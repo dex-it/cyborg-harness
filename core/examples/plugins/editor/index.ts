@@ -1,12 +1,9 @@
 import type { PluginModule } from '../../../src/index.ts';
 
-interface FilesV2 {
-  readText(path: string): Promise<{ text: string; size: number } | undefined>;
-}
-
 const plugin: PluginModule = {
   activate(ctx) {
-    const files = ctx.contracts.get<FilesV2>('cyborg.files')!;
+    const files = ctx.contracts.get('cyborg.files', 2);
+    if (!files) throw new Error('cyborg.files в requires, но его нет');
     ctx.log('беру cyborg.files второй мажорной версии');
     ctx.contracts.provide('cyborg.tab', '1.0', {
       kind: 'редактор',

@@ -6,7 +6,7 @@ if (!process.send) throw new Error('host-entry запускается тольк
 const send = process.send.bind(process);
 runHost(
   {
-    post: (message) => void send(message as object),
+    post: (message) => void send(message),
     onMessage: (listener) => void process.on('message', listener),
   },
   async (entry) => ((await import(entry)) as { default: PluginModule }).default,

@@ -1,0 +1,9 @@
+{
+  "name": "@cyborg/contracts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Типы контрактов cyborg.* без логики; сторонние пакеты дополняют карту Contracts",
+  "type": "module",
+  "types": "./index.ts",
+  "exports": { ".": { "types": "./index.ts" } }
+}

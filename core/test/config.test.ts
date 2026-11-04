@@ -48,7 +48,7 @@ test('каждый слой мигрирует от своей версии', ()
   assert.deepEqual(seen, [1, 2]);
   assert.equal(result.status, 'ok');
   assert.deepEqual(layers.get('user'), { minutes: 5, idle: undefined, locked: false });
-  assert.deepEqual(result.status === 'ok' && result.migrated, ['user', 'workspace']);
+  assert.deepEqual(result.migrated, ['user', 'workspace']);
 });
 
 test('слой новее манифеста - откат версии, раздел не читается', () => {

@@ -22,21 +22,35 @@ test('потребитель получает свою мажорную верс
   const r = registry([files, oldUser, newUser]);
   r.provide('files', 'cyborg.files', '1.4', { v: 1 });
   r.provide('files', 'cyborg.files', '2.0', { v: 2 });
-  assert.deepEqual(r.get('old', 'cyborg.files'), { v: 1 });
-  assert.deepEqual(r.get('new', 'cyborg.files'), { v: 2 });
+  assert.deepEqual(r.get('old', 'cyborg.files', 1), { v: 1 });
+  assert.deepEqual(r.get('new', 'cyborg.files', 2), { v: 2 });
+});
+
+test('мажорная версия в get и all должна лежать в диапазоне манифеста', () => {
+  const any = m('any', { optional: { 'cyborg.files': '*' } });
+  const r = registry([files, oldUser, any]);
+  r.provide('files', 'cyborg.files', '1.4', { v: 1 });
+  r.provide('files', 'cyborg.files', '2.0', { v: 2 });
+  assert.throws(() => r.get('old', 'cyborg.files', 2), { code: 'NotDeclared', message: 'old: cyborg.files объявлен как ^1, мажорной версии 2 в нём нет' });
+  assert.deepEqual(r.get('any', 'cyborg.files', 1), { v: 1 });
+  assert.deepEqual(r.get('any', 'cyborg.files', 2), { v: 2 });
+  assert.equal(r.get('any', 'cyborg.files', 3), undefined);
+  const untyped = r as unknown as { get(consumer: string, contract: string, major?: unknown): unknown };
+  assert.throws(() => untyped.get('old', 'cyborg.files'), { code: 'NotDeclared' });
+  assert.throws(() => untyped.get('old', 'cyborg.files', '1'), { code: 'NotDeclared' });
 });
 
 test('необъявленное не отдаётся и не берётся', () => {
   const r = registry([files, oldUser]);
   assert.throws(() => r.provide('files', 'cyborg.files', '1.5', {}), { code: 'NotDeclared' });
   assert.throws(() => r.provide('old', 'cyborg.files', '1.4', {}), { code: 'NotDeclared' });
-  assert.throws(() => r.get('files', 'cyborg.files'), { code: 'NotDeclared' });
+  assert.throws(() => r.get('files', 'cyborg.files', 1), { code: 'NotDeclared' });
 });
 
 test('requires без отданного контракта - Unavailable, optional - undefined', () => {
   const r = registry([files, oldUser, newUser]);
-  assert.throws(() => r.get('old', 'cyborg.files'), { code: 'Unavailable' });
-  assert.equal(r.get('new', 'cyborg.files'), undefined);
+  assert.throws(() => r.get('old', 'cyborg.files', 1), { code: 'Unavailable' });
+  assert.equal(r.get('new', 'cyborg.files', 2), undefined);
 });
 
 test('consumes: все поставщики, onChange на приход и уход, снятие по dispose', () => {
@@ -50,10 +64,10 @@ test('consumes: все поставщики, onChange на приход и ух�
   r.onChange('shell', 'cyborg.tab', () => changes++);
   const a = r.provide('editor', 'cyborg.tab', '1.0', { kind: 'editor' });
   r.provide('viewer', 'cyborg.tab', '1.1', { kind: 'viewer' });
-  assert.deepEqual(r.all('shell', 'cyborg.tab').map((p) => p.pluginId), ['editor', 'viewer']);
+  assert.deepEqual(r.all('shell', 'cyborg.tab', 1).map((p) => p.pluginId), ['editor', 'viewer']);
   a.dispose();
   a.dispose();
-  assert.deepEqual(r.all('shell', 'cyborg.tab').map((p) => p.pluginId), ['viewer']);
+  assert.deepEqual(r.all('shell', 'cyborg.tab', 1).map((p) => p.pluginId), ['viewer']);
   assert.equal(changes, 3);
 });
 
@@ -62,8 +76,8 @@ test('replace: зеркало хоста заменяет поставщиков
   let changes = 0;
   r.onChange('new', 'cyborg.files', () => changes++);
   r.replace('cyborg.files', [{ pluginId: 'files', version: '2.0', impl: { v: 2 } }]);
-  assert.deepEqual(r.get('new', 'cyborg.files'), { v: 2 });
+  assert.deepEqual(r.get('new', 'cyborg.files', 2), { v: 2 });
   r.replace('cyborg.files', []);
-  assert.equal(r.get('new', 'cyborg.files'), undefined);
+  assert.equal(r.get('new', 'cyborg.files', 2), undefined);
   assert.equal(changes, 2);
 });

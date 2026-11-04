@@ -7,8 +7,9 @@ const plugin: PluginModule = {
   },
   activate(ctx) {
     let locked = false;
-    const { minutes, pin } = ctx.config!.get();
-    ctx.log(`блокирую после ${minutes} мин простоя`);
+    if (!ctx.config) throw new Error('раздел config объявлен в манифесте, но не пришёл');
+    const { minutes, pin } = ctx.config.get();
+    ctx.log(`блокирую после ${String(minutes)} мин простоя`);
 
     ctx.contracts.provide('cyborg.lock', '1.0', { isLocked: async () => locked });
     ctx.commands.register('pin-lock.lock', () => {
@@ -16,7 +17,7 @@ const plugin: PluginModule = {
       return 'заблокировано';
     });
     ctx.commands.register('pin-lock.unlock', (entered) => {
-      if (entered !== pin) return 'неверный пин';
+      if (typeof entered !== 'string' || entered !== pin) return 'неверный пин';
       locked = false;
       return 'разблокировано';
     });

@@ -2,7 +2,7 @@ import type { PluginModule } from '../../src/plugin.ts';
 
 const plugin: PluginModule = {
   activate(ctx) {
-    ctx.contracts.provide('cyborg.files', '1.0', {
+    ctx.contracts.provide('test.files', '1.0', {
       read: async (path: string) => `data:${path}`,
       fail: async () => {
         throw new Error('нет файла');

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { satisfies, isValidRange } from '../src/semver.ts';
-import { parseManifest } from '../src/manifest.ts';
+import { allowsMajor, satisfies, isValidRange } from '../src/semver.ts';
+import { checkArgs, parseManifest, type CommandSpec } from '../src/manifest.ts';
 
 test('диапазоны: каретка, тильда, префикс и звезда', () => {
   assert.ok(satisfies('1.4.0', '^1'));
@@ -20,6 +20,17 @@ test('диапазоны: каретка, тильда, префикс и зве
   assert.ok(!satisfies('1.x', '^1'));
 });
 
+test('allowsMajor: есть ли в диапазоне версия этой мажорной', () => {
+  assert.ok(allowsMajor('^1.4', 1));
+  assert.ok(!allowsMajor('^1.4', 2));
+  assert.ok(!allowsMajor('^1.4', 0));
+  assert.ok(allowsMajor('~0.2', 0));
+  assert.ok(allowsMajor('*', 7));
+  assert.ok(allowsMajor('2', 2));
+  assert.ok(!allowsMajor('^1', 1.5));
+  assert.ok(!allowsMajor('^1', -1));
+});
+
 const base = { id: 'pin-lock', version: '1.0.0', engines: { cyborg: '^1' } };
 
 test('манифест: минимальный приводится к полной форме', () => {
@@ -27,7 +38,7 @@ test('манифест: минимальный приводится к полн�
   assert.ok(r.ok);
   assert.deepEqual(r.manifest.provides, { 'cyborg.lock': ['1.0'] });
   assert.deepEqual(r.manifest.requires, {});
-  assert.deepEqual(r.manifest.commands, []);
+  assert.deepEqual(r.manifest.commands, {});
 });
 
 test('манифест: ошибки собираются все сразу и id сохраняется для журнала', () => {
@@ -49,4 +60,55 @@ test('манифест: ошибки собираются все сразу и i
 test('манифест: контракт many не может быть одновременно one', () => {
   const r = parseManifest({ ...base, requires: { 'cyborg.tab': '^1' }, consumes: { 'cyborg.tab': '^1' } });
   assert.ok(!r.ok);
+});
+
+test('команды: список имён - без аргументов, объект - со схемой аргументов', () => {
+  const short = parseManifest({ ...base, commands: ['pin-lock.lock'] });
+  assert.ok(short.ok);
+  assert.deepEqual(short.manifest.commands, { 'pin-lock.lock': { args: [] } });
+
+  const full = parseManifest({ ...base, commands: { 'pin-lock.unlock': { args: ['string', 'number?'] }, 'pin-lock.log': { args: ['string'], rest: 'any' } } });
+  assert.ok(full.ok);
+  assert.deepEqual(full.manifest.commands['pin-lock.unlock'], {
+    args: [
+      { kind: 'string', optional: false },
+      { kind: 'number', optional: true },
+    ],
+  });
+  assert.equal(full.manifest.commands['pin-lock.log']?.rest, 'any');
+});
+
+test('команды: схема с ошибкой не проходит разбор', () => {
+  const errors = (commands: unknown) => {
+    const r = parseManifest({ ...base, commands });
+    return r.ok ? '' : r.errors.join('\n');
+  };
+  assert.match(errors({ 'pin-lock.a': { args: ['date'] } }), /неизвестный вид "date"/);
+  assert.match(errors({ 'pin-lock.a': { args: ['string?', 'number'] } }), /обязательный аргумент после необязательного/);
+  assert.match(errors({ 'pin-lock.a': { args: ['string?'], rest: 'any' } }), /rest вместе с необязательными/);
+  assert.match(errors({ 'pin-lock.a': { rest: 'thing' } }), /rest: неизвестный вид/);
+  assert.match(errors({ 'pin-lock.a': 'string' }), /ожидается объект/);
+  assert.match(errors({ 'other.a': {} }), /пространстве имён "pin-lock\."/);
+  assert.match(errors(['pin-lock.a', 'pin-lock.a']), /имя повторяется/);
+  assert.match(errors(5), /ожидается список имён или объект/);
+});
+
+test('команды: аргументы сверяются по числу и виду', () => {
+  const spec: CommandSpec = {
+    args: [
+      { kind: 'string', optional: false },
+      { kind: 'number', optional: true },
+    ],
+  };
+  checkArgs('c', spec, ['a']);
+  checkArgs('c', spec, ['a', 2]);
+  assert.throws(() => checkArgs('c', spec, []), { code: 'Invalid', message: 'c: аргументов 0, ожидается 1-2' });
+  assert.throws(() => checkArgs('c', spec, ['a', 2, 3]), { code: 'Invalid' });
+  assert.throws(() => checkArgs('c', spec, [1]), { code: 'Invalid', message: 'c: аргумент 1 не string' });
+  assert.throws(() => checkArgs('c', spec, ['a', Number.NaN]), { message: 'c: аргумент 2 не number' });
+
+  const rest: CommandSpec = { args: [{ kind: 'string', optional: false }], rest: 'record' };
+  checkArgs('r', rest, ['a', {}, {}]);
+  assert.throws(() => checkArgs('r', rest, ['a', {}, []]), { message: 'r: аргумент 3 не record' });
+  assert.throws(() => checkArgs('r', { args: [{ kind: 'any', optional: false }] }, [undefined]), { message: 'r: аргумент 1 не any' });
 });

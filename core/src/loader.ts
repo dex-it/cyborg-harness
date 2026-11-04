@@ -1,11 +1,13 @@
 import type { SectionResult, SectionStore } from './config.ts';
 import type { Disposable } from './disposable.ts';
-import { CoreError } from './errors.ts';
+import { CoreError, errorMessage, ignore } from './errors.ts';
 import { providesMatching, resolveGraph, type ContractGraph, type Rejection } from './graph.ts';
 import { handleKey, type ActivateResult, type ContractDescriptor, type SectionInput } from './host-runtime.ts';
-import { parseManifest, type PluginManifest } from './manifest.ts';
+import { checkArgs, parseManifest, type PluginManifest } from './manifest.ts';
 import { ContractRegistry } from './registry.ts';
 import { Endpoint } from './rpc.ts';
+import { satisfies } from './semver.ts';
+import { parseWire, type Parsed, type WireSpec } from './wire.ts';
 import type { HostHandle, SpawnHost } from './transports.ts';
 
 export type JournalEntry =
@@ -20,6 +22,8 @@ export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'activated'; readonly hostId: string; readonly ms: number }
   | { readonly pluginId: string; readonly kind: 'deactivated'; readonly error?: string }
   | { readonly pluginId: string; readonly kind: 'revived' }
+  /** Сторонний плагин назван в группе plugins.hosts с другими - ядро всё равно дало ему свой хост. */
+  | { readonly pluginId: string; readonly kind: 'host-isolated'; readonly group: string; readonly hostId: string }
   | {
       readonly pluginId: string;
       readonly kind: 'switched-off';
@@ -63,19 +67,21 @@ export interface LoadOptions {
   readonly manifests: readonly unknown[];
   readonly spawnHost: SpawnHost;
   /** Что хост передаст импортёру; по умолчанию id плагина. */
-  readonly entry?: (manifest: PluginManifest) => string;
+  readonly entry?: ((manifest: PluginManifest) => string) | undefined;
   /** `plugins.hosts`: группа -> плагины; не названный идёт в `builtin` или в свой хост по `host: "own"`. */
-  readonly hosts?: Readonly<Record<string, readonly string[]>>;
-  readonly config?: SectionStore;
-  readonly state?: SectionStore;
+  readonly hosts?: Readonly<Record<string, readonly string[]>> | undefined;
+  /** Плагины из поставки Cyborg; только они делят хост. Не названный здесь - сторонний и всегда один в своём хосте. */
+  readonly bundled?: readonly string[] | undefined;
+  readonly config?: SectionStore | undefined;
+  readonly state?: SectionStore | undefined;
   /** Окно без плагинов: манифесты разобраны, хосты не запускаются. */
-  readonly safeMode?: boolean;
-  readonly watchdog?: WatchdogOptions;
-  readonly activationTimeout?: number;
+  readonly safeMode?: boolean | undefined;
+  readonly watchdog?: WatchdogOptions | undefined;
+  readonly activationTimeout?: number | undefined;
   /** Граф решён, код плагинов ещё не запускался. */
-  readonly onGraph?: (graph: ContractGraph) => void | Promise<void>;
-  readonly onJournal?: (entry: JournalEntry) => void;
-  readonly onLog?: (pluginId: string, message: string) => void;
+  readonly onGraph?: ((graph: ContractGraph) => Promise<void> | undefined) | undefined;
+  readonly onJournal?: ((entry: JournalEntry) => void) | undefined;
+  readonly onLog?: ((pluginId: string, message: string) => void) | undefined;
 }
 
 export interface Kernel {
@@ -103,8 +109,38 @@ interface Host {
   readonly inflight: Map<number, string>;
   seq: number;
   down: boolean;
-  pingAt?: number;
+  pingAt?: number | undefined;
   timer?: ReturnType<typeof setInterval>;
+}
+
+// Граница доверия ядра - процесс хоста: внутри хоста плагины неразличимы, поэтому сторонний не делит процесс ни с кем.
+function assignHosts(
+  manifests: readonly PluginManifest[],
+  groups: Readonly<Record<string, readonly string[]>>,
+  bundled: ReadonlySet<string>,
+  record: (entry: JournalEntry) => void,
+): Map<string, string> {
+  const loaded = new Set(manifests.map((m) => m.id));
+  const groupOf = (id: string) => Object.entries(groups).find(([, ids]) => ids.includes(id));
+  const result = new Map<string, string>();
+  for (const m of manifests) {
+    const group = groupOf(m.id);
+    result.set(m.id, group?.[0] ?? (m.host === 'own' || !bundled.has(m.id) ? m.id : 'builtin'));
+  }
+  const used = new Set(result.values());
+  for (const m of manifests) {
+    if (bundled.has(m.id)) continue;
+    const hostId = result.get(m.id) ?? m.id;
+    const neighbours = manifests.filter((other) => other.id !== m.id && result.get(other.id) === hostId);
+    if (neighbours.length === 0) continue;
+    let own = m.id;
+    for (let n = 2; used.has(own); n++) own = `${m.id}~${n}`;
+    used.add(own);
+    result.set(m.id, own);
+    const group = groupOf(m.id);
+    if (group?.[1].some((id) => id !== m.id && loaded.has(id))) record({ pluginId: m.id, kind: 'host-isolated', group: group[0], hostId: own });
+  }
+  return result;
 }
 
 export async function load(options: LoadOptions): Promise<Kernel> {
@@ -149,12 +185,13 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   let chain: Promise<void> = Promise.resolve();
   let unloading = false;
 
-  const hostOf = (pluginId: string): string | undefined => {
+  const manifestOf = (pluginId: string): PluginManifest => {
     const m = byId.get(pluginId);
-    if (!m) return undefined;
-    for (const [hostId, ids] of Object.entries(options.hosts ?? {})) if (ids.includes(pluginId)) return hostId;
-    return m.host === 'own' ? pluginId : 'builtin';
+    if (!m) throw new CoreError('Unavailable', `плагина ${pluginId} нет`);
+    return m;
   };
+  const hostIds = assignHosts(manifests, options.hosts ?? {}, new Set(options.bundled ?? []), record);
+  const hostOf = (pluginId: string): string | undefined => hostIds.get(pluginId);
 
   const broadcast = (contract: string) => {
     for (const host of hosts.values()) host.endpoint.notify('contracts', { contract, providers: descriptors.get(contract) ?? [] });
@@ -177,24 +214,35 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     }
   }
 
+  /** Те же правила, что у ContractRegistry в хосте: requires и optional - только связанный графом поставщик, consumes - любой подходящей версии. */
+  function mayUse(caller: string, provider: string, contract: string, version: string): boolean {
+    const m = byId.get(caller);
+    if (!m || caller === provider) return false;
+    const one = m.requires[contract] ?? m.optional[contract];
+    if (one !== undefined) return graph.bindings.get(caller)?.get(contract) === provider && satisfies(version, one);
+    const many = m.consumes[contract];
+    return many !== undefined && satisfies(version, many);
+  }
+
   function liveHost(pluginId: string): Host {
     const host = hosts.get(hostOf(pluginId) ?? '');
     if (!host || !active.includes(pluginId)) throw new CoreError('Unavailable', `${pluginId} не активен`);
     return host;
   }
 
-  function dropProvided(key: string): void {
+  function dropProvided(pluginId: string, contract: string, version: string): void {
+    const key = handleKey(pluginId, contract, version);
     const disposable = provided.get(key);
     if (!disposable) return;
     provided.delete(key);
     disposable.dispose();
-    const [pluginId, contract, version] = key.split('|');
     descriptors.set(contract, (descriptors.get(contract) ?? []).filter((d) => d.pluginId !== pluginId || d.version !== version));
     broadcast(contract);
   }
 
   function dropPlugin(pluginId: string): void {
-    for (const key of [...provided.keys()]) if (key.startsWith(`${pluginId}|`)) dropProvided(key);
+    const given = [...descriptors.values()].flat().filter((d) => d.pluginId === pluginId);
+    for (const d of given) dropProvided(d.pluginId, d.contract, d.version);
     for (const [name, owner] of [...commandOwners]) if (owner === pluginId) commandOwners.delete(name);
     const i = active.indexOf(pluginId);
     if (i >= 0) active.splice(i, 1);
@@ -204,50 +252,88 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     const uses = (consumer: PluginManifest, provider: PluginManifest) =>
       [...(graph.bindings.get(consumer.id)?.values() ?? [])].includes(provider.id) ||
       Object.entries(consumer.consumes).some(([contract, range]) => providesMatching(provider, contract, range));
-    return active.filter((id) => !gone.includes(id) && gone.some((p) => uses(byId.get(id)!, byId.get(p)!)));
+    return active.filter((id) => !gone.includes(id) && gone.some((p) => uses(manifestOf(id), manifestOf(p))));
   }
 
   function startHost(hostId: string): Host {
     const handle = options.spawnHost(hostId);
     const host: Host = { id: hostId, handle, endpoint: new Endpoint(handle.port), inflight: new Map(), seq: 0, down: false };
     hosts.set(hostId, host);
-    const own = (pluginId: string) => !host.down && hostOf(pluginId) === hostId;
     const { endpoint } = host;
+    const mine = (pluginId: string): PluginManifest => {
+      const m = byId.get(pluginId);
+      if (!m || host.down || hostOf(pluginId) !== hostId) throw new CoreError('Unavailable', `${pluginId} не в этом хосте`);
+      return m;
+    };
 
-    endpoint.handle('provide', (d: ContractDescriptor) => {
-      if (!own(d.pluginId)) return;
-      const impl: Record<string, unknown> = { ...d.data };
-      for (const member of d.methods) {
-        impl[member] = (...args: unknown[]) =>
-          callHost(host, d.pluginId, 'call', { pluginId: d.pluginId, contract: d.contract, version: d.version, member, args });
+    const onRequest = <const S extends WireSpec>(method: string, spec: S, handler: (p: Parsed<S>) => unknown) => {
+      endpoint.handle(method, (raw: unknown) => handler(parseWire(method, raw, spec)));
+    };
+    // У уведомления нет отправителя, которому вернуть отказ: без записи в лог подделка прошла бы молча.
+    const onNote = <const S extends WireSpec>(method: string, spec: S, handler: (p: Parsed<S>) => void) => {
+      endpoint.handle(method, (raw: unknown) => {
+        try {
+          handler(parseWire(method, raw, spec));
+        } catch (error) {
+          options.onLog?.(`хост ${hostId}`, `ядро отказало: ${errorMessage(error)}`);
+        }
+      });
+    };
+    const KEY = { pluginId: 'string', contract: 'string', version: 'string' } as const;
+
+    onNote('provide', { ...KEY, data: 'record', methods: 'strings' }, (d) => {
+      if (!mine(d.pluginId).provides[d.contract]?.includes(d.version)) {
+        throw new CoreError('NotDeclared', `${d.pluginId}: ${d.contract}@${d.version} не объявлен в provides`);
+      }
+      const descriptor: ContractDescriptor = { pluginId: d.pluginId, contract: d.contract, version: d.version, data: d.data, methods: d.methods };
+      const impl: Record<string, unknown> = { ...descriptor.data };
+      for (const member of descriptor.methods) {
+        impl[member] = (...args: unknown[]) => callHost(host, d.pluginId, 'call', { pluginId: d.pluginId, contract: d.contract, version: d.version, member, args });
       }
       provided.set(handleKey(d.pluginId, d.contract, d.version), registry.provide(d.pluginId, d.contract, d.version, impl));
-      descriptors.set(d.contract, [...(descriptors.get(d.contract) ?? []), d]);
+      descriptors.set(d.contract, [...(descriptors.get(d.contract) ?? []), descriptor]);
       broadcast(d.contract);
     });
-    endpoint.handle('unprovide', (p: { pluginId: string; contract: string; version: string }) => {
-      if (own(p.pluginId)) dropProvided(handleKey(p.pluginId, p.contract, p.version));
+    onNote('unprovide', KEY, (p) => {
+      mine(p.pluginId);
+      dropProvided(p.pluginId, p.contract, p.version);
     });
-    endpoint.handle('register', (p: { pluginId: string; name: string }) => {
-      if (own(p.pluginId)) commandOwners.set(p.name, p.pluginId);
+    onNote('register', { pluginId: 'string', name: 'string' }, (p) => {
+      if (!Object.hasOwn(mine(p.pluginId).commands, p.name)) throw new CoreError('NotDeclared', `${p.pluginId}: команда ${p.name} не объявлена в commands`);
+      const owner = commandOwners.get(p.name);
+      if (owner !== undefined && owner !== p.pluginId) throw new CoreError('CommandConflict', `${p.pluginId}: команда ${p.name} уже у ${owner}`);
+      commandOwners.set(p.name, p.pluginId);
     });
-    endpoint.handle('unregister', (p: { pluginId: string; name: string }) => {
-      if (own(p.pluginId) && commandOwners.get(p.name) === p.pluginId) commandOwners.delete(p.name);
+    onNote('unregister', { pluginId: 'string', name: 'string' }, (p) => {
+      mine(p.pluginId);
+      if (commandOwners.get(p.name) === p.pluginId) commandOwners.delete(p.name);
     });
-    endpoint.handle('invoke', (p: { pluginId: string; contract: string; version: string; member: string; args: unknown[] }) =>
-      callHost(liveHost(p.pluginId), p.pluginId, 'call', p),
-    );
-    endpoint.handle('run', (p: { name: string; args: unknown[] }) => run(p.name, ...p.args));
-    endpoint.handle('section.write', async (p: { pluginId: string; kind: 'config' | 'state'; layer: string; version: number; data: Record<string, unknown> }) => {
-      if (!own(p.pluginId)) throw new CoreError('Unavailable', `${p.pluginId} не в этом хосте`);
+    onRequest('invoke', { ...KEY, caller: 'string', member: 'string', args: 'array' }, (p) => {
+      mine(p.caller);
+      const d = descriptors.get(p.contract)?.find((x) => x.pluginId === p.pluginId && x.version === p.version);
+      if (!d?.methods.includes(p.member)) throw new CoreError('Unavailable', `${p.contract}@${p.version}.${p.member} у ${p.pluginId} нет`);
+      if (!mayUse(p.caller, p.pluginId, p.contract, p.version)) {
+        throw new CoreError('NotDeclared', `${p.caller}: ${p.contract}@${p.version} от ${p.pluginId} не объявлен потребляемым`);
+      }
+      const { pluginId, contract, version, member, args } = p;
+      return callHost(liveHost(pluginId), pluginId, 'call', { pluginId, contract, version, member, args });
+    });
+    onRequest('run', { name: 'string', args: 'array' }, (p) => run(p.name, ...p.args));
+    onRequest('section.write', { pluginId: 'string', kind: ['config', 'state'], layer: 'string', version: 'number', data: 'record' }, async (p) => {
+      const declared = mine(p.pluginId)[p.kind];
+      if (!declared) throw new CoreError('NotDeclared', `${p.pluginId}: раздел ${p.kind} не объявлен в манифесте`);
+      if (p.version !== declared.version) {
+        throw new CoreError('Invalid', `${p.pluginId}: раздел ${p.kind} версии ${p.version}, а в манифесте ${declared.version}`);
+      }
       await options[p.kind]?.write(p.layer, p.pluginId, p.version, p.data);
     });
-    endpoint.handle('log', (p: { pluginId: string; message: string }) => {
-      if (own(p.pluginId)) options.onLog?.(p.pluginId, p.message);
+    onNote('log', { pluginId: 'string', message: 'string' }, (p) => {
+      mine(p.pluginId);
+      options.onLog?.(p.pluginId, p.message);
     });
 
     handle.onExit(() => hostDown(host, 'crash'));
-    endpoint.request('init', wire).catch(() => {});
+    endpoint.request('init', wire).catch(ignore);
     for (const contract of descriptors.keys()) endpoint.notify('contracts', { contract, providers: descriptors.get(contract) });
 
     host.timer = setInterval(() => {
@@ -259,10 +345,10 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       host.pingAt = performance.now();
       endpoint.request('ping', null).then(
         () => (host.pingAt = undefined),
-        () => {},
+        ignore,
       );
     }, watchdog.interval);
-    host.timer.unref?.();
+    host.timer.unref();
     return host;
   }
 
@@ -316,13 +402,13 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   }
 
   async function activate(pluginId: string): Promise<void> {
-    const m = byId.get(pluginId)!;
+    const m = manifestOf(pluginId);
     const down = [...(graph.bindings.get(pluginId) ?? [])].find(([c, p]) => c in m.requires && !active.includes(p));
     if (down) {
       record({ pluginId, kind: 'skipped', reason: `поставщик ${down[0]} (${down[1]}) не активен` });
       return;
     }
-    const hostId = hostOf(pluginId)!;
+    const hostId = hostOf(m.id) ?? m.id;
     const host = hosts.get(hostId) ?? startHost(hostId);
     const started = performance.now();
     try {
@@ -337,14 +423,17 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     } catch (error) {
       if (host.down) return;
       dropPlugin(pluginId);
-      if (error instanceof CoreError && error.code === 'Timeout') host.endpoint.request('deactivate', { pluginId }).catch(() => {});
-      record({ pluginId, kind: 'failed', hostId, error: (error as Error).message });
+      if (error instanceof CoreError && error.code === 'Timeout') host.endpoint.request('deactivate', { pluginId }).catch(ignore);
+      record({ pluginId, kind: 'failed', hostId, error: errorMessage(error) });
     }
   }
 
   async function run(command: string, ...args: unknown[]): Promise<unknown> {
     const owner = commandOwners.get(command);
     if (!owner) throw new CoreError('CommandNotFound', `команды ${command} нет`);
+    const spec = manifestOf(owner).commands[command];
+    if (!spec) throw new CoreError('CommandNotFound', `команда ${command} не объявлена у ${owner}`);
+    checkArgs(command, spec, args);
     return callHost(liveHost(owner), owner, 'command', { pluginId: owner, name: command, args });
   }
 
@@ -355,7 +444,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     if (active.includes(pluginId)) return;
     strikes.delete(pluginId);
     switchedOff.delete(pluginId);
-    hostFailures.delete(hostOf(pluginId)!);
+    hostFailures.delete(hostOf(manifestOf(pluginId).id) ?? pluginId);
     const lastKind = (id: string) => journal.findLast((e) => e.pluginId === id)?.kind;
     chain = chain.then(async () => {
       if (unloading || active.includes(pluginId)) return;
@@ -401,7 +490,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
           await callHost(liveHost(pluginId), pluginId, 'deactivate', { pluginId }, activationTimeout);
           record({ pluginId, kind: 'deactivated' });
         } catch (error) {
-          record({ pluginId, kind: 'deactivated', error: (error as Error).message });
+          record({ pluginId, kind: 'deactivated', error: errorMessage(error) });
         }
         dropPlugin(pluginId);
       }

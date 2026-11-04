@@ -1,5 +1,6 @@
 import { resolveSection, VERSION_KEY, type SectionResult } from './config.ts';
 import { DisposableStore, toDisposable, type Disposable } from './disposable.ts';
+import type { ContractName, ContractType, Major, Remote } from '@cyborg/contracts';
 import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';
@@ -17,7 +18,7 @@ export interface ContractDescriptor {
 
 export interface SectionInput {
   readonly version: number;
-  readonly layers: ReadonlyArray<readonly [string, unknown]>;
+  readonly layers: readonly (readonly [string, unknown])[];
 }
 
 export type ActivateResult =
@@ -32,7 +33,7 @@ interface Loaded {
   readonly commands: Map<string, CommandHandler>;
 }
 
-export const handleKey = (pluginId: string, contract: string, version: string) => `${pluginId}|${contract}|${version}`;
+export const handleKey = (pluginId: string, contract: string, version: string): string => `${pluginId}|${contract}|${version}`;
 
 /** Среда хоста: плагины видят только ctx, всё остальное - сообщения в ядро. */
 export function runHost(port: Port, importer: Importer): Endpoint {
@@ -40,10 +41,11 @@ export function runHost(port: Port, importer: Importer): Endpoint {
   let manifests = new Map<string, PluginManifest>();
   let mirror: ContractRegistry | undefined;
   const plugins = new Map<string, Loaded>();
+  const proxies = new Proxies(endpoint);
 
   endpoint.handle('ping', () => true);
 
-  endpoint.handle('init', (p: { manifests: PluginManifest[]; bindings: Array<[string, Array<[string, string]>]> }) => {
+  endpoint.handle('init', (p: { manifests: PluginManifest[]; bindings: [string, [string, string][]][] }) => {
     manifests = new Map(p.manifests.map((m) => [m.id, m]));
     mirror = new ContractRegistry(p.manifests, new Map(p.bindings.map(([id, b]) => [id, new Map(b)])));
   });
@@ -51,7 +53,7 @@ export function runHost(port: Port, importer: Importer): Endpoint {
   endpoint.handle('contracts', (p: { contract: string; providers: ContractDescriptor[] }) => {
     mirror?.replace(
       p.contract,
-      p.providers.map((d) => ({ pluginId: d.pluginId, version: d.version, impl: proxy(endpoint, d) })),
+      p.providers.map((d) => ({ pluginId: d.pluginId, version: d.version, impl: proxies.template(d) })),
     );
   });
 
@@ -67,7 +69,7 @@ export function runHost(port: Port, importer: Importer): Endpoint {
 
     plugins.set(p.pluginId, loaded);
     try {
-      const result = await module.activate(context(endpoint, manifest, mirror, loaded, config?.handle, state?.handle));
+      const result = await module.activate(context(endpoint, proxies, manifest, mirror, loaded, config?.handle, state?.handle));
       if (result) loaded.store.add(result);
       return { ok: true } satisfies ActivateResult;
     } catch (error) {
@@ -83,14 +85,14 @@ export function runHost(port: Port, importer: Importer): Endpoint {
     loaded?.store.dispose();
   });
 
-  endpoint.handle('call', async (p: { pluginId: string; contract: string; version: string; member: string; args: unknown[] }) => {
+  endpoint.handle('call', (p: { pluginId: string; contract: string; version: string; member: string; args: unknown[] }) => {
     const impl = plugins.get(p.pluginId)?.provided.get(handleKey(p.pluginId, p.contract, p.version));
     const member = impl?.[p.member];
     if (typeof member !== 'function') throw new CoreError('Unavailable', `${p.contract}@${p.version}.${p.member} у ${p.pluginId} нет`);
     return member.apply(impl, p.args);
   });
 
-  endpoint.handle('command', async (p: { pluginId: string; name: string; args: unknown[] }) => {
+  endpoint.handle('command', (p: { pluginId: string; name: string; args: unknown[] }) => {
     const handler = plugins.get(p.pluginId)?.commands.get(p.name);
     if (!handler) throw new CoreError('CommandNotFound', `команды ${p.name} нет`);
     return handler(...p.args);
@@ -99,17 +101,45 @@ export function runHost(port: Port, importer: Importer): Endpoint {
   return endpoint;
 }
 
-function proxy(endpoint: Endpoint, d: ContractDescriptor): ContractImpl {
-  const impl: Record<string, unknown> = { ...d.data };
-  for (const member of d.methods) {
-    impl[member] = (...args: unknown[]) =>
-      endpoint.request('invoke', { pluginId: d.pluginId, contract: d.contract, version: d.version, member, args });
+/** Чужой контракт в хосте: в зеркале лежит заготовка, потребитель получает свою копию, и ядро видит в invoke, кто зовёт. */
+class Proxies {
+  readonly #endpoint: Endpoint;
+  readonly #descriptors = new WeakMap<ContractImpl, ContractDescriptor>();
+  // Своя копия на потребителя одна: плагин вправе сравнивать полученное из get по ссылке.
+  readonly #bound = new WeakMap<ContractImpl, Map<string, ContractImpl>>();
+
+  constructor(endpoint: Endpoint) {
+    this.#endpoint = endpoint;
   }
-  return impl;
+
+  template(d: ContractDescriptor): ContractImpl {
+    const impl: ContractImpl = { ...d.data };
+    this.#descriptors.set(impl, d);
+    return impl;
+  }
+
+  forCaller(impl: ContractImpl, caller: string): ContractImpl {
+    const d = this.#descriptors.get(impl);
+    if (!d) return impl;
+    const copies = this.#bound.get(impl) ?? new Map<string, ContractImpl>();
+    this.#bound.set(impl, copies);
+    let copy = copies.get(caller);
+    if (!copy) {
+      const made: Record<string, unknown> = { ...d.data };
+      for (const member of d.methods) {
+        made[member] = (...args: unknown[]) =>
+          this.#endpoint.request('invoke', { caller, pluginId: d.pluginId, contract: d.contract, version: d.version, member, args });
+      }
+      copy = made;
+      copies.set(caller, copy);
+    }
+    return copy;
+  }
 }
 
 function context(
   endpoint: Endpoint,
+  proxies: Proxies,
   manifest: PluginManifest,
   mirror: ContractRegistry,
   loaded: Loaded,
@@ -126,7 +156,8 @@ function context(
     subscriptions: loaded.store,
     log: (message) => endpoint.notify('log', { pluginId, message }),
     contracts: {
-      provide(contract, version, impl) {
+      provide(contract: string, version: string, impl: unknown) {
+        if (typeof impl !== 'object' || impl === null) throw new CoreError('Invalid', `${pluginId}: реализация ${contract}@${version} не объект`);
         const key = handleKey(pluginId, contract, version);
         if (!manifest.provides[contract]?.includes(version)) {
           throw new CoreError('NotDeclared', `${pluginId}: контракт ${contract}@${version} не объявлен в provides`);
@@ -140,7 +171,7 @@ function context(
         }
         const descriptor: ContractDescriptor = { pluginId, contract, version, data, methods };
         endpoint.notify('provide', descriptor);
-        loaded.provided.set(key, impl);
+        loaded.provided.set(key, impl as ContractImpl);
         return track(
           toDisposable(() => {
             loaded.provided.delete(key);
@@ -148,13 +179,19 @@ function context(
           }),
         );
       },
-      get: (contract) => mirror.get(pluginId, contract),
-      all: (contract) => mirror.all(pluginId, contract),
+      get<K extends ContractName, M extends Major<K>>(contract: K, major: M) {
+        const impl = mirror.get(pluginId, contract, major);
+        // Тип обещан картой Contracts: ядро сверило имя, мажорную версию и имена методов, но не их сигнатуры.
+        return (impl && proxies.forCaller(impl, pluginId)) as Remote<ContractType<K, M>> | undefined;
+      },
+      all<K extends ContractName, M extends Major<K>>(contract: K, major: M) {
+        return mirror.all(pluginId, contract, major).map((p) => ({ ...p, impl: proxies.forCaller(p.impl, pluginId) as Remote<ContractType<K, M>> }));
+      },
       onChange: (contract, listener) => track(mirror.onChange(pluginId, contract, listener)),
     },
     commands: {
       register(name, handler) {
-        if (!manifest.commands.includes(name)) throw new CoreError('NotDeclared', `${pluginId}: команда ${name} не объявлена в commands`);
+        if (!Object.hasOwn(manifest.commands, name)) throw new CoreError('NotDeclared', `${pluginId}: команда ${name} не объявлена в commands`);
         if (loaded.commands.has(name)) throw new CoreError('CommandConflict', `команда ${name} уже зарегистрирована`);
         loaded.commands.set(name, handler);
         endpoint.notify('register', { pluginId, name });
@@ -194,8 +231,8 @@ async function section(
   if (first.result.status !== 'ok') return { failed: first.result };
   const write = (layer: string, data: Record<string, unknown>) =>
     endpoint.request('section.write', { pluginId, kind, layer, version: spec.version, data });
-  for (const layer of first.result.migrated) {
-    const data = first.layers.get(layer)!;
+  for (const [layer, data] of first.layers) {
+    if (!first.result.migrated.includes(layer)) continue;
     await write(layer, data);
     raw.set(layer, { ...data, [VERSION_KEY]: spec.version });
   }

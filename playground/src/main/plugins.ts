@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { describeEntry, entryLevel, entryPlugins, load, pluginStatuses, SectionStore, type JournalEntry, type Kernel, type LayerStore, type SpawnHost } from '../../../core/src/index.ts';
+import { describeEntry, entryLevel, errorMessage, entryPlugins, load, pluginStatuses, SectionStore, type JournalEntry, type Kernel, type LayerStore, type SpawnHost } from '../../../core/src/index.ts';
 import { isRecord } from '../../../core/src/manifest.ts';
 import type { PluginJournalLine, PluginRow, PluginsSnapshot } from '../shared/plugins.ts';
 import { writeJsonAtomic } from './jsonfile.ts';
@@ -14,12 +14,14 @@ export interface Discovered {
   readonly manifests: unknown[];
   /** id -> file URL точки входа; при повторе id остаётся первый, второму граф откажет. */
   readonly entries: Map<string, string>;
+  /** id -> каталог, где найден первым. */
+  readonly origins: Map<string, string>;
   readonly problems: string[];
 }
 
 /** Каталоги по порядку приоритета: встроенные раньше пользовательских. */
 export function discoverPlugins(dirs: readonly string[]): Discovered {
-  const found: Discovered = { manifests: [], entries: new Map(), problems: [] };
+  const found: Discovered = { manifests: [], entries: new Map(), origins: new Map(), problems: [] };
   for (const dir of dirs) {
     let names: string[];
     try {
@@ -40,6 +42,7 @@ export function discoverPlugins(dirs: readonly string[]): Discovered {
       const id = isRecord(raw) && typeof raw.id === 'string' ? raw.id : undefined;
       const entry = ENTRY_FILES.map((f) => path.join(home, f)).find((f) => fs.existsSync(f));
       if (id && entry && !found.entries.has(id)) found.entries.set(id, pathToFileURL(entry).href);
+      if (id && !found.origins.has(id)) found.origins.set(id, dir);
     }
   }
   return found;
@@ -75,7 +78,7 @@ export function userLayerStore(file: string): LayerStore {
       return doc;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
-      throw new Error(`${file} не разобран, запись отменена: ${(error as Error).message}`);
+      throw new Error(`${file} не разобран, запись отменена: ${errorMessage(error)}`, { cause: error });
     }
   };
   return {
@@ -115,6 +118,8 @@ export async function startPlugins(options: StartOptions): Promise<Kernel> {
     enabled: user.enabled,
     manifests: found.manifests,
     hosts: user.hosts,
+    // Признак поставки - каталог установки, а не манифест: сторонний автор пишет в манифест что угодно.
+    bundled: [...found.origins].filter(([, dir]) => dir === options.builtinDir).map(([id]) => id),
     spawnHost: options.spawnHost,
     entry: (m) => found.entries.get(m.id) ?? m.id,
     config: await SectionStore.open(userLayerStore(file), ['user']),
@@ -162,7 +167,7 @@ export class PluginsService {
       this.phase = 'ready';
     } catch (error) {
       this.phase = 'failed';
-      this.error = (error as Error).message;
+      this.error = errorMessage(error);
       options.log(`[plugins] ядро не запустилось: ${(error as Error).stack ?? this.error}`);
     }
     this.events.changed();
@@ -179,12 +184,13 @@ export class PluginsService {
     const kernel = this.kernel;
     const versions = new Map(kernel?.manifests.map((m) => [m.id, m.version]));
     const plugins: PluginRow[] = pluginStatuses(this.entries.map((e) => e.entry)).map((s) => {
+      const version = versions.get(s.id);
       const host = s.state === 'disabled' ? undefined : kernel?.hostOf(s.id);
       return {
         id: s.id,
         state: s.state,
         revivable: s.revivable && kernel !== undefined,
-        ...(versions.has(s.id) && { version: versions.get(s.id) }),
+        ...(version !== undefined && { version }),
         ...(host !== undefined && { host }),
         ...(s.cause && s.state !== 'active' && { reason: describeEntry(s.cause) }),
       };

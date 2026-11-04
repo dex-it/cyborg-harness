@@ -27,10 +27,23 @@ test('поиск: встроенные раньше пользовательск
   fs.writeFileSync(path.join(user, 'broken', 'manifest.json'), '{ нет');
   const found = discoverPlugins([builtin, user, path.join(user, 'нет-каталога')]);
   assert.equal(found.manifests.length, 3);
-  assert.match(found.entries.get('files')!, new RegExp(`${path.basename(builtin)}/files/index\\.mjs$`));
-  assert.match(found.entries.get('notes')!, /notes\/index\.ts$/);
+  assert.match(found.entries.get('files') ?? '', new RegExp(`${path.basename(builtin)}/files/index\\.mjs$`));
+  assert.match(found.entries.get('notes') ?? '', /notes\/index\.ts$/);
   assert.equal(found.problems.length, 1);
-  assert.match(found.problems[0], /broken/);
+  assert.match(found.problems[0] ?? '', /broken/);
+  assert.deepEqual([...found.origins], [['files', builtin], ['notes', user]]);
+});
+
+test('старт: плагин из каталога пользователя - сторонний и не попадает в общую группу хоста', async () => {
+  const userData = tmp();
+  const builtinDir = tmp();
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['files', 'notes'], hosts: { ui: ['files', 'notes'] } } }));
+  plugin(builtinDir, 'files', {}, 'export default {}');
+  plugin(path.join(userData, 'plugins'), 'notes', {}, 'export default {}');
+  const kernel = await startPlugins({ userData, builtinDir, spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {} });
+  assert.deepEqual([kernel.hostOf('files'), kernel.hostOf('notes')], ['ui', 'notes']);
+  assert.ok(kernel.journal.some((e) => e.kind === 'host-isolated' && e.pluginId === 'notes'));
+  await kernel.unload();
 });
 
 test('cyborg.json: нет файла - пусто без жалобы, битый - пусто с жалобой, мусор в полях отброшен', () => {
@@ -52,7 +65,9 @@ test('старт: включённый плагин активен, миграц
   plugin(path.join(userData, 'plugins'), 'idle', {}, 'export default {}');
   const greeter: PluginModule = {
     config: { migrate: (_, d) => ({ who: d.name }) },
-    activate: (ctx) => ctx.log(`привет, ${ctx.config!.get().who}`),
+    activate(ctx) {
+      ctx.log(`привет, ${String(ctx.config?.get().who)}`);
+    },
   };
   const lines: string[] = [];
   const kernel = await startPlugins({
@@ -103,7 +118,7 @@ test('служба окна: снимок с причиной и журнало�
 
   broken = false;
   assert.deepEqual(await service.revive('disk'), {});
-  assert.equal(service.snapshot().plugins[1].state, 'active');
+  assert.equal(service.snapshot().plugins[1]?.state, 'active');
   assert.deepEqual(await service.revive('spare'), { error: 'spare не загружается: причина в журнале' });
   assert.deepEqual(await service.revive(42), { error: 'нет id плагина' });
   assert.ok(changes > 3);

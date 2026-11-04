@@ -21,10 +21,10 @@ export type SectionResult =
 
 export const VERSION_KEY = '$version';
 
-type Resolved = { readonly result: SectionResult; readonly layers: ReadonlyMap<Layer, Record<string, unknown>> };
+interface Resolved { readonly result: SectionResult; readonly layers: ReadonlyMap<Layer, Record<string, unknown>> }
 
 /** Слой новее манифеста - откат плагина: раздел не читается, чтобы старый код не затёр новые данные. */
-export function resolveSection(spec: SectionSpec, layers: ReadonlyArray<readonly [Layer, unknown]>): Resolved {
+export function resolveSection(spec: SectionSpec, layers: readonly (readonly [Layer, unknown])[]): Resolved {
   const current = new Map<Layer, Record<string, unknown>>();
   const migrated: Layer[] = [];
   for (const [layer, raw] of layers) {
@@ -110,14 +110,14 @@ export class SectionStore {
   }
 
   /** Раздел без миграций - для собственных разделов ядра вроде `plugins.enabled`. */
-  raw(id: string): ReadonlyArray<readonly [Layer, unknown]> {
+  raw(id: string): readonly (readonly [Layer, unknown])[] {
     return this.#layers.map((layer) => [layer, this.#documents.get(layer)?.[id]] as const);
   }
 
   async section(id: string, spec: SectionSpec): Promise<SectionHandle> {
     const { result, layers } = resolveSection(spec, this.raw(id));
     if (result.status === 'ok') {
-      for (const layer of result.migrated) await this.write(layer, id, spec.version, layers.get(layer)!);
+      for (const [layer, data] of layers) if (result.migrated.includes(layer)) await this.write(layer, id, spec.version, data);
     }
     const listeners = new Set<(value: Record<string, unknown>) => void>();
     let value = result.status === 'ok' ? result.value : structuredClone({ ...spec.defaults });

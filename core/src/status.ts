@@ -108,6 +108,8 @@ export function describeEntry(e: JournalEntry): string {
       return e.error ? `снят с ошибкой: ${e.error}` : 'снят';
     case 'revived':
       return 'включён снова';
+    case 'host-isolated':
+      return `сторонний плагин не делит хост: группа ${e.group} из plugins.hosts не действует, работает в своём хосте ${e.hostId}`;
     case 'switched-off':
       return `выключен, сбоев подряд: ${e.strikes}` + (e.affects.length ? `; его контракты брали: ${list(e.affects)}` : '');
     case 'host-down': {
@@ -138,6 +140,7 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
     case 'safe-mode':
     case 'skipped':
     case 'host-down':
+    case 'host-isolated':
       return 'warn';
     default:
       return 'error';

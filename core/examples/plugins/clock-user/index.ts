@@ -1,17 +1,16 @@
-import type { PluginModule } from '../../../src/index.ts';
-
-type Clock = Record<string, (...args: unknown[]) => Promise<unknown>>;
+import { CoreError, errorMessage, type PluginModule } from '../../../src/index.ts';
 
 const plugin: PluginModule = {
   activate(ctx) {
-    const clock = ctx.contracts.get<Clock>('demo.clock')!;
+    const clock = ctx.contracts.get('demo.clock', 1);
+    if (!clock) throw new Error('demo.clock в requires, но его нет');
     ctx.commands.register('clock-user.probe', async () => {
       const out: string[] = [];
       const attempt = async (label: string, call: () => Promise<unknown>) => {
         try {
           out.push(`${label}: ок ${JSON.stringify(await call())}`);
         } catch (error) {
-          out.push(`${label}: ${(error as { code?: string }).code ?? 'ошибка'} - ${(error as Error).message}`);
+          out.push(`${label}: ${error instanceof CoreError ? error.code : 'ошибка'} - ${errorMessage(error)}`);
         }
       };
       await attempt('now()', () => clock.now());

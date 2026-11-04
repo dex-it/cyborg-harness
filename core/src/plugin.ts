@@ -1,8 +1,10 @@
 import type { SectionResult, SectionSpec } from './config.ts';
 import type { Disposable, DisposableStore } from './disposable.ts';
-import type { ContractImpl, Provider } from './registry.ts';
+import type { ContractName, ContractType, Major, MajorOf, Remote, VersionOf } from '@cyborg/contracts';
+import type { Provider } from './registry.ts';
 
-export type CommandHandler = (...args: any[]) => unknown;
+/** Аргументы уже сверены ядром со схемой из манифеста, но обработчик сужает их сам: тип с провода не выводится. */
+export type CommandHandler = (...args: unknown[]) => unknown;
 
 export interface PluginSection {
   readonly result: SectionResult;
@@ -16,10 +18,12 @@ export interface PluginContext {
   readonly pluginId: string;
   readonly subscriptions: DisposableStore;
   readonly contracts: {
-    provide(contract: string, version: string, impl: ContractImpl): Disposable;
-    get<T = ContractImpl>(contract: string): T | undefined;
-    all<T = ContractImpl>(contract: string): Provider<T>[];
-    onChange(contract: string, listener: () => void): Disposable;
+    /** Мажорная часть версии выбирает тип impl из карты Contracts. */
+    provide<K extends ContractName, V extends VersionOf<K>>(contract: K, version: V, impl: ContractType<K, MajorOf<V> & Major<K>>): Disposable;
+    /** Мажорная версия обязательна: ядро сверяет её с диапазоном из манифеста, и тип ответа ей соответствует. */
+    get<K extends ContractName, M extends Major<K>>(contract: K, major: M): Remote<ContractType<K, M>> | undefined;
+    all<K extends ContractName, M extends Major<K>>(contract: K, major: M): Provider<Remote<ContractType<K, M>>>[];
+    onChange(contract: ContractName, listener: () => void): Disposable;
   };
   readonly commands: {
     register(name: string, handler: CommandHandler): Disposable;
@@ -33,5 +37,5 @@ export interface PluginContext {
 export interface PluginModule {
   readonly config?: Omit<SectionSpec, 'version'>;
   readonly state?: Omit<SectionSpec, 'version'>;
-  activate(ctx: PluginContext): void | Disposable | Promise<void | Disposable>;
+  activate(ctx: PluginContext): Disposable | undefined | Promise<Disposable | undefined>;
 }

@@ -1,4 +1,19 @@
+import { CoreError } from './errors.ts';
 import { isValidRange, parseVersion } from './semver.ts';
+import { isRecord, isWireKind, matchesKind, type WireKind } from './wire.ts';
+
+export { isRecord };
+
+export interface ArgSpec {
+  readonly kind: WireKind;
+  readonly optional: boolean;
+}
+
+/** Аргументы команды: позиционные, необязательные только в хвосте; `rest` - вид всех остальных. */
+export interface CommandSpec {
+  readonly args: readonly ArgSpec[];
+  readonly rest?: WireKind;
+}
 
 /** Манифест плагина; читается ядром до запуска кода плагина. */
 export interface PluginManifest {
@@ -13,7 +28,8 @@ export interface PluginManifest {
   readonly optional: Readonly<Record<string, string>>;
   /** Кратность many, поставщики приходят и уходят во время работы. */
   readonly consumes: Readonly<Record<string, string>>;
-  readonly commands: readonly string[];
+  /** Имя -> аргументы; ядро сверяет их до вызова обработчика. */
+  readonly commands: Readonly<Record<string, CommandSpec>>;
   readonly config?: { readonly version: number };
   readonly state?: { readonly version: number };
   /** `own` - просьба о своём хосте; пользователь вправе переопределить группой в `plugins.hosts`. */
@@ -22,7 +38,7 @@ export interface PluginManifest {
 
 export type ManifestResult =
   | { readonly ok: true; readonly manifest: PluginManifest }
-  | { readonly ok: false; readonly id?: string; readonly errors: readonly string[] };
+  | { readonly ok: false; readonly id?: string | undefined; readonly errors: readonly string[] };
 
 const ID = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/;
 
@@ -60,13 +76,13 @@ export function parseManifest(raw: unknown): ManifestResult {
   const state = readSchemaVersion('state', raw.state, errors);
   if (raw.host !== undefined && raw.host !== 'own') errors.push(`host: допустимо только "own", получено ${show(raw.host)}`);
 
-  if (errors.length > 0) return { ok: false, id, errors };
+  if (errors.length > 0 || id === undefined || typeof version !== 'string' || typeof engines !== 'string') return { ok: false, id, errors };
   return {
     ok: true,
     manifest: {
-      id: id!,
-      version: version as string,
-      engines: { cyborg: engines as string },
+      id,
+      version,
+      engines: { cyborg: engines },
       provides,
       requires,
       optional,
@@ -88,14 +104,15 @@ function readProvides(raw: unknown, errors: string[]): Record<string, string[]> 
   }
   for (const [name, value] of Object.entries(raw)) {
     if (!isValidId(name)) errors.push(`provides.${name}: недопустимое имя контракта`);
-    const list = typeof value === 'string' ? [value] : value;
-    if (!Array.isArray(list) || list.length === 0 || !list.every((v) => typeof v === 'string' && parseVersion(v))) {
+    const list: unknown = typeof value === 'string' ? [value] : value;
+    const versions = Array.isArray(list) ? list.filter((v): v is string => typeof v === 'string' && parseVersion(v) !== null) : [];
+    if (!Array.isArray(list) || versions.length === 0 || versions.length !== list.length) {
       errors.push(`provides.${name}: ожидается версия или список версий, получено ${show(value)}`);
       continue;
     }
-    const majors = list.map((v) => parseVersion(v as string)![0]);
+    const majors = versions.map((v) => parseVersion(v)?.[0]);
     if (new Set(majors).size !== majors.length) errors.push(`provides.${name}: две версии одной мажорной`);
-    out[name] = list as string[];
+    out[name] = versions;
   }
   return out;
 }
@@ -118,19 +135,80 @@ function readRanges(field: string, raw: unknown, errors: string[]): Record<strin
   return out;
 }
 
-function readCommands(raw: unknown, id: string | undefined, errors: string[]): string[] {
-  if (raw === undefined) return [];
-  if (!Array.isArray(raw) || !raw.every((c) => typeof c === 'string')) {
-    errors.push('commands: ожидается список имён');
-    return [];
+/** Список имён - команды без аргументов; объект - имя и `{ args, rest }`. */
+function readCommands(raw: unknown, id: string | undefined, errors: string[]): Record<string, CommandSpec> {
+  const out: Record<string, CommandSpec> = {};
+  if (raw === undefined) return out;
+  let entries: [string, unknown][];
+  if (Array.isArray(raw) && raw.every((c) => typeof c === 'string')) {
+    if (new Set(raw).size !== raw.length) errors.push('commands: имя повторяется');
+    entries = raw.map((name) => [name, {}]);
+  } else if (isRecord(raw)) {
+    entries = Object.entries(raw);
+  } else {
+    errors.push('commands: ожидается список имён или объект имя -> { args, rest }');
+    return out;
   }
-  for (const name of raw as string[]) {
+  for (const [name, spec] of entries) {
     if (!isValidId(name) || (id !== undefined && !name.startsWith(`${id}.`))) {
       errors.push(`commands: "${name}" должна лежать в пространстве имён "${id}."`);
     }
+    const parsed = readCommandSpec(name, spec, errors);
+    if (parsed) out[name] = parsed;
   }
-  if (new Set(raw).size !== raw.length) errors.push('commands: имя повторяется');
-  return raw as string[];
+  return out;
+}
+
+function readCommandSpec(name: string, raw: unknown, errors: string[]): CommandSpec | undefined {
+  const where = `commands.${name}`;
+  if (!isRecord(raw)) {
+    errors.push(`${where}: ожидается объект { args, rest }`);
+    return undefined;
+  }
+  const list = raw.args ?? [];
+  if (!Array.isArray(list) || !list.every((a) => typeof a === 'string')) {
+    errors.push(`${where}.args: ожидается список видов, например ["string", "number?"]`);
+    return undefined;
+  }
+  const args: ArgSpec[] = [];
+  for (const text of list) {
+    const optional = text.endsWith('?');
+    const kind = optional ? text.slice(0, -1) : text;
+    if (!isWireKind(kind)) {
+      errors.push(`${where}.args: неизвестный вид ${show(text)}`);
+      return undefined;
+    }
+    if (!optional && args.some((a) => a.optional)) {
+      errors.push(`${where}.args: обязательный аргумент после необязательного`);
+      return undefined;
+    }
+    args.push({ kind, optional });
+  }
+  const rest = raw.rest;
+  if (rest === undefined) return { args };
+  if (typeof rest !== 'string' || !isWireKind(rest)) {
+    errors.push(`${where}.rest: неизвестный вид ${show(rest)}`);
+    return undefined;
+  }
+  if (args.some((a) => a.optional)) {
+    errors.push(`${where}: rest вместе с необязательными аргументами неоднозначен`);
+    return undefined;
+  }
+  return { args, rest };
+}
+
+/** Ядро зовёт до обработчика: команду вызывает кто угодно по имени, аргументы - недоверенный вход. */
+export function checkArgs(name: string, spec: CommandSpec, args: readonly unknown[]): void {
+  const required = spec.args.filter((a) => !a.optional).length;
+  const max = spec.rest ? Infinity : spec.args.length;
+  if (args.length < required || args.length > max) {
+    const expected = spec.rest ? `не меньше ${required}` : required === spec.args.length ? `${required}` : `${required}-${spec.args.length}`;
+    throw new CoreError('Invalid', `${name}: аргументов ${args.length}, ожидается ${expected}`);
+  }
+  args.forEach((value, i) => {
+    const kind = spec.args[i]?.kind ?? spec.rest;
+    if (kind && !matchesKind(kind, value)) throw new CoreError('Invalid', `${name}: аргумент ${i + 1} не ${kind}`);
+  });
 }
 
 function readSchemaVersion(field: string, raw: unknown, errors: string[]): { version: number } | undefined {
@@ -141,10 +219,6 @@ function readSchemaVersion(field: string, raw: unknown, errors: string[]): { ver
     return undefined;
   }
   return { version };
-}
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function show(value: unknown): string {

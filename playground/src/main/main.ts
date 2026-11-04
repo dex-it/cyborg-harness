@@ -75,6 +75,7 @@ void app.whenReady().then(() => {
     userData,
     builtinDir: path.join(__dirname, 'plugins'),
     spawnHost: utilityHosts(path.join(__dirname, 'plugin-host.mjs')),
+    // eslint-disable-next-line no-console -- журнал ядра в главном процессе - это stderr приложения
     log: (line) => console.error(line),
   });
 });

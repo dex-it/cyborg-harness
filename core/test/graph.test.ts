@@ -34,14 +34,14 @@ test('отказ по engines каскадирует на зависимых, op
     '1.3.0',
   );
   assert.deepEqual(g.order, ['tree']);
-  assert.equal(g.rejected.get('files')?.[0].kind, 'engines');
+  assert.equal(g.rejected.get('files')?.[0]?.kind, 'engines');
   assert.deepEqual(g.rejected.get('sessions'), [{ kind: 'missing', contract: 'cyborg.files', range: '^1' }]);
   assert.equal(g.bindings.get('tree')?.size, 0);
 });
 
 test('несовместимая мажорная версия поставщика - как отсутствие', () => {
   const g = resolveGraph([m('files', { provides: { 'cyborg.files': '2.0' } }), m('sessions', { requires: { 'cyborg.files': '^1' } })], '1.0.0');
-  assert.equal(g.rejected.get('sessions')?.[0].kind, 'missing');
+  assert.equal(g.rejected.get('sessions')?.[0]?.kind, 'missing');
 });
 
 test('поставщик с двумя мажорными версиями обслуживает старого и нового потребителя', () => {
@@ -80,9 +80,9 @@ test('цикл отказывает всем участникам и каска�
     '1.0.0',
   );
   assert.deepEqual(g.order, ['d']);
-  assert.equal(g.rejected.get('a')?.[0].kind, 'cycle');
-  assert.equal(g.rejected.get('b')?.[0].kind, 'cycle');
-  assert.equal(g.rejected.get('c')?.[0].kind, 'missing');
+  assert.equal(g.rejected.get('a')?.[0]?.kind, 'cycle');
+  assert.equal(g.rejected.get('b')?.[0]?.kind, 'cycle');
+  assert.equal(g.rejected.get('c')?.[0]?.kind, 'missing');
 });
 
 test('consumes не создаёт ребра: циклические consumes допустимы', () => {

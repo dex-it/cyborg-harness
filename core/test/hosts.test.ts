@@ -4,8 +4,8 @@ import { load, type JournalEntry, type Kernel } from '../src/loader.ts';
 import { forkHosts } from '../src/transports.ts';
 
 const manifests = [
-  { id: 'files', version: '1.0.0', engines: { cyborg: '^1' }, provides: { 'cyborg.files': '1.0' } },
-  { id: 'consumer', version: '1.0.0', engines: { cyborg: '^1' }, optional: { 'cyborg.files': '^1' }, commands: ['consumer.call', 'consumer.state'] },
+  { id: 'files', version: '1.0.0', engines: { cyborg: '^1' }, provides: { 'test.files': '1.0' } },
+  { id: 'consumer', version: '1.0.0', engines: { cyborg: '^1' }, optional: { 'test.files': '^1' }, commands: { 'consumer.call': { args: ['string'], rest: 'any' }, 'consumer.state': {} } },
 ];
 
 function start(strikes = 3): Promise<Kernel> {
@@ -20,7 +20,7 @@ function start(strikes = 3): Promise<Kernel> {
   });
 }
 
-type State = { changes: number; files: boolean; pid: number };
+interface State { changes: number; files: boolean; pid: number }
 const state = (k: Kernel) => k.run('consumer.state') as Promise<State>;
 const downs = (k: Kernel) =>
   k.journal.filter((e): e is Extract<JournalEntry, { kind: 'host-down' }> => e.kind === 'host-down').map((d) => [d.hostId, d.reason, d.culprits, d.affects]);

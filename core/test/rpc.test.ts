@@ -4,8 +4,8 @@ import { CoreError } from '../src/errors.ts';
 import { Endpoint, type Port } from '../src/rpc.ts';
 
 function pair(): [Endpoint, Endpoint] {
-  const listeners: [Array<(m: unknown) => void>, Array<(m: unknown) => void>] = [[], []];
-  const port = (to: number, from: number): Port => ({
+  const listeners: [((m: unknown) => void)[], ((m: unknown) => void)[]] = [[], []];
+  const port = (to: 0 | 1, from: 0 | 1): Port => ({
     post(message) {
       const copy = structuredClone(message);
       setImmediate(() => listeners[to].forEach((l) => l(copy)));

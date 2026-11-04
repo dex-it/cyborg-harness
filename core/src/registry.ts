@@ -2,9 +2,12 @@ import { toDisposable, type Disposable } from './disposable.ts';
 import { CoreError } from './errors.ts';
 import type { ContractGraph } from './graph.ts';
 import type { PluginManifest } from './manifest.ts';
-import { parseVersion, satisfies } from './semver.ts';
+import { allowsMajor, compareVersions, parseVersion, satisfies } from './semver.ts';
 
 export type ContractImpl = Readonly<Record<string, unknown>>;
+
+const major = (version: string): number => parseVersion(version)?.[0] ?? -1;
+const newer = (a: string, b: string): boolean => compareVersions(parseVersion(a) ?? [0, 0, 0], parseVersion(b) ?? [0, 0, 0]) > 0;
 
 export interface Provider<T = ContractImpl> {
   readonly pluginId: string;
@@ -52,29 +55,31 @@ export class ContractRegistry {
     this.#emit(contract);
   }
 
-  /** requires и optional: связанный графом поставщик; для optional без поставщика - undefined. */
-  get<T = ContractImpl>(consumerId: string, contract: string): T | undefined {
+  /** requires и optional: связанный графом поставщик нужной мажорной версии; для optional без поставщика - undefined. */
+  get(consumerId: string, contract: string, wanted: number): ContractImpl | undefined {
     const m = this.#manifest(consumerId);
     const range = m.requires[contract] ?? m.optional[contract];
     if (range === undefined) throw new CoreError('NotDeclared', `${consumerId}: ${contract} нет в requires и optional`);
+    assertMajor(consumerId, contract, range, wanted);
     const providerId = this.#bindings.get(consumerId)?.get(contract);
-    const entry = providerId === undefined ? undefined : this.#best(contract, range, providerId);
-    if (entry) return entry.impl as T;
+    const entry = providerId === undefined ? undefined : this.#best(contract, range, providerId, wanted);
+    if (entry) return entry.impl;
     if (contract in m.requires) throw new CoreError('Unavailable', `${consumerId}: поставщик ${contract} не отдал контракт`);
     return undefined;
   }
 
-  /** consumes: все отданные сейчас поставщики подходящей версии. */
-  all<T = ContractImpl>(consumerId: string, contract: string): Provider<T>[] {
+  /** consumes: все отданные сейчас поставщики подходящей версии этой мажорной. */
+  all(consumerId: string, contract: string, wanted: number): Provider[] {
     const range = this.#manifest(consumerId).consumes[contract];
     if (range === undefined) throw new CoreError('NotDeclared', `${consumerId}: ${contract} нет в consumes`);
+    assertMajor(consumerId, contract, range, wanted);
     const byPlugin = new Map<string, Provider>();
     for (const e of this.#entries.get(contract) ?? []) {
       if (e.pluginId === consumerId || byPlugin.has(e.pluginId)) continue;
-      const best = this.#best(contract, range, e.pluginId);
+      const best = this.#best(contract, range, e.pluginId, wanted);
       if (best) byPlugin.set(e.pluginId, best);
     }
-    return [...byPlugin.values()] as Provider<T>[];
+    return [...byPlugin.values()];
   }
 
   onChange(consumerId: string, contract: string, listener: () => void): Disposable {
@@ -88,14 +93,10 @@ export class ContractRegistry {
     return toDisposable(() => set.delete(listener));
   }
 
-  /** Старшая подходящая версия: поставщик может отдавать две мажорные сразу. */
-  #best(contract: string, range: string, pluginId: string): Provider | undefined {
-    let best: Provider | undefined;
-    for (const e of this.#entries.get(contract) ?? []) {
-      if (e.pluginId !== pluginId || !satisfies(e.version, range)) continue;
-      if (!best || parseVersion(e.version)![0] > parseVersion(best.version)![0]) best = e;
-    }
-    return best;
+  /** Поставщик может отдавать две мажорные сразу, а тип у потребителя - ровно одной. */
+  #best(contract: string, range: string, pluginId: string, wanted: number): Provider | undefined {
+    const fit = (this.#entries.get(contract) ?? []).filter((e) => e.pluginId === pluginId && major(e.version) === wanted && satisfies(e.version, range));
+    return fit.reduce<Provider | undefined>((best, e) => (!best || newer(e.version, best.version) ? e : best), undefined);
   }
 
   #emit(contract: string): void {
@@ -112,5 +113,12 @@ export class ContractRegistry {
     const m = this.#manifests.get(pluginId);
     if (!m) throw new CoreError('NotDeclared', `плагин ${pluginId} не загружен`);
     return m;
+  }
+}
+
+/** Мажорная версия в get и all связывает тип у потребителя с тем, что придёт в рантайме. */
+function assertMajor(consumerId: string, contract: string, range: string, wanted: unknown): asserts wanted is number {
+  if (typeof wanted !== 'number' || !allowsMajor(range, wanted)) {
+    throw new CoreError('NotDeclared', `${consumerId}: ${contract} объявлен как ${range}, мажорной версии ${String(wanted)} в нём нет`);
   }
 }

@@ -1,4 +1,4 @@
-import { CoreError, fromWire, toWire, type WireError } from './errors.ts';
+import { CoreError, errorMessage, fromWire, toWire, type WireError } from './errors.ts';
 
 /** Канал сообщений между ядром и хостом; post бросает, если сообщение не переживает structuredClone. */
 export interface Port {
@@ -12,7 +12,8 @@ type Message =
   | { readonly t: 'res'; readonly id: number; readonly ok: false; readonly e: WireError }
   | { readonly t: 'note'; readonly m: string; readonly p: unknown };
 
-type Handler = (params: any) => unknown;
+// Форму параметров проверяет сам обработчик: ядро пропускает сообщения хоста через parseWire.
+type Handler = (params: never) => unknown;
 
 /** Запрос-ответ и уведомления поверх порта; сообщения одного порта приходят в порядке отправки. */
 export class Endpoint {
@@ -24,7 +25,7 @@ export class Endpoint {
 
   constructor(port: Port) {
     this.#port = port;
-    port.onMessage((message) => this.#receive(message as Message));
+    port.onMessage((message) => void this.#receive(message as Message));
   }
 
   get closed(): boolean {
@@ -36,15 +37,16 @@ export class Endpoint {
   }
 
   request<T = unknown>(method: string, params: unknown): Promise<T> {
-    if (this.#closed) return Promise.reject(this.#closed);
+    const closed = this.#closed;
+    if (closed) return Promise.reject(closed);
     const id = this.#next++;
     return new Promise<T>((resolve, reject) => {
-      this.#pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
+      this.#pending.set(id, { resolve: resolve, reject });
       try {
         this.#send({ t: 'req', id, m: method, p: params }, `${method}: аргументы`);
       } catch (error) {
         this.#pending.delete(id);
-        reject(error);
+        reject(error instanceof Error ? error : new CoreError('Remote', String(error)));
       }
     });
   }
@@ -68,7 +70,7 @@ export class Endpoint {
       this.#port.post(message);
     } catch (error) {
       if (error instanceof CoreError) throw error;
-      throw new CoreError('NotCloneable', `${label} не переживут structuredClone: ${(error as Error).message}`);
+      throw new CoreError('NotCloneable', `${label} не переживут structuredClone: ${errorMessage(error)}`);
     }
   }
 
@@ -85,7 +87,7 @@ export class Endpoint {
     const handler = this.#handlers.get(message.m);
     if (message.t === 'note') {
       try {
-        await handler?.(message.p);
+        await handler?.(message.p as never);
       } catch {
         // У уведомления нет отправителя, которому вернуть ошибку.
       }
@@ -93,7 +95,7 @@ export class Endpoint {
     }
     try {
       if (!handler) throw new CoreError('Remote', `нет обработчика ${message.m}`);
-      const value = await handler(message.p);
+      const value = await handler(message.p as never);
       this.#reply({ t: 'res', id: message.id, ok: true, v: value }, `${message.m}: результат`);
     } catch (error) {
       this.#reply({ t: 'res', id: message.id, ok: false, e: toWire(error) }, `${message.m}: ошибка`);

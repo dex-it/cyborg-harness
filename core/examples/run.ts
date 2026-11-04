@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
-import { forkHosts, load, SectionStore, type ContractGraph, type JournalEntry, type LayerStore, type Rejection } from '../src/index.ts';
+import { CoreError, errorMessage, forkHosts, isRecord, load, parseManifest, SectionStore, type ContractGraph, type JournalEntry, type LayerStore, type Rejection } from '../src/index.ts';
 import { scenarios, type Documents, type Scenario } from './scenarios.ts';
 
 const API_VERSION = '1.0.0';
@@ -119,24 +119,33 @@ function journalLine(e: JournalEntry): string {
       return `${red('✖')} ${bold(`хост ${e.hostId}`)} брошен после ${e.failures} сбоев без виновника; выключены ${e.plugins.join(', ') || 'никто'}`;
     case 'revived':
       return `${yellow('↻')} ${id} включён снова`;
+    case 'host-isolated':
+      return `${yellow('◌')} ${id} сторонний: группа ${e.group} не действует, свой хост ${e.hostId}`;
   }
 }
 
 function printManifests(raw: unknown[], enabled: readonly string[]): void {
-  for (const m of raw as Array<Record<string, any>>) {
-    if (!enabled.includes(m.id)) continue;
+  const listed = (label: string, entries: Record<string, string | readonly string[]>, sep: string) => {
+    const items = Object.entries(entries).map(([c, v]) => `${c}${sep}${[v].flat().join('+')}`);
+    return items.length > 0 ? `${label} ${items.join(', ')}` : undefined;
+  };
+  const seen = new Set<string>();
+  for (const parsed of raw.map(parseManifest)) {
+    if (!parsed.ok || !enabled.includes(parsed.manifest.id)) continue;
+    const m = parsed.manifest;
+    seen.add(m.id);
     const parts = [
-      m.provides && `отдаёт ${Object.entries(m.provides).map(([c, v]) => `${c}@${[v].flat().join('+')}`).join(', ')}`,
-      m.requires && `требует ${Object.entries(m.requires).map(([c, r]) => `${c} ${r}`).join(', ')}`,
-      m.optional && `может взять ${Object.entries(m.optional).map(([c, r]) => `${c} ${r}`).join(', ')}`,
-      m.consumes && `собирает ${Object.entries(m.consumes).map(([c, r]) => `${c} ${r}`).join(', ')}`,
+      listed('отдаёт', m.provides, '@'),
+      listed('требует', m.requires, ' '),
+      listed('может взять', m.optional, ' '),
+      listed('собирает', m.consumes, ' '),
       m.config && `config v${m.config.version}`,
       m.state && `state v${m.state.version}`,
-    ].filter(Boolean);
+    ].filter((p) => p !== undefined);
     console.log(`  ${cyan(`${m.id}@${m.version}`.padEnd(22))} ${parts.join(dim(' | ')) || dim('без контрактов')}`);
   }
-  const missing = enabled.filter((id) => !(raw as Array<{ id: string }>).some((m) => m.id === id));
-  if (missing.length > 0) console.log(`  ${dim(`в enabled, но нет на диске: ${missing.join(', ')}`)}`);
+  const missing = enabled.filter((id) => !seen.has(id));
+  if (missing.length > 0) console.log(`  ${dim(`в enabled, но нет на диске или манифест с ошибкой: ${missing.join(', ')}`)}`);
 }
 
 function printGraph(graph: ContractGraph): void {
@@ -173,11 +182,15 @@ async function runScenario(s: Scenario): Promise<void> {
     spawnHost: forkHosts(),
     entry,
     hosts: s.hosts,
+    bundled: s.bundled ?? raw.map((m) => (isRecord(m) && typeof m.id === 'string' ? m.id : '')),
     watchdog: { interval: 100, timeout: 800, strikes: 2 },
     config: await SectionStore.open(config.store, ['user', 'workspace']),
     state: await SectionStore.open(state.store, ['workspace']),
     safeMode: s.safeMode,
-    onJournal: (e) => (activationStarted ? console.log(`  ${journalLine(e)}`) : early.push(e)),
+    onJournal: (e) => {
+      if (activationStarted) console.log(`  ${journalLine(e)}`);
+      else early.push(e);
+    },
     onLog: (id, message) => console.log(`      ${dim(`${id}:`)} ${message}`),
     async onGraph(graph) {
       const disabled = early.filter((e) => e.kind === 'disabled').map((e) => e.pluginId);
@@ -202,7 +215,7 @@ async function runScenario(s: Scenario): Promise<void> {
         const lines = Array.isArray(result) ? result.map(String) : [typeof result === 'string' ? result : JSON.stringify(result)];
         console.log(`  ${cyan(call)}\n${lines.map((l) => `      ${l}`).join('\n')}`);
       } catch (error) {
-        console.log(`  ${cyan(call)}\n      ${red(`${(error as { code?: string }).code ?? 'ошибка'}: ${(error as Error).message}`)}`);
+        console.log(`  ${cyan(call)}\n      ${red(`${error instanceof CoreError ? error.code : 'ошибка'}: ${errorMessage(error)}`)}`);
       }
     });
     await pause();
@@ -213,5 +226,5 @@ async function runScenario(s: Scenario): Promise<void> {
   printDocuments('state', state.docs);
 }
 
-for (const s of chosen) await runScenario(s);
+for (const s of chosen) if (s) await runScenario(s);
 prompt?.close();

@@ -16,10 +16,7 @@ export function parseVersion(text: string): Version | null {
 }
 
 export function compareVersions(a: Version, b: Version): number {
-  for (let i = 0; i < 3; i++) {
-    if (a[i] !== b[i]) return a[i] - b[i];
-  }
-  return 0;
+  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
 }
 
 /** Диапазон: `*`, версия-префикс (`1`, `1.2`, `1.2.3`), `^` и `~` по правилам npm. */
@@ -34,6 +31,13 @@ export function satisfies(version: string, range: string): boolean {
   return compareVersions(v, b.min) >= 0 && (b.max === null || compareVersions(v, b.max) < 0);
 }
 
+/** Есть ли в диапазоне хоть одна версия этой мажорной: `^1.4` - да для 1, `*` - для любой. */
+export function allowsMajor(range: string, major: number): boolean {
+  const b = toBounds(range);
+  if (!b || !Number.isInteger(major) || major < 0) return false;
+  return compareVersions(b.min, [major + 1, 0, 0]) < 0 && (b.max === null || compareVersions(b.max, [major, 0, 0]) > 0);
+}
+
 function toBounds(range: string): Bounds | null {
   const r = range.trim();
   if (r === '*') return { min: [0, 0, 0], max: null };
@@ -42,7 +46,8 @@ function toBounds(range: string): Bounds | null {
   const m = VERSION.exec(body);
   if (!m) return null;
   const parts = m[3] !== undefined ? 3 : m[2] !== undefined ? 2 : 1;
-  const min = parseVersion(body)!;
+  const min = parseVersion(body);
+  if (!min) return null;
   const [major, minor, patch] = min;
   if (op === '^') {
     if (major > 0 || parts === 1) return { min, max: [major + 1, 0, 0] };

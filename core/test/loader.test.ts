@@ -26,7 +26,7 @@ function memory(initial: Record<string, Record<string, unknown>> = {}) {
   return { docs, store };
 }
 
-const kinds = (k: { journal: readonly { pluginId?: string; kind: string }[] }) => k.journal.map((e) => `${e.pluginId ?? '-'}:${e.kind}`);
+const kinds = (k: { journal: readonly { pluginId?: string | undefined; kind: string }[] }) => k.journal.map((e) => `${e.pluginId ?? '-'}:${e.kind}`);
 
 test('активация по графу, вызов чужого контракта через ядро, снятие в обратном порядке', async () => {
   const events: string[] = [];
@@ -35,21 +35,21 @@ test('активация по графу, вызов чужого контрак
       files: {
         activate(ctx) {
           events.push('files:up');
-          ctx.contracts.provide('cyborg.files', '1.0', { root: '/w', read: async (p: string) => `data:${p}` });
+          ctx.contracts.provide('test.files', '1.0', { root: '/w', read: async (p: string) => `data:${p}` });
           return toDisposable(() => events.push('files:down'));
         },
       },
       sessions: {
         async activate(ctx) {
-          const api = ctx.contracts.get<{ root: string; read(p: string): Promise<string> }>('cyborg.files')!;
-          events.push(`sessions:${api.root}:${await api.read('a')}`);
+          const api = ctx.contracts.get('test.files', 1)!;
+          events.push(`sessions:${api.root ?? ''}:${(await api.read?.('a')) ?? ''}`);
           ctx.subscriptions.add(toDisposable(() => events.push('sessions:down')));
         },
       },
     },
     {
       enabled: ['sessions', 'files'],
-      manifests: [manifest('sessions', { requires: { 'cyborg.files': '^1' } }), manifest('files', { provides: { 'cyborg.files': '1.0' } })],
+      manifests: [manifest('sessions', { requires: { 'test.files': '^1' } }), manifest('files', { provides: { 'test.files': '1.0' } })],
       hosts: { one: ['files'], two: ['sessions'] },
     },
   );
@@ -67,9 +67,9 @@ test('журнал: невалидный, выключенный, не найд�
       manifests: [
         { id: 'broken' },
         manifest('extra'),
-        manifest('files', { provides: { 'cyborg.files': '1.0' } }),
-        manifest('sessions', { requires: { 'cyborg.files': '^1' } }),
-        manifest('lonely', { requires: { 'cyborg.nobody': '^1' } }),
+        manifest('files', { provides: { 'test.files': '1.0' } }),
+        manifest('sessions', { requires: { 'test.files': '^1' } }),
+        manifest('lonely', { requires: { 'test.nobody': '^1' } }),
       ],
     },
   );
@@ -83,7 +83,7 @@ test('сбой активации снимает уже отданное пла�
     {
       files: {
         activate(ctx) {
-          ctx.contracts.provide('cyborg.files', '1.0', {});
+          ctx.contracts.provide('test.files', '1.0', {});
           throw new Error('после provide');
         },
       },
@@ -91,18 +91,18 @@ test('сбой активации снимает уже отданное пла�
     },
     {
       enabled: ['files', 'tree'],
-      manifests: [manifest('files', { provides: { 'cyborg.files': '1.0' } }), manifest('tree', { optional: { 'cyborg.files': '^1' } })],
+      manifests: [manifest('files', { provides: { 'test.files': '1.0' } }), manifest('tree', { optional: { 'test.files': '^1' } })],
     },
   );
   assert.deepEqual(k.active, ['tree']);
-  assert.equal(k.contracts.get('tree', 'cyborg.files'), undefined);
+  assert.equal(k.contracts.get('tree', 'test.files', 1), undefined);
   await k.unload();
 });
 
 test('команды: запуск из ядра и из другого плагина, необъявленная команда отклоняется', async () => {
   const k = await kernel(
     {
-      lock: { activate: (ctx) => void ctx.commands.register('lock.now', (reason: string) => `locked:${reason}`) },
+      lock: { activate: (ctx) => void ctx.commands.register('lock.now', (reason) => `locked:${String(reason)}`) },
       menu: {
         activate(ctx) {
           assert.throws(() => ctx.commands.register('lock.now', () => 0), { code: 'NotDeclared' });
@@ -110,7 +110,7 @@ test('команды: запуск из ядра и из другого плаг
         },
       },
     },
-    { enabled: ['lock', 'menu'], manifests: [manifest('lock', { commands: ['lock.now'] }), manifest('menu', { commands: ['menu.press'] })] },
+    { enabled: ['lock', 'menu'], manifests: [manifest('lock', { commands: { 'lock.now': { args: ['string'] } } }), manifest('menu', { commands: ['menu.press'] })] },
   );
   assert.equal(await k.run('lock.now', 'idle'), 'locked:idle');
   assert.equal(await k.run('menu.press'), 'locked:menu');
@@ -122,16 +122,22 @@ test('функция в результате контракта - NotCloneable �
   let error: unknown;
   const k = await kernel(
     {
-      clock: { activate: (ctx) => void ctx.contracts.provide('cyborg.clock', '1.0', { tick: async () => () => 0 }) },
+      clock: {
+        activate(ctx) {
+          ctx.contracts.provide('test.clock', '1.0', { tick: async () => () => 0 });
+        },
+      },
       user: {
         async activate(ctx) {
-          await ctx.contracts.get<{ tick(): Promise<unknown> }>('cyborg.clock')!.tick().catch((e) => (error = e));
+          await ctx.contracts.get('test.clock', 1)!.tick().catch((e: unknown) => {
+            error = e;
+          });
         },
       },
     },
     {
       enabled: ['clock', 'user'],
-      manifests: [manifest('clock', { provides: { 'cyborg.clock': '1.0' } }), manifest('user', { requires: { 'cyborg.clock': '^1' } })],
+      manifests: [manifest('clock', { provides: { 'test.clock': '1.0' } }), manifest('user', { requires: { 'test.clock': '^1' } })],
     },
   );
   assert.equal((error as { code: string }).code, 'NotCloneable');
@@ -146,7 +152,13 @@ test('битый манифест невключённого плагина - di
 test('хуки: граф до кода, журнал по ходу, лог с id плагина, снятие в журнале', async () => {
   const seen: string[] = [];
   const k = await kernel(
-    { a: { activate: (ctx) => ctx.log('привет') } },
+    {
+      a: {
+        activate(ctx) {
+          ctx.log('привет');
+        },
+      },
+    },
     {
       enabled: ['a'],
       manifests: [manifest('a')],
@@ -216,12 +228,14 @@ test('миграция config идёт в хосте, ядро записыва�
 test('хост упал без виновника: журнал называет задетых через consumes, хост поднимается, после лимита брошен', async () => {
   const handles = new Map<string, HostHandle>();
   const spawn = inlineHosts(async (entry) => ({
-    activate: (ctx) => void (entry === 'editor' && ctx.contracts.provide('cyborg.tab', '1.0', { kind: 'редактор' })),
+    activate(ctx) {
+      if (entry === 'editor') ctx.contracts.provide('test.tab', '1.0', { kind: 'редактор' });
+    },
   }));
   const k = await load({
     apiVersion: '1.0.0',
     enabled: ['editor', 'tabs'],
-    manifests: [manifest('editor', { provides: { 'cyborg.tab': '1.0' } }), manifest('tabs', { consumes: { 'cyborg.tab': '^1' } })],
+    manifests: [manifest('editor', { provides: { 'test.tab': '1.0' } }), manifest('tabs', { consumes: { 'test.tab': '^1' } })],
     hosts: { one: ['editor'], two: ['tabs'] },
     watchdog: { strikes: 2 },
     spawnHost: (id) => {
@@ -234,7 +248,7 @@ test('хост упал без виновника: журнал называет
   await k.idle();
   handles.get('one')!.kill();
   await k.idle();
-  const host = k.journal.filter((e) => e.pluginId === undefined).map((e) => (e.kind === 'host-down' ? `${e.kind}:${e.culprits}:${e.affects}` : e.kind));
+  const host = k.journal.filter((e) => e.pluginId === undefined).map((e) => (e.kind === 'host-down' ? `${e.kind}:${e.culprits.join()}:${e.affects.join()}` : e.kind));
   assert.deepEqual(host, ['host-down::tabs', 'host-restart', 'host-down::tabs', 'host-abandoned']);
   assert.deepEqual(k.active, ['tabs']);
   await k.unload();
@@ -248,7 +262,7 @@ test('«Включить снова»: не поднявшийся плагин 
       ? {
           activate(ctx) {
             if (broken) throw new Error('нет диска');
-            ctx.contracts.provide('demo.flaky', '1.0', {});
+            ctx.contracts.provide('test.flaky', '1.0', {});
             ctx.commands.register('flaky.hang', () => new Promise(() => {}));
           },
         }
@@ -257,7 +271,7 @@ test('«Включить снова»: не поднявшийся плагин 
   const k = await load({
     apiVersion: '1.0.0',
     enabled: ['flaky', 'user'],
-    manifests: [manifest('flaky', { provides: { 'demo.flaky': '1.0' }, commands: ['flaky.hang'] }), manifest('user', { requires: { 'demo.flaky': '^1' } })],
+    manifests: [manifest('flaky', { provides: { 'test.flaky': '1.0' }, commands: ['flaky.hang'] }), manifest('user', { requires: { 'test.flaky': '^1' } })],
     hosts: { one: ['flaky'], two: ['user'] },
     watchdog: { strikes: 1 },
     spawnHost: (id) => {
@@ -285,4 +299,35 @@ test('«Включить снова»: не поднявшийся плагин 
     ['flaky', 'user'],
   );
   await k.unload();
+});
+
+test('хосты: из поставки - по группам, сторонний всегда один в своём хосте', async () => {
+  const noop: PluginModule = { activate: () => undefined };
+  const ids = ['a', 'b', 'x', 'y', 'z', 'w'];
+  const k = await kernel(Object.fromEntries(ids.map((id) => [id, noop])), {
+    enabled: ids,
+    manifests: ids.map((id) => manifest(id)),
+    bundled: ['a', 'b', 'w'],
+    hosts: { ui: ['a', 'x'], solo: ['y'], z: ['w'] },
+  });
+  assert.deepEqual(
+    ids.map((id) => [id, k.hostOf(id)]),
+    [
+      ['a', 'ui'],
+      ['b', 'builtin'],
+      ['x', 'x'],
+      ['y', 'solo'],
+      ['z', 'z~2'],
+      ['w', 'z'],
+    ],
+  );
+  assert.deepEqual(
+    k.journal.filter((e) => e.kind === 'host-isolated'),
+    [{ pluginId: 'x', kind: 'host-isolated', group: 'ui', hostId: 'x' }],
+  );
+  await k.unload();
+
+  const unknown = await kernel({ p: noop, q: noop }, { enabled: ['p', 'q'], manifests: [manifest('p'), manifest('q')] });
+  assert.deepEqual([unknown.hostOf('p'), unknown.hostOf('q')], ['p', 'q'], 'без bundled все сторонние');
+  await unknown.unload();
 });

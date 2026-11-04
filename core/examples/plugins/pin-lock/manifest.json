@@ -3,6 +3,6 @@
   "version": "2.1.0",
   "engines": { "cyborg": "^1" },
   "provides": { "cyborg.lock": "1.0" },
-  "commands": ["pin-lock.lock", "pin-lock.unlock"],
+  "commands": { "pin-lock.lock": {}, "pin-lock.unlock": { "args": ["string"] } },
   "config": { "version": 2 }
 }

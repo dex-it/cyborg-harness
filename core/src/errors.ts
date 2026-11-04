@@ -3,6 +3,7 @@ export type CoreErrorCode =
   | 'AlreadyProvided'
   | 'Unavailable'
   | 'NotCloneable'
+  | 'Invalid'
   | 'CommandNotFound'
   | 'CommandConflict'
   | 'HostGone'
@@ -28,6 +29,15 @@ export function toWire(error: unknown): WireError {
   if (error instanceof CoreError) return { code: error.code, message: error.message };
   if (error instanceof Error) return { code: 'Remote', message: error.message };
   return { code: 'Remote', message: String(error) };
+}
+
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Отказ уже учтён в другом месте - например, падение хоста фиксирует его журнал. */
+export function ignore(): undefined {
+  return undefined;
 }
 
 export function fromWire(error: WireError): CoreError {

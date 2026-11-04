@@ -11,12 +11,12 @@ export interface PluginsPort {
 }
 
 export class PluginsPanel {
-  private readonly summaryEl = byId('plugins-summary');
-  private readonly problemsEl = byId('plugins-problems');
-  private readonly listEl = byId('plugins-list');
-  private readonly journalTitle = byId('plugins-journal-title');
-  private readonly journalAll = byId<HTMLButtonElement>('plugins-journal-all');
-  private readonly journalEl = byId('plugins-journal');
+  private readonly summaryEl = byId('plugins-summary', HTMLElement);
+  private readonly problemsEl = byId('plugins-problems', HTMLElement);
+  private readonly listEl = byId('plugins-list', HTMLElement);
+  private readonly journalTitle = byId('plugins-journal-title', HTMLElement);
+  private readonly journalAll = byId('plugins-journal-all', HTMLButtonElement);
+  private readonly journalEl = byId('plugins-journal', HTMLElement);
   private snapshot: PluginsSnapshot | null = null;
   private focus: string | null = null;
   private readonly errors = new Map<string, string>();
@@ -43,6 +43,7 @@ export class PluginsPanel {
         this.again = false;
         this.snapshot = await this.port.pluginsSnapshot();
         this.render();
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- again взводит refresh, пришедший во время await
       } while (this.again);
     } finally {
       this.loading = false;

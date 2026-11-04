@@ -35,7 +35,7 @@ export function resolveGraph(manifests: readonly PluginManifest[], apiVersion: s
   }
 
   const alive = () => [...byId.values()].filter((m) => !rejected.has(m.id));
-  let bindings = new Map<string, Map<string, string>>();
+  let bindings: Map<string, Map<string, string>>;
 
   for (;;) {
     bindings = bindAll(alive(), reject);
@@ -59,7 +59,7 @@ function bindAll(plugins: readonly PluginManifest[], reject: (id: string, r: Rej
       if (providers.length > 1) {
         reject(m.id, { kind: 'ambiguous', contract, providers });
         ok = false;
-      } else if (providers.length === 1) {
+      } else if (providers[0] !== undefined) {
         bound.set(contract, providers[0]);
       } else if (required) {
         reject(m.id, { kind: 'missing', contract, range });
@@ -83,36 +83,32 @@ export function providesMatching(m: PluginManifest, contract: string, range: str
 /** Компоненты сильной связности размером больше одного (Тарьян). */
 function findCycles(bindings: ReadonlyMap<string, ReadonlyMap<string, string>>): string[][] {
   const index = new Map<string, number>();
-  const low = new Map<string, number>();
   const stack: string[] = [];
   const onStack = new Set<string>();
   const cycles: string[][] = [];
   let counter = 0;
 
-  const visit = (v: string) => {
-    index.set(v, counter);
-    low.set(v, counter);
-    counter++;
+  const visit = (v: string): number => {
+    const own = counter++;
+    let low = own;
+    index.set(v, own);
     stack.push(v);
     onStack.add(v);
     for (const w of bindings.get(v)?.values() ?? []) {
-      if (!index.has(w)) {
-        visit(w);
-        low.set(v, Math.min(low.get(v)!, low.get(w)!));
-      } else if (onStack.has(w)) {
-        low.set(v, Math.min(low.get(v)!, index.get(w)!));
-      }
+      const seen = index.get(w);
+      if (seen === undefined) low = Math.min(low, visit(w));
+      else if (onStack.has(w)) low = Math.min(low, seen);
     }
-    if (low.get(v) === index.get(v)) {
+    if (low === own) {
       const component: string[] = [];
-      let w: string;
-      do {
-        w = stack.pop()!;
+      for (let w = stack.pop(); w !== undefined; w = stack.pop()) {
         onStack.delete(w);
         component.push(w);
-      } while (w !== v);
+        if (w === v) break;
+      }
       if (component.length > 1) cycles.push(component.reverse());
     }
+    return low;
   };
 
   for (const v of bindings.keys()) if (!index.has(v)) visit(v);

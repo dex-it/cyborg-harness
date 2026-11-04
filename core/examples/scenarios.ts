@@ -13,6 +13,8 @@ export interface Scenario {
   readonly safeMode?: boolean;
   /** `plugins.hosts`: не названные плагины идут в хост builtin. */
   readonly hosts?: Readonly<Record<string, readonly string[]>>;
+  /** Плагины из поставки; по умолчанию все примеры. */
+  readonly bundled?: readonly string[];
   readonly act?: (kernel: Kernel, run: (command: string, ...args: unknown[]) => Promise<void>) => Promise<void>;
 }
 
@@ -49,6 +51,19 @@ export const scenarios: readonly Scenario[] = [
       await run('pin-lock.unlock', '1234');
       await run('sessions.restore');
       await run('sessions.restore');
+    },
+  },
+  {
+    name: 'third-party',
+    title: 'Сторонний плагин не делит хост',
+    point: 'viewer поставлен пользователем, а не с Cyborg: группа ui его не берёт, ядро даёт ему свой хост и пишет об этом в журнал',
+    enabled: base,
+    bundled: base.filter((id) => id !== 'viewer'),
+    hosts: { storage: ['files', 'projects'], ui: ['editor', 'viewer', 'tabs'] },
+    config: oldConfig,
+    state: sessionsState,
+    async act(_kernel, run) {
+      await run('tabs.open', '/work/cyborg/README.md');
     },
   },
   {

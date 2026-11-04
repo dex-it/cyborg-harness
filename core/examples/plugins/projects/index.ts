@@ -1,14 +1,5 @@
+import type { Project } from '@cyborg/contracts';
 import type { PluginModule } from '../../../src/index.ts';
-
-interface Project {
-  id: string;
-  name: string;
-  path: string;
-}
-
-interface Files {
-  list(): Promise<string[]>;
-}
 
 const plugin: PluginModule = {
   config: {
@@ -16,7 +7,7 @@ const plugin: PluginModule = {
     // v1 - старый формат приложения {projects, lastProjectId}: id назначался индексом.
     migrate(from, data) {
       if (from !== 1) throw new Error(`неизвестная версия ${from}`);
-      const old = (data.projects ?? []) as Array<{ name: string; path: string }>;
+      const old = (data.projects ?? []) as { name: string; path: string }[];
       const list = old.map((p, i) => ({ id: `p${i + 1}`, name: p.name, path: p.path }));
       const last = typeof data.lastProjectId === 'number' ? list[data.lastProjectId] : undefined;
       return { list, current: last?.id ?? null };
@@ -24,8 +15,9 @@ const plugin: PluginModule = {
     validate: (v) => (Array.isArray(v.list) ? [] : ['list не массив']),
   },
   async activate(ctx) {
-    const files = ctx.contracts.get<Files>('cyborg.files')!;
-    const value = ctx.config!.get();
+    const files = ctx.contracts.get('cyborg.files', 1);
+    if (!files || !ctx.config) throw new Error('cyborg.files и раздел config объявлены, но не пришли');
+    const value = ctx.config.get();
     const list = value.list as Project[];
     const known = await files.list();
     for (const p of list) {

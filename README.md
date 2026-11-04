@@ -1,8 +1,9 @@
 # Cyborg Harness
 
-Ядро плагинов Cyborg и playground-приложение, на котором оно проверяется вживую. Архитектура — SAD2 в репозитории Cyborg: `docs/cyborg-harness/03-architecture/design/sad2.md`.
+Ядро плагинов Cyborg и playground-приложение, на котором оно проверяется вживую. Проект перестройки, ресёрч, требования и архитектура — в [docs/](docs/README.md); общая архитектура ядра — [SAD2](docs/03-architecture/design/sad2.md).
 
 - `core/` — ядро без зависимостей: манифесты, граф контрактов, хосты со сторожем, RPC, слои config, журнал и состояние плагинов. От Electron не зависит, тесты идут на Node 24.
+- `contracts/` — `@cyborg/contracts`: типы контрактов по имени и мажорной версии, без логики. Как дополнять и полный пример — [contracts/README.md](contracts/README.md).
 - `playground/` — Electron-приложение с одним окном «Плагины Cyborg»: хосты в `utilityProcess`, демо-плагины `echo`, `probe` и `flaky`, заглушка выключенного плагина с причиной, журнал и «Включить снова».
 
 ## Команды
