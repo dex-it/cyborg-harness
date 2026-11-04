@@ -259,3 +259,56 @@ test('сторонний плагин не делит хост: группа п�
   assert.equal(code(await shared.forge('shared')), 'ok');
   await shared.kernel.unload();
 });
+
+test('emit и release: чужой хост не стреляет в чужую подписку и не снимает её', async () => {
+  const seen: number[] = [];
+  let emit: ((n: number) => void) | undefined;
+  let reader: PluginContext | undefined;
+  const forger = forging({
+    ticker: {
+      activate(ctx) {
+        ctx.contracts.provide('test.ticker', '1.0', {
+          onTick(listener) {
+            emit = (n) => listener(n, '');
+            return { dispose: () => (emit = undefined) };
+          },
+          tick: () => undefined,
+          listeners: () => (emit ? 1 : 0),
+        });
+        return undefined;
+      },
+    },
+    reader: {
+      activate(ctx) {
+        reader = ctx;
+        return undefined;
+      },
+    },
+    mallory: { activate: () => undefined },
+  });
+  const logs: string[] = [];
+  const kernel = await load({
+    apiVersion: '1.0.0',
+    enabled: ['ticker', 'reader', 'mallory'],
+    manifests: [manifest('ticker', { provides: { 'test.ticker': '1.0' } }), manifest('reader', { requires: { 'test.ticker': '^1' } }), manifest('mallory')],
+    spawnHost: forger.spawn,
+    hosts: { t: ['ticker'], r: ['reader'], m: ['mallory'] },
+    onLog: (id, message) => logs.push(`${id}: ${message}`),
+  });
+  const api = reader!.contracts.get('test.ticker', 1)!;
+  await api.onTick((n) => void seen.push(n));
+  const pause = async () => {
+    for (let i = 0; i < 5; i++) await settle();
+  };
+  emit?.(1);
+  forger.notify('m', 'emit', { subscription: 1, index: 0, args: [666] });
+  forger.notify('m', 'release', { caller: 'mallory', subscription: 1 });
+  forger.notify('m', 'release', { caller: 'reader', subscription: 1 });
+  await pause();
+  emit?.(2);
+  await pause();
+  assert.deepEqual(seen, [1, 2]);
+  assert.equal(await api.listeners(), 1);
+  assert.equal(logs.filter((l) => l.startsWith('хост m: ядро отказало')).length, 3, logs.join('\n'));
+  await kernel.unload();
+});

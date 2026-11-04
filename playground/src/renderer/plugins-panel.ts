@@ -1,26 +1,37 @@
-// Окно «Плагины Cyborg» (SAD2 §3.2, §3.5): состояние плагинов, заглушка выключенного с причиной и «Включить снова», журнал ядра.
+// Окно playground: плагины с кнопками над ядром, сочетания клавиш, лента сообщений плагинов и журнал ядра (SAD2 §3.2, §3.5).
 
-import type { PluginRow, PluginsSnapshot } from '../shared/plugins.ts';
+import { keyOfInput } from '../../../core/src/keys.ts';
+import type { FeedLine, KeyRow, PluginRow, PluginsSnapshot, Reply } from '../shared/plugins.ts';
 import { byId, el } from './dom.ts';
-import { clock, journalFor, sortedPlugins, STATE_LABEL, summary } from './plugins-model.ts';
+import { actionsFor, clock, conflictText, journalFor, keyStatus, mergeFeed, sortedPlugins, STATE_LABEL, summary, type ActionButton } from './plugins-model.ts';
 
 export interface PluginsPort {
   pluginsSnapshot(): Promise<PluginsSnapshot>;
-  revivePlugin(id: string): Promise<{ error?: string }>;
+  enablePlugin(id: string): Promise<Reply>;
+  disablePlugin(id: string): Promise<Reply>;
+  crashHost(id: string): Promise<Reply>;
+  hangHost(id: string): Promise<Reply>;
+  runCommand(command: string): Promise<Reply>;
   onPluginsChanged(listener: () => void): void;
 }
+
+const LOCAL_LIMIT = 50;
 
 export class PluginsPanel {
   private readonly summaryEl = byId('plugins-summary', HTMLElement);
   private readonly problemsEl = byId('plugins-problems', HTMLElement);
   private readonly listEl = byId('plugins-list', HTMLElement);
+  private readonly keysEl = byId('keys-list', HTMLElement);
+  private readonly feedEl = byId('feed', HTMLElement);
   private readonly journalTitle = byId('plugins-journal-title', HTMLElement);
   private readonly journalAll = byId('plugins-journal-all', HTMLButtonElement);
   private readonly journalEl = byId('plugins-journal', HTMLElement);
   private snapshot: PluginsSnapshot | null = null;
   private focus: string | null = null;
   private readonly errors = new Map<string, string>();
-  private readonly reviving = new Set<string>();
+  private readonly busy = new Set<string>();
+  /** Нажатия, которые ядро не забрало: о них знает только страница. */
+  private readonly local: FeedLine[] = [];
   private loading = false;
   private again = false;
   private readonly port: PluginsPort;
@@ -29,6 +40,7 @@ export class PluginsPanel {
     this.port = port;
     this.journalAll.addEventListener('click', () => this.showJournal(null));
     port.onPluginsChanged(() => void this.refresh());
+    window.addEventListener('keydown', (event) => this.reached(event));
   }
 
   /** Записи журнала идут пачками: пока снимок в пути, следующие изменения сливаются в один повтор. */
@@ -50,74 +62,119 @@ export class PluginsPanel {
     }
   }
 
+  private reached(event: KeyboardEvent): void {
+    if (event.repeat) return;
+    const key = keyOfInput({ key: event.key, code: event.code, control: event.ctrlKey, alt: event.altKey, shift: event.shiftKey, meta: event.metaKey });
+    // Буквы без модификатора - обычный ввод, не сочетание.
+    if (key === undefined || (!key.includes('+') && !/^F\d/.test(key))) return;
+    this.local.push({ at: Date.now(), kind: 'window', subject: key, text: 'до окна дошло: ядро не забрало' });
+    if (this.local.length > LOCAL_LIMIT) this.local.shift();
+    this.renderFeed();
+  }
+
   private render(): void {
     const snapshot = this.snapshot;
     if (!snapshot) return;
     this.summaryEl.textContent = summary(snapshot);
     this.problemsEl.textContent = snapshot.problems.length ? `Не дошло до ядра:\n${snapshot.problems.join('\n')}` : '';
     this.problemsEl.hidden = snapshot.problems.length === 0;
-    this.listEl.replaceChildren(...sortedPlugins(snapshot.plugins).map((row) => this.row(row)));
+    this.listEl.replaceChildren(...sortedPlugins(snapshot.plugins).map((row) => this.row(row, snapshot.canHang)));
+    this.keysEl.replaceChildren(...(snapshot.keys.length ? snapshot.keys.map((row) => this.keyRow(row)) : [this.emptyKeys()]));
+    this.renderFeed();
     this.renderJournal();
   }
 
-  private row(row: PluginRow): HTMLElement {
+  private row(row: PluginRow, canHang: boolean): HTMLElement {
     const item = el('li', 'plugin-row');
     item.dataset.state = row.state;
     item.dataset.plugin = row.id;
     const head = el('div', 'plugin-head');
     head.append(el('span', 'plugin-name', row.id));
     if (row.version) head.append(el('span', 'plugin-version', row.version));
-    if (row.host) head.append(el('span', 'plugin-host', `хост ${row.host}`));
-    head.append(el('span', 'spacer'));
-    if (row.state === 'active') head.append(this.actions(row));
-    head.append(el('span', 'plugin-state', STATE_LABEL[row.state]));
+    if (row.host) head.append(el('span', 'plugin-host', row.pid === undefined ? `хост ${row.host}` : `хост ${row.host} · pid ${row.pid}`));
+    head.append(el('span', 'spacer'), el('span', 'plugin-state', STATE_LABEL[row.state]));
     item.append(head);
-    if (row.state === 'active') return item;
-    // Заглушка на месте плагина: имя, причина из журнала, «Включить снова» и «Журнал» (SAD2 §3.5).
-    const stub = el('div', 'plugin-stub');
-    if (row.reason) stub.append(el('p', 'plugin-reason', row.reason));
+    if (row.reason) item.append(el('p', 'plugin-reason', row.reason));
     const error = this.errors.get(row.id);
     if (error) {
       const line = el('p', 'plugin-error', error);
       line.setAttribute('role', 'alert');
-      stub.append(line);
+      item.append(line);
     }
-    stub.append(this.actions(row));
-    item.append(stub);
+    const bar = el('div', 'plugin-actions');
+    bar.append(...actionsFor(row, canHang).map((button) => this.button(row.id, button)));
+    item.append(bar);
     return item;
   }
 
-  private actions(row: PluginRow): HTMLElement {
-    const bar = el('div', 'plugin-actions');
-    if (row.revivable) {
-      const busy = this.reviving.has(row.id);
-      const revive = el('button', 'primary', busy ? 'Включаю…' : 'Включить снова') as HTMLButtonElement;
-      revive.type = 'button';
-      revive.disabled = busy;
-      revive.addEventListener('click', () => void this.revive(row.id));
-      bar.append(revive);
+  private button(id: string, spec: ActionButton): HTMLButtonElement {
+    const button = el('button', [spec.primary ? 'primary' : '', spec.action === 'run' ? 'command' : ''].join(' ').trim(), spec.label) as HTMLButtonElement;
+    button.type = 'button';
+    button.dataset.action = spec.action;
+    if (spec.action === 'journal') {
+      button.setAttribute('aria-label', `Журнал ${id}`);
+      button.addEventListener('click', () => this.showJournal(id));
+      return button;
     }
-    const journal = el('button', '', 'Журнал') as HTMLButtonElement;
-    journal.type = 'button';
-    journal.setAttribute('aria-label', `Журнал ${row.id}`);
-    journal.addEventListener('click', () => this.showJournal(row.id));
-    bar.append(journal);
-    return bar;
+    button.disabled = this.busy.has(id);
+    button.addEventListener('click', () => void this.act(id, spec));
+    return button;
   }
 
-  private async revive(id: string): Promise<void> {
-    this.reviving.add(id);
+  private async act(id: string, spec: ActionButton): Promise<void> {
+    if (spec.action === 'journal') return;
+    const call: Record<Exclude<ActionButton['action'], 'journal'>, () => Promise<Reply>> = {
+      run: () => this.port.runCommand(spec.command ?? ''),
+      disable: () => this.port.disablePlugin(id),
+      enable: () => this.port.enablePlugin(id),
+      crash: () => this.port.crashHost(id),
+      hang: () => this.port.hangHost(id),
+    };
+    this.busy.add(id);
     this.errors.delete(id);
     this.render();
     try {
-      const reply = await this.port.revivePlugin(id);
+      const reply = await call[spec.action]();
       if (reply.error) this.errors.set(id, reply.error);
     } catch (error) {
       this.errors.set(id, (error as Error).message);
     } finally {
-      this.reviving.delete(id);
+      this.busy.delete(id);
     }
     await this.refresh();
+  }
+
+  private keyRow(row: KeyRow): HTMLElement {
+    const tr = el('tr', 'key-row');
+    tr.dataset.key = row.key;
+    tr.dataset.live = String(row.live);
+    const keyCell = el('td');
+    keyCell.append(el('kbd', '', row.key));
+    const command = el('td');
+    command.append(el('span', 'key-command', row.command), el('span', 'key-owner', ` (${row.pluginId})`));
+    const conflict = conflictText(row);
+    if (conflict) command.append(el('div', 'key-conflict', conflict));
+    tr.append(keyCell, command, el('td', 'key-status', keyStatus(row)));
+    return tr;
+  }
+
+  private emptyKeys(): HTMLElement {
+    const tr = el('tr');
+    const td = el('td', 'empty', 'Плагины не объявили сочетаний');
+    td.setAttribute('colspan', '3');
+    tr.append(td);
+    return tr;
+  }
+
+  private renderFeed(): void {
+    const lines = mergeFeed(this.snapshot?.feed ?? [], this.local);
+    const items = lines.map((line) => {
+      const item = el('li', `log-line kind-${line.kind}`);
+      item.append(el('time', 'log-time', clock(line.at)), el('span', 'log-subject', line.subject), el('span', 'log-text', line.text));
+      return item;
+    });
+    this.feedEl.replaceChildren(...(items.length ? items : [el('li', 'empty', 'Сообщений нет: нажмите команду плагина или его сочетание')]));
+    this.feedEl.scrollTop = this.feedEl.scrollHeight;
   }
 
   private showJournal(pluginId: string | null): void {
@@ -131,11 +188,11 @@ export class PluginsPanel {
     this.journalTitle.textContent = this.focus === null ? 'Журнал' : `Журнал: ${this.focus}`;
     this.journalAll.hidden = this.focus === null;
     const items = lines.map((line) => {
-      const item = el('li', `plugin-journal-line level-${line.level}`);
-      item.append(el('time', 'plugin-journal-time', clock(line.at)), el('span', 'plugin-journal-subject', line.subject), el('span', 'plugin-journal-text', line.text));
+      const item = el('li', `log-line level-${line.level}`);
+      item.append(el('time', 'log-time', clock(line.at)), el('span', 'log-subject', line.subject), el('span', 'log-text', line.text));
       return item;
     });
-    this.journalEl.replaceChildren(...(items.length ? items : [el('li', 'plugin-journal-empty', 'Записей нет')]));
+    this.journalEl.replaceChildren(...(items.length ? items : [el('li', 'empty', 'Записей нет')]));
     this.journalEl.scrollTop = this.journalEl.scrollHeight;
   }
 }

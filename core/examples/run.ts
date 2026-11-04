@@ -119,6 +119,10 @@ function journalLine(e: JournalEntry): string {
       return `${red('✖')} ${bold(`хост ${e.hostId}`)} брошен после ${e.failures} сбоев без виновника; выключены ${e.plugins.join(', ') || 'никто'}`;
     case 'revived':
       return `${yellow('↻')} ${id} включён снова`;
+    case 'unloaded':
+      return `${dim('⏏')} ${id} выгружен${e.by === e.pluginId ? '' : ` вместе с ${e.by}`}${e.error ? `, ошибка: ${e.error}` : ''}`;
+    case 'key-conflict':
+      return `${yellow('⌨')} ${id}: ${e.key} уже у ${e.winner}, ${e.command} не получит нажатие`;
     case 'host-isolated':
       return `${yellow('◌')} ${id} сторонний: группа ${e.group} не действует, свой хост ${e.hostId}`;
   }

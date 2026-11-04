@@ -1,12 +1,16 @@
 import type { PluginModule } from '../../../src/index.ts';
 
-// Нарочно испытывает границу хоста: синхронный метод, колбэк в аргументе, функция в ответе команды.
+// Нарочно испытывает границу хоста: синхронный метод, подписка с колбэком, функция в ответе команды.
 const plugin: PluginModule = {
   activate(ctx) {
     ctx.contracts.provide('demo.clock', '1.0', {
       nowSync: () => Date.now(),
       now: async () => new Date(0),
-      onTick: async (callback: () => void) => callback,
+      onTick(callback) {
+        let tick = 0;
+        const timer = setInterval(() => callback(++tick), 5);
+        return { dispose: () => clearInterval(timer) };
+      },
     });
     ctx.commands.register('clock.now', () => ({ at: new Date(0), format: () => 'x' }));
   },

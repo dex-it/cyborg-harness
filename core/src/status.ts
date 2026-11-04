@@ -2,7 +2,7 @@ import type { SectionResult } from './config.ts';
 import type { Rejection } from './graph.ts';
 import type { JournalEntry } from './loader.ts';
 
-/** Что показать на месте плагина: работает, ждёт перезапуска хоста, выключен (заглушка) или не включён в настройках. */
+/** Что показать на месте плагина: работает, ждёт перезапуска хоста, выключен (сбоем или человеком) или не включён в настройках. */
 export type PluginState = 'active' | 'restarting' | 'stopped' | 'disabled';
 
 export interface PluginStatus {
@@ -25,7 +25,8 @@ export function entryPlugins(entry: JournalEntry): readonly string[] {
 /** Состояние каждого плагина по журналу, в порядке первого упоминания. */
 export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[] {
   const states = new Map<string, PluginStatus>();
-  const set = (id: string, state: PluginState, cause: JournalEntry) => states.set(id, { id, state, cause, revivable: state === 'stopped' && REVIVABLE.has(cause.kind) });
+  const revivable = (id: string, cause: JournalEntry) => REVIVABLE.has(cause.kind) || (cause.kind === 'unloaded' && cause.by === id);
+  const set = (id: string, state: PluginState, cause: JournalEntry) => states.set(id, { id, state, cause, revivable: state === 'stopped' && revivable(id, cause) });
   for (const entry of journal) {
     for (const id of entryPlugins(entry)) {
       switch (entry.kind) {
@@ -38,6 +39,9 @@ export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[]
         case 'host-down':
         case 'revived':
           set(id, 'restarting', entry);
+          break;
+        case 'key-conflict':
+          // Конфликт сочетаний о работе плагина ничего не говорит: плагин запускается как обычно.
           break;
         case 'host-restart':
           // Причиной остаётся падение: «перезапуск» без «почему» человеку ничего не говорит.
@@ -108,6 +112,12 @@ export function describeEntry(e: JournalEntry): string {
       return e.error ? `снят с ошибкой: ${e.error}` : 'снят';
     case 'revived':
       return 'включён снова';
+    case 'unloaded': {
+      const what = e.by === e.pluginId ? 'выгружен' : `выгружен вместе с ${e.by}: требует его контракт`;
+      return e.error ? `${what}; deactivate с ошибкой: ${e.error}` : what;
+    }
+    case 'key-conflict':
+      return `сочетание ${e.key} (${e.command}) уже у ${e.winner}: нажатие получает ${e.winner}`;
     case 'host-isolated':
       return `сторонний плагин не делит хост: группа ${e.group} из plugins.hosts не действует, работает в своём хосте ${e.hostId}`;
     case 'switched-off':
@@ -132,6 +142,10 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
     case 'revived':
     case 'host-restart':
       return 'info';
+    case 'unloaded':
+      return e.error ? 'warn' : 'info';
+    case 'key-conflict':
+      return 'warn';
     case 'deactivated':
       return e.error ? 'warn' : 'info';
     case 'config':

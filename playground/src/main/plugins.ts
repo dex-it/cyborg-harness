@@ -1,9 +1,24 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { describeEntry, entryLevel, errorMessage, entryPlugins, load, pluginStatuses, SectionStore, type JournalEntry, type Kernel, type LayerStore, type SpawnHost } from '../../../core/src/index.ts';
+import {
+  describeEntry,
+  entryLevel,
+  errorMessage,
+  entryPlugins,
+  keyOfInput,
+  load,
+  pluginStatuses,
+  SectionStore,
+  type JournalEntry,
+  type Kernel,
+  type KeyInput,
+  type LayerStore,
+  type SpawnHost,
+  type WatchdogOptions,
+} from '../../../core/src/index.ts';
 import { isRecord } from '../../../core/src/manifest.ts';
-import type { PluginJournalLine, PluginRow, PluginsSnapshot } from '../shared/plugins.ts';
+import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply } from '../shared/plugins.ts';
 import { writeJsonAtomic } from './jsonfile.ts';
 
 export const PLUGIN_API_VERSION = '1.0.0';
@@ -97,7 +112,11 @@ export interface StartOptions {
   readonly builtinDir: string;
   readonly spawnHost: SpawnHost;
   readonly log: (line: string) => void;
+  readonly watchdog?: WatchdogOptions;
+  /** Под какую платформу читать CmdOrCtrl; по умолчанию - текущая. */
+  readonly platform?: string;
   readonly onJournal?: (entry: JournalEntry) => void;
+  readonly onLog?: (pluginId: string, message: string) => void;
   /** Что не дошло до ядра; по умолчанию - в log. */
   readonly onProblem?: (problem: string) => void;
 }
@@ -127,7 +146,12 @@ export async function startPlugins(options: StartOptions): Promise<Kernel> {
       options.log(`[plugins] ${JSON.stringify(entry)}`);
       options.onJournal?.(entry);
     },
-    onLog: (id, message) => options.log(`[plugins] ${id}: ${message}`),
+    watchdog: options.watchdog,
+    platform: options.platform,
+    onLog: (id, message) => {
+      options.log(`[plugins] ${id}: ${message}`);
+      options.onLog?.(id, message);
+    },
   });
 }
 
@@ -138,13 +162,22 @@ export interface PluginsEvents {
   alert(title: string, body: string): void;
 }
 
-/** Ядро плагинов глазами окна «Плагины Cyborg»: журнал с временем, состояние каждого плагина, «Включить снова». */
+export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProblem' | 'onLog'> {
+  /** Процесс хоста для «Уронить» и «Повесить»; у хостов в том же процессе его нет. */
+  readonly pidOf?: (hostId: string) => number | undefined;
+}
+
+const FEED_LIMIT = 300;
+
+/** Ядро плагинов глазами окна playground: журнал, состояние плагинов, клавиши, лента сообщений и кнопки над ними. */
 export class PluginsService {
   private kernel: Kernel | undefined;
   private phase: PluginsSnapshot['phase'] = 'starting';
   private error: string | undefined;
+  private pidOf: ServiceOptions['pidOf'];
   private readonly entries: { at: number; entry: JournalEntry }[] = [];
   private readonly problems: string[] = [];
+  private readonly feed: FeedLine[] = [];
 
   private readonly events: PluginsEvents;
   private readonly now: () => number;
@@ -154,7 +187,8 @@ export class PluginsService {
     this.now = now;
   }
 
-  async start(options: Omit<StartOptions, 'onJournal' | 'onProblem'>): Promise<void> {
+  async start(options: ServiceOptions): Promise<void> {
+    this.pidOf = options.pidOf;
     try {
       this.kernel = await startPlugins({
         ...options,
@@ -163,6 +197,7 @@ export class PluginsService {
           this.problems.push(problem);
           this.events.changed();
         },
+        onLog: (pluginId, text) => this.say({ kind: 'log', subject: pluginId, text }),
       });
       this.phase = 'ready';
     } catch (error) {
@@ -180,21 +215,41 @@ export class PluginsService {
     this.events.changed();
   }
 
+  private say(line: Omit<FeedLine, 'at'>): void {
+    this.feed.push({ at: this.now(), ...line });
+    if (this.feed.length > FEED_LIMIT) this.feed.splice(0, this.feed.length - FEED_LIMIT);
+    this.events.changed();
+  }
+
   snapshot(): PluginsSnapshot {
     const kernel = this.kernel;
-    const versions = new Map(kernel?.manifests.map((m) => [m.id, m.version]));
+    const manifests = new Map(kernel?.manifests.map((m) => [m.id, m]));
     const plugins: PluginRow[] = pluginStatuses(this.entries.map((e) => e.entry)).map((s) => {
-      const version = versions.get(s.id);
+      const manifest = manifests.get(s.id);
       const host = s.state === 'disabled' ? undefined : kernel?.hostOf(s.id);
+      const pid = host !== undefined && s.state === 'active' ? this.pidOf?.(host) : undefined;
+      const commands = Object.entries(manifest?.commands ?? {})
+        .filter(([, spec]) => spec.args.every((a) => a.optional))
+        .map(([name]) => name);
       return {
         id: s.id,
         state: s.state,
         revivable: s.revivable && kernel !== undefined,
-        ...(version !== undefined && { version }),
+        unloaded: s.cause?.kind === 'unloaded' && s.cause.by === s.id,
+        commands,
+        ...(manifest && { version: manifest.version }),
         ...(host !== undefined && { host }),
+        ...(pid !== undefined && { pid }),
         ...(s.cause && s.state !== 'active' && { reason: describeEntry(s.cause) }),
       };
     });
+    const keys: KeyRow[] = (kernel?.keybindings ?? []).map((k) => ({
+      key: k.key,
+      command: k.command,
+      pluginId: k.pluginId,
+      live: kernel?.keybinding(k.key) !== undefined,
+      shadowed: k.shadowed,
+    }));
     const journal: PluginJournalLine[] = this.entries.map(({ at, entry }) => ({
       at,
       subject: entry.pluginId ?? `хост ${entry.hostId}`,
@@ -203,17 +258,80 @@ export class PluginsService {
       text: describeEntry(entry),
       level: entryLevel(entry),
     }));
-    return { phase: this.phase, ...(this.error !== undefined && { error: this.error }), problems: [...this.problems], plugins, journal };
+    return {
+      phase: this.phase,
+      ...(this.error !== undefined && { error: this.error }),
+      problems: [...this.problems],
+      plugins,
+      keys,
+      feed: [...this.feed],
+      journal,
+      canHang: process.platform !== 'win32' && this.pidOf !== undefined,
+    };
   }
 
-  async revive(id: unknown): Promise<{ error?: string }> {
-    if (typeof id !== 'string') return { error: 'нет id плагина' };
+  /** Синхронно, иначе `preventDefault` в `before-input-event` опоздает: сочетание активного плагина страница не получает. */
+  press(input: KeyInput): boolean {
+    const key = keyOfInput(input);
+    const kernel = this.kernel;
+    const binding = key === undefined ? undefined : kernel?.keybinding(key);
+    if (!binding) return false;
+    this.say({ kind: 'key', subject: binding.key, text: `→ ${binding.command} (${binding.pluginId})` });
+    void this.run(binding.command);
+    return true;
+  }
+
+  run(command: unknown): Promise<Reply> {
+    return this.act(command, 'нет имени команды', async (kernel, name) => {
+      try {
+        await kernel.run(name);
+      } catch (error) {
+        this.say({ kind: 'error', subject: name, text: errorMessage(error) });
+        throw error;
+      }
+    });
+  }
+
+  /** Вместе с плагином уходят те, кто требует его через requires. */
+  disable(id: unknown): Promise<Reply> {
+    return this.act(id, 'нет id плагина', (kernel, pluginId) => kernel.disable(pluginId));
+  }
+
+  /** «Загрузить» и «Включить снова» - одно действие ядра. */
+  enable(id: unknown): Promise<Reply> {
+    return this.act(id, 'нет id плагина', (kernel, pluginId) => kernel.enable(pluginId));
+  }
+
+  /** Для ядра это падение хоста: сторож перезапустит его. */
+  crash(id: unknown): Promise<Reply> {
+    return this.signal(id, 'SIGKILL');
+  }
+
+  /** Пинги остаются без ответа, сторож признаёт зависание и убивает хост. */
+  hang(id: unknown): Promise<Reply> {
+    if (process.platform === 'win32') return Promise.resolve({ error: 'на Windows процесс не остановить' });
+    return this.signal(id, 'SIGSTOP');
+  }
+
+  private signal(id: unknown, signal: NodeJS.Signals): Promise<Reply> {
+    return this.act(id, 'нет id плагина', async (kernel, pluginId) => {
+      const host = kernel.hostOf(pluginId);
+      const pid = host === undefined ? undefined : this.pidOf?.(host);
+      if (pid === undefined) throw new Error(`у ${pluginId} нет живого процесса хоста`);
+      process.kill(pid, signal);
+    });
+  }
+
+  private async act(value: unknown, missing: string, action: (kernel: Kernel, value: string) => Promise<unknown>): Promise<Reply> {
+    if (typeof value !== 'string') return { error: missing };
     if (!this.kernel) return { error: 'ядро плагинов не запущено' };
     try {
-      await this.kernel.revive(id);
+      await action(this.kernel, value);
       return {};
     } catch (error) {
-      return { error: (error as Error).message };
+      return { error: errorMessage(error) };
+    } finally {
+      this.events.changed();
     }
   }
 

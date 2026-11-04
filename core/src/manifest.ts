@@ -1,5 +1,6 @@
 import { CoreError } from './errors.ts';
 import { isValidRange, parseVersion } from './semver.ts';
+import { normalizeKey } from './keys.ts';
 import { isRecord, isWireKind, matchesKind, type WireKind } from './wire.ts';
 
 export { isRecord };
@@ -13,6 +14,12 @@ export interface ArgSpec {
 export interface CommandSpec {
   readonly args: readonly ArgSpec[];
   readonly rest?: WireKind;
+}
+
+/** Сочетание клавиш -> своя команда без обязательных аргументов; `key` уже в записи `normalizeKey`. */
+export interface KeybindingSpec {
+  readonly key: string;
+  readonly command: string;
 }
 
 /** Манифест плагина; читается ядром до запуска кода плагина. */
@@ -30,6 +37,8 @@ export interface PluginManifest {
   readonly consumes: Readonly<Record<string, string>>;
   /** Имя -> аргументы; ядро сверяет их до вызова обработчика. */
   readonly commands: Readonly<Record<string, CommandSpec>>;
+  /** Читаются до запуска кода: конфликт сочетаний виден при загрузке, а не при нажатии. */
+  readonly keybindings: readonly KeybindingSpec[];
   readonly config?: { readonly version: number };
   readonly state?: { readonly version: number };
   /** `own` - просьба о своём хосте; пользователь вправе переопределить группой в `plugins.hosts`. */
@@ -72,6 +81,7 @@ export function parseManifest(raw: unknown): ManifestResult {
   }
 
   const commands = readCommands(raw.commands, id, errors);
+  const keybindings = readKeybindings(raw.keybindings, commands, errors);
   const config = readSchemaVersion('config', raw.config, errors);
   const state = readSchemaVersion('state', raw.state, errors);
   if (raw.host !== undefined && raw.host !== 'own') errors.push(`host: допустимо только "own", получено ${show(raw.host)}`);
@@ -88,6 +98,7 @@ export function parseManifest(raw: unknown): ManifestResult {
       optional,
       consumes,
       commands,
+      keybindings,
       ...(config && { config }),
       ...(state && { state }),
       ...(raw.host === 'own' && { host: 'own' as const }),
@@ -209,6 +220,32 @@ export function checkArgs(name: string, spec: CommandSpec, args: readonly unknow
     const kind = spec.args[i]?.kind ?? spec.rest;
     if (kind && !matchesKind(kind, value)) throw new CoreError('Invalid', `${name}: аргумент ${i + 1} не ${kind}`);
   });
+}
+
+function readKeybindings(raw: unknown, commands: Readonly<Record<string, CommandSpec>>, errors: string[]): KeybindingSpec[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    errors.push('keybindings: ожидается список { key, command }');
+    return [];
+  }
+  const out: KeybindingSpec[] = [];
+  for (const item of raw) {
+    const key = isRecord(item) && typeof item.key === 'string' ? normalizeKey(item.key) : undefined;
+    const command = isRecord(item) ? item.command : undefined;
+    if (key === undefined) {
+      errors.push(`keybindings: сочетание ${show(isRecord(item) ? item.key : item)} не разобрано, ожидается вида "CmdOrCtrl+Shift+K" или "F5"`);
+      continue;
+    }
+    const spec = typeof command === 'string' ? commands[command] : undefined;
+    if (typeof command !== 'string' || !spec) {
+      errors.push(`keybindings.${key}: команда ${show(command)} не объявлена в commands этого плагина`);
+      continue;
+    }
+    if (spec.args.some((a) => !a.optional)) errors.push(`keybindings.${key}: у ${command} обязательные аргументы, нажатие их не даст`);
+    else if (out.some((k) => k.key === key)) errors.push(`keybindings.${key}: сочетание повторяется`);
+    else out.push({ key, command });
+  }
+  return out;
 }
 
 function readSchemaVersion(field: string, raw: unknown, errors: string[]): { version: number } | undefined {

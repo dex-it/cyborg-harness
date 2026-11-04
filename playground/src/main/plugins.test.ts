@@ -111,17 +111,90 @@ test('служба окна: снимок с причиной и журнало�
   assert.equal(before.phase, 'ready');
   assert.equal(before.problems.length, 1);
   assert.deepEqual(before.plugins, [
-    { id: 'spare', state: 'disabled', revivable: false, version: '1.0.0', reason: 'не включён в настройках (plugins.enabled)' },
-    { id: 'disk', state: 'stopped', revivable: true, version: '1.0.0', host: 'io', reason: 'не поднялся в хосте io: нет диска' },
+    { id: 'spare', state: 'disabled', revivable: false, unloaded: false, commands: [], version: '1.0.0', reason: 'не включён в настройках (plugins.enabled)' },
+    { id: 'disk', state: 'stopped', revivable: true, unloaded: false, commands: [], version: '1.0.0', host: 'io', reason: 'не поднялся в хосте io: нет диска' },
   ]);
   assert.deepEqual(before.journal.at(-1), { at: 1000, subject: 'disk', plugins: ['disk'], text: 'не поднялся в хосте io: нет диска', level: 'error' });
 
   broken = false;
-  assert.deepEqual(await service.revive('disk'), {});
+  assert.deepEqual(await service.enable('disk'), {});
   assert.equal(service.snapshot().plugins[1]?.state, 'active');
-  assert.deepEqual(await service.revive('spare'), { error: 'spare не загружается: причина в журнале' });
-  assert.deepEqual(await service.revive(42), { error: 'нет id плагина' });
+  assert.deepEqual(await service.enable('spare'), { error: 'spare не загружается: причина в журнале' });
+  assert.deepEqual(await service.enable(42), { error: 'нет id плагина' });
+  assert.deepEqual(await service.crash('disk'), { error: 'у disk нет живого процесса хоста' });
+  assert.equal(service.snapshot().canHang, false);
   assert.ok(changes > 3);
   assert.deepEqual(alerts, []);
+  await service.unload();
+});
+
+test('служба окна: сочетания с конфликтом, перехват нажатия, лента, выгрузка с зависимым и загрузка обратно', async () => {
+  const userData = tmp();
+  const dir = path.join(userData, 'plugins');
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['voice', 'ear'] } }));
+  plugin(dir, 'voice', { provides: { 'demo.echo': '1.0' }, commands: ['voice.ping'], keybindings: [{ key: 'CmdOrCtrl+Shift+E', command: 'voice.ping' }] }, 'export default {}');
+  plugin(dir, 'ear', { requires: { 'demo.echo': '^1' }, commands: ['ear.hi', 'ear.fail'], keybindings: [{ key: 'CmdOrCtrl+Shift+E', command: 'ear.hi' }] }, 'export default {}');
+  const modules: Record<string, PluginModule> = {
+    voice: {
+      activate(ctx) {
+        ctx.contracts.provide('demo.echo', '1.0', { say: async (text: string) => `эхо: ${text}` });
+        ctx.commands.register('voice.ping', () => ctx.log('pong'));
+      },
+    },
+    ear: {
+      activate(ctx) {
+        ctx.commands.register('ear.hi', async () => ctx.log((await ctx.contracts.get('demo.echo', 1)?.say('привет')) ?? 'тишина'));
+        ctx.commands.register('ear.fail', () => {
+          throw new Error('не вышло');
+        });
+      },
+    },
+  };
+  const service = new PluginsService({ changed: () => {}, alert: () => {} }, () => 5);
+  await service.start({
+    userData,
+    builtinDir: path.join(userData, 'нет'),
+    spawnHost: inlineHosts(async (entry) => modules[/\/(\w+)\/index\.mjs$/.exec(entry)?.[1] ?? ''] ?? { activate() {} }),
+    platform: 'linux',
+    log: () => {},
+  });
+  const ctrlShiftE = { key: 'E', code: 'KeyE', control: true, alt: false, shift: true, meta: false };
+
+  assert.deepEqual(service.snapshot().keys, [
+    { key: 'Ctrl+Shift+E', command: 'ear.hi', pluginId: 'ear', live: true, shadowed: [{ pluginId: 'voice', command: 'voice.ping' }] },
+  ]);
+  assert.equal(service.press({ ...ctrlShiftE, shift: false }), false, 'свободное сочетание ядро не забирает');
+  assert.equal(service.press(ctrlShiftE), true);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(
+    service.snapshot().feed.map((l) => [l.kind, l.subject, l.text]),
+    [
+      ['key', 'Ctrl+Shift+E', '→ ear.hi (ear)'],
+      ['log', 'ear', 'эхо: привет'],
+    ],
+  );
+  assert.deepEqual(await service.run('ear.fail'), { error: 'не вышло' });
+  assert.deepEqual(service.snapshot().feed.at(-1), { at: 5, kind: 'error', subject: 'ear.fail', text: 'не вышло' });
+
+  assert.deepEqual(await service.disable('voice'), {});
+  const off = service.snapshot();
+  assert.deepEqual(
+    off.plugins.map((p) => [p.id, p.state, p.unloaded, p.revivable]),
+    [
+      ['voice', 'stopped', true, true],
+      ['ear', 'stopped', false, false],
+    ],
+  );
+  assert.equal(off.keys[0]?.live, false);
+  assert.equal(service.press(ctrlShiftE), false, 'владелец выгружен - нажатие уходит в окно');
+
+  assert.deepEqual(await service.enable('voice'), {});
+  assert.deepEqual(
+    service.snapshot().plugins.map((p) => [p.id, p.state]),
+    [
+      ['voice', 'active'],
+      ['ear', 'active'],
+    ],
+  );
   await service.unload();
 });

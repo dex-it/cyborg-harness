@@ -119,7 +119,7 @@ export const scenarios: readonly Scenario[] = [
     name: 'boundary',
     title: 'Граница хоста',
     point:
-      'clock и clock-user в разных процессах: синхронный метод через границу становится асинхронным, а колбэк в аргументе и функция в ответе не проходят structuredClone',
+      'clock и clock-user в разных процессах: синхронный метод через границу становится асинхронным, колбэк в аргументе проходит подпиской через ядро, а функция в ответе команды не проходит structuredClone',
     enabled: ['clock', 'clock-user'],
     hosts: { clock: ['clock'], user: ['clock-user'] },
     async act(_kernel, run) {

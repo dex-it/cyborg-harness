@@ -282,7 +282,7 @@ test('«Включить снова»: не поднявшийся плагин 
   });
   assert.deepEqual(k.active, []);
   broken = false;
-  await k.revive('flaky');
+  await k.enable('flaky');
   assert.deepEqual(k.active, ['flaky', 'user']);
 
   void k.run('flaky.hang').catch(() => {});
@@ -291,9 +291,9 @@ test('«Включить снова»: не поднявшийся плагин 
   await k.idle();
   assert.equal(k.journal.at(-1)?.kind, 'switched-off');
   assert.deepEqual(k.active, ['user']);
-  await k.revive('flaky');
+  await k.enable('flaky');
   assert.deepEqual(k.active, ['user', 'flaky']);
-  await assert.rejects(k.revive('nobody'), /не загружается/);
+  await assert.rejects(k.enable('nobody'), /не загружается/);
   assert.deepEqual(
     k.manifests.map((m) => m.id),
     ['flaky', 'user'],

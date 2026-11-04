@@ -2,5 +2,7 @@
   "id": "echo",
   "version": "1.0.0",
   "engines": { "cyborg": "^1" },
-  "provides": { "demo.echo": "1.0" }
+  "provides": { "demo.echo": "1.0" },
+  "commands": ["echo.ping"],
+  "keybindings": [{ "key": "F2", "command": "echo.ping" }]
 }

@@ -1,4 +1,4 @@
-import type { PluginJournalLine, PluginRow, PluginsSnapshot, PluginState } from '../shared/plugins.ts';
+import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, PluginState } from '../shared/plugins.ts';
 
 export const STATE_LABEL: Record<PluginState, string> = {
   active: 'Работает',
@@ -12,6 +12,48 @@ const ORDER: Record<PluginState, number> = { stopped: 0, restarting: 1, active: 
 
 export function sortedPlugins(rows: readonly PluginRow[]): PluginRow[] {
   return [...rows].sort((a, b) => ORDER[a.state] - ORDER[b.state] || a.id.localeCompare(b.id));
+}
+
+export type Action = 'run' | 'disable' | 'enable' | 'crash' | 'hang' | 'journal';
+
+export interface ActionButton {
+  readonly action: Action;
+  readonly label: string;
+  /** Команда для `run`. */
+  readonly command?: string;
+  readonly primary?: boolean;
+}
+
+/** Кнопки строки плагина по его состоянию: у работающего - команды и то, чем его снять, у выключенного - чем вернуть. */
+export function actionsFor(row: PluginRow, canHang: boolean): ActionButton[] {
+  const journal: ActionButton = { action: 'journal', label: 'Журнал' };
+  if (row.state === 'active') {
+    const hosted = row.pid !== undefined;
+    return [
+      ...row.commands.map((command): ActionButton => ({ action: 'run', label: command, command })),
+      { action: 'disable', label: 'Выгрузить' },
+      ...(hosted ? [{ action: 'crash', label: 'Уронить хост' } as const] : []),
+      ...(hosted && canHang ? [{ action: 'hang', label: 'Повесить хост' } as const] : []),
+      journal,
+    ];
+  }
+  if (row.state === 'stopped' && row.revivable) return [{ action: 'enable', label: row.unloaded ? 'Загрузить' : 'Включить снова', primary: true }, journal];
+  return [journal];
+}
+
+/** Что будет с нажатием: ядро заберёт, окно получит, потому что владелец не работает. */
+export function keyStatus(row: KeyRow): string {
+  return row.live ? 'перехват' : `${row.pluginId} не работает - нажатие уйдёт в окно`;
+}
+
+export function conflictText(row: KeyRow): string | undefined {
+  if (row.shadowed.length === 0) return undefined;
+  return `конфликт: ${row.shadowed.map((s) => `${s.command} (${s.pluginId})`).join(', ')} не получает сочетание`;
+}
+
+/** Лента: строки ядра и нажатия, дошедшие до окна, по времени. */
+export function mergeFeed(core: readonly FeedLine[], local: readonly FeedLine[]): FeedLine[] {
+  return [...core, ...local].sort((a, b) => a.at - b.at);
 }
 
 export function journalFor(lines: readonly PluginJournalLine[], pluginId: string | null): PluginJournalLine[] {

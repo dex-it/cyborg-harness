@@ -15,7 +15,13 @@ const plugin: PluginModule = {
       };
       await attempt('now()', () => clock.now());
       await attempt('nowSync()', () => clock.nowSync());
-      await attempt('onTick(fn)', () => clock.onTick(() => 0));
+      await attempt('onTick(fn)', async () => {
+        const ticks: number[] = [];
+        const sub = await clock.onTick((tick) => ticks.push(tick));
+        await new Promise((r) => setTimeout(r, 40));
+        sub.dispose();
+        return ticks.length > 0 ? 'тики пришли, подписка снята' : 'тиков нет';
+      });
       return out;
     });
   },

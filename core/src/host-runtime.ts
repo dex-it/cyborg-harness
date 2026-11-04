@@ -6,6 +6,7 @@ import type { PluginManifest } from './manifest.ts';
 import type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';
 import { ContractRegistry, type ContractImpl } from './registry.ts';
 import { Endpoint, type Port } from './rpc.ts';
+import { isRecord } from './wire.ts';
 
 /** Описание отданного контракта на проводе: данные как есть, методы - только именами. */
 export interface ContractDescriptor {
@@ -31,7 +32,20 @@ interface Loaded {
   readonly store: DisposableStore;
   readonly provided: Map<string, ContractImpl>;
   readonly commands: Map<string, CommandHandler>;
+  /** Подписки, которые плагин держит как поставщик: номер ядра -> снятие. */
+  readonly served: Map<number, Disposable>;
 }
+
+/** Колбэк на проводе: у потребителя - его номер в хосте, у поставщика - номер аргумента. */
+export const CALLBACK = '$cyborg.callback';
+/** Ответ поставщика на вызов с колбэками: подписка открыта, снимает её ядро. */
+export const SUBSCRIPTION = '$cyborg.subscription';
+
+export function marker(value: unknown, key: string): unknown {
+  return isRecord(value) && Object.keys(value).length === 1 ? value[key] : undefined;
+}
+
+const isDisposable = (value: unknown): value is Disposable => isRecord(value) && typeof value.dispose === 'function';
 
 export const handleKey = (pluginId: string, contract: string, version: string): string => `${pluginId}|${contract}|${version}`;
 
@@ -41,7 +55,7 @@ export function runHost(port: Port, importer: Importer): Endpoint {
   let manifests = new Map<string, PluginManifest>();
   let mirror: ContractRegistry | undefined;
   const plugins = new Map<string, Loaded>();
-  const proxies = new Proxies(endpoint);
+  const proxies = new Proxies(endpoint, (caller) => plugins.get(caller)?.store);
 
   endpoint.handle('ping', () => true);
 
@@ -61,7 +75,8 @@ export function runHost(port: Port, importer: Importer): Endpoint {
     const manifest = manifests.get(p.pluginId);
     if (!manifest || !mirror) throw new CoreError('Remote', `хост не знает плагин ${p.pluginId}`);
     const module = await importer(p.entry);
-    const loaded: Loaded = { store: new DisposableStore(), provided: new Map(), commands: new Map() };
+    const loaded: Loaded = { store: new DisposableStore(), provided: new Map(), commands: new Map(), served: new Map() };
+    loaded.store.add(toDisposable(() => [...loaded.served.values()].forEach((d) => d.dispose())));
     const config = await section(endpoint, p.pluginId, 'config', module, p.config);
     if (config && 'failed' in config) return { ok: false, kind: 'config', result: config.failed } satisfies ActivateResult;
     const state = await section(endpoint, p.pluginId, 'state', module, p.state);
@@ -85,12 +100,44 @@ export function runHost(port: Port, importer: Importer): Endpoint {
     loaded?.store.dispose();
   });
 
-  endpoint.handle('call', (p: { pluginId: string; contract: string; version: string; member: string; args: unknown[] }) => {
-    const impl = plugins.get(p.pluginId)?.provided.get(handleKey(p.pluginId, p.contract, p.version));
+  endpoint.handle('call', async (p: { pluginId: string; contract: string; version: string; member: string; args: unknown[]; subscription?: number }) => {
+    const loaded = plugins.get(p.pluginId);
+    const impl = loaded?.provided.get(handleKey(p.pluginId, p.contract, p.version));
     const member = impl?.[p.member];
-    if (typeof member !== 'function') throw new CoreError('Unavailable', `${p.contract}@${p.version}.${p.member} у ${p.pluginId} нет`);
-    return member.apply(impl, p.args);
+    if (!loaded || typeof member !== 'function') throw new CoreError('Unavailable', `${p.contract}@${p.version}.${p.member} у ${p.pluginId} нет`);
+    const subscription = p.subscription;
+    if (subscription === undefined) return member.apply(impl, p.args);
+
+    let alive = true;
+    const args = p.args.map((arg) => {
+      const index = marker(arg, CALLBACK);
+      if (typeof index !== 'number') return arg;
+      return (...values: unknown[]) => {
+        if (alive) endpoint.notify('emit', { subscription, index, args: values });
+      };
+    });
+    const result: unknown = await member.apply(impl, args);
+    if (!isDisposable(result)) {
+      alive = false;
+      return result;
+    }
+    loaded.served.set(
+      subscription,
+      toDisposable(() => {
+        alive = false;
+        loaded.served.delete(subscription);
+        result.dispose();
+      }),
+    );
+    return { [SUBSCRIPTION]: subscription };
   });
+
+  endpoint.handle('release', (p: { subscription: number }) => {
+    for (const loaded of plugins.values()) loaded.served.get(p.subscription)?.dispose();
+  });
+
+  endpoint.handle('callback', (p: { id: string; args: unknown[] }) => proxies.deliver(p.id, p.args));
+  endpoint.handle('forget', (p: { ids: string[] }) => proxies.forget(p.ids));
 
   endpoint.handle('command', (p: { pluginId: string; name: string; args: unknown[] }) => {
     const handler = plugins.get(p.pluginId)?.commands.get(p.name);
@@ -104,12 +151,16 @@ export function runHost(port: Port, importer: Importer): Endpoint {
 /** Чужой контракт в хосте: в зеркале лежит заготовка, потребитель получает свою копию, и ядро видит в invoke, кто зовёт. */
 class Proxies {
   readonly #endpoint: Endpoint;
+  readonly #storeOf: (caller: string) => DisposableStore | undefined;
   readonly #descriptors = new WeakMap<ContractImpl, ContractDescriptor>();
   // Своя копия на потребителя одна: плагин вправе сравнивать полученное из get по ссылке.
   readonly #bound = new WeakMap<ContractImpl, Map<string, ContractImpl>>();
+  readonly #listeners = new Map<string, (...args: unknown[]) => unknown>();
+  #seq = 0;
 
-  constructor(endpoint: Endpoint) {
+  constructor(endpoint: Endpoint, storeOf: (caller: string) => DisposableStore | undefined) {
     this.#endpoint = endpoint;
+    this.#storeOf = storeOf;
   }
 
   template(d: ContractDescriptor): ContractImpl {
@@ -126,14 +177,50 @@ class Proxies {
     let copy = copies.get(caller);
     if (!copy) {
       const made: Record<string, unknown> = { ...d.data };
-      for (const member of d.methods) {
-        made[member] = (...args: unknown[]) =>
-          this.#endpoint.request('invoke', { caller, pluginId: d.pluginId, contract: d.contract, version: d.version, member, args });
-      }
+      for (const member of d.methods) made[member] = (...args: unknown[]) => this.#invoke(d, caller, member, args);
       copy = made;
       copies.set(caller, copy);
     }
     return copy;
+  }
+
+  // Ответ слушателя отдаётся Endpoint: тот дождётся его и проглотит отказ, иначе отказ уронил бы процесс хоста.
+  deliver(id: string, args: unknown[]): unknown {
+    return this.#listeners.get(id)?.(...args);
+  }
+
+  forget(ids: readonly string[]): void {
+    for (const id of ids) this.#listeners.delete(id);
+  }
+
+  // Функция пересекает границу только аргументом верхнего уровня: вложенная упадёт на structuredClone, как и раньше.
+  async #invoke(d: ContractDescriptor, caller: string, member: string, args: unknown[]): Promise<unknown> {
+    const ids: string[] = [];
+    const wire = args.map((arg) => {
+      if (typeof arg !== 'function') return arg;
+      const id = `${caller}#${++this.#seq}`;
+      this.#listeners.set(id, arg as (...xs: unknown[]) => unknown);
+      ids.push(id);
+      return { [CALLBACK]: id };
+    });
+    let result: unknown;
+    try {
+      result = await this.#endpoint.request('invoke', { caller, pluginId: d.pluginId, contract: d.contract, version: d.version, member, args: wire });
+    } catch (error) {
+      this.forget(ids);
+      throw error;
+    }
+    const subscription = marker(result, SUBSCRIPTION);
+    if (ids.length === 0 || typeof subscription !== 'number') {
+      this.forget(ids);
+      return result;
+    }
+    const handle = toDisposable(() => {
+      this.forget(ids);
+      this.#endpoint.notify('release', { caller, subscription });
+    });
+    this.#storeOf(caller)?.add(handle);
+    return handle;
   }
 }
 

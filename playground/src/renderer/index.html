@@ -7,16 +7,41 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="plugins-panel" aria-labelledby="plugins-title">
-      <h1 id="plugins-title">Плагины Cyborg</h1>
-      <p id="plugins-summary" class="plugins-summary" aria-live="polite"></p>
-      <div id="plugins-problems" class="plugins-problems" hidden></div>
-      <ul id="plugins-list" class="plugins-list" aria-label="Плагины"></ul>
-      <div class="plugins-journal-head">
-        <h2 id="plugins-journal-title">Журнал</h2>
-        <button type="button" id="plugins-journal-all" hidden>Весь журнал</button>
-      </div>
-      <ol id="plugins-journal" class="plugins-journal" aria-labelledby="plugins-journal-title"></ol>
+    <main class="playground">
+      <header class="playground-head">
+        <h1>Cyborg Playground</h1>
+        <p id="plugins-summary" class="plugins-summary" aria-live="polite"></p>
+        <div id="plugins-problems" class="plugins-problems" hidden></div>
+      </header>
+
+      <section class="pane pane-plugins" aria-labelledby="plugins-title">
+        <h2 id="plugins-title">Плагины</h2>
+        <ul id="plugins-list" class="plugins-list" aria-label="Плагины"></ul>
+      </section>
+
+      <section class="pane pane-keys" aria-labelledby="keys-title">
+        <h2 id="keys-title">Клавиши</h2>
+        <p class="pane-hint">Нажмите сочетание в окне: занятое работающим плагином ядро забирает до страницы.</p>
+        <table class="keys">
+          <thead>
+            <tr><th>Сочетание</th><th>Команда</th><th>Что будет</th></tr>
+          </thead>
+          <tbody id="keys-list"></tbody>
+        </table>
+      </section>
+
+      <section class="pane pane-feed" aria-labelledby="feed-title">
+        <h2 id="feed-title">Сообщения</h2>
+        <ol id="feed" class="log feed" aria-labelledby="feed-title" aria-live="polite"></ol>
+      </section>
+
+      <section class="pane pane-journal" aria-labelledby="plugins-journal-title">
+        <div class="plugins-journal-head">
+          <h2 id="plugins-journal-title">Журнал</h2>
+          <button type="button" id="plugins-journal-all" hidden>Весь журнал</button>
+        </div>
+        <ol id="plugins-journal" class="log plugins-journal" aria-labelledby="plugins-journal-title"></ol>
+      </section>
     </main>
     <script src="app.js"></script>
   </body>

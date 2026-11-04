@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { PluginJournalLine, PluginRow, PluginsSnapshot } from '../src/shared/plugins.ts';
-import { journalFor, sortedPlugins, summary } from '../src/renderer/plugins-model.ts';
+import { actionsFor, conflictText, journalFor, keyStatus, mergeFeed, sortedPlugins, summary } from '../src/renderer/plugins-model.ts';
 
-const row = (id: string, state: PluginRow['state']): PluginRow => ({ id, state, revivable: state === 'stopped' });
-const snapshot = (plugins: PluginRow[], over: Partial<PluginsSnapshot> = {}): PluginsSnapshot => ({ phase: 'ready', problems: [], plugins, journal: [], ...over });
+const row = (id: string, state: PluginRow['state'], over: Partial<PluginRow> = {}): PluginRow => ({ id, state, revivable: state === 'stopped', unloaded: false, commands: [], ...over });
+const snapshot = (plugins: PluginRow[], over: Partial<PluginsSnapshot> = {}): PluginsSnapshot => ({ phase: 'ready', problems: [], plugins, keys: [], feed: [], journal: [], canHang: true, ...over });
 
 describe('окно «Плагины Cyborg»: модель', () => {
   it('выключенные сверху, затем ждущие перезапуска, работающие и невключённые; внутри - по имени', () => {
@@ -32,6 +32,30 @@ describe('окно «Плагины Cyborg»: модель', () => {
     assert.equal(
       summary(snapshot([row('a', 'active'), row('b', 'stopped'), row('c', 'restarting'), row('d', 'disabled')])),
       'работает: 1 из 3, ждут перезапуска: 1, выключено: 1',
+    );
+  });
+
+  it('кнопки: у работающего - команды, выгрузка и хост; у выгруженного - «Загрузить», у упавшего - «Включить снова»', () => {
+    const labels = (r: PluginRow, canHang = true) => actionsFor(r, canHang).map((a) => a.label);
+    assert.deepEqual(labels(row('bob', 'active', { commands: ['bob.hello'], pid: 7 })), ['bob.hello', 'Выгрузить', 'Уронить хост', 'Повесить хост', 'Журнал']);
+    assert.deepEqual(labels(row('bob', 'active', { pid: 7 }), false), ['Выгрузить', 'Уронить хост', 'Журнал']);
+    assert.deepEqual(labels(row('bob', 'active')), ['Выгрузить', 'Журнал'], 'без процесса хоста ронять нечего');
+    assert.deepEqual(labels(row('bob', 'stopped', { unloaded: true })), ['Загрузить', 'Журнал']);
+    assert.deepEqual(labels(row('bob', 'stopped')), ['Включить снова', 'Журнал']);
+    assert.deepEqual(labels(row('bob', 'stopped', { revivable: false })), ['Журнал']);
+    assert.deepEqual(labels(row('bob', 'restarting')), ['Журнал']);
+  });
+
+  it('клавиши: перехват у работающего владельца, конфликт называет проигравших, лента - по времени', () => {
+    const key = { key: 'F2', command: 'bob.status', pluginId: 'bob', live: true, shadowed: [{ pluginId: 'echo', command: 'echo.ping' }] };
+    assert.equal(keyStatus(key), 'перехват');
+    assert.equal(keyStatus({ ...key, live: false }), 'bob не работает - нажатие уйдёт в окно');
+    assert.equal(conflictText(key), 'конфликт: echo.ping (echo) не получает сочетание');
+    assert.equal(conflictText({ ...key, shadowed: [] }), undefined);
+    const line = (at: number, subject: string) => ({ at, kind: 'log' as const, subject, text: '' });
+    assert.deepEqual(
+      mergeFeed([line(1, 'a'), line(3, 'c')], [line(2, 'b')]).map((l) => l.subject),
+      ['a', 'b', 'c'],
     );
   });
 });

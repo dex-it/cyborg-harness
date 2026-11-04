@@ -1,6 +1,6 @@
 {
-  "id": "probe",
+  "id": "chat",
   "version": "1.0.0",
   "engines": { "cyborg": "^1" },
-  "optional": { "demo.echo": "^1" }
+  "provides": { "demo.chat": "1.0" }
 }

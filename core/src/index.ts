@@ -11,3 +11,4 @@ export * from './plugin.ts';
 export * from './rpc.ts';
 export * from './transports.ts';
 export * from './status.ts';
+export * from './keys.ts';

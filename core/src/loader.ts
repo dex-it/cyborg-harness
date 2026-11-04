@@ -2,7 +2,8 @@ import type { SectionResult, SectionStore } from './config.ts';
 import type { Disposable } from './disposable.ts';
 import { CoreError, errorMessage, ignore } from './errors.ts';
 import { providesMatching, resolveGraph, type ContractGraph, type Rejection } from './graph.ts';
-import { handleKey, type ActivateResult, type ContractDescriptor, type SectionInput } from './host-runtime.ts';
+import { CALLBACK, handleKey, marker, SUBSCRIPTION, type ActivateResult, type ContractDescriptor, type SectionInput } from './host-runtime.ts';
+import { resolveKey } from './keys.ts';
 import { checkArgs, parseManifest, type PluginManifest } from './manifest.ts';
 import { ContractRegistry } from './registry.ts';
 import { Endpoint } from './rpc.ts';
@@ -22,6 +23,10 @@ export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'activated'; readonly hostId: string; readonly ms: number }
   | { readonly pluginId: string; readonly kind: 'deactivated'; readonly error?: string }
   | { readonly pluginId: string; readonly kind: 'revived' }
+  /** Снят по disable: сам (`by` - он же) или вместе с поставщиком, которого требовал. */
+  | { readonly pluginId: string; readonly kind: 'unloaded'; readonly by: string; readonly error?: string }
+  /** Сочетание объявлено и другим плагином; нажатие получает `winner`. */
+  | { readonly pluginId: string; readonly kind: 'key-conflict'; readonly key: string; readonly command: string; readonly winner: string }
   /** Сторонний плагин назван в группе plugins.hosts с другими - ядро всё равно дало ему свой хост. */
   | { readonly pluginId: string; readonly kind: 'host-isolated'; readonly group: string; readonly hostId: string }
   | {
@@ -79,6 +84,8 @@ export interface LoadOptions {
   readonly watchdog?: WatchdogOptions | undefined;
   readonly activationTimeout?: number | undefined;
   /** Граф решён, код плагинов ещё не запускался. */
+  /** Под какую ОС раскрыть `CmdOrCtrl`; по умолчанию текущая. */
+  readonly platform?: string | undefined;
   readonly onGraph?: ((graph: ContractGraph) => Promise<void> | undefined) | undefined;
   readonly onJournal?: ((entry: JournalEntry) => void) | undefined;
   readonly onLog?: ((pluginId: string, message: string) => void) | undefined;
@@ -93,13 +100,37 @@ export interface Kernel {
   /** Разобранные манифесты, включённые и нет. */
   readonly manifests: readonly PluginManifest[];
   hostOf(pluginId: string): string | undefined;
-  /** «Включить снова»: сбрасывает счёт сбоев, активирует плагин и его пропущенных потребителей. */
-  revive(pluginId: string): Promise<void>;
+  /** Все сочетания из манифестов принятых плагинов, `key` - под платформу, как его даёт `keyOfInput`. */
+  readonly keybindings: readonly Keybinding[];
+  /** Синхронно, чтобы главный процесс успел отменить нажатие; владелец не активен - undefined. */
+  keybinding(key: string): Keybinding | undefined;
+  /** Выгружает плагин и тех, кто требует его через requires; хост без плагинов гасится, сторож и enable без явной просьбы их не поднимают. */
+  disable(pluginId: string): Promise<void>;
+  /** «Включить снова»: сбрасывает счёт сбоев, активирует плагин, его пропущенных потребителей и снятых вместе с ним. */
+  enable(pluginId: string): Promise<void>;
   run(command: string, ...args: unknown[]): Promise<unknown>;
   /** Дожидается перезапусков хостов, начатых сторожем. */
   idle(): Promise<void>;
   /** Снимает плагины в обратном порядке активации и гасит хосты. */
   unload(): Promise<void>;
+}
+
+/** Подписка через границу: колбэки живут в хосте потребителя, снятие - у поставщика. */
+interface Subscription {
+  readonly consumer: string;
+  readonly consumerHost: Host;
+  readonly provider: string;
+  readonly providerHost: Host;
+  /** Номер аргумента -> номер колбэка в хосте потребителя. */
+  readonly callbacks: readonly (string | undefined)[];
+}
+
+export interface Keybinding {
+  readonly key: string;
+  readonly command: string;
+  readonly pluginId: string;
+  /** Проигравшие в конфликте: то же сочетание у других плагинов. */
+  readonly shadowed: readonly { readonly pluginId: string; readonly command: string }[];
 }
 
 interface Host {
@@ -143,6 +174,31 @@ function assignHosts(
   return result;
 }
 
+// Встроенный побеждает сторонний, между равными - первый по id: исход не зависит от порядка каталогов на диске.
+function bindKeys(
+  manifests: readonly PluginManifest[],
+  bundled: ReadonlySet<string>,
+  platform: string,
+  record: (entry: JournalEntry) => void,
+): Map<string, Keybinding> {
+  const rank = (m: PluginManifest) => [bundled.has(m.id) ? 0 : 1, m.id] as const;
+  const sorted = [...manifests].sort((a, b) => rank(a)[0] - rank(b)[0] || rank(a)[1].localeCompare(rank(b)[1]));
+  const table = new Map<string, Keybinding>();
+  for (const m of sorted) {
+    for (const k of m.keybindings) {
+      const key = resolveKey(k.key, platform);
+      const owner = table.get(key);
+      if (!owner) {
+        table.set(key, { key, command: k.command, pluginId: m.id, shadowed: [] });
+        continue;
+      }
+      table.set(key, { ...owner, shadowed: [...owner.shadowed, { pluginId: m.id, command: k.command }] });
+      record({ pluginId: m.id, kind: 'key-conflict', key, command: k.command, winner: owner.pluginId });
+    }
+  }
+  return table;
+}
+
 export async function load(options: LoadOptions): Promise<Kernel> {
   const journal: JournalEntry[] = [];
   const record = (entry: JournalEntry) => {
@@ -182,6 +238,10 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   const hostFailures = new Map<string, number>();
   const strikes = new Map<string, number>();
   const switchedOff = new Set<string>();
+  // Выключенные пользователем: сторож их не перезапускает, enable соседа не поднимает.
+  const userOff = new Set<string>();
+  const subscriptions = new Map<number, Subscription>();
+  let subscriptionSeq = 0;
   let chain: Promise<void> = Promise.resolve();
   let unloading = false;
 
@@ -192,6 +252,8 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   };
   const hostIds = assignHosts(manifests, options.hosts ?? {}, new Set(options.bundled ?? []), record);
   const hostOf = (pluginId: string): string | undefined => hostIds.get(pluginId);
+  const accepted = graph.order.map(manifestOf);
+  const keys = bindKeys(accepted, new Set(options.bundled ?? []), options.platform ?? process.platform, record);
 
   const broadcast = (contract: string) => {
     for (const host of hosts.values()) host.endpoint.notify('contracts', { contract, providers: descriptors.get(contract) ?? [] });
@@ -240,7 +302,16 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     broadcast(contract);
   }
 
+  function release(subscription: number): void {
+    const s = subscriptions.get(subscription);
+    if (!s) return;
+    subscriptions.delete(subscription);
+    s.providerHost.endpoint.notify('release', { subscription });
+    s.consumerHost.endpoint.notify('forget', { ids: s.callbacks.filter((id) => id !== undefined) });
+  }
+
   function dropPlugin(pluginId: string): void {
+    for (const [n, s] of [...subscriptions]) if (s.consumer === pluginId || s.provider === pluginId) release(n);
     const given = [...descriptors.values()].flat().filter((d) => d.pluginId === pluginId);
     for (const d of given) dropProvided(d.pluginId, d.contract, d.version);
     for (const [name, owner] of [...commandOwners]) if (owner === pluginId) commandOwners.delete(name);
@@ -315,8 +386,42 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       if (!mayUse(p.caller, p.pluginId, p.contract, p.version)) {
         throw new CoreError('NotDeclared', `${p.caller}: ${p.contract}@${p.version} от ${p.pluginId} не объявлен потребляемым`);
       }
-      const { pluginId, contract, version, member, args } = p;
-      return callHost(liveHost(pluginId), pluginId, 'call', { pluginId, contract, version, member, args });
+      const { pluginId, contract, version, member } = p;
+      const target = liveHost(pluginId);
+      const callbacks = p.args.map((arg) => marker(arg, CALLBACK));
+      if (!callbacks.some((id) => id !== undefined)) return callHost(target, pluginId, 'call', { pluginId, contract, version, member, args: p.args });
+      if (callbacks.some((id) => id !== undefined && typeof id !== 'string')) throw new CoreError('Invalid', 'invoke: номер колбэка не строка');
+
+      const subscription = ++subscriptionSeq;
+      subscriptions.set(subscription, { consumer: p.caller, consumerHost: host, provider: pluginId, providerHost: target, callbacks: callbacks as (string | undefined)[] });
+      const args = p.args.map((arg, i) => (callbacks[i] === undefined ? arg : { [CALLBACK]: i }));
+      return callHost(target, pluginId, 'call', { pluginId, contract, version, member, args, subscription }).then(
+        (result) => {
+          // Потребителя могли снять, пока поставщик отвечал: тогда подписку закрывает ядро.
+          if (marker(result, SUBSCRIPTION) === subscription && subscriptions.has(subscription)) return result;
+          if (marker(result, SUBSCRIPTION) === subscription) target.endpoint.notify('release', { subscription });
+          subscriptions.delete(subscription);
+          return result;
+        },
+        (error: unknown) => {
+          subscriptions.delete(subscription);
+          throw error;
+        },
+      );
+    });
+    onNote('emit', { subscription: 'number', index: 'number', args: 'array' }, (p) => {
+      const s = subscriptions.get(p.subscription);
+      if (!s) return;
+      if (s.providerHost !== host) throw new CoreError('Unavailable', `подписка ${p.subscription} не из этого хоста`);
+      const id = s.callbacks[p.index];
+      if (id !== undefined) s.consumerHost.endpoint.notify('callback', { id, args: p.args });
+    });
+    onNote('release', { caller: 'string', subscription: 'number' }, (p) => {
+      mine(p.caller);
+      const s = subscriptions.get(p.subscription);
+      if (!s) return;
+      if (s.consumerHost !== host || s.consumer !== p.caller) throw new CoreError('Unavailable', `подписка ${p.subscription} не у ${p.caller}`);
+      release(p.subscription);
     });
     onRequest('run', { name: 'string', args: 'array' }, (p) => run(p.name, ...p.args));
     onRequest('section.write', { pluginId: 'string', kind: ['config', 'state'], layer: 'string', version: 'number', data: 'record' }, async (p) => {
@@ -386,7 +491,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       }
     }
 
-    const again = graph.order.filter((id) => hostOf(id) === host.id && !switchedOff.has(id) && (victims.includes(id) || culprits.includes(id)));
+    const again = graph.order.filter((id) => hostOf(id) === host.id && !switchedOff.has(id) && !userOff.has(id) && (victims.includes(id) || culprits.includes(id)));
     if (again.length === 0) return;
     chain = chain.then(async () => {
       if (unloading) return;
@@ -437,20 +542,74 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     return callHost(liveHost(owner), owner, 'command', { pluginId: owner, name: command, args });
   }
 
-  async function revive(pluginId: string): Promise<void> {
+  function guard(pluginId: string): void {
     if (!graph.order.includes(pluginId)) throw new CoreError('Unavailable', `${pluginId} не загружается: причина в журнале`);
     if (unloading) throw new CoreError('Unavailable', 'ядро выгружается');
     if (options.safeMode) throw new CoreError('Unavailable', 'безопасный режим');
+  }
+
+  async function enable(pluginId: string): Promise<void> {
+    guard(pluginId);
+    userOff.delete(pluginId);
     if (active.includes(pluginId)) return;
     strikes.delete(pluginId);
     switchedOff.delete(pluginId);
-    hostFailures.delete(hostOf(manifestOf(pluginId).id) ?? pluginId);
-    const lastKind = (id: string) => journal.findLast((e) => e.pluginId === id)?.kind;
+    hostFailures.delete(hostOf(pluginId) ?? pluginId);
+    const last = (id: string) => journal.findLast((e) => e.pluginId === id && e.kind !== 'key-conflict');
+    const follows = (id: string) => {
+      const e = last(id);
+      return e?.kind === 'skipped' || (e?.kind === 'unloaded' && e.by === pluginId && id !== pluginId);
+    };
     chain = chain.then(async () => {
       if (unloading || active.includes(pluginId)) return;
       record({ pluginId, kind: 'revived' });
       await activate(pluginId);
-      for (const id of graph.order) if (!active.includes(id) && !switchedOff.has(id) && lastKind(id) === 'skipped') await activate(id);
+      for (const id of graph.order) if (!active.includes(id) && !switchedOff.has(id) && !userOff.has(id) && follows(id)) await activate(id);
+    });
+    await idle();
+  }
+
+  /** Активные, кто через requires прямо или по цепочке держится за `root`. */
+  function dependents(root: string): Set<string> {
+    const gone = new Set([root]);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const id of active) {
+        if (gone.has(id)) continue;
+        const m = manifestOf(id);
+        if (![...(graph.bindings.get(id) ?? [])].some(([c, p]) => c in m.requires && gone.has(p))) continue;
+        gone.add(id);
+        grew = true;
+      }
+    }
+    return gone;
+  }
+
+  async function deactivate(pluginId: string, by: string): Promise<void> {
+    const host = hosts.get(hostOf(pluginId) ?? '');
+    let error: string | undefined;
+    try {
+      if (host) await callHost(host, pluginId, 'deactivate', { pluginId }, activationTimeout);
+    } catch (e) {
+      error = errorMessage(e);
+    }
+    dropPlugin(pluginId);
+    record({ pluginId, kind: 'unloaded', by, ...(error !== undefined && { error }) });
+    // Пустой хост гасится: следующая активация импортирует код плагина заново, в новом процессе.
+    if (host && !host.down && !active.some((id) => hostOf(id) === host.id)) stopHost(host, new CoreError('HostGone', `хост ${host.id} без плагинов`));
+  }
+
+  async function disable(pluginId: string): Promise<void> {
+    guard(pluginId);
+    userOff.add(pluginId);
+    chain = chain.then(async () => {
+      if (unloading) return;
+      if (!active.includes(pluginId)) {
+        record({ pluginId, kind: 'unloaded', by: pluginId });
+        return;
+      }
+      const gone = dependents(pluginId);
+      for (const id of [...active].reverse()) if (gone.has(id)) await deactivate(id, pluginId);
     });
     await idle();
   }
@@ -479,7 +638,13 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     contracts: registry,
     manifests: known,
     hostOf,
-    revive,
+    keybindings: [...keys.values()],
+    keybinding(key) {
+      const k = keys.get(key);
+      return k && active.includes(k.pluginId) ? k : undefined;
+    },
+    disable,
+    enable,
     run,
     idle,
     async unload() {
