@@ -1,0 +1,7 @@
+{
+  "id": "monitor",
+  "version": "1.0.0",
+  "engines": { "cyborg": "^1" },
+  "optional": { "demo.flaky": "^1" },
+  "commands": ["monitor.status"]
+}

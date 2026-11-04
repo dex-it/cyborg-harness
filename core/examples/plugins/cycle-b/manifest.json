@@ -1,0 +1,7 @@
+{
+  "id": "cycle-b",
+  "version": "1.0.0",
+  "engines": { "cyborg": "^1" },
+  "provides": { "demo.b": "1.0" },
+  "optional": { "demo.a": "^1" }
+}

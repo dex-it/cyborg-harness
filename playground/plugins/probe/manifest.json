@@ -1,0 +1,6 @@
+{
+  "id": "probe",
+  "version": "1.0.0",
+  "engines": { "cyborg": "^1" },
+  "optional": { "demo.echo": "^1" }
+}

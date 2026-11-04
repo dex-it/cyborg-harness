@@ -1,0 +1,6 @@
+{
+  "id": "lock-alt",
+  "version": "0.1.0",
+  "engines": { "cyborg": "^1" },
+  "provides": { "cyborg.lock": "1.2" }
+}

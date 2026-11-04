@@ -1,0 +1,7 @@
+{
+  "id": "editor",
+  "version": "1.0.0",
+  "engines": { "cyborg": "^1" },
+  "provides": { "cyborg.tab": "1.0" },
+  "requires": { "cyborg.files": "^2" }
+}

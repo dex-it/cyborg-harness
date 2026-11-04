@@ -1,0 +1,5 @@
+{
+  "id": "flaky",
+  "version": "1.0.0",
+  "engines": { "cyborg": "^1" }
+}

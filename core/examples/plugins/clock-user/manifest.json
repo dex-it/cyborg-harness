@@ -1,0 +1,7 @@
+{
+  "id": "clock-user",
+  "version": "1.0.0",
+  "engines": { "cyborg": "^1" },
+  "requires": { "demo.clock": "^1" },
+  "commands": ["clock-user.probe"]
+}

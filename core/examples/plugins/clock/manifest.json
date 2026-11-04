@@ -1,0 +1,7 @@
+{
+  "id": "clock",
+  "version": "1.0.0",
+  "engines": { "cyborg": "^1" },
+  "provides": { "demo.clock": "1.0" },
+  "commands": ["clock.now"]
+}

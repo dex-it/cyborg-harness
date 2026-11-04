@@ -1,0 +1,5 @@
+{
+  "id": "future",
+  "version": "1.0.0",
+  "engines": { "cyborg": "^2" }
+}

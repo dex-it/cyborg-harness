@@ -1,0 +1,9 @@
+{
+  "id": "sessions",
+  "version": "1.3.0",
+  "engines": { "cyborg": "^1" },
+  "requires": { "cyborg.projects": "^1" },
+  "optional": { "cyborg.lock": "^1" },
+  "commands": ["sessions.restore"],
+  "state": { "version": 1 }
+}

@@ -1,0 +1,7 @@
+{
+  "id": "tabs",
+  "version": "1.0.0",
+  "engines": { "cyborg": "^1" },
+  "consumes": { "cyborg.tab": "^1" },
+  "commands": ["tabs.open"]
+}

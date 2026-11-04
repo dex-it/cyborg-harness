@@ -1,0 +1,217 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { createInterface } from 'node:readline/promises';
+import { forkHosts, load, SectionStore, type ContractGraph, type JournalEntry, type LayerStore, type Rejection } from '../src/index.ts';
+import { scenarios, type Documents, type Scenario } from './scenarios.ts';
+
+const API_VERSION = '1.0.0';
+const pluginsDir = new URL('./plugins/', import.meta.url);
+
+const tty = process.stdout.isTTY;
+const paint = (code: number) => (s: string) => (tty ? `\x1b[${code}m${s}\x1b[0m` : s);
+const bold = paint(1);
+const dim = paint(2);
+const red = paint(31);
+const green = paint(32);
+const yellow = paint(33);
+const cyan = paint(36);
+
+const args = process.argv.slice(2);
+const step = args.includes('--step');
+const names = args.filter((a) => !a.startsWith('--'));
+
+if (args.includes('--help') || names.some((n) => n !== 'all' && !scenarios.some((s) => s.name === n))) {
+  console.log(`${bold('npm run core:demo -- [сценарий ...|all] [--step]')}\n`);
+  for (const s of scenarios) console.log(`  ${cyan(s.name.padEnd(10))} ${s.title}`);
+  console.log(`\n  без имени - basic; --step - пауза на Enter после каждого шага`);
+  process.exit(names.length > 0 && !args.includes('--help') ? 1 : 0);
+}
+
+const chosen = names.includes('all') ? scenarios : names.length > 0 ? scenarios.filter((s) => names.includes(s.name)) : [scenarios[0]];
+const prompt = step && process.stdin.isTTY ? createInterface({ input: process.stdin, output: process.stdout }) : undefined;
+
+async function pause(): Promise<void> {
+  if (prompt) await prompt.question(dim('  Enter - дальше '));
+}
+
+function heading(n: number, title: string): void {
+  console.log(`\n${bold(`Шаг ${n}. ${title}`)}`);
+}
+
+function readManifests(): unknown[] {
+  return readdirSync(pluginsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => JSON.parse(readFileSync(new URL(`${d.name}/manifest.json`, pluginsDir), 'utf8')) as unknown);
+}
+
+const entry = (manifest: { id: string }) => new URL(`${manifest.id}/index.ts`, pluginsDir).href;
+
+function memoryStore(initial: Documents = {}): { store: LayerStore; docs: Map<string, Record<string, unknown>> } {
+  const docs = new Map(Object.entries(structuredClone(initial)));
+  return {
+    docs,
+    store: {
+      load: async (layer) => structuredClone(docs.get(layer)),
+      save: async (layer, doc) => void docs.set(layer, structuredClone(doc)),
+    },
+  };
+}
+
+function rejection(r: Rejection): string {
+  switch (r.kind) {
+    case 'duplicate':
+      return 'id уже занят другим манифестом';
+    case 'engines':
+      return `требует ядро ${r.range}, а ядро ${r.api}`;
+    case 'missing':
+      return `нет поставщика ${r.contract} ${r.range}`;
+    case 'ambiguous':
+      return `${r.contract}: поставщиков несколько (${r.providers.join(', ')}), а кратность one`;
+    case 'cycle':
+      return `цикл зависимостей: ${r.members.join(' -> ')}`;
+  }
+}
+
+function journalLine(e: JournalEntry): string {
+  const id = (e.pluginId ?? '').padEnd(16);
+  switch (e.kind) {
+    case 'invalid':
+      return `${red('✖')} ${id} манифест не разобран:\n${e.errors.map((x) => `                     ${dim(x)}`).join('\n')}`;
+    case 'disabled':
+      return `${dim('·')} ${dim(`${id} есть на диске, но не в plugins.enabled`)}`;
+    case 'not-found':
+      return `${red('✖')} ${id} в plugins.enabled, но манифеста нет`;
+    case 'rejected':
+      return `${red('✖')} ${id} ${e.reasons.map(rejection).join('; ')}`;
+    case 'safe-mode':
+      return `${yellow('◌')} ${id} безопасный режим: код не запускается`;
+    case 'skipped':
+      return `${yellow('◌')} ${id} пропущен: ${e.reason}`;
+    case 'config':
+    case 'state': {
+      const r = e.result;
+      const why =
+        r.status === 'newer'
+          ? `в слое ${r.layer} версия ${r.found}, плагин знает только до ${r.expected} - откат версии, данные не трогаю`
+          : r.status === 'migrate-error'
+            ? `миграция слоя ${r.layer} с версии ${r.from} упала: ${r.error}`
+            : r.status === 'invalid'
+              ? `значение не прошло проверку: ${r.errors.join('; ')}`
+              : '';
+      return `${red('✖')} ${id} раздел ${e.kind} не поднялся: ${why}`;
+    }
+    case 'failed':
+      return `${red('✖')} ${id} activate бросил: ${e.error}`;
+    case 'activated':
+      return `${green('✔')} ${id} активен ${dim(`в хосте ${e.hostId}, за ${e.ms.toFixed(1)} мс`)}`;
+    case 'deactivated':
+      return e.error ? `${red('✖')} ${id} снят с ошибкой: ${e.error}` : `${dim('↓')} ${id} снят`;
+    case 'switched-off':
+      return `${red('⏻')} ${id} выключен после ${e.strikes} сбоев за сессию${e.affects.length > 0 ? `; без него: ${e.affects.join(', ')}` : ''}`;
+    case 'host-down': {
+      const why = e.reason === 'hang' ? 'завис - не ответил на пинг' : 'процесс завершился';
+      const blame = e.culprits.length > 0 ? `виновник ${e.culprits.join(', ')}` : 'виновник не установлен';
+      const hit = e.affects.length > 0 ? `; задеты ${e.affects.join(', ')}` : '';
+      return `${red('✖')} ${bold(`хост ${e.hostId}`)} ${why}; ${blame}; сняты ${e.plugins.join(', ') || 'никто'}${hit}`;
+    }
+    case 'host-restart':
+      return `${yellow('↻')} ${bold(`хост ${e.hostId}`)} перезапуск: ${e.plugins.join(', ')}`;
+    case 'host-abandoned':
+      return `${red('✖')} ${bold(`хост ${e.hostId}`)} брошен после ${e.failures} сбоев без виновника; выключены ${e.plugins.join(', ') || 'никто'}`;
+    case 'revived':
+      return `${yellow('↻')} ${id} включён снова`;
+  }
+}
+
+function printManifests(raw: unknown[], enabled: readonly string[]): void {
+  for (const m of raw as Array<Record<string, any>>) {
+    if (!enabled.includes(m.id)) continue;
+    const parts = [
+      m.provides && `отдаёт ${Object.entries(m.provides).map(([c, v]) => `${c}@${[v].flat().join('+')}`).join(', ')}`,
+      m.requires && `требует ${Object.entries(m.requires).map(([c, r]) => `${c} ${r}`).join(', ')}`,
+      m.optional && `может взять ${Object.entries(m.optional).map(([c, r]) => `${c} ${r}`).join(', ')}`,
+      m.consumes && `собирает ${Object.entries(m.consumes).map(([c, r]) => `${c} ${r}`).join(', ')}`,
+      m.config && `config v${m.config.version}`,
+      m.state && `state v${m.state.version}`,
+    ].filter(Boolean);
+    console.log(`  ${cyan(`${m.id}@${m.version}`.padEnd(22))} ${parts.join(dim(' | ')) || dim('без контрактов')}`);
+  }
+  const missing = enabled.filter((id) => !(raw as Array<{ id: string }>).some((m) => m.id === id));
+  if (missing.length > 0) console.log(`  ${dim(`в enabled, но нет на диске: ${missing.join(', ')}`)}`);
+}
+
+function printGraph(graph: ContractGraph): void {
+  console.log(`  порядок активации: ${graph.order.map((id) => cyan(id)).join(dim(' → ')) || dim('пусто')}`);
+  for (const [consumer, bound] of graph.bindings) {
+    for (const [contract, provider] of bound) console.log(`  ${dim('связь')} ${consumer} ${dim(`← ${contract} ←`)} ${provider}`);
+  }
+}
+
+function printDocuments(label: string, docs: ReadonlyMap<string, unknown>): void {
+  for (const [layer, doc] of docs) console.log(`  ${dim(`${label} ${layer}:`)} ${JSON.stringify(doc)}`);
+}
+
+async function runScenario(s: Scenario): Promise<void> {
+  console.log(`\n${bold(cyan(`━━ ${s.name}: ${s.title}`))}\n${s.point}`);
+
+  const raw = readManifests();
+  const config = memoryStore(s.config);
+  const state = memoryStore(s.state);
+
+  heading(1, 'Манифесты и plugins.enabled');
+  printManifests(raw, s.enabled);
+  printDocuments('config', config.docs);
+  printDocuments('state', state.docs);
+  await pause();
+
+  heading(2, 'Граф контрактов - до запуска кода');
+  const early: JournalEntry[] = [];
+  let activationStarted = false;
+  const kernel = await load({
+    apiVersion: API_VERSION,
+    enabled: s.enabled,
+    manifests: raw,
+    spawnHost: forkHosts(),
+    entry,
+    hosts: s.hosts,
+    watchdog: { interval: 100, timeout: 800, strikes: 2 },
+    config: await SectionStore.open(config.store, ['user', 'workspace']),
+    state: await SectionStore.open(state.store, ['workspace']),
+    safeMode: s.safeMode,
+    onJournal: (e) => (activationStarted ? console.log(`  ${journalLine(e)}`) : early.push(e)),
+    onLog: (id, message) => console.log(`      ${dim(`${id}:`)} ${message}`),
+    async onGraph(graph) {
+      const disabled = early.filter((e) => e.kind === 'disabled').map((e) => e.pluginId);
+      if (disabled.length > 0) console.log(`  ${dim(`· не в plugins.enabled: ${disabled.join(', ')}`)}`);
+      for (const e of early) if (e.kind !== 'disabled') console.log(`  ${journalLine(e)}`);
+      printGraph(graph);
+      await pause();
+      heading(3, 'Активация по порядку графа');
+      activationStarted = true;
+    },
+  });
+  printDocuments('config', config.docs);
+  printDocuments('state', state.docs);
+  await pause();
+
+  if (s.act && kernel.active.length > 0) {
+    heading(4, 'Работа: команды через ядро');
+    await s.act(kernel, async (command, ...args) => {
+      const call = `${command}(${args.map((a) => JSON.stringify(a)).join(', ')})`;
+      try {
+        const result = await kernel.run(command, ...args);
+        const lines = Array.isArray(result) ? result.map(String) : [typeof result === 'string' ? result : JSON.stringify(result)];
+        console.log(`  ${cyan(call)}\n${lines.map((l) => `      ${l}`).join('\n')}`);
+      } catch (error) {
+        console.log(`  ${cyan(call)}\n      ${red(`${(error as { code?: string }).code ?? 'ошибка'}: ${(error as Error).message}`)}`);
+      }
+    });
+    await pause();
+  }
+
+  heading(s.act && kernel.active.length > 0 ? 5 : 4, 'Снятие в обратном порядке');
+  await kernel.unload();
+  printDocuments('state', state.docs);
+}
+
+for (const s of chosen) await runScenario(s);
+prompt?.close();

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'" />
+    <title>Cyborg Playground</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="plugins-panel" aria-labelledby="plugins-title">
+      <h1 id="plugins-title">Плагины Cyborg</h1>
+      <p id="plugins-summary" class="plugins-summary" aria-live="polite"></p>
+      <div id="plugins-problems" class="plugins-problems" hidden></div>
+      <ul id="plugins-list" class="plugins-list" aria-label="Плагины"></ul>
+      <div class="plugins-journal-head">
+        <h2 id="plugins-journal-title">Журнал</h2>
+        <button type="button" id="plugins-journal-all" hidden>Весь журнал</button>
+      </div>
+      <ol id="plugins-journal" class="plugins-journal" aria-labelledby="plugins-journal-title"></ol>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

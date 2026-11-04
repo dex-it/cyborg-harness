@@ -1,0 +1,258 @@
+/* Токены как у Cyborg: окно плагинов выглядит так же, как будет выглядеть внутри него. */
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --bg-side: #f5f5f6;
+  --bg-hover: rgba(0, 0, 0, 0.055);
+  --bg-active: rgba(0, 0, 0, 0.1);
+  --border: #e2e2e4;
+  --fg: #2b2b2e;
+  --fg-dim: #66666b;
+  --fg-faint: #9a9aa0;
+  --accent: #005fb8;
+  --accent-solid: #005fb8;
+  --accent-soft: rgba(0, 95, 184, 0.12);
+  --modified: #895503;
+  --danger: #c42b1c;
+  --radius: 6px;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, 'DejaVu Sans Mono', 'Ubuntu Mono', monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e1e;
+    --bg-side: #181818;
+    --bg-hover: rgba(255, 255, 255, 0.06);
+    --bg-active: rgba(255, 255, 255, 0.11);
+    --border: #2d2d30;
+    --fg: #d4d4d8;
+    --fg-dim: #9b9ba1;
+    --fg-faint: #6c6c72;
+    --accent: #4da3ff;
+    --accent-solid: #2672c8;
+    --accent-soft: rgba(77, 163, 255, 0.16);
+    --modified: #e2c08d;
+    --danger: #f46b5f;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+button {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+button.primary {
+  border-color: var(--accent-solid);
+  background: var(--accent-solid);
+  color: #fff;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.plugins-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 16px 18px;
+}
+
+.plugins-panel h1 {
+  margin: 0 0 4px;
+  font-size: 17px;
+}
+
+.plugins-summary {
+  margin: 0 0 12px;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.plugins-problems {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--modified);
+  background: var(--bg-side);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.plugins-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 48px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.plugin-row {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.plugin-row[data-state='stopped'] {
+  border-color: var(--danger);
+}
+
+.plugin-row[data-state='disabled'] {
+  color: var(--fg-dim);
+}
+
+.plugin-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.plugin-head .spacer {
+  flex: 1;
+}
+
+.plugin-name {
+  font-weight: 600;
+}
+
+.plugin-version,
+.plugin-host {
+  color: var(--fg-faint);
+  font-size: 12px;
+}
+
+.plugin-state {
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--bg-active);
+  font-size: 11px;
+}
+
+.plugin-row[data-state='active'] .plugin-state {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.plugin-row[data-state='stopped'] .plugin-state {
+  background: var(--danger);
+  color: #fff;
+}
+
+.plugin-reason {
+  margin: 6px 0;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.plugin-error {
+  margin: 6px 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.plugin-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.plugin-row[data-state='disabled'] .plugin-actions {
+  display: none;
+}
+
+.plugin-head .plugin-actions {
+  margin-top: 0;
+}
+
+.plugin-head .plugin-actions button {
+  padding: 1px 8px;
+  font-size: 11px;
+}
+
+.plugins-journal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.plugins-journal-head h2 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.plugins-journal {
+  flex: 1;
+  min-height: 120px;
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-side);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  list-style: none;
+}
+
+.plugin-journal-line {
+  display: flex;
+  gap: 8px;
+  padding: 1px 0;
+}
+
+.plugin-journal-time {
+  flex: none;
+  color: var(--fg-faint);
+}
+
+.plugin-journal-subject {
+  flex: none;
+  min-width: 9ch;
+  font-weight: 600;
+}
+
+.plugin-journal-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.plugin-journal-line.level-warn .plugin-journal-subject {
+  color: var(--modified);
+}
+
+.plugin-journal-line.level-error .plugin-journal-subject {
+  color: var(--danger);
+}
+
+.plugin-journal-empty {
+  color: var(--fg-faint);
+}

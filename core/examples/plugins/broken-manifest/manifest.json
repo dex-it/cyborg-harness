@@ -1,0 +1,6 @@
+{
+  "id": "broken-manifest",
+  "version": "latest",
+  "provides": { "cyborg.files": "1.0" },
+  "commands": ["files.read"]
+}
