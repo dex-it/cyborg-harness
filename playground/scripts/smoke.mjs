@@ -78,11 +78,11 @@ async function main() {
   const lines = () => stderr.split('\n').filter((l) => l.startsWith('[plugins]'));
 
   // Как в Electron Accelerator: modifiers - control, shift, meta; клавиша - буква или F1-F24.
-  const press = (combo) =>
+  const press = (keys) =>
     main(`(() => {
       const { webContents } = process.mainModule.require('electron');
       const page = webContents.getAllWebContents().find((w) => w.getType() === 'window');
-      const parts = ${JSON.stringify(combo)}.split('+');
+      const parts = ${JSON.stringify(keys)}.split('+');
       const keyCode = parts.pop();
       const modifiers = parts.map((m) => ({ Ctrl: 'control', Shift: 'shift', Alt: 'alt', Meta: 'meta' })[m]);
       page.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
@@ -91,8 +91,10 @@ async function main() {
   const feed = () => ev(`[...document.querySelectorAll('#feed .log-line')].map((l) => l.textContent)`);
   const feedHas = async (pattern) => (await feed()).some((l) => pattern.test(l));
   const pid = (id) => ev(`/pid (\\d+)/.exec(document.querySelector('#plugins-list [data-plugin=${JSON.stringify(id)}] .plugin-host')?.textContent ?? '')?.[1] ?? ''`);
-  const keyRow = (combo) => ev(`(() => { const r = document.querySelector('#keys-list [data-key=${JSON.stringify(combo)}]'); return r ? { live: r.dataset.live, text: r.textContent } : null; })()`);
-  const mod = process.platform === 'darwin' ? 'Meta' : 'Ctrl';
+  const keyRow = (keys) => ev(`(() => { const r = document.querySelector('#keys-list [data-key=${JSON.stringify(keys)}]'); return r ? { live: r.dataset.live, text: r.textContent } : null; })()`);
+  // Запись ядра: модификаторы в порядке Ctrl, Alt, Shift, Meta - на macOS это Shift+Meta+A.
+  const combo = (key) => (process.platform === 'darwin' ? `Shift+Meta+${key}` : `Ctrl+Shift+${key}`);
+  const re = (key, rest) => new RegExp(combo(key).replaceAll('+', '\\+') + rest);
   const states = async (expected) => {
     for (const [id, want] of Object.entries(expected)) if ((await state(id)) !== want) return false;
     return true;
@@ -112,14 +114,14 @@ async function main() {
   const f2 = await keyRow('F2');
   assert.equal(f2?.live, 'true');
   assert.match(f2.text, /bob\.status.*конфликт: echo\.ping \(echo\)/, 'конфликт F2 не показан');
-  await press(`${mod}+Shift+A`);
+  await press(combo('A'));
   await waitFor('alice → чат → bob → эхо → чат → alice', () => feedHas(/alice← bob: ответ: привет, bob \(эхо из \d+\)/));
-  assert.ok(await feedHas(new RegExp(`${mod}\\+Shift\\+A→ alice\\.hello \\(alice\\)`)), 'перехват сочетания не попал в ленту');
-  assert.ok(!(await feedHas(new RegExp(`${mod}\\+Shift\\+Aдо окна дошло`))), 'перехваченное сочетание дошло до страницы');
+  assert.ok(await feedHas(re('A', '→ alice\\.hello \\(alice\\)')), 'перехват сочетания не попал в ленту');
+  assert.ok(!(await feedHas(re('A', 'до окна дошло'))), 'перехваченное сочетание дошло до страницы');
   await press('F2');
   await waitFor('F2 у bob, а не у echo', () => feedHas(/bobчат есть, эхо есть/));
-  await press(`${mod}+Shift+Z`);
-  await waitFor('свободное сочетание дошло до окна', () => feedHas(new RegExp(`${mod}\\+Shift\\+Zдо окна дошло`)));
+  await press(combo('Z'));
+  await waitFor('свободное сочетание дошло до окна', () => feedHas(re('Z', 'до окна дошло')));
   log('перехват клавиш, конфликт, обмен сообщениями через три хоста');
 
   assert.equal(await button('chat', 'Выгрузить'), true, 'у chat нет «Выгрузить»');
@@ -127,9 +129,9 @@ async function main() {
     (await states({ chat: 'stopped', alice: 'stopped', bob: 'active' })) && lines().includes('[plugins] bob: чат пропал'),
   );
   assert.match(await text('#plugins-list [data-plugin="alice"] .plugin-reason'), /выгружен вместе с chat/);
-  assert.equal((await keyRow(`${mod}+Shift+A`))?.live, 'false');
-  await press(`${mod}+Shift+A`);
-  await waitFor('сочетание выгруженной alice дошло до окна', () => feedHas(new RegExp(`${mod}\\+Shift\\+Aдо окна дошло`)));
+  assert.equal((await keyRow(combo('A')))?.live, 'false');
+  await press(combo('A'));
+  await waitFor('сочетание выгруженной alice дошло до окна', () => feedHas(re('A', 'до окна дошло')));
   assert.equal(await button('chat', 'Загрузить'), true, 'у выгруженного chat нет «Загрузить»');
   await waitFor('chat и alice вернулись, bob переподписался', async () =>
     (await states({ chat: 'active', alice: 'active' })) && lines().includes('[plugins] bob: чат вернулся, подписываюсь снова'),
