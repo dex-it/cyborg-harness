@@ -255,6 +255,14 @@ function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths:
     ...(p.notify && { notify: Object.freeze({ show: call('notify.show') }) }),
     ...(clipboard && { clipboard: Object.freeze(clipboard) }),
     ...(p['security.roots'] && { security: Object.freeze({ setRoots: call('security.setRoots') }) }),
+    ...(p['ui.lock'] && {
+      ui: Object.freeze({
+        lock: async (options?: { hideNotifications?: boolean }) => {
+          await call('ui.lock')({ hideNotifications: options?.hideNotifications === true });
+          return Object.freeze({ release: () => call<undefined>('ui.unlock')() });
+        },
+      }),
+    }),
   }) as PluginOs;
 }
 

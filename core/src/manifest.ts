@@ -47,7 +47,13 @@ export interface PluginManifest {
   /** `lazy` - не при старте, а по первой команде, сочетанию, показу вида или потребителю своего контракта. */
   readonly activation?: 'lazy';
   /** Вид -> модуль с `mount` относительно каталога плагина; каждый вид живёт в своём `<iframe>`. */
-  readonly ui?: { readonly views: Readonly<Record<string, string>> };
+  readonly ui?: {
+    readonly views: Readonly<Record<string, string>>;
+    /** Модуль замка окна, вид с именем `overlay`: только при праве `ui.lock`. */
+    readonly overlay?: string;
+  };
+  /** `onStart` - окно закрыто с первого кадра, плагин активируется сразу, даже `lazy`. */
+  readonly lock?: { readonly onStart: true };
   readonly permissions: PluginPermissions;
 }
 
@@ -94,6 +100,12 @@ export function parseManifest(raw: unknown): ManifestResult {
   const ui = readUi(raw.ui, errors);
   if (raw.host !== undefined && raw.host !== 'own') errors.push(`host: допустимо только "own", получено ${show(raw.host)}`);
   if (raw.activation !== undefined && raw.activation !== 'lazy') errors.push(`activation: допустимо только "lazy", получено ${show(raw.activation)}`);
+  const lock = isRecord(raw.lock) && raw.lock.onStart === true && Object.keys(raw.lock).length === 1;
+  if (raw.lock !== undefined && !lock) errors.push(`lock: допустимо только { "onStart": true }, получено ${show(raw.lock)}`);
+  // Замок без своего экрана запер бы человека без способа открыть окно, экран без права замка не нужен.
+  if (permissions['ui.lock'] === true && ui?.overlay === undefined) errors.push('permissions.ui.lock: нужен ui.overlay - экран, которым человек откроет окно');
+  if (ui?.overlay !== undefined && permissions['ui.lock'] !== true) errors.push('ui.overlay: только с правом permissions.ui.lock');
+  if (lock && permissions['ui.lock'] !== true) errors.push('lock.onStart: только с правом permissions.ui.lock');
 
   if (errors.length > 0 || id === undefined || typeof version !== 'string' || typeof engines !== 'string') return { ok: false, id, errors };
   return {
@@ -114,6 +126,7 @@ export function parseManifest(raw: unknown): ManifestResult {
       ...(raw.host === 'own' && { host: 'own' as const }),
       ...(raw.activation === 'lazy' && { activation: 'lazy' as const }),
       ...(ui && { ui }),
+      ...(lock && { lock: { onStart: true as const } }),
     },
   };
 }
@@ -264,21 +277,38 @@ const VIEW_NAME = /^[a-z][a-z0-9-]*$/;
 // Путь попадает в атрибут страницы-оболочки и в import(): только вниз от каталога плагина, без экранируемых символов.
 const VIEW_ENTRY = /^\.\/(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*\/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\.js$/;
 
-function readUi(raw: unknown, errors: string[]): { views: Record<string, string> } | undefined {
+const isEntry = (entry: unknown): entry is string => typeof entry === 'string' && VIEW_ENTRY.test(entry) && !entry.split('/').includes('..');
+
+function readUi(raw: unknown, errors: string[]): { views: Record<string, string>; overlay?: string } | undefined {
   if (raw === undefined) return undefined;
-  if (!isRecord(raw) || !isRecord(raw.views)) {
-    errors.push('ui: ожидается { "views": { "<вид>": "./<модуль>.js" } }');
+  if (!isRecord(raw) || (raw.views !== undefined && !isRecord(raw.views)) || (raw.views === undefined && raw.overlay === undefined)) {
+    errors.push('ui: ожидается { "views": { "<вид>": "./<модуль>.js" } } и/или { "overlay": "./<модуль>.js" }');
     return undefined;
   }
-  for (const key of Object.keys(raw)) if (key !== 'views') errors.push(`ui.${key}: ядро знает только ui.views`);
+  for (const key of Object.keys(raw)) if (key !== 'views' && key !== 'overlay') errors.push(`ui.${key}: ядро знает только ui.views и ui.overlay`);
   const views: Record<string, string> = {};
-  for (const [name, entry] of Object.entries(raw.views)) {
+  const rawViews = isRecord(raw.views) ? raw.views : {};
+  for (const [name, entry] of Object.entries(rawViews)) {
     if (!VIEW_NAME.test(name)) errors.push(`ui.views.${name}: имя вида - строчные латинские буквы, цифры и дефис`);
-    else if (typeof entry !== 'string' || !VIEW_ENTRY.test(entry) || entry.split('/').some((s) => s === '..')) errors.push(`ui.views.${name}: ожидается путь "./<модуль>.js" внутри каталога плагина, получено ${show(entry)}`);
+    else if (name === 'overlay') errors.push('ui.views.overlay: имя занято экраном замка, его объявляют как ui.overlay');
+    else if (!isEntry(entry)) errors.push(`ui.views.${name}: ожидается путь "./<модуль>.js" внутри каталога плагина, получено ${show(entry)}`);
     else views[name] = entry;
   }
-  if (Object.keys(raw.views).length === 0) errors.push('ui.views: нет ни одного вида');
-  return { views };
+  if (raw.views !== undefined && Object.keys(rawViews).length === 0) errors.push('ui.views: нет ни одного вида');
+  if (raw.overlay === undefined) return { views };
+  if (!isEntry(raw.overlay)) {
+    errors.push(`ui.overlay: ожидается путь "./<модуль>.js" внутри каталога плагина, получено ${show(raw.overlay)}`);
+    return { views };
+  }
+  return { views, overlay: raw.overlay };
+}
+
+/** Модуль вида по имени: `overlay` - экран замка из `ui.overlay`. */
+export function viewEntry(m: PluginManifest, view: string): string | undefined {
+  if (typeof view !== 'string') return undefined;
+  if (view === 'overlay') return m.ui?.overlay;
+  const views = m.ui?.views;
+  return views && Object.hasOwn(views, view) ? views[view] : undefined;
 }
 
 function readSchemaVersion(field: string, raw: unknown, errors: string[]): { version: number } | undefined {

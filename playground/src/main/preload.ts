@@ -13,6 +13,7 @@ const api = {
   runCommand: (command: string): Promise<Reply> => ipcRenderer.invoke('plugins:run', command),
   onPluginsChanged: (listener: () => void): void => void ipcRenderer.on('plugins:changed', () => listener()),
   setViewVisible: (id: string, visible: boolean): Promise<void> => ipcRenderer.invoke('views:visibility', { id, visible }),
+  answerDialog: (id: number, choice: string | undefined): Promise<Reply> => ipcRenderer.invoke('window:answer', { id, choice }),
 };
 
 export type PlaygroundApi = typeof api;
@@ -34,6 +35,8 @@ const view: ViewBridge = {
   terminalClose: (tid) => ipcRenderer.send('view:terminal:close', tid),
   state: (viewName) => ipcRenderer.invoke('view:state', viewName),
   setState: (viewName, value) => ipcRenderer.invoke('view:state:set', viewName, value),
+  dialog: (viewName, spec) => ipcRenderer.invoke('view:dialog', viewName, spec),
+  keys: () => ipcRenderer.invoke('view:keys'),
   onTerminal: (listener) => void ipcRenderer.on('view:terminal', (_event, event: TerminalEvent) => listener(event)),
 };
 

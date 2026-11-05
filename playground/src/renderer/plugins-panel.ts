@@ -5,6 +5,7 @@ import type { FeedLine, KeyRow, PluginRow, PluginsSnapshot, Reply } from '../sha
 import type { DisablePreview } from '../../../core/src/loader.ts';
 import { byId, el } from './dom.ts';
 import { ViewsPanel } from './views-panel.ts';
+import { WindowLayerView } from './window-layer.ts';
 import { actionsFor, clock, conflictText, journalFor, keyStatus, mergeFeed, sortedPlugins, STATE_LABEL, summary, type ActionButton } from './plugins-model.ts';
 
 export interface PluginsPort {
@@ -17,6 +18,7 @@ export interface PluginsPort {
   runCommand(command: string): Promise<Reply>;
   onPluginsChanged(listener: () => void): void;
   setViewVisible(id: string, visible: boolean): Promise<void>;
+  answerDialog(id: number, choice: string | undefined): Promise<Reply>;
 }
 
 const LOCAL_LIMIT = 50;
@@ -40,9 +42,11 @@ export class PluginsPanel {
   private loading = false;
   private again = false;
   private readonly port: PluginsPort;
+  private readonly layer: WindowLayerView;
 
   constructor(port: PluginsPort) {
     this.port = port;
+    this.layer = new WindowLayerView(port, byId('playground', HTMLElement), byId('lock-layer', HTMLElement));
     this.views = new ViewsPanel(byId('views', HTMLElement), {
       setViewVisible: (id, visible) => port.setViewVisible(id, visible),
       actions: (row) => actionsFor(row, false).filter((b) => b.action === 'enable' || b.action === 'journal').map((b) => this.button(row.id, b)),
@@ -92,6 +96,7 @@ export class PluginsPanel {
     this.renderFeed();
     this.renderJournal();
     this.views.sync(snapshot.plugins);
+    this.layer.sync(snapshot.window, snapshot.plugins);
   }
 
   private row(row: PluginRow, canHang: boolean): HTMLElement {

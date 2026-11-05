@@ -103,6 +103,14 @@ async function main() {
       const frame = page.mainFrame.framesInSubtree.find((f) => f.origin === 'cyborg-plugin://${id}');
       return frame ? frame.executeJavaScript(${JSON.stringify(expression)}) : null;
     })()`);
+  // Под замком у pin-lock два документа: вид и экран замка; экран - по ?view=overlay.
+  const inOverlay = (id, expression) =>
+    main(`(async () => {
+      const { webContents } = process.mainModule.require('electron');
+      const page = webContents.getAllWebContents().find((w) => w.getType() === 'window');
+      const frame = page.mainFrame.framesInSubtree.find((f) => f.origin === 'cyborg-plugin://${id}' && f.url.includes('view=overlay'));
+      return frame ? frame.executeJavaScript(${JSON.stringify(expression)}) : null;
+    })()`);
   const viewLog = (id) => inView(id, "[...document.querySelectorAll('#log li')].map((l) => l.textContent).join('\\n')");
   const views = () => ev("[...document.querySelectorAll('#views iframe')].map((f) => f.closest('[data-plugin]').dataset.plugin).sort().join(',')");
   const viewVar = (id, name) => inView(id, `getComputedStyle(document.documentElement).getPropertyValue(${JSON.stringify(name)}).trim()`);
@@ -136,7 +144,7 @@ async function main() {
   await waitFor('свободное сочетание дошло до окна', () => feedHas(re('Z', 'до окна дошло')));
   log('перехват клавиш, конфликт, обмен сообщениями через три хоста');
 
-  await waitFor('виды echo, alice и bob во фреймах', async () => (await views()) === 'alice,bob,echo,sessions' && (await inView('bob', "document.readyState")) === 'complete');
+  await waitFor('виды echo, alice и bob во фреймах', async () => (await views()) === 'alice,bob,echo,pin-lock,sessions' && (await inView('bob', "document.readyState")) === 'complete');
   assert.equal(await inView('alice', 'typeof window.playground'), 'undefined', 'вид получил мост окна');
   await inView('alice', "document.getElementById('hello').click()");
   await waitFor('вид alice → чат → вид bob', async () => /→ привет, bob/.test(await viewLog('alice')) && /← alice: привет, bob/.test(await viewLog('bob')));
@@ -189,7 +197,7 @@ async function main() {
     (await states({ chat: 'stopped', alice: 'stopped', bob: 'active' })) && lines().includes('[plugins] bob: чат пропал'),
   );
   assert.match(await text('#plugins-list [data-plugin="alice"] .plugin-reason'), /выгружен вместе с chat/);
-  await waitFor('на месте вида снятой alice - заглушка с причиной', async () => (await views()) === 'bob,echo,sessions' && /выгружен вместе с chat/.test(await text('#views [data-plugin="alice"] .view-reason')));
+  await waitFor('на месте вида снятой alice - заглушка с причиной', async () => (await views()) === 'bob,echo,pin-lock,sessions' && /выгружен вместе с chat/.test(await text('#views [data-plugin="alice"] .view-reason')));
   assert.ok(await ev(`[...document.querySelectorAll('#views [data-plugin="alice"] button')].some((b) => b.textContent === 'Журнал')`), 'у заглушки нет «Журнал»');
   assert.equal((await keyRow(combo('A')))?.live, 'false');
   await press(combo('A'));
@@ -199,7 +207,7 @@ async function main() {
     (await states({ chat: 'active', alice: 'active' })) && lines().includes('[plugins] bob: чат вернулся, подписываюсь снова'),
   );
   assert.notEqual(await pid('chat'), chatPid, 'после выгрузки chat должен подняться в новом процессе');
-  await waitFor('вид alice вернулся', async () => (await views()) === 'alice,bob,echo,sessions');
+  await waitFor('вид alice вернулся', async () => (await views()) === 'alice,bob,echo,pin-lock,sessions');
   await waitFor('новый документ alice помнит приветы из state воркспейса', async () => (await inView('alice', "document.getElementById('greeted')?.textContent")) === 'приветов: 1');
   log('выгрузка с зависимыми, загрузка в новый процесс, переподписка');
 
@@ -265,6 +273,31 @@ async function main() {
   await inView('bob', "document.getElementById('status').click()");
   await waitFor('вид после перезапуска зовёт новый хост', async () => (await statuses()) > before);
   log('перезапуск хоста: вид под плашкой без ввода, документ вида жив, мост ходит в новый хост');
+
+  const answer = () => inView('pin-lock', "document.getElementById('answer').textContent");
+  await waitFor('вид pin-lock знает своё сочетание', async () => /Shift\+L\)$/.test((await inView('pin-lock', "document.getElementById('lock')?.textContent")) ?? ''));
+  await inView('pin-lock', "document.getElementById('ask').click()");
+  await waitFor('диалог ask в слое окна, поверх фреймов', () => ev("document.querySelector('dialog.layer-ask[data-plugin=\"pin-lock\"]')?.open === true"));
+  await ev("document.querySelector('dialog.layer-ask button[data-choice=\"yes\"]').click()");
+  await waitFor('ответ ask дошёл до вида', async () => (await answer()) === 'yes');
+  await inView('pin-lock', "document.getElementById('menu').click()");
+  await waitFor('меню у кнопки вида', () => ev("(() => { const d = document.querySelector('dialog.layer-menu'); return d?.open === true && d.style.top !== ''; })()"));
+  await ev("document.querySelector('dialog.layer-menu').click()");
+  await waitFor('клик мимо меню - отмена', async () => (await answer()) === 'отмена');
+  log('слой окна: ask и menu вида поверх фреймов, ответ и отмена, ctx.keys.of');
+
+  await press(combo('L'));
+  await waitFor('окно закрыто замком pin-lock', () => ev("document.body.dataset.locked === 'true' && document.getElementById('playground').inert && !!document.querySelector('#lock-layer [data-plugin=\"pin-lock\"] iframe')"));
+  await waitFor('экран замка загружен', async () => (await inOverlay('pin-lock', "document.getElementById('status')?.textContent")) === 'Окно закрыто');
+  await press(combo('A'));
+  await waitFor('чужое сочетание под замком не перехвачено', () => feedHas(re('A', 'до окна дошло')));
+  const submit = (pin) => inOverlay('pin-lock', `(() => { document.getElementById('pin').value = ${JSON.stringify(pin)}; document.getElementById('unlock').click(); })()`);
+  await submit('1234');
+  await waitFor('неверный PIN не открывает', async () => (await inOverlay('pin-lock', "document.getElementById('status').textContent")) === 'Неверный PIN');
+  assert.equal(await ev('document.body.dataset.locked'), 'true', 'окно открылось по неверному PIN');
+  await submit('0000');
+  await waitFor('окно открыто по PIN', () => ev("document.body.dataset.locked === 'false' && !document.getElementById('playground').inert && document.getElementById('lock-layer').hidden"));
+  log('замок: виды скрыты, экран замка, чужие сочетания не перехвачены, открытие по PIN');
 
   const agentButtons = () => inView('sessions', "[...document.querySelectorAll('#agents button')].map((b) => b.dataset.agent + (b.disabled ? '-' : '+')).sort().join(',')");
   await waitFor('sessions видит обоих поставщиков cyborg.agent', async () => /^claude-code[+-],shell\+$/.test(await agentButtons()));

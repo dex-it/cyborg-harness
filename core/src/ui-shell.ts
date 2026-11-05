@@ -1,6 +1,6 @@
 // Оболочка вида в его <iframe> (SAD2 §3.8) идёт в браузер: здесь нет node-модулей.
 
-import type { Disposable, FeedLine, PtyExit, PtyInfo, Reply, ThemeTokens, UiContext, UiTerminal, ViewDrop } from '@cyborg/contracts';
+import type { DialogSpec, Disposable, FeedLine, PtyExit, PtyInfo, Reply, ThemeTokens, UiContext, UiTerminal, ViewDrop } from '@cyborg/contracts';
 import { toDisposable } from './disposable.ts';
 
 /** Мост вида к главному процессу, его выдаёт preload приложения; плагин работает с `UiContext`, а не с ним. */
@@ -25,6 +25,10 @@ export interface ViewBridge {
   /** `value` - память вида или undefined. */
   state(view: string): Promise<Reply>;
   setState(view: string, value: unknown): Promise<Reply>;
+  /** `value` - id выбранного пункта или undefined. */
+  dialog(view: string, spec: DialogSpec): Promise<Reply>;
+  /** Команды своего плагина -> сочетание; таблица сочетаний не меняется до перезапуска ядра. */
+  keys(): Promise<Readonly<Record<string, string>>>;
 }
 
 /** Ответ на `terminalOpen`: описание pty, хвост и номер терминала в этом документе. */
@@ -160,7 +164,9 @@ class Terminals {
 
 /** Тема ставится до возврата: модуль плагина монтируется уже на своих токенах, без вспышки чужих цветов. */
 export async function connectView(bridge: ViewBridge, target: ViewTarget): Promise<UiContext> {
+  const keysAsked = bridge.keys();
   let [tokens, memory] = await Promise.all([bridge.theme(), bridge.state(target.view).then(unwrap)]);
+  const keys = { ...(await keysAsked) };
   target.applyTheme(tokens);
   let visible = true;
   const themes = new Listeners<ThemeTokens>(target.report);
@@ -207,6 +213,8 @@ export async function connectView(bridge: ViewBridge, target: ViewTarget): Promi
         memory = value === undefined ? undefined : structuredClone(value);
       },
     }),
+    dialogs: Object.freeze({ show: async (spec: DialogSpec) => unwrap(await bridge.dialog(target.view, spec)) as string | undefined }),
+    keys: Object.freeze({ of: (command: string) => (Object.hasOwn(keys, command) ? keys[command] : undefined) }),
     drag: Object.freeze({ start: (path: string) => bridge.startDrag(path), drop: () => bridge.drop() }),
   });
 }

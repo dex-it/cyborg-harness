@@ -1,4 +1,5 @@
 import type { FeedLine, Reply } from '@cyborg/contracts';
+import type { WindowSnapshot } from '../../../core/src/window-layer.ts';
 
 export type { FeedLine, Reply };
 // Окно playground: снимок, который главный процесс отдаёт интерфейсу (SAD2 §3.2, §3.5).
@@ -24,6 +25,8 @@ export interface PluginRow {
   readonly permissions: readonly string[];
   /** Адрес вида для <iframe>: есть у включённого плагина с `ui` в манифесте; у снятого окно рисует заглушку вместо фрейма. */
   readonly view?: string;
+  /** Адрес экрана замка `ui.overlay`: окно показывает его, пока замок плагина стоит. */
+  readonly overlay?: string;
 }
 
 export interface KeyRow {
@@ -60,5 +63,7 @@ export interface PluginsSnapshot {
   readonly journal: readonly PluginJournalLine[];
   /** «Повесить хост» - SIGSTOP, на Windows его нет. */
   readonly canHang: boolean;
+  /** Диалог на экране и замки окна. */
+  readonly window: WindowSnapshot;
 }
 

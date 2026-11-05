@@ -33,6 +33,8 @@ function fakeBridge(tokens: ThemeTokens) {
     terminalClose: (tid) => calls.push(['close', tid]),
     onTerminal: (l) => (on.terminal = l),
     state: async (view) => (view === 'main' ? { value: { opened: 1 } } : {}),
+    dialog: async (view, spec) => (calls.push(['dialog', view, spec.kind]), spec.kind === 'ask' ? { value: spec.buttons[0]?.id } : { error: 'диалог: меню вне вида' }),
+    keys: async () => ({ 'own.go': 'Ctrl+G' }),
     setState: async (view, value) => (calls.push(['state', view, value]), (value === undefined ? 0 : JSON.stringify(value).length) > 20 ? { error: 'память вида больше 20 байт' } : {}),
   };
   return { bridge, calls, on };
@@ -104,7 +106,7 @@ test('манифест ui.views: путь модуля только вниз о�
     assert.ok(errorsOf({ views: { main: bad } }).some((e) => e.startsWith('ui.views.main:')), bad);
   assert.ok(errorsOf({ views: { Main: './ui.js' } }).some((e) => e.startsWith('ui.views.Main:')));
   assert.ok(errorsOf({ views: {} }).includes('ui.views: нет ни одного вида'));
-  assert.ok(errorsOf({ overlay: './lock.js', views: { main: './ui.js' } }).includes('ui.overlay: ядро знает только ui.views'));
+  assert.ok(errorsOf({ popup: './pop.js', views: { main: './ui.js' } }).includes('ui.popup: ядро знает только ui.views и ui.overlay'));
   assert.ok(errorsOf('./ui.js').some((e) => e.startsWith('ui:')));
 });
 
@@ -173,4 +175,14 @@ test('ядро: память вида в разделе $views state воркс�
   await k.setViewState('own', 'side', undefined);
   assert.deepEqual(doc.$views, { $version: 1, 'own/main': { a: 1 } });
   await k.unload();
+});
+
+test('диалоги и сочетания вида: ответ окна, отказ ядра - исключение; сочетание своей команды без запроса', async () => {
+  const { bridge, calls } = fakeBridge({});
+  const ctx = await connectView(bridge, { pluginId: 'own', view: 'main', applyTheme: () => undefined, report: () => undefined });
+  assert.equal(await ctx.dialogs.show({ kind: 'ask', title: 'Удалить?', buttons: [{ id: 'yes', label: 'Да' }] }), 'yes');
+  await assert.rejects(ctx.dialogs.show({ kind: 'menu', items: [{ id: 'a', label: 'A' }], at: { x: 0, y: 0 } }), /меню вне вида/);
+  assert.deepEqual(calls.filter((c) => c[0] === 'dialog'), [['dialog', 'main', 'ask'], ['dialog', 'main', 'menu']]);
+  assert.equal(ctx.keys.of('own.go'), 'Ctrl+G');
+  assert.equal(ctx.keys.of('toString'), undefined);
 });

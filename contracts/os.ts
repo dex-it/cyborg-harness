@@ -20,6 +20,7 @@ export interface PluginPermissions {
   readonly 'secrets.ref'?: readonly string[];
   /** Задать корни проектов - область `workspace` для всех плагинов. */
   readonly 'security.roots'?: boolean;
+  /** Закрыть окно своим `ui.overlay`; без него манифест не примут. */
   readonly 'ui.lock'?: boolean;
 }
 
@@ -152,6 +153,18 @@ export interface PluginOs {
   readonly clipboard?: { readText?(): Promise<string>; writeText?(text: string): Promise<void> };
   readonly secrets: OsSecrets;
   readonly security?: { setRoots(paths: readonly string[]): Promise<void> };
+  readonly ui?: OsUi;
+}
+
+/** Замок окна: чужие виды скрыты и `inert`, виден только `ui.overlay` владельца, работают только его сочетания и диалоги. Главные части работают дальше. */
+export interface OsUi {
+  /** Повторный вызов владельца меняет только `hideNotifications`. Хост владельца упал - окно остаётся закрытым до его возвращения. */
+  lock(options?: { readonly hideNotifications?: boolean }): Promise<UiLock>;
+}
+
+export interface UiLock {
+  /** Снимает только свой замок; два замка - окно откроется, когда сняты оба. */
+  release(): Promise<void>;
 }
 
 export interface SecretValue {

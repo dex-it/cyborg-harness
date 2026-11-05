@@ -34,7 +34,7 @@ if (!spiking && !app.requestSingleInstanceLock({ workspace: workspaceFile })) ap
 /** Первый запуск: alice и bob делят хост c - видно, как падение одного процесса снимает обоих, а чат в хосте b живёт. */
 const DEFAULT_CONFIG = {
   plugins: {
-    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'sessions'],
+    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'sessions', 'pin-lock'],
     hosts: { a: ['echo'], b: ['chat'], c: ['alice', 'bob'], d: ['flaky'], agents: ['agent-claude-code', 'agent-shell'] },
   },
 };
@@ -93,6 +93,15 @@ windowChannel('plugins:disable-preview', (id) => plugins.disablePreview(id));
 windowChannel('plugins:crash', (id) => plugins.crash(id));
 windowChannel('plugins:hang', (id) => plugins.hang(id));
 windowChannel('plugins:run', (command) => plugins.run(command));
+windowChannel('window:answer', (arg) => plugins.answerDialog(arg));
+ipcMain.handle('view:dialog', (event, view: unknown, spec: unknown) => {
+  const pluginId = senderPlugin(event);
+  return pluginId === undefined ? { error: 'не вид плагина' } : plugins.dialogFor(pluginId, view, spec);
+});
+ipcMain.handle('view:keys', (event) => {
+  const pluginId = senderPlugin(event);
+  return pluginId === undefined ? {} : plugins.keysFor(pluginId);
+});
 ipcMain.handle('view:logs', (event) => {
   const pluginId = senderPlugin(event);
   return pluginId === undefined ? [] : plugins.logsOf(pluginId);

@@ -92,6 +92,7 @@ export interface StartOptions {
   /** Что не дошло до ядра; по умолчанию - в log. */
   readonly onProblem?: (problem: string) => void;
   readonly onDiscovered?: (found: Discovered) => void;
+  readonly onWindow?: () => void;
 }
 
 export async function startPlugins(options: StartOptions): Promise<Kernel & { readonly workspace: string }> {
@@ -129,6 +130,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     os: options.os,
     platform: options.platform,
     idleSeconds: options.idleSeconds,
+    onWindow: () => options.onWindow?.(),
     onLog: (id, message) => {
       options.log(`[plugins] ${id}: ${message}`);
       options.onLog?.(id, message);
@@ -140,6 +142,10 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
   const watching = ws.watch((ids) => void kernel.reloadSections('config', ids), report);
   return {
     ...kernel,
+    // Спред вычисляет геттер один раз: без этого снимок слоя застыл бы на старте.
+    get window() {
+      return kernel.window;
+    },
     workspace: ws.file,
     async unload() {
       watching.dispose();
@@ -161,7 +167,7 @@ export interface PluginsEvents {
   log?(pluginId: string, line: FeedLine): void;
 }
 
-export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProblem' | 'onLog' | 'onDiscovered'> {
+export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProblem' | 'onLog' | 'onDiscovered' | 'onWindow'> {
   /** Процесс хоста для «Уронить» и «Повесить»; у хостов в том же процессе его нет. */
   readonly pidOf?: (hostId: string) => number | undefined;
 }
@@ -199,6 +205,7 @@ export class PluginsService {
           this.events.changed();
         },
         onDiscovered: (found) => (this.views = found.views),
+        onWindow: () => this.events.changed(),
         onLog: (pluginId, text) => {
           const line = this.say({ kind: 'log', subject: pluginId, text });
           this.events.log?.(pluginId, line);
@@ -215,8 +222,10 @@ export class PluginsService {
 
   private record(entry: JournalEntry): void {
     this.entries.push({ at: this.now(), entry });
-    if (this.phase === 'ready' && entry.kind === 'switched-off') this.events.alert(`Плагин ${entry.pluginId} выключен`, describeEntry(entry));
-    if (this.phase === 'ready' && entry.kind === 'host-abandoned') this.events.alert(`Плагины выключены: ${entry.plugins.join(', ')}`, describeEntry(entry));
+    // Под замком с hideNotifications уведомление ядра тоже уходит без текста: его видно на заблокированном экране ОС.
+    const alert = (title: string, body: string) => (this.kernel?.window.locks.some((l) => l.hideNotifications) ? this.events.alert('Cyborg', 'новое событие') : this.events.alert(title, body));
+    if (this.phase === 'ready' && entry.kind === 'switched-off') alert(`Плагин ${entry.pluginId} выключен`, describeEntry(entry));
+    if (this.phase === 'ready' && entry.kind === 'host-abandoned') alert(`Плагины выключены: ${entry.plugins.join(', ')}`, describeEntry(entry));
     this.events.changed();
   }
 
@@ -231,11 +240,11 @@ export class PluginsService {
   /** Виды плагина: по ним протокол cyborg-plugin отдаёт оболочку и файлы; `wake` - запрос пришёл от показа вида. */
   uiOf(pluginId: string, wake = false): PluginUi | undefined {
     const dir = this.views.get(pluginId);
-    const views = this.kernel?.manifests.find((m) => m.id === pluginId)?.ui?.views;
-    if (dir === undefined || views === undefined) return undefined;
+    const ui = this.kernel?.manifests.find((m) => m.id === pluginId)?.ui;
+    if (dir === undefined || ui === undefined) return undefined;
     // Показ вида - вызов ленивого плагина: мосту вида нужна его главная часть.
     if (wake) void this.kernel?.wake(pluginId).catch(() => undefined);
-    return { dir, views };
+    return { dir, views: ui.views, ...(ui.overlay !== undefined && { overlay: ui.overlay }) };
   }
 
   emit(event: SystemEvent): void {
@@ -292,6 +301,33 @@ export class PluginsService {
     }
   }
 
+  /** Диалог вида в слое окна; плагин - из origin фрейма. */
+  async dialogFor(pluginId: string, view: unknown, spec: unknown): Promise<Reply> {
+    if (!this.kernel) return { error: 'ядро плагинов не запущено' };
+    try {
+      const value = await this.kernel.showDialog(pluginId, view as string, spec);
+      return value === undefined ? {} : { value };
+    } catch (error) {
+      return { error: errorMessage(error) };
+    }
+  }
+
+  keysFor(pluginId: string): Readonly<Record<string, string>> {
+    return this.kernel?.keysOf(pluginId) ?? {};
+  }
+
+  /** Ответ человека из окна. */
+  answerDialog(arg: unknown): Reply {
+    if (!isRecord(arg) || typeof arg.id !== 'number' || (arg.choice !== undefined && typeof arg.choice !== 'string')) return { error: 'ответ диалога: { id, choice? }' };
+    if (!this.kernel) return { error: 'ядро плагинов не запущено' };
+    try {
+      this.kernel.answerDialog(arg.id, arg.choice);
+      return {};
+    } catch (error) {
+      return { error: errorMessage(error) };
+    }
+  }
+
   /** Есть ли у плагина вида поставщик контракта; права те же, что у главной части: только requires и optional манифеста. */
   contractFor(pluginId: string, contract: unknown, major: unknown): Reply {
     if (typeof contract !== 'string' || typeof major !== 'number') return { error: 'контракт: ожидаются имя и мажорная версия' };
@@ -337,7 +373,8 @@ export class PluginsService {
         commands,
         permissions: manifest ? describePermissions(manifest.permissions) : [],
         ...(manifest && { version: manifest.version }),
-        ...(s.state !== 'disabled' && manifest?.ui && this.views.has(s.id) && { view: `${viewOrigin(s.id)}/` }),
+        ...(s.state !== 'disabled' && manifest?.ui && Object.keys(manifest.ui.views).length > 0 && this.views.has(s.id) && { view: `${viewOrigin(s.id)}/` }),
+        ...(manifest?.ui?.overlay !== undefined && this.views.has(s.id) && { overlay: `${viewOrigin(s.id)}/?view=overlay` }),
         ...(host !== undefined && { host }),
         ...(pid !== undefined && { pid }),
         ...(s.cause && s.state !== 'active' && { reason: describeEntry(s.cause) }),
@@ -367,6 +404,7 @@ export class PluginsService {
       feed: [...this.feed],
       journal,
       canHang: process.platform !== 'win32' && this.pidOf !== undefined,
+      window: kernel?.window ?? { queued: 0, locks: [] },
     };
   }
 

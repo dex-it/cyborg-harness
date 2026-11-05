@@ -9,7 +9,7 @@ import { CoreError, errorMessage, ignore } from './errors.ts';
 import { providesMatching, resolveGraph, type ContractGraph, type Rejection } from './graph.ts';
 import { CALLBACK, handleKey, marker, SUBSCRIPTION, type ActivateResult, type ContractDescriptor, type SectionInput, type SystemEvent } from './host-runtime.ts';
 import { normalizeKey, resolveKey } from './keys.ts';
-import { checkArgs, parseManifest, type PluginManifest } from './manifest.ts';
+import { checkArgs, parseManifest, viewEntry, type PluginManifest } from './manifest.ts';
 import { ContractRegistry } from './registry.ts';
 import { Endpoint } from './rpc.ts';
 import { satisfies } from './semver.ts';
@@ -17,6 +17,7 @@ import { OsGateway, type OsEnvironment } from './os-gateway.ts';
 import { isRecord, parseWire, type Parsed, type WireSpec } from './wire.ts';
 import type { HostHandle, SpawnHost } from './transports.ts';
 import type { TerminalSink, TerminalView } from './pty.ts';
+import { WindowLayer, type WindowSnapshot } from './window-layer.ts';
 
 export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'invalid'; readonly errors: readonly string[] }
@@ -110,6 +111,8 @@ export interface LoadOptions {
   readonly onGraph?: ((graph: ContractGraph) => Promise<void> | undefined) | undefined;
   readonly onJournal?: ((entry: JournalEntry) => void) | undefined;
   readonly onLog?: ((pluginId: string, message: string) => void) | undefined;
+  /** Диалог на экране, очередь и замки поменялись: приложение перерисовывает слой окна. */
+  readonly onWindow?: ((snapshot: WindowSnapshot) => void) | undefined;
 }
 
 export interface DisableOptions {
@@ -158,6 +161,14 @@ export interface Kernel {
   viewState(pluginId: string, view: string): unknown;
   /** JSON до 64 КБ, undefined - забыть; записи идут по очереди, чтобы параллельные не затёрли друг друга. */
   setViewState(pluginId: string, view: string, value: unknown): Promise<void>;
+  /** Слой окна сейчас: диалог на экране и замки. */
+  readonly window: WindowSnapshot;
+  /** Диалог вида; ответ - id пункта или undefined. Описание проверяется здесь, окно получает разобранную копию. */
+  showDialog(pluginId: string, view: string, spec: unknown): Promise<string | undefined>;
+  /** Ответ человека на диалог `window.dialog`. */
+  answerDialog(id: number, choice: string | undefined): void;
+  /** Свои команды плагина с сочетаниями, как их ловит `keybinding`. */
+  keysOf(pluginId: string): Readonly<Record<string, string>>;
   /** Событие окна или ОС от приложения: ядро раздаёт его активным плагинам. */
   emit(event: SystemEvent): void;
   /** Слушатели `onBeforeQuit` всех хостов, не дольше `budget` мс; после него приложение зовёт `unload`. */
@@ -297,8 +308,12 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   const enabled = new Set(options.enabled);
   const watchdog = { interval: 1000, timeout: 5000, strikes: 3, ...options.watchdog };
   const activationTimeout = options.activationTimeout ?? 10_000;
+  const layer = new WindowLayer((snapshot) => options.onWindow?.(snapshot));
+  const osEnv = options.os ?? defaultOs();
+  const notify = osEnv.notify;
   const gateway = new OsGateway(
-    options.os ?? defaultOs(),
+    // Под замком с hideNotifications текст уведомления виден на заблокированном экране ОС - уходит без него.
+    notify ? { ...osEnv, notify: (title, body) => (layer.hideNotifications ? notify('Cyborg', 'новое событие') : notify(title, body)) } : osEnv,
     (d) => record({ pluginId: d.pluginId, kind: 'denied', method: d.method, detail: d.detail }),
     (id) => Object.assign({}, ...(options.config?.raw(id) ?? []).map(([, data]) => (isRecord(data) ? data : {}))) as Record<string, unknown>,
     (id, method, params) => {
@@ -311,8 +326,8 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   const known: PluginManifest[] = [];
   let viewWrites: Promise<unknown> = Promise.resolve();
   const viewKey = (pluginId: string, view: string): string => {
-    const views = known.find((m) => m.id === pluginId)?.ui?.views;
-    if (typeof view !== 'string' || !views || !Object.hasOwn(views, view)) throw new CoreError('Invalid', `${pluginId}: вида ${JSON.stringify(view)} нет в манифесте`);
+    const m = known.find((k) => k.id === pluginId);
+    if (!m || viewEntry(m, view) === undefined) throw new CoreError('Invalid', `${pluginId}: вида ${JSON.stringify(view)} нет в манифесте`);
     return `${pluginId}/${view}`;
   };
   const viewMemory = (): Record<string, unknown> => {
@@ -456,6 +471,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     for (const d of given) dropProvided(d.pluginId, d.contract, d.version);
     for (const [name, owner] of [...commandOwners]) if (owner === pluginId) commandOwners.delete(name);
     const kept = gateway.forget(pluginId, pty);
+    layer.forget(pluginId);
     const i = active.indexOf(pluginId);
     if (i >= 0) active.splice(i, 1);
     return kept;
@@ -587,7 +603,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       if (p.kind === 'config') guardNetFields(mine(p.pluginId), p.data);
       await options[p.kind]?.write(p.layer, p.pluginId, p.version, p.data);
     });
-    onRequest('os', { pluginId: 'string', method: 'string', args: 'array' }, (p) => gateway.call(mine(p.pluginId), p.method, p.args));
+    onRequest('os', { pluginId: 'string', method: 'string', args: 'array' }, (p) => (p.method === 'ui.lock' || p.method === 'ui.unlock' ? lockCall(mine(p.pluginId), p.method, p.args) : gateway.call(mine(p.pluginId), p.method, p.args)));
     onNote('log', { pluginId: 'string', message: 'string' }, (p) => {
       mine(p.pluginId);
       options.onLog?.(p.pluginId, p.message);
@@ -744,6 +760,16 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     return callHost(liveHost(owner), owner, 'command', { pluginId: owner, name: command, args });
   }
 
+  function lockCall(m: PluginManifest, method: string, args: readonly unknown[]): undefined {
+    if (m.permissions['ui.lock'] !== true) {
+      record({ pluginId: m.id, kind: 'denied', method, detail: 'нет права ui.lock' });
+      throw new CoreError('PermissionDenied', `${m.id}: ${method} - нет права ui.lock`);
+    }
+    if (method === 'ui.unlock') layer.release(m.id);
+    else layer.lock(m.id, isRecord(args[0]) && args[0].hideNotifications === true);
+    return undefined;
+  }
+
   function guard(pluginId: string): void {
     if (!graph.order.includes(pluginId)) throw new CoreError('Unavailable', `${pluginId} не загружается: причина в журнале`);
     if (unloading) throw new CoreError('Unavailable', 'ядро выгружается');
@@ -804,6 +830,8 @@ export async function load(options: LoadOptions): Promise<Kernel> {
 
   async function disable(pluginId: string, options: DisableOptions = {}): Promise<void> {
     guard(pluginId);
+    const owner = [...(active.includes(pluginId) ? dependents(pluginId) : [pluginId])].find((id) => layer.isOwner(id));
+    if (owner !== undefined) throw new CoreError('Invalid', `окно закрыто замком ${owner}: выключить его из-под замка нельзя`);
     userOff.add(pluginId);
     waiting.delete(pluginId);
     await waking.get(pluginId);
@@ -828,12 +856,14 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     }
   }
 
+  // Окно закрыто до первого кадра: иначе виды успели бы показаться до активации плагина замка.
+  if (!options.safeMode) for (const pluginId of graph.order) if (manifestOf(pluginId).lock) layer.lock(pluginId, false);
   for (const pluginId of graph.order) {
     if (options.safeMode) {
       record({ pluginId, kind: 'safe-mode' });
       continue;
     }
-    if (manifestOf(pluginId).activation === 'lazy') {
+    if (manifestOf(pluginId).activation === 'lazy' && !manifestOf(pluginId).lock) {
       waiting.add(pluginId);
       record({ pluginId, kind: 'waiting' });
       continue;
@@ -852,8 +882,18 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     keybindings: [...keys.values()],
     keybinding(key) {
       const k = keys.get(key);
-      return k && (active.includes(k.pluginId) || waiting.has(k.pluginId) || waking.has(k.pluginId)) ? k : undefined;
+      return k && layer.allows(k.pluginId) && (active.includes(k.pluginId) || waiting.has(k.pluginId) || waking.has(k.pluginId)) ? k : undefined;
     },
+    get window() {
+      return layer.snapshot;
+    },
+    showDialog(pluginId, view, spec) {
+      viewKey(pluginId, view);
+      if (unloading) throw new CoreError('Unavailable', 'ядро выгружается');
+      return layer.show(pluginId, view, spec);
+    },
+    answerDialog: (id, choice) => layer.answer(id, choice),
+    keysOf: (pluginId) => Object.fromEntries([...keys.values()].filter((k) => k.pluginId === pluginId).map((k) => [k.command, k.key])),
     wake,
     openTerminal: (pluginId, ticket, sink) => gateway.openTerminal(pluginId, ticket, sink),
     viewState: (pluginId, view) => {
@@ -923,6 +963,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
         dropPlugin(pluginId);
       }
       gateway.releaseAllPty();
+      layer.clear();
       for (const host of [...hosts.values()]) stopHost(host, new CoreError('HostGone', 'ядро выгружено'));
     },
   };

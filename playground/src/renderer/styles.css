@@ -478,3 +478,83 @@ kbd {
   gap: 8px;
   justify-content: flex-end;
 }
+
+body[data-locked='true'] main {
+  visibility: hidden;
+}
+
+.lock-layer {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  background: var(--bg);
+}
+
+.lock-layer[hidden] {
+  display: none;
+}
+
+.lock-screen {
+  display: grid;
+  min-height: 0;
+}
+
+.lock-screen iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.lock-wait {
+  place-self: center;
+  color: var(--fg-faint);
+}
+
+.layer-dialog {
+  max-width: 460px;
+  padding: 14px 16px;
+  border: 1px solid var(--border, #8884);
+  border-radius: var(--radius, 8px);
+}
+
+.layer-dialog h3 {
+  margin: 0 0 8px;
+}
+
+.layer-from {
+  opacity: 0.7;
+  font-size: 0.85em;
+}
+
+.layer-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.layer-menu {
+  position: fixed;
+  margin: 0;
+  padding: 4px;
+}
+
+.layer-menu::backdrop {
+  background: transparent;
+}
+
+.layer-items {
+  display: grid;
+}
+
+.layer-items button {
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 4px 10px;
+}
+
+.layer-items button:hover,
+.layer-items button:focus-visible {
+  background: var(--accent);
+  color: var(--bg);
+}
