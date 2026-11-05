@@ -6,6 +6,7 @@ import type { DisablePreview } from '../../../core/src/loader.ts';
 import { byId, el } from './dom.ts';
 import { ViewsPanel } from './views-panel.ts';
 import { moveFocus } from './focus.ts';
+import { SideTabs } from './side-tabs.ts';
 import { WindowLayerView } from './window-layer.ts';
 import { actionsFor, clock, conflictText, journalFor, keyStatus, mergeFeed, sortedPlugins, STATE_LABEL, summary, type ActionButton } from './plugins-model.ts';
 
@@ -41,6 +42,7 @@ export class PluginsPanel {
   private readonly journalAll = byId('plugins-journal-all', HTMLButtonElement);
   private readonly journalEl = byId('plugins-journal', HTMLElement);
   private readonly views: ViewsPanel;
+  private readonly tabs = new SideTabs(byId('side-tabs', HTMLElement));
   private snapshot: PluginsSnapshot | null = null;
   private focus: string | null = null;
   private readonly errors = new Map<string, string>();
@@ -253,7 +255,7 @@ export class PluginsPanel {
   private showJournal(pluginId: string | null): void {
     this.focus = pluginId;
     this.renderJournal();
-    this.journalEl.scrollIntoView({ block: 'nearest' });
+    this.tabs.reveal(this.journalEl);
   }
 
   private renderJournal(): void {

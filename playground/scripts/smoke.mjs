@@ -322,7 +322,7 @@ async function main() {
   await press('F6');
   await waitFor('F6: фокус на первой панели', async () => /pane-plugins/.test(await focusedArea()));
   await press('F6');
-  await waitFor('F6: следующая панель', async () => /pane-documents/.test(await focusedArea()));
+  await waitFor('F6: скрытые вкладки пропущены, следом вид сессии', async () => (await focusedArea()) === 'вид sessions');
   await press('Shift+F6');
   await press('Shift+F6');
   await waitFor('Shift+F6 с первой панели - на последний вид', async () => /^вид /.test(await focusedArea()));
@@ -415,6 +415,7 @@ async function main() {
 
   assert.equal(await button('flaky', 'Журнал'), true, 'у flaky нет кнопки «Журнал»');
   assert.equal(await text('#plugins-journal-title'), 'Журнал: flaky');
+  assert.equal(await ev("document.getElementById('tab-journal').getAttribute('aria-selected') + ':' + document.getElementById('panel-journal').hidden"), 'true:false', '«Журнал» плагина не открыл вкладку журнала');
   assert.doesNotMatch(await text('#plugins-journal'), /\bchat\b/, 'журнал flaky показал чужие записи');
   assert.equal(await button('flaky', 'Включить снова'), true, 'у выключенного flaky нет «Включить снова»');
   await waitFor('flaky включён снова', async () => (await state('flaky')) === 'active');
