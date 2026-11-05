@@ -204,7 +204,7 @@ async function viewAt(contents: WebContents, point: Electron.Point): Promise<str
   const [x, y] = [point.x - bounds.x, point.y - bounds.y];
   const id: unknown = await contents
     .executeJavaScript(
-      `(() => { for (const f of document.querySelectorAll('#views iframe')) { const r = f.getBoundingClientRect(); if (${x} >= r.left && ${x} < r.right && ${y} >= r.top && ${y} < r.bottom) return f.closest('[data-plugin]')?.dataset.plugin ?? null; } return null; })()`,
+      `(() => { for (const f of document.querySelectorAll('.views iframe')) { const r = f.getBoundingClientRect(); if (${x} >= r.left && ${x} < r.right && ${y} >= r.top && ${y} < r.bottom) return f.closest('[data-plugin]')?.dataset.plugin ?? null; } return null; })()`,
     )
     .catch(() => null);
   return typeof id === 'string' ? id : undefined;

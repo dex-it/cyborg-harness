@@ -9,8 +9,8 @@ const TYPES: Record<string, string> = {
   '.png': 'image/png',
 };
 
-/** Вид видит только свой origin: ни сети, ни чужих видов, ни inline-скриптов. */
-export const VIEW_CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:";
+/** Вид видит только свой origin: ни сети, ни чужих видов, ни inline-скриптов; инлайн-стили разрешены - xterm и Monaco вставляют <style>, а скрипту вида они не дают ничего сверх CSSOM. */
+export const VIEW_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:";
 
 /** Файлы оболочки вида: их отдаёт приложение под origin плагина, чтобы CSP `'self'` их пропустил. */
 export const SHELL_PATH = '/.cyborg/';

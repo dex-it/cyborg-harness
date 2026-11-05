@@ -1,14 +1,20 @@
 // Вид sessions: кнопка на каждого поставщика cyborg.agent и терминал последней сессии по билету главной части.
 
-import type { AgentFacts, Disposable, ItemEventDetail, SessionAction, UiContext, UiTerminal } from '@cyborg/contracts';
+import type { AgentFacts, Disposable, ItemEventDetail, SessionAction, ThemeTokens, UiContext, UiTerminal } from '@cyborg/contracts';
+import { FitAddon } from '@xterm/addon-fit';
+import { Terminal, type ITheme } from '@xterm/xterm';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}): HTMLElementTagNameMap[K] {
   return Object.assign(document.createElement(tag), props);
 }
 
-const ESCAPES = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]|\\r`, 'g');
-
 const ARROWS: Readonly<Record<string, string>> = { ArrowUp: '\x1b[A', ArrowDown: '\x1b[B', ArrowRight: '\x1b[C', ArrowLeft: '\x1b[D' };
+
+function palette(tokens: ThemeTokens): ITheme {
+  const bg = tokens['--cy-surface'] ?? tokens['--cy-bg'] ?? '#000000';
+  const fg = tokens['--cy-fg'] ?? '#ffffff';
+  return { background: bg, foreground: fg, cursor: fg, cursorAccent: bg, selectionBackground: tokens['--cy-border'] ?? '#808080' };
+}
 
 type AgentRow = AgentFacts & { readonly pluginId: string };
 interface PreviousRow {
@@ -21,8 +27,7 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
   const status = el('span', { id: 'session-state', className: 'state', textContent: 'нет сессии' });
   const header = el('header');
   header.append(el('strong', { textContent: 'Сессии' }), agents, status);
-  const screen = el('pre', { id: 'screen', className: 'screen' });
-  screen.setAttribute('aria-label', 'Вывод сессии');
+  const screen = el('div', { id: 'screen', className: 'screen' });
   // Элементы ядра: оболочка вида определила их до mount.
   const line = el('cy-field', { id: 'line' });
   line.setAttribute('placeholder', 'Ввод в сессию, Enter - отправить');
@@ -36,16 +41,26 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
   previous.setAttribute('aria-label', 'Сессии прошлого запуска');
   // Кнопки предлагает агент вызовом инструмента suggest_actions; человек нажимает - реплика уходит в сессию.
   const suggested = el('div', { id: 'actions', className: 'agents', hidden: true });
-  root.append(el('link', { rel: 'stylesheet', href: new URL('./ui.css', import.meta.url).href }), header, previous, screen, suggested, line);
+  const sheet = (href: string) => el('link', { rel: 'stylesheet', href: new URL(href, import.meta.url).href });
+  root.append(sheet('./xterm.css'), sheet('./ui.css'), header, previous, screen, suggested, line);
+
+  const xterm = new Terminal({ cursorBlink: true, scrollback: 5000, fontFamily: ctx.theme.tokens['--cy-font-mono'] ?? 'monospace', fontSize: 13, theme: palette(ctx.theme.tokens) });
+  const fit = new FitAddon();
+  xterm.loadAddon(fit);
+  const themed = ctx.theme.onChange((tokens) => (xterm.options.theme = palette(tokens)));
+  let shown = false;
 
   const state = (text: string) => (status.textContent = text);
-  const print = (chunk: string) => {
-    screen.textContent = (screen.textContent + chunk.replace(ESCAPES, '')).slice(-8000);
-    screen.scrollTop = screen.scrollHeight;
-  };
   const failed = (error: unknown) => state(`отказ: ${error instanceof Error ? error.message : String(error)}`);
   let term: UiTerminal | undefined;
   let polling = 0;
+  xterm.onData((data) => void term?.write(data).catch(failed));
+  // Агент рисует под размер pty: экран вида вырос - pty растёт вместе с ним, иначе TUI займёт угол.
+  xterm.onResize(({ cols, rows }) => void term?.resize(cols, rows).catch(failed));
+  const resized = new ResizeObserver(() => {
+    if (shown) fit.fit();
+  });
+  resized.observe(screen);
   const showActions = (list: readonly SessionAction[]) => {
     suggested.replaceChildren(
       ...list.map((a) => {
@@ -54,6 +69,7 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
           if (!term) return;
           if (a.submit) {
             void term.write(`${a.text}\r`).catch(failed);
+            xterm.focus();
             return;
           }
           line.value = a.text;
@@ -85,14 +101,24 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
     void poll(ticket, generation).catch(() => {
       if (generation === polling) showActions([]);
     });
-    screen.textContent = '';
-    print(opened.backlog);
-    opened.onData(print);
+    if (!shown) {
+      shown = true;
+      empty.remove();
+      xterm.open(screen);
+    }
+    xterm.reset();
+    fit.fit();
+    void opened.resize(xterm.cols, xterm.rows).catch(failed);
+    xterm.write(opened.backlog);
+    opened.onData((chunk) => {
+      if (term === opened) xterm.write(chunk);
+    });
     opened.onExit((exit) => {
       state(`${title}: вышла с ${String(exit.code)}`);
       if (term === opened) term = undefined;
     });
     state(`${title}: pid ${String(opened.pid)}`);
+    xterm.focus();
     void listPrevious().catch(failed);
   };
   const listPrevious = async () => {
@@ -135,7 +161,10 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
   return {
     dispose: () => {
       polling++;
+      resized.disconnect();
+      themed.dispose();
       term?.close();
+      xterm.dispose();
     },
   };
 }

@@ -346,3 +346,4 @@ test('sessions: инструменты поставщиков - по id плаг
   assert.deepEqual([...tools].map(([name, t]) => `${name}:${t.source.pluginId}`), ['dup:alpha', 'z:zed']);
   assert.equal(log.length, 3, log.join('; '));
 });
+

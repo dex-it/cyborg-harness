@@ -55,11 +55,12 @@ async function connect(url) {
       pending.set(id, (d) => (d.error ? rej(new Error(d.error.message)) : res(d.result)));
       socket.send(JSON.stringify({ id, method, params }));
     });
-  return async (expression) => {
+  const evaluate = async (expression) => {
     const result = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
     if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text);
     return result.result?.value;
   };
+  return Object.assign(evaluate, { send });
 }
 
 async function main() {
@@ -88,6 +89,23 @@ async function main() {
       page.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
       page.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
     })()`);
+  // Ввод как с клавиатуры через протокол DevTools страницы: он идёт во фрейм с фокусом и не зависит от фокуса окна в оконной системе.
+  const typeText = (text) => ev.send('Input.insertText', { text });
+  const KEY_CODES = { Enter: 13, ArrowDown: 40 };
+  const tap = async (key) => {
+    const base = { key, code: key, windowsVirtualKeyCode: KEY_CODES[key], ...(key === 'Enter' && { text: '\r' }) };
+    await ev.send('Input.dispatchKeyEvent', { type: 'keyDown', ...base });
+    await ev.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
+  };
+  // Строки экрана xterm: в #screen лежат ещё его <style>, их текст в проверку не берём.
+  const sessionScreen = () => inView('sessions', "[...document.querySelectorAll('#screen .xterm-rows > div')].map((d) => d.textContent).join('\\n')");
+  const clickIn = async (id, selector) => {
+    const frame = await ev(`(() => { const r = document.querySelector('.views [data-plugin="${id}"] iframe').getBoundingClientRect(); return [r.left, r.top]; })()`);
+    const inner = await inView(id, `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
+    const at = { x: frame[0] + inner[0], y: frame[1] + inner[1], button: 'left', clickCount: 1 };
+    await ev.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...at });
+    await ev.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...at });
+  };
   const feed = () => ev(`[...document.querySelectorAll('#feed .log-line')].map((l) => l.textContent)`);
   const feedHas = async (pattern) => (await feed()).some((l) => pattern.test(l));
   const pid = (id) => ev(`/pid (\\d+)/.exec(document.querySelector('#plugins-list [data-plugin=${JSON.stringify(id)}] .plugin-host')?.textContent ?? '')?.[1] ?? ''`);
@@ -112,7 +130,7 @@ async function main() {
       return frame ? frame.executeJavaScript(${JSON.stringify(expression)}) : null;
     })()`);
   const viewLog = (id) => inView(id, "[...document.querySelectorAll('#log li')].map((l) => l.textContent).join('\\n')");
-  const views = () => ev("[...document.querySelectorAll('#views iframe')].map((f) => f.closest('[data-plugin]').dataset.plugin).sort().join(',')");
+  const views = () => ev("[...document.querySelectorAll('.views iframe')].map((f) => f.closest('[data-plugin]').dataset.plugin).sort().join(',')");
   const viewVar = (id, name) => inView(id, `getComputedStyle(document.documentElement).getPropertyValue(${JSON.stringify(name)}).trim()`);
   const theme = (source) => main(`process.mainModule.require('electron').nativeTheme.themeSource = ${JSON.stringify(source)}`);
   const states = async (expected) => {
@@ -317,8 +335,17 @@ async function main() {
   await inView('sessions', "document.querySelector('#agents cy-button[data-agent=\"shell\"]').click()");
   await waitFor('сессия агента shell открыта', async () => /^Оболочка: pid \d+$/.test(await inView('sessions', "document.getElementById('session-state').textContent")));
   await inView('sessions', `(() => { const l = document.getElementById('line'); l.value = 'echo агент-$((5*5))'; l.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); })()`);
-  await waitFor('терминал сессии ответил', async () => /агент-25/.test(await inView('sessions', "document.getElementById('screen').textContent")));
-  log(`cyborg.agent: два поставщика (${await agentButtons()}), sessions запускает pty по описанию агента`);
+  await waitFor('терминал сессии ответил', async () => /агент-25/.test(await sessionScreen()));
+  assert.ok(await inView('sessions', "document.getElementById('screen').contains(document.activeElement)"), 'открытая сессия не забрала фокус на экран');
+  await clickIn('sessions', '#screen');
+  await typeText('echo экран-$((6*7))');
+  await tap('Enter');
+  await waitFor('клавиши с экрана дошли до сессии', async () => /экран-42/.test(await sessionScreen()));
+  await inView('sessions', `(() => { const l = document.getElementById('line'); l.value = 'echo размер-$(stty size | tr " " x)'; l.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); })()`);
+  let ptySize = '';
+  await waitFor('pty сообщил размер', async () => (ptySize = /размер-(\d+x\d+)/.exec(await sessionScreen())?.[1] ?? '') !== '');
+  assert.notEqual(ptySize, '32x120', 'размер pty не подогнан под экран вида');
+  log(`cyborg.agent: два поставщика (${await agentButtons()}), sessions запускает pty по описанию агента; клавиши с экрана уходят в сессию, pty по экрану ${ptySize}`);
 
   // Элементы ядра: оболочка определила их до mount; клавиши шлём в тень, как их шлёт браузер с фокусом там.
   const kit = await inView('sessions', `(() => {
@@ -365,7 +392,7 @@ async function main() {
   if (process.env.CYBORG_SMOKE_CLAUDE === '1') {
     assert.match(await agentButtons(), /claude-code\+/, 'CYBORG_SMOKE_CLAUDE=1, а claude не найден в PATH оболочки входа');
     await inView('sessions', "document.querySelector('#agents cy-button[data-agent=\"claude-code\"]').click()");
-    const screen = () => inView('sessions', "document.getElementById('screen').textContent");
+    const screen = () => sessionScreen();
     // Новый каталог сессий claude сначала спрашивает о доверии; уже доверенный сразу начинает сессию.
     await waitFor('живой claude: вопрос о доверии к каталогу или начало сессии', async () => /trust\s*this\s*folder/.test(await screen()) || lines().some((l) => /claude-code s\S+: сессия агента/.test(l)), 60_000);
     let reached = 'хук SessionStart дошёл событием session';
@@ -374,11 +401,11 @@ async function main() {
       const chosen = async () => /❯\s*Yes,\s*I\s*trust/.test((await screen()).slice(-400));
       // Ink выводит диалог раньше, чем принимает клавиши.
       for (let i = 0; i < 5 && !(await chosen()); i++) {
-        await inView('sessions', "(() => { const l = document.getElementById('line'); l.value = ''; l.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' })); })()");
+        await tap('ArrowDown');
         await waitFor('выбор в диалоге claude', chosen, 2000).catch(() => undefined);
       }
-      assert.ok(await chosen(), 'стрелка из пустого поля не дошла до диалога claude');
-      reached = 'вопрос о доверии к каталогу, стрелка из вида меняет выбор';
+      assert.ok(await chosen(), 'стрелка с экрана не дошла до диалога claude');
+      reached = 'вопрос о доверии к каталогу, стрелка с экрана меняет выбор';
     }
     await waitFor('вкладка сессии claude в панели «Документы»', async () => (await docRows()) === 'sessions · session:true');
     await ev("document.querySelector('#documents-list .document-row button').click()");

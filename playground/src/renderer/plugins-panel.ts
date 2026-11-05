@@ -58,7 +58,7 @@ export class PluginsPanel {
     this.views = new ViewsPanel(byId('views', HTMLElement), {
       setViewVisible: (id, visible) => port.setViewVisible(id, visible),
       actions: (row) => actionsFor(row, false).filter((b) => b.action === 'enable' || b.action === 'journal').map((b) => this.button(row.id, b)),
-    });
+    }, { id: 'sessions', root: byId('main-view', HTMLElement) });
     this.journalAll.addEventListener('click', () => this.showJournal(null));
     byId('workspace-open', HTMLButtonElement).addEventListener('click', () => void port.openWorkspace());
     port.onPluginsChanged(() => void this.refresh());

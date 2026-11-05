@@ -27,10 +27,13 @@ export class ViewsPanel {
   private readonly root: HTMLElement;
   private readonly empty: HTMLElement;
   private readonly port: ViewsPort;
+  private readonly main: { readonly id: string; readonly root: HTMLElement } | undefined;
 
-  constructor(root: HTMLElement, port: ViewsPort) {
+  /** `main` - вид, которому окно отдаёт свою большую область вместо места в общей сетке. */
+  constructor(root: HTMLElement, port: ViewsPort, main?: { readonly id: string; readonly root: HTMLElement }) {
     this.root = root;
     this.port = port;
+    this.main = main;
     this.empty = el('p', 'empty', 'Включённых плагинов с видом нет');
     root.append(this.empty);
   }
@@ -50,13 +53,14 @@ export class ViewsPanel {
       if (!box) {
         box = viewMode(row) === 'placeholder' ? this.placeholder(row) : this.frame(row);
         this.boxes.set(id, box);
-        if (previous) previous.after(box.figure);
+        if (id === this.main?.id) this.main.root.append(box.figure);
+        else if (previous) previous.after(box.figure);
         else this.root.prepend(box.figure);
       }
       box.update(row);
-      previous = box.figure;
+      if (id !== this.main?.id) previous = box.figure;
     }
-    this.empty.hidden = this.boxes.size > 0;
+    this.empty.hidden = [...this.boxes.keys()].some((id) => id !== this.main?.id);
   }
 
   private frame(row: PluginRow): Box {

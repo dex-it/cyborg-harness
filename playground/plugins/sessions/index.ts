@@ -109,7 +109,7 @@ const plugin: PluginModule = {
       let handle: PtyHandle;
       try {
         const spec = await provider.impl.launch({ sessionId, cwd: ctx.os.paths.data, ...(resume !== undefined && { resumeId: resume }), ...(promptFragments.length > 0 && { promptFragments }), ...(tools && { tools }) });
-        handle = await pty.spawn({ ...spec, cols: 100, rows: 16, persist: true, describedBy: provider.pluginId });
+        handle = await pty.spawn({ ...spec, cols: 120, rows: 32, persist: true, describedBy: provider.pluginId });
       } catch (error) {
         forget();
         throw error;

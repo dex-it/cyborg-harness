@@ -21,13 +21,15 @@ header {
   flex: 1;
   min-height: 6em;
   margin: 0;
-  padding: 6px 8px;
-  overflow: auto;
-  white-space: pre-wrap;
-  font-family: var(--cy-font-mono);
+  padding: 4px 6px;
+  overflow: hidden;
   background: var(--cy-surface);
   border: 1px solid var(--cy-border);
   border-radius: var(--cy-radius);
+}
+
+.screen .xterm {
+  height: 100%;
 }
 
 #line::part(input) {
@@ -36,7 +38,6 @@ header {
 
 #no-session {
   height: 100%;
-  white-space: normal;
   font-family: var(--cy-font);
 }
 
@@ -51,4 +52,9 @@ header {
 
 #actions[hidden] {
   display: none;
+}
+
+.screen:focus-within {
+  outline: 2px solid var(--cy-accent);
+  outline-offset: -1px;
 }

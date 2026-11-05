@@ -2,8 +2,8 @@
 
 /** Области в порядке обхода; вид - сам фрейм: дальше фокус ведёт документ плагина. */
 function areas(): HTMLElement[] {
-  const panes = [...document.querySelectorAll<HTMLElement>('main .pane:not(.pane-views)')];
-  const frames = [...document.querySelectorAll<HTMLIFrameElement>('#views [data-plugin] iframe')].filter((f) => f.offsetParent !== null);
+  const panes = [...document.querySelectorAll<HTMLElement>('main .pane:not(.pane-views, .pane-session)')];
+  const frames = [...document.querySelectorAll<HTMLIFrameElement>('.views [data-plugin] iframe')].filter((f) => f.offsetParent !== null);
   return [...panes, ...frames].filter((a) => !a.closest('[hidden], [inert]'));
 }
 

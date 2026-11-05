@@ -3,7 +3,7 @@
 import type { ItemEventDetail, ListItem, TabItem, ToggleEventDetail, TreeItem } from '@cyborg/contracts';
 import { checkItems, checkTree, stepIndex, stepTab, treeKey, visibleRows, type TreeRow } from '../src/elements-model.ts';
 
-// CSP вида - style-src 'self': <style> в тени он режет, а сконструированные таблицы CSSOM - нет.
+// Сконструированные таблицы CSSOM не зависят от style-src окна: строгий CSP без 'unsafe-inline' резал бы <style> в тени.
 function sheet(css: string): CSSStyleSheet {
   const s = new CSSStyleSheet();
   s.replaceSync(css);

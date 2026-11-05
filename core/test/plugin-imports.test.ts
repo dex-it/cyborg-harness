@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { isBuiltin } from 'node:module';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import ts from 'typescript';
@@ -55,9 +56,12 @@ const inside = (dir: string, target: string) => target === dir || target.startsW
 /** Нарушения в файле плагина `file` из каталога `home`. */
 export function violations(file: string, text: string, home: string, declarations: string): string[] {
   const found: string[] = [];
+  // Вид - браузерный бандл во фрейме без Node (SAD2 §3.8): пакеты вроде xterm шлюз не обходят, а встроенные модули и electron - да.
+  const view = inside(path.join(home, 'ui'), file);
   for (const use of usesOf(file, text)) {
     const where = `${path.relative(repo, file)}:${use.line} '${use.spec}'`;
     if (use.spec === CONTRACTS) continue;
+    if (view && !use.spec.startsWith('.') && !isBuiltin(use.spec) && use.spec !== 'electron' && !use.spec.startsWith('electron/')) continue;
     if (!use.spec.startsWith('.')) {
       found.push(`${where}: только ${CONTRACTS} и свои модули`);
       continue;
@@ -128,6 +132,10 @@ describe('импорты плагинов', () => {
     ].join('\n');
     const found = violations(file, text, home, declarations).map((v) => Number(/:(\d+) /.exec(v)?.[1]));
     assert.deepEqual(found, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    const viewText = ["import { Terminal } from '@xterm/xterm';", "import fs from 'fs';", "import { ipcRenderer } from 'electron';", "import { helper } from '../../other/index.ts';"].join('\n');
+    const viewFound = violations(path.join(home, 'ui', 'ui.ts'), viewText, home, declarations).map((v) => Number(/:(\d+) /.exec(v)?.[1]));
+    assert.deepEqual(viewFound, [2, 3, 4]);
+    assert.equal(violations(file, viewText, home, declarations).length, 4, 'пакет вида разрешён только в ui/');
     assert.equal(declarationProblems(declarations, "export const x = 1;\nimport fs from 'node:fs';\nexport interface Ok { a: 1 }\n").length, 2);
   });
 });

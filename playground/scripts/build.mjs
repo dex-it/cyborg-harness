@@ -27,3 +27,5 @@ const views = readdirSync(join(root, 'plugins'), { withFileTypes: true })
 cpSync(join(root, 'plugins'), join(dist, 'plugins'), { recursive: true, filter: (from) => !/[/\\]ui[/\\][^/\\]+\.ts$/.test(from) });
 cpSync(join(root, 'bench'), join(dist, 'bench'), { recursive: true });
 for (const file of views) await build({ ...browser, format: 'esm', entryPoints: [join(root, 'plugins', file)], outfile: join(dist, 'plugins', file.replace(/\.ts$/, '.js')) });
+// Вид грузит стили только со своего origin: таблица xterm кладётся рядом с модулем вида sessions.
+cpSync(join(root, '..', 'node_modules', '@xterm', 'xterm', 'css', 'xterm.css'), join(dist, 'plugins', 'sessions', 'ui', 'xterm.css'));
