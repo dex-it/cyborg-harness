@@ -149,6 +149,14 @@ test('битый манифест невключённого плагина - di
   assert.deepEqual(k.journal, [{ pluginId: 'old', kind: 'disabled' }]);
 });
 
+test('манифест с полем новой версии API - в журнале причина версия, а не поле', async () => {
+  const k = await kernel({}, { enabled: ['next', 'typo'], manifests: [manifest('next', { engines: { cyborg: '^1.3' }, layout: {} }), manifest('typo', { keybinding: [] })] });
+  assert.deepEqual(k.journal, [
+    { pluginId: 'next', kind: 'invalid', errors: ['engines.cyborg: нужен API Cyborg ^1.3, есть 1.0.0'] },
+    { pluginId: 'typo', kind: 'invalid', errors: ['keybinding: незнакомое поле манифеста'] },
+  ]);
+});
+
 test('хуки: граф до кода, журнал по ходу, лог с id плагина, снятие в журнале', async () => {
   const seen: string[] = [];
   const k = await kernel(

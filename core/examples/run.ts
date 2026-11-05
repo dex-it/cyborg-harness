@@ -140,7 +140,7 @@ function printManifests(raw: unknown[], enabled: readonly string[]): void {
     return items.length > 0 ? `${label} ${items.join(', ')}` : undefined;
   };
   const seen = new Set<string>();
-  for (const parsed of raw.map(parseManifest)) {
+  for (const parsed of raw.map((m) => parseManifest(m))) {
     if (!parsed.ok || !enabled.includes(parsed.manifest.id)) continue;
     const m = parsed.manifest;
     seen.add(m.id);

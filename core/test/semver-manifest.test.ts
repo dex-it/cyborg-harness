@@ -33,6 +33,20 @@ test('allowsMajor: есть ли в диапазоне версия этой м�
 
 const base = { id: 'pin-lock', version: '1.0.0', engines: { cyborg: '^1' } };
 
+test('манифест: незнакомое поле верхнего уровня - отказ с именем поля, $schema разрешён', () => {
+  const typo = parseManifest({ ...base, keybinding: [], lok: { onStart: true } });
+  assert.deepEqual(typo, { ok: false, id: 'pin-lock', errors: ['keybinding: незнакомое поле манифеста', 'lok: незнакомое поле манифеста'] });
+  assert.ok(parseManifest({ $schema: './manifest.schema.json', ...base }).ok);
+});
+
+test('манифест под другой API: при ошибках разбора одна причина - версия API', () => {
+  const newer = { ...base, engines: { cyborg: '^1.3' }, layout: { kind: 'side' } };
+  assert.deepEqual(parseManifest(newer, '1.2.0'), { ok: false, id: 'pin-lock', errors: ['engines.cyborg: нужен API Cyborg ^1.3, есть 1.2.0'] });
+  assert.deepEqual(parseManifest(newer, '1.3.0'), { ok: false, id: 'pin-lock', errors: ['layout: незнакомое поле манифеста'] });
+  assert.deepEqual(parseManifest(newer), { ok: false, id: 'pin-lock', errors: ['layout: незнакомое поле манифеста'] });
+  assert.ok(parseManifest({ ...base, engines: { cyborg: '^2' } }, '1.2.0').ok, 'без ошибок разбора версию судит граф');
+});
+
 test('манифест: минимальный приводится к полной форме', () => {
   const r = parseManifest({ ...base, provides: { 'cyborg.lock': '1.0' } });
   assert.ok(r.ok);
