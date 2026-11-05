@@ -376,7 +376,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     return Object.fromEntries(Object.entries(raw).filter(([key]) => key !== VERSION_KEY));
   };
   for (const raw of options.manifests) {
-    const parsed = parseManifest(raw);
+    const parsed = parseManifest(raw, options.apiVersion);
     const id = parsed.ok ? parsed.manifest.id : parsed.id;
     if (parsed.ok) known.push(parsed.manifest);
     if (id !== undefined && !enabled.has(id)) record({ pluginId: id, kind: 'disabled' });

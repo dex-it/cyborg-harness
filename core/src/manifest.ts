@@ -1,5 +1,5 @@
 import { CoreError } from './errors.ts';
-import { isValidRange, parseVersion } from './semver.ts';
+import { isValidRange, parseVersion, satisfies } from './semver.ts';
 import { normalizeKey } from './keys.ts';
 import { readPermissions, type PluginPermissions } from './permissions.ts';
 import { readGuard, type MemberGuards } from './via-contract.ts';
@@ -70,13 +70,23 @@ export type ManifestResult =
 
 const ID = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/;
 
+const TOP_LEVEL = new Set([
+  '$schema', 'id', 'version', 'engines', 'provides', 'requires', 'optional', 'consumes', 'commands', 'keybindings',
+  'config', 'state', 'permissions', 'ui', 'documents', 'host', 'activation', 'lock',
+]);
+
 export function isValidId(value: string): boolean {
   return ID.test(value);
 }
 
-export function parseManifest(raw: unknown): ManifestResult {
+/** С `apiVersion` манифест под другой API при ошибках разбора отклоняется одной причиной - версией API. */
+export function parseManifest(raw: unknown, apiVersion?: string): ManifestResult {
   const errors: string[] = [];
   if (!isRecord(raw)) return { ok: false, errors: ['манифест не объект'] };
+
+  for (const key of Object.keys(raw)) {
+    if (!TOP_LEVEL.has(key)) errors.push(`${key}: незнакомое поле манифеста`);
+  }
 
   const id = typeof raw.id === 'string' ? raw.id : undefined;
   if (id === undefined || !isValidId(id)) errors.push(`id: ожидается имя вида "pin-lock" или "cyborg.files", получено ${show(raw.id)}`);
@@ -116,6 +126,10 @@ export function parseManifest(raw: unknown): ManifestResult {
   if (ui?.overlay !== undefined && permissions['ui.lock'] !== true) errors.push('ui.overlay: только с правом permissions.ui.lock');
   if (lock && permissions['ui.lock'] !== true) errors.push('lock.onStart: только с правом permissions.ui.lock');
 
+  // Поле или значение новой версии API старое ядро не знает: причина отказа - версия, а не поле.
+  if (errors.length > 0 && apiVersion !== undefined && typeof engines === 'string' && isValidRange(engines) && !satisfies(apiVersion, engines)) {
+    return { ok: false, id, errors: [`engines.cyborg: нужен API Cyborg ${engines}, есть ${apiVersion}`] };
+  }
   if (errors.length > 0 || id === undefined || typeof version !== 'string' || typeof engines !== 'string') return { ok: false, id, errors };
   return {
     ok: true,
