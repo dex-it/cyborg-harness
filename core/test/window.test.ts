@@ -8,7 +8,8 @@ import { load, type LoadOptions } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts } from '../src/transports.ts';
-import { parseDialog, WindowLayer, type WindowSnapshot } from '../src/window-layer.ts';
+import { keepFocus } from '../src/ui-shell.ts';
+import { parseDialog, reservedId, WINDOW_OWNER, WindowLayer, type WindowSnapshot } from '../src/window-layer.ts';
 
 const shown = (layer: WindowLayer) => layer.snapshot.dialog;
 const shownId = (layer: WindowLayer): number => {
@@ -241,4 +242,67 @@ test('манифест: ui.lock только с ui.overlay, overlay и lock.onSt
   assert.match(errors({ lock: { onStart: false } }).join(), /lock: допустимо только/);
   assert.match(errors({ ui: { views: { overlay: './x.js' } } }).join(), /имя занято/);
   assert.match(errors({ permissions: { 'ui.lock': true }, ui: { overlay: '../lock.js' } }).join(), /ui.overlay: ожидается путь/);
+});
+
+test('команды окна: F6 и Shift+F6 у ядра, плагин их не перехватит, человек переназначит; под замком не работают', async () => {
+  const pad: PluginModule = {
+    activate(ctx) {
+      ctx.commands.register('pad.open', () => 'open');
+      return undefined;
+    },
+  };
+  const { start } = kernel(
+    { pin, pad },
+    {
+      enabled: ['pin', 'pad'],
+      manifests: [pinManifest(), manifest('pad', { commands: { 'pad.open': {} }, keybindings: [{ key: 'F6', command: 'pad.open' }] })],
+      keybindings: [
+        { key: 'Ctrl+Alt+Right', command: 'cyborg.window.focus-next' },
+        { key: 'Shift+F6', command: null },
+      ],
+      platform: 'linux',
+    },
+  );
+  const k = await start();
+  assert.deepEqual(k.keybinding('F6'), { key: 'F6', command: 'cyborg.window.focus-next', pluginId: WINDOW_OWNER, shadowed: [{ pluginId: 'pad', command: 'pad.open' }] });
+  assert.ok(k.journal.some((e) => e.kind === 'key-conflict' && e.pluginId === 'pad' && e.winner === WINDOW_OWNER));
+  assert.equal(k.keybinding('Ctrl+Alt+Right')?.command, 'cyborg.window.focus-next');
+  assert.ok(!k.journal.some((e) => e.kind === 'key-ignored'), 'команда окна - известная команда');
+  assert.equal(k.keybinding('Shift+F6'), undefined, 'освобождённое сочетание идёт в окно');
+  await k.run('pin.lock', false);
+  assert.equal(k.keybinding('F6'), undefined, 'под замком области недоступны');
+  await k.run('pin.unlock');
+  assert.equal(k.keybinding('F6')?.pluginId, WINDOW_OWNER);
+  await k.unload();
+});
+
+test('манифест: id, в пространстве которого лежат команды окна, занят', () => {
+  for (const id of ['cyborg', 'cyborg.window']) assert.equal(reservedId(id), true, id);
+  for (const id of ['cyborg.files', 'cyborg.window.focus-next', 'window']) assert.equal(reservedId(id), false, id);
+  const r = parseManifest(manifest('cyborg.window'));
+  assert.ok(!r.ok && r.errors.join().includes('занято командами окна'));
+});
+
+test('keepFocus: фокус, пришедший во фрейм, ложится на autofocus или первый элемент, но не сбивает запомненный', () => {
+  const focused: string[] = [];
+  const el = (name: string) => ({ focus: () => void focused.push(name) });
+  const listeners = new Set<() => void>();
+  const doc: { activeElement: unknown; body: unknown } = { activeElement: null, body: {} };
+  const win = {
+    document: doc,
+    addEventListener: (_: 'focus', l: () => void) => void listeners.add(l),
+    removeEventListener: (_: 'focus', l: () => void) => void listeners.delete(l),
+  };
+  let auto: ReturnType<typeof el> | null = null;
+  const sub = keepFocus(win, { querySelector: (s) => (s === '[autofocus]' ? auto : el('первая кнопка')) });
+  const arrive = () => listeners.forEach((l) => l());
+  arrive();
+  doc.activeElement = doc.body;
+  auto = el('поле');
+  arrive();
+  doc.activeElement = { name: 'запомненный' };
+  arrive();
+  assert.deepEqual(focused, ['первая кнопка', 'поле']);
+  sub.dispose();
+  assert.equal(listeners.size, 0);
 });

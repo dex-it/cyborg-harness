@@ -219,6 +219,30 @@ export async function connectView(bridge: ViewBridge, target: ViewTarget): Promi
   });
 }
 
+/** Минимум DOM для `keepFocus`: ядро собирается без lib DOM. */
+export interface FocusWindow {
+  addEventListener(type: 'focus', listener: () => void): void;
+  removeEventListener(type: 'focus', listener: () => void): void;
+  readonly document: { readonly activeElement: unknown; readonly body: unknown };
+}
+
+export interface FocusRoot {
+  querySelector(selectors: string): { focus(): void } | null;
+}
+
+// Не `[href]`: под него попадает <link> стилей вида, а focus() на нём пустой.
+const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** Фокус пришёл во фрейм снаружи: в первый раз он лёг бы на body, и человек не видел бы, где он. Дальше документ сам помнит свой элемент. */
+export function keepFocus(win: FocusWindow, root: FocusRoot): Disposable {
+  const place = () => {
+    const { activeElement, body } = win.document;
+    if (activeElement === null || activeElement === body) (root.querySelector('[autofocus]') ?? root.querySelector(FOCUSABLE))?.focus();
+  };
+  win.addEventListener('focus', place);
+  return toDisposable(() => win.removeEventListener('focus', place));
+}
+
 /** Вызывает `mount` модуля; не модуль вида - исключение с причиной, которую оболочка покажет вместо вида. */
 export function mountModule(module: unknown, root: unknown, ctx: UiContext): Disposable {
   const mount = typeof module === 'object' && module !== null ? (module as { mount?: unknown }).mount : undefined;

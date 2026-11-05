@@ -17,7 +17,7 @@ import { OsGateway, type OsEnvironment } from './os-gateway.ts';
 import { isRecord, parseWire, type Parsed, type WireSpec } from './wire.ts';
 import type { HostHandle, SpawnHost } from './transports.ts';
 import type { TerminalSink, TerminalView } from './pty.ts';
-import { WindowLayer, type WindowSnapshot } from './window-layer.ts';
+import { WINDOW_COMMANDS, WINDOW_OWNER, WindowLayer, type WindowSnapshot } from './window-layer.ts';
 
 export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'invalid'; readonly errors: readonly string[] }
@@ -253,6 +253,7 @@ function bindKeys(
   const rank = (m: PluginManifest) => [bundled.has(m.id) ? 0 : 1, m.id] as const;
   const sorted = [...manifests].sort((a, b) => rank(a)[0] - rank(b)[0] || rank(a)[1].localeCompare(rank(b)[1]));
   const table = new Map<string, Keybinding>();
+  for (const [command, key] of Object.entries(WINDOW_COMMANDS)) table.set(key, { key, command, pluginId: WINDOW_OWNER, shadowed: [] });
   for (const m of sorted) {
     for (const k of m.keybindings) {
       const key = resolveKey(k.key, platform);
@@ -270,7 +271,7 @@ function bindKeys(
 
 /** Выбор пользователя сильнее манифестов: конфликт он уже разрешил, поэтому вытесненные - в shadowed без записи о конфликте. */
 function applyUserKeys(table: Map<string, Keybinding>, user: readonly UserKeybinding[], manifests: readonly PluginManifest[], platform: string, record: (entry: JournalEntry) => void): void {
-  const ownerOf = new Map(manifests.flatMap((m) => Object.keys(m.commands).map((c) => [c, m.id] as const)));
+  const ownerOf = new Map([...Object.keys(WINDOW_COMMANDS).map((c) => [c, WINDOW_OWNER] as const), ...manifests.flatMap((m) => Object.keys(m.commands).map((c) => [c, m.id] as const))]);
   for (const u of user) {
     const normalized = normalizeKey(u.key);
     if (normalized === undefined) {
@@ -882,7 +883,8 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     keybindings: [...keys.values()],
     keybinding(key) {
       const k = keys.get(key);
-      return k && layer.allows(k.pluginId) && (active.includes(k.pluginId) || waiting.has(k.pluginId) || waking.has(k.pluginId)) ? k : undefined;
+      if (!k || !layer.allows(k.pluginId)) return undefined;
+      return k.pluginId === WINDOW_OWNER || active.includes(k.pluginId) || waiting.has(k.pluginId) || waking.has(k.pluginId) ? k : undefined;
     },
     get window() {
       return layer.snapshot;

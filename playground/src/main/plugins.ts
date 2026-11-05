@@ -22,6 +22,7 @@ import {
   type WatchdogOptions,
 } from '../../../core/src/index.ts';
 import { isRecord } from '../../../core/src/manifest.ts';
+import { WINDOW_OWNER } from '../../../core/src/window-layer.ts';
 import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply } from '../shared/plugins.ts';
 import { viewOrigin } from '../shared/views.ts';
 import type { PluginUi } from './view-files.ts';
@@ -165,6 +166,8 @@ export interface PluginsEvents {
   alert(title: string, body: string): void;
   /** Сообщение плагина: его вид получает строку сразу, без снимка. */
   log?(pluginId: string, line: FeedLine): void;
+  /** Команда окна (`WINDOW_COMMANDS`): исполняет окно, а не плагин. */
+  windowCommand?(command: string): void;
 }
 
 export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProblem' | 'onLog' | 'onDiscovered' | 'onWindow'> {
@@ -415,7 +418,8 @@ export class PluginsService {
     const binding = key === undefined ? undefined : kernel?.keybinding(key);
     if (!binding) return false;
     this.say({ kind: 'key', subject: binding.key, text: `→ ${binding.command} (${binding.pluginId})` });
-    void this.run(binding.command);
+    if (binding.pluginId === WINDOW_OWNER) this.events.windowCommand?.(binding.command);
+    else void this.run(binding.command);
     return true;
   }
 

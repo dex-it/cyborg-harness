@@ -58,6 +58,9 @@ app.on('second-instance', (_event, _argv, _cwd, data) => {
   }
 });
 const plugins = new PluginsService({
+  windowCommand: (command) => {
+    if (win && !win.isDestroyed()) win.webContents.send('window:command', command);
+  },
   changed: () => {
     if (win && !win.isDestroyed()) win.webContents.send('plugins:changed');
   },

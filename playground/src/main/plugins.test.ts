@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { inlineHosts } from '../../../core/src/transports.ts';
 import type { PluginModule } from '../../../core/src/plugin.ts';
+import { WINDOW_OWNER } from '../../../core/src/window-layer.ts';
+import type { KeyRow } from '../shared/plugins.ts';
 import { discoverPlugins, PluginsService, startPlugins } from './plugins.ts';
 
 function tmp(): string {
@@ -165,7 +167,8 @@ test('служба окна: сочетания с конфликтом, пер�
   });
   const ctrlShiftE = { key: 'E', code: 'KeyE', control: true, alt: false, shift: true, meta: false };
 
-  assert.deepEqual(service.snapshot().keys, [
+  const own = (keys: readonly KeyRow[]) => keys.filter((k) => k.pluginId !== WINDOW_OWNER);
+  assert.deepEqual(own(service.snapshot().keys), [
     { key: 'Ctrl+Shift+E', command: 'ear.hi', pluginId: 'ear', live: true, shadowed: [{ pluginId: 'voice', command: 'voice.ping' }] },
   ]);
   assert.equal(service.press({ ...ctrlShiftE, shift: false }), false, 'свободное сочетание ядро не забирает');
@@ -190,7 +193,7 @@ test('служба окна: сочетания с конфликтом, пер�
       ['ear', 'stopped', false, false],
     ],
   );
-  assert.equal(off.keys[0]?.live, false);
+  assert.equal(own(off.keys)[0]?.live, false);
   assert.equal(service.press(ctrlShiftE), false, 'владелец выгружен - нажатие уходит в окно');
 
   assert.deepEqual(await service.enable('voice'), {});

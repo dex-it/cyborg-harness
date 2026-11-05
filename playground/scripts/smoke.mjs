@@ -299,6 +299,19 @@ async function main() {
   await waitFor('окно открыто по PIN', () => ev("document.body.dataset.locked === 'false' && !document.getElementById('playground').inert && document.getElementById('lock-layer').hidden"));
   log('замок: виды скрыты, экран замка, чужие сочетания не перехвачены, открытие по PIN');
 
+  const focusedArea = () => ev("(() => { const a = document.activeElement; return a?.tagName === 'IFRAME' ? 'вид ' + a.closest('[data-plugin]').dataset.plugin : [...(a?.classList ?? [])].join(' '); })()");
+  await ev('document.activeElement?.blur()');
+  await press('F6');
+  await waitFor('F6: фокус на первой панели', async () => /pane-plugins/.test(await focusedArea()));
+  await press('F6');
+  await waitFor('F6: следующая панель', async () => /pane-keys/.test(await focusedArea()));
+  await press('Shift+F6');
+  await press('Shift+F6');
+  await waitFor('Shift+F6 с первой панели - на последний вид', async () => /^вид /.test(await focusedArea()));
+  const last = (await focusedArea()).slice('вид '.length);
+  await waitFor('фокус вида лёг на его элемент, а не на body', async () => !['BODY', null].includes(await inView(last, 'document.activeElement?.tagName ?? null')));
+  log(`порядок фокуса: F6 по панелям, Shift+F6 по кругу на вид ${last}, внутри вида - первый элемент`);
+
   const agentButtons = () => inView('sessions', "[...document.querySelectorAll('#agents button')].map((b) => b.dataset.agent + (b.disabled ? '-' : '+')).sort().join(',')");
   await waitFor('sessions видит обоих поставщиков cyborg.agent', async () => /^claude-code[+-],shell\+$/.test(await agentButtons()));
   await inView('sessions', "document.querySelector('#agents button[data-agent=\"shell\"]').click()");

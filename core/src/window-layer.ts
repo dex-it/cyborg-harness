@@ -4,6 +4,15 @@ import type { DialogChoice, DialogSpec } from '@cyborg/contracts';
 import { CoreError } from './errors.ts';
 import { isRecord } from './wire.ts';
 
+/** Владелец команд окна в таблице сочетаний: команды исполняет приложение, а не плагин. */
+export const WINDOW_OWNER = 'cyborg.window';
+
+/** Переход между областями окна; сочетание ловится до страницы, поэтому выводит и из фрейма, который забирает Tab себе (терминал). */
+export const WINDOW_COMMANDS: Readonly<Record<string, string>> = {
+  'cyborg.window.focus-next': 'F6',
+  'cyborg.window.focus-prev': 'Shift+F6',
+};
+
 const MAX_PENDING = 8;
 const MAX_CHOICES = 12;
 const MAX_LABEL = 80;
@@ -51,6 +60,11 @@ function choices(field: string, raw: unknown): DialogChoice[] {
 }
 
 /** Описание от вида - недоверенные данные: в окно уходит только разобранная копия. */
+/** Плагин с таким id мог бы объявить команду окна в своём пространстве имён. */
+export function reservedId(id: string): boolean {
+  return Object.keys(WINDOW_COMMANDS).some((c) => c.startsWith(`${id}.`));
+}
+
 export function parseDialog(raw: unknown): DialogSpec {
   if (!isRecord(raw)) throw new CoreError('Invalid', 'диалог: ожидается { kind: "ask" | "menu", ... }');
   if (raw.kind === 'ask') {

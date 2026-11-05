@@ -5,6 +5,7 @@ import type { FeedLine, KeyRow, PluginRow, PluginsSnapshot, Reply } from '../sha
 import type { DisablePreview } from '../../../core/src/loader.ts';
 import { byId, el } from './dom.ts';
 import { ViewsPanel } from './views-panel.ts';
+import { moveFocus } from './focus.ts';
 import { WindowLayerView } from './window-layer.ts';
 import { actionsFor, clock, conflictText, journalFor, keyStatus, mergeFeed, sortedPlugins, STATE_LABEL, summary, type ActionButton } from './plugins-model.ts';
 
@@ -19,6 +20,7 @@ export interface PluginsPort {
   onPluginsChanged(listener: () => void): void;
   setViewVisible(id: string, visible: boolean): Promise<void>;
   answerDialog(id: number, choice: string | undefined): Promise<Reply>;
+  onWindowCommand(listener: (command: string) => void): void;
 }
 
 const LOCAL_LIMIT = 50;
@@ -53,6 +55,10 @@ export class PluginsPanel {
     });
     this.journalAll.addEventListener('click', () => this.showJournal(null));
     port.onPluginsChanged(() => void this.refresh());
+    port.onWindowCommand((command) => {
+      if (command === 'cyborg.window.focus-next') moveFocus(1);
+      if (command === 'cyborg.window.focus-prev') moveFocus(-1);
+    });
     window.addEventListener('keydown', (event) => this.reached(event));
   }
 
