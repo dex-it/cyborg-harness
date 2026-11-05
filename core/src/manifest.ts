@@ -3,7 +3,7 @@ import { isValidRange, parseVersion, satisfies } from './semver.ts';
 import { normalizeKey } from './keys.ts';
 import { readPermissions, type PluginPermissions } from './permissions.ts';
 import { readGuard, type MemberGuards } from './via-contract.ts';
-import { isRecord, isWireKind, matchesKind, type WireKind } from './wire.ts';
+import { isRecord, isWireKind, matchesKind, own, type WireKind } from './wire.ts';
 import { reservedId, WINDOW_COMMANDS } from './window-layer.ts';
 
 export { isRecord };
@@ -104,10 +104,10 @@ export function parseManifest(raw: unknown, apiVersion?: string): ManifestResult
   const consumes = readRanges('consumes', raw.consumes, errors);
 
   for (const name of Object.keys(requires)) {
-    if (name in optional) errors.push(`${name}: контракт одновременно в requires и optional`);
+    if (Object.hasOwn(optional, name)) errors.push(`${name}: контракт одновременно в requires и optional`);
   }
   for (const name of Object.keys(consumes)) {
-    if (name in requires || name in optional) errors.push(`${name}: контракт кратности many не может быть в requires или optional`);
+    if (Object.hasOwn(requires, name) || Object.hasOwn(optional, name)) errors.push(`${name}: контракт кратности many не может быть в requires или optional`);
   }
 
   const commands = readCommands(raw.commands, id, errors);
@@ -298,7 +298,7 @@ function readKeybindings(raw: unknown, commands: Readonly<Record<string, Command
       errors.push(`keybindings: сочетание ${show(isRecord(item) ? item.key : item)} не разобрано, ожидается вида "CmdOrCtrl+Shift+K" или "F5"`);
       continue;
     }
-    const spec = typeof command === 'string' ? commands[command] : undefined;
+    const spec = typeof command === 'string' ? own(commands, command) : undefined;
     if (typeof command !== 'string' || !spec) {
       errors.push(`keybindings.${key}: команда ${show(command)} не объявлена в commands этого плагина`);
       continue;

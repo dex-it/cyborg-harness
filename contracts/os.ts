@@ -68,6 +68,8 @@ export interface HttpRequest {
   readonly method?: string;
   readonly headers?: Readonly<Record<string, string>>;
   readonly body?: string;
+  /** Срок всего запроса вместе с телом, мс; по умолчанию 30 с, дольше - `Timeout`. Тело ответа больше 16 МиБ - `Remote`. */
+  readonly timeoutMs?: number;
 }
 
 export interface HttpResponse {
@@ -105,8 +107,8 @@ export interface OsFs {
   stat(path: string): Promise<FileStat>;
   /** Кусок файла с байта `offset`, от 4 байт до 1 МиБ: длинный журнал читается частями, а не целиком. */
   readSlice(path: string, offset: number, maxBytes: number): Promise<FileSlice>;
-  /** Изменения файла или каталога по праву чтения; у каталога - имена изменённых, события склеиваются за 50 мс. */
-  watch(path: string, listener: (names: readonly string[]) => void): Promise<Disposable>;
+  /** Изменения файла или каталога по праву чтения; у каталога - имена изменённых, события склеиваются за 50 мс. Ядро закрыло наблюдение само (ошибка ОС, путь ушёл из прав) - `onClose` с причиной. */
+  watch(path: string, listener: (names: readonly string[]) => void, onClose?: (reason: string) => void): Promise<Disposable>;
   writeText(path: string, text: string): Promise<void>;
   mkdir(path: string): Promise<void>;
   remove(path: string): Promise<void>;

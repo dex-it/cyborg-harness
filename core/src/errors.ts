@@ -32,6 +32,10 @@ export function ignore(): undefined {
   return undefined;
 }
 
-export function fromWire(error: WireError): CoreError {
-  return new CoreError(error.code, error.message);
+/** Ошибка пришла от другой стороны канала и формы не обещает. */
+export function fromWire(error: unknown): CoreError {
+  if (typeof error !== 'object' || error === null) return new CoreError('Remote', 'ошибка без формы');
+  const { code, message } = error as Record<string, unknown>;
+  if (typeof code !== 'string' || typeof message !== 'string') return new CoreError('Remote', 'ошибка без формы');
+  return new CoreError(code as CoreErrorCode, message);
 }

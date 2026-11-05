@@ -4,6 +4,11 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Значение по ключу из недоверенного имени: `constructor` и `__proto__` иначе нашлись бы в прототипе. */
+export function own<T>(record: Readonly<Record<string, T>> | undefined, key: string): T | undefined {
+  return record !== undefined && Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
 const KINDS = {
   string: (v: unknown): v is string => typeof v === 'string',
   number: (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v),

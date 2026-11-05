@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, PtyExit } from '@cyborg/contracts';
@@ -12,7 +12,8 @@ import { inlineHosts, type HostHandle } from '../src/transports.ts';
 const tick = () => new Promise((r) => setTimeout(r, 30));
 
 async function setup(plugins: Record<string, unknown>, withBackend = true) {
-  const root = await mkdtemp(path.join(tmpdir(), 'cyborg-pty-'));
+  // На macOS tmpdir - симлинк /var -> /private/var, а шлюз отдаёт пути после realpath.
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-pty-')));
   const work = path.join(root, 'work');
   await mkdir(work);
   const backend = fakePty();
@@ -97,7 +98,7 @@ test('pty.spawn с describedBy: описание поставщика прохо
   assert.equal(s.hasPty('honest'), false, 'launch не даёт поставщику ctx.os.pty');
   const denied = s.k.journal.flatMap((e) => (e.kind === 'denied' ? [`${e.pluginId}: ${e.detail}`] : []));
   assert.equal(denied.length, 4);
-  assert.match(denied[0] ?? '', /^consumer: rogue: программа не в launch/);
+  assert.match(denied[0] ?? '', /^consumer: rogue: аргументы не по правилу launch: \/bin\/bash$/);
   assert.deepEqual(describePermissions({ launch: [rule] }), ['предлагает запуск в терминале: /bin/bash -c exec agent (окружение: AGENT_FILE) - его выполнит потребитель']);
 });
 

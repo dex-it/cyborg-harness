@@ -3,6 +3,7 @@ import { CoreError } from './errors.ts';
 import type { ContractGraph } from './graph.ts';
 import type { PluginManifest } from './manifest.ts';
 import { allowsMajor, compareVersions, parseVersion, satisfies } from './semver.ts';
+import { own } from './wire.ts';
 
 export type ContractImpl = Readonly<Record<string, unknown>>;
 
@@ -29,7 +30,7 @@ export class ContractRegistry {
 
   /** Проверка provide без записи: хост отвечает плагину синхронно, не дожидаясь ядра. */
   assertCanProvide(pluginId: string, contract: string, version: string): void {
-    const declared = this.#manifest(pluginId).provides[contract];
+    const declared = own(this.#manifest(pluginId).provides, contract);
     if (!declared?.includes(version)) {
       throw new CoreError('NotDeclared', `${pluginId}: контракт ${contract}@${version} не объявлен в provides`);
     }
@@ -58,19 +59,19 @@ export class ContractRegistry {
   /** requires и optional: связанный графом поставщик нужной мажорной версии; для optional без поставщика - undefined. */
   get(consumerId: string, contract: string, wanted: number): ContractImpl | undefined {
     const m = this.#manifest(consumerId);
-    const range = m.requires[contract] ?? m.optional[contract];
+    const range = own(m.requires, contract) ?? own(m.optional, contract);
     if (range === undefined) throw new CoreError('NotDeclared', `${consumerId}: ${contract} нет в requires и optional`);
     assertMajor(consumerId, contract, range, wanted);
     const providerId = this.#bindings.get(consumerId)?.get(contract);
     const entry = providerId === undefined ? undefined : this.#best(contract, range, providerId, wanted);
     if (entry) return entry.impl;
-    if (contract in m.requires) throw new CoreError('Unavailable', `${consumerId}: поставщик ${contract} не отдал контракт`);
+    if (Object.hasOwn(m.requires, contract)) throw new CoreError('Unavailable', `${consumerId}: поставщик ${contract} не отдал контракт`);
     return undefined;
   }
 
   /** consumes: все отданные сейчас поставщики подходящей версии этой мажорной. */
   all(consumerId: string, contract: string, wanted: number): Provider[] {
-    const range = this.#manifest(consumerId).consumes[contract];
+    const range = own(this.#manifest(consumerId).consumes, contract);
     if (range === undefined) throw new CoreError('NotDeclared', `${consumerId}: ${contract} нет в consumes`);
     assertMajor(consumerId, contract, range, wanted);
     const byPlugin = new Map<string, Provider>();
@@ -84,7 +85,7 @@ export class ContractRegistry {
 
   onChange(consumerId: string, contract: string, listener: () => void): Disposable {
     const m = this.#manifest(consumerId);
-    if (!(contract in m.requires || contract in m.optional || contract in m.consumes)) {
+    if (![m.requires, m.optional, m.consumes].some((declared) => Object.hasOwn(declared, contract))) {
       throw new CoreError('NotDeclared', `${consumerId}: ${contract} не объявлен потребляемым`);
     }
     const set = this.#listeners.get(contract) ?? new Set();

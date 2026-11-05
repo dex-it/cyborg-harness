@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { pluginOfOrigin } from '../shared/views.ts';
 
@@ -71,7 +72,16 @@ function fileIn(dir: string, pathname: string): ViewRequest | undefined {
   const file = path.resolve(root, `.${relative}`);
   if (!file.startsWith(root + path.sep)) return undefined;
   const type = TYPES[path.extname(file)];
-  return type === undefined ? undefined : { kind: 'file', file, type };
+  if (type === undefined) return undefined;
+  // Симлинк в каталоге плагина отдал бы виду любой файл пользователя: граница - по настоящим путям.
+  let real: string;
+  try {
+    real = fs.realpathSync(file);
+    if (!real.startsWith(fs.realpathSync(root) + path.sep)) return undefined;
+  } catch {
+    return undefined;
+  }
+  return { kind: 'file', file: real, type };
 }
 
 /** Статика без оболочки: `/` - index.html каталога; так спайк отдаёт пробные страницы. */

@@ -300,7 +300,7 @@ async function main() {
   log('перезапуск хоста: вид под плашкой без ввода, документ вида жив, мост ходит в новый хост');
 
   const answer = () => inView('pin-lock', "document.getElementById('answer').textContent");
-  await waitFor('вид pin-lock знает своё сочетание', async () => /Shift\+L\)$/.test((await inView('pin-lock', "document.getElementById('lock')?.textContent")) ?? ''));
+  await waitFor('вид pin-lock знает своё сочетание', async () => ((await inView('pin-lock', "document.getElementById('lock')?.textContent")) ?? '').endsWith(`(${combo('L')})`));
   await inView('pin-lock', "document.getElementById('ask').click()");
   await waitFor('диалог ask в слое окна, поверх фреймов', () => ev("document.querySelector('dialog.layer-ask[data-plugin=\"pin-lock\"]')?.open === true"));
   await ev("document.querySelector('dialog.layer-ask button[data-choice=\"yes\"]').click()");

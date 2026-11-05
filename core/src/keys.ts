@@ -1,3 +1,5 @@
+import { own } from './wire.ts';
+
 /** Модификаторы в порядке записи; `CmdOrCtrl` - Cmd на macOS и Ctrl на остальных. */
 const MODIFIERS = ['CmdOrCtrl', 'Ctrl', 'Alt', 'Shift', 'Meta'] as const;
 type Modifier = (typeof MODIFIERS)[number];
@@ -33,7 +35,7 @@ export function normalizeKey(raw: string): string | undefined {
   if (key === undefined) return undefined;
   const mods = new Set<Modifier>();
   for (const part of parts) {
-    const mod = ALIASES[part.toLowerCase()];
+    const mod = own(ALIASES, part.toLowerCase());
     if (mod === undefined || mods.has(mod)) return undefined;
     mods.add(mod);
   }

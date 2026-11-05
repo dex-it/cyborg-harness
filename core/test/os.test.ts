@@ -14,7 +14,8 @@ import { inlineHosts } from '../src/transports.ts';
 const manifest = (id: string, permissions?: unknown) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...(permissions !== undefined && { permissions }) });
 
 async function sandbox() {
-  const root = await mkdtemp(path.join(tmpdir(), 'cyborg-os-'));
+  // На macOS tmpdir - симлинк /var -> /private/var, а шлюз отдаёт пути после realpath.
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-os-')));
   const dirs = { data: path.join(root, 'data'), temp: path.join(root, 'temp'), work: path.join(root, 'work'), outside: path.join(root, 'outside') };
   for (const d of [dirs.work, dirs.outside]) await mkdir(d, { recursive: true });
   return { root, ...dirs, [Symbol.asyncDispose]: () => rm(root, { recursive: true, force: true }) };

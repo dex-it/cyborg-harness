@@ -78,18 +78,22 @@ test('onIdle: один раз на простой, снова - после ак�
   await settle();
   assert.equal(asked, 0, 'ядро спрашивает ОС о простое без подписчиков');
   const sub = ctx!.system.onIdle(60, () => fired.push(idle));
+  // Значение простоя держится, пока ядро не спросит ОС дважды: медленный раннер за 20 мс может не успеть ни разу.
+  const polled = async () => {
+    for (const from = asked; asked < from + 2; ) await sleep(5);
+  };
   assert.throws(() => ctx!.system.onIdle(0, () => undefined), { code: 'Invalid' });
   idle = 30;
-  await settle();
+  await polled();
   idle = 61;
-  await settle();
+  await polled();
   idle = 90;
-  await settle();
+  await polled();
   assert.deepEqual(fired, [61], 'второй раз за тот же простой');
   idle = 0;
-  await settle();
+  await polled();
   idle = 70;
-  await settle();
+  await polled();
   assert.deepEqual(fired, [61, 70]);
   sub.dispose();
   await settle();

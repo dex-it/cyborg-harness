@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { BrowserWindow, clipboard, dialog, Notification, safeStorage, shell } from 'electron';
 import * as nodePty from 'node-pty';
-import type { OsEnvironment, SecretStore } from '../../../core/src/index.ts';
+import { groupKilled, type OsEnvironment, type SecretStore } from '../../../core/src/index.ts';
 
 /** Секреты в файле, каждое значение зашифровано safeStorage; без шифрования ОС хранилище недоступно, а не открыто. */
 export function fileSecrets(file: string): SecretStore {
@@ -59,6 +59,6 @@ export function electronOs(options: { userData: string; roots: () => readonly st
         return result.canceled ? [] : result.filePaths;
       },
     },
-    pty: { spawn: (file, args, o) => nodePty.spawn(file, args, o) },
+    pty: { spawn: (file, args, o) => groupKilled(nodePty.spawn(file, args, o)) },
   };
 }

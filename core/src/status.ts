@@ -1,5 +1,6 @@
 import type { SectionResult } from './config.ts';
 import type { Rejection } from './graph.ts';
+import { DENIED_WINDOW_MS } from './journal.ts';
 import type { JournalEntry } from './loader.ts';
 
 /** Что показать на месте плагина: работает, ждёт перезапуска хоста, выключен (сбоем или человеком) или не включён в настройках. */
@@ -121,7 +122,7 @@ export function describeEntry(e: JournalEntry): string {
     case 'revived':
       return 'включён снова';
     case 'denied':
-      return `отказ ctx.os: ${e.detail}`;
+      return e.repeats ? `отказ ctx.os: ${e.detail} - ещё ${String(e.repeats)} раз за ${String(DENIED_WINDOW_MS / 1000)} с` : `отказ ctx.os: ${e.detail}`;
     case 'unloaded': {
       const base = e.by === e.pluginId ? 'выгружен' : `выгружен вместе с ${e.by}: требует его контракт`;
       const what = e.keptPty ? `${base}; процессов в терминале оставлено: ${String(e.keptPty)}` : base;
