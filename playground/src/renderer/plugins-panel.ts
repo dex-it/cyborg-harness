@@ -2,6 +2,7 @@
 
 import { keyOfInput } from '../../../core/src/keys.ts';
 import type { FeedLine, KeyRow, PluginRow, PluginsSnapshot, Reply } from '../shared/plugins.ts';
+import type { DisablePreview } from '../../../core/src/loader.ts';
 import { byId, el } from './dom.ts';
 import { ViewsPanel } from './views-panel.ts';
 import { actionsFor, clock, conflictText, journalFor, keyStatus, mergeFeed, sortedPlugins, STATE_LABEL, summary, type ActionButton } from './plugins-model.ts';
@@ -9,7 +10,8 @@ import { actionsFor, clock, conflictText, journalFor, keyStatus, mergeFeed, sort
 export interface PluginsPort {
   pluginsSnapshot(): Promise<PluginsSnapshot>;
   enablePlugin(id: string): Promise<Reply>;
-  disablePlugin(id: string): Promise<Reply>;
+  disablePlugin(id: string, keepPty?: boolean): Promise<Reply>;
+  disablePreview(id: string): Promise<Reply>;
   crashHost(id: string): Promise<Reply>;
   hangHost(id: string): Promise<Reply>;
   runCommand(command: string): Promise<Reply>;
@@ -139,7 +141,7 @@ export class PluginsPanel {
     if (spec.action === 'journal') return;
     const call: Record<Exclude<ActionButton['action'], 'journal'>, () => Promise<Reply>> = {
       run: () => this.port.runCommand(spec.command ?? ''),
-      disable: () => this.port.disablePlugin(id),
+      disable: () => this.disable(id),
       enable: () => this.port.enablePlugin(id),
       crash: () => this.port.crashHost(id),
       hang: () => this.port.hangHost(id),
@@ -156,6 +158,16 @@ export class PluginsPanel {
       this.busy.delete(id);
     }
     await this.refresh();
+  }
+
+  /** SAD2 3.6: выключение не завершает процессы в терминале молча - человек решает, оставить их или завершить. */
+  private async disable(id: string): Promise<Reply> {
+    const preview = await this.port.disablePreview(id);
+    if (preview.error !== undefined) return preview;
+    const { plugins, ptys } = preview.value as DisablePreview;
+    if (ptys.length === 0) return this.port.disablePlugin(id);
+    const choice = await askPty(id, plugins, ptys);
+    return choice === 'cancel' ? {} : this.port.disablePlugin(id, choice === 'keep');
   }
 
   private keyRow(row: KeyRow): HTMLElement {
@@ -209,4 +221,37 @@ export class PluginsPanel {
     this.journalEl.replaceChildren(...(items.length ? items : [el('li', 'empty', 'Записей нет')]));
     this.journalEl.scrollTop = this.journalEl.scrollHeight;
   }
+}
+
+/** Модальный вопрос в окне, а не нативный: его видят и клавиатура окна, и дымовой тест. */
+function askPty(id: string, plugins: readonly string[], ptys: DisablePreview['ptys']): Promise<'kill' | 'keep' | 'cancel'> {
+  const dialog = el('dialog', 'pty-dialog') as HTMLDialogElement;
+  dialog.setAttribute('aria-labelledby', 'pty-dialog-title');
+  const title = el('h3', '', `Выключить ${id}?`);
+  title.id = 'pty-dialog-title';
+  const others = plugins.filter((p) => p !== id);
+  const list = el('ul', 'pty-list');
+  for (const p of ptys) list.append(el('li', '', `${[p.program, ...p.args].join(' ')} - pid ${String(p.pid)}${p.pluginId === id ? '' : `, плагин ${p.pluginId}`}`));
+  const lead = others.length > 0 ? `Вместе с ним выгружаются ${others.join(', ')}. В терминале работают процессы:` : 'В терминале работают процессы:';
+  const buttons = el('div', 'pty-actions');
+  const button = (value: string, text: string) => {
+    const b = el('button', '', text) as HTMLButtonElement;
+    b.type = 'button';
+    b.dataset.choice = value;
+    b.addEventListener('click', () => dialog.close(value));
+    return b;
+  };
+  const keep = button('keep', 'Оставить работать');
+  buttons.append(button('kill', 'Завершить'), keep, button('cancel', 'Отмена'));
+  dialog.append(title, el('p', '', lead), list, el('p', 'pty-hint', 'Оставленные процессы дождутся, пока плагин включат снова; при выходе из Cyborg они завершатся.'), buttons);
+  document.body.append(dialog);
+  return new Promise((resolve) => {
+    dialog.addEventListener('close', () => {
+      dialog.remove();
+      const v = dialog.returnValue;
+      resolve(v === 'kill' || v === 'keep' ? v : 'cancel');
+    });
+    dialog.showModal();
+    keep.focus();
+  });
 }

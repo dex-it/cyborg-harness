@@ -372,8 +372,14 @@ export class PluginsService {
   }
 
   /** Вместе с плагином уходят те, кто требует его через requires. */
-  disable(id: unknown): Promise<Reply> {
-    return this.act(id, 'нет id плагина', (kernel, pluginId) => kernel.disable(pluginId));
+  /** `keepPty` - ответ человека на вопрос о процессах плагина: оставить их ждать его возвращения. */
+  disable(id: unknown, keepPty: unknown = false): Promise<Reply> {
+    return this.act(id, 'нет id плагина', (kernel, pluginId) => kernel.disable(pluginId, { keepPty: keepPty === true }));
+  }
+
+  /** Что заберёт выключение: окно спрашивает человека, только если есть живые pty. */
+  disablePreview(id: unknown): Promise<Reply> {
+    return this.act(id, 'нет id плагина', async (kernel, pluginId) => kernel.disablePreview(pluginId));
   }
 
   /** «Загрузить» и «Включить снова» - одно действие ядра. */

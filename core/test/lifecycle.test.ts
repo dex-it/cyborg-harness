@@ -102,6 +102,34 @@ test('disable: выключенного человеком enable соседа �
   await k.unload();
 });
 
+test('run: команда плагина, который сейчас поднимает enable, ждёт его активации', async () => {
+  let open = () => {};
+  const gate = new Promise<void>((resolve) => (open = resolve));
+  let slow = false;
+  const { start } = kernel(
+    {
+      tool: {
+        async activate(ctx) {
+          if (slow) await gate;
+          ctx.commands.register('tool.go', () => 'готово');
+          return undefined;
+        },
+      },
+    },
+    { enabled: ['tool'], manifests: [manifest('tool', { commands: ['tool.go'] })] },
+  );
+  const k = await start();
+  await k.disable('tool');
+  slow = true;
+  const enabled = k.enable('tool');
+  await settle();
+  const ran = k.run('tool.go');
+  open();
+  assert.equal(await ran, 'готово');
+  await enabled;
+  await k.unload();
+});
+
 test('сочетания клавиш: запись, платформа, нажатие', () => {
   assert.equal(normalizeKey('shift+cmdorctrl+k'), 'CmdOrCtrl+Shift+K');
   assert.equal(normalizeKey('Control+Option+Up'), 'Ctrl+Alt+Up');

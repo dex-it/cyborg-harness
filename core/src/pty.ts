@@ -173,6 +173,24 @@ export class PtyTable {
     for (const e of this.#of(pluginId)) this.#end(e);
   }
 
+  /** Человек выключил плагин и оставил его процессы: живые ждут attach, как `persist` после падения хоста; число оставленных. */
+  park(pluginId: string): number {
+    let kept = 0;
+    for (const e of this.#of(pluginId)) {
+      if (e.exit) this.#entries.delete(e.id);
+      else {
+        e.attached = false;
+        kept++;
+      }
+    }
+    return kept;
+  }
+
+  /** Приложение завершается: припаркованные pty выключенных плагинов тоже уходят. */
+  releaseAll(): void {
+    for (const e of [...this.#entries.values()]) this.#end(e);
+  }
+
   #end(e: Entry): void {
     this.#entries.delete(e.id);
     if (!e.exit) e.proc.kill();

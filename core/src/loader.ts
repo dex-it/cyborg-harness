@@ -1,4 +1,5 @@
 import { mkdtempSync } from 'node:fs';
+import type { PtyInfo } from '@cyborg/contracts';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -34,7 +35,7 @@ export type JournalEntry =
   /** Шлюз `ctx.os` отказал: вызов вне прав манифеста. */
   | { readonly pluginId: string; readonly kind: 'denied'; readonly method: string; readonly detail: string }
   /** Снят по disable: сам (`by` - он же) или вместе с поставщиком, которого требовал. */
-  | { readonly pluginId: string; readonly kind: 'unloaded'; readonly by: string; readonly error?: string }
+  | { readonly pluginId: string; readonly kind: 'unloaded'; readonly by: string; readonly error?: string; readonly keptPty?: number }
   /** Сочетание объявлено и другим плагином; нажатие получает `winner`. */
   | { readonly pluginId: string; readonly kind: 'key-conflict'; readonly key: string; readonly command: string; readonly winner: string }
   /** Привязка `plugins.keybindings` не применена: сочетание не разобралось или команды нет ни у одного плагина. */
@@ -111,6 +112,16 @@ export interface LoadOptions {
   readonly onLog?: ((pluginId: string, message: string) => void) | undefined;
 }
 
+export interface DisableOptions {
+  readonly keepPty?: boolean;
+}
+
+export interface DisablePreview {
+  /** Сам плагин и активные, кто требует его через requires. */
+  readonly plugins: readonly string[];
+  readonly ptys: readonly (PtyInfo & { readonly pluginId: string })[];
+}
+
 export interface Kernel {
   readonly journal: readonly JournalEntry[];
   /** Активные сейчас, в порядке активации. */
@@ -124,8 +135,10 @@ export interface Kernel {
   readonly keybindings: readonly Keybinding[];
   /** Синхронно, чтобы главный процесс успел отменить нажатие; владелец не активен - undefined. */
   keybinding(key: string): Keybinding | undefined;
-  /** Выгружает плагин и тех, кто требует его через requires; хост без плагинов гасится, сторож и enable без явной просьбы их не поднимают. */
-  disable(pluginId: string): Promise<void>;
+  /** Выгружает плагин и тех, кто требует его через requires; хост без плагинов гасится, сторож и enable без явной просьбы их не поднимают. `keepPty` - живые pty не завершаются и ждут `attach` вернувшегося плагина. */
+  disable(pluginId: string, options?: DisableOptions): Promise<void>;
+  /** Что выключение заберёт с собой: плагины по requires и их живые pty - о них приложение спрашивает человека до `disable`. */
+  disablePreview(pluginId: string): DisablePreview;
   /** «Включить снова»: сбрасывает счёт сбоев, активирует плагин, его пропущенных потребителей и снятых вместе с ним. */
   enable(pluginId: string): Promise<void>;
   run(command: string, ...args: unknown[]): Promise<unknown>;
@@ -323,6 +336,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   let unloading = false;
   const waiting = new Set<string>();
   const waking = new Map<string, Promise<void>>();
+  const activating = new Map<string, Promise<void>>();
   const idleWatchers = new Map<string, { host: Host; pluginId: string; seconds: number; fired: boolean }>();
   let idleTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -415,16 +429,17 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     }
   }
 
-  function dropPlugin(pluginId: string, hostDown = false): void {
+  function dropPlugin(pluginId: string, pty: 'release' | 'detach' | 'park' = 'release'): number {
     for (const [id, w] of [...idleWatchers]) if (w.pluginId === pluginId) idleWatchers.delete(id);
     syncIdleTimer();
     for (const [n, s] of [...subscriptions]) if (s.consumer === pluginId || s.provider === pluginId) release(n);
     const given = [...descriptors.values()].flat().filter((d) => d.pluginId === pluginId);
     for (const d of given) dropProvided(d.pluginId, d.contract, d.version);
     for (const [name, owner] of [...commandOwners]) if (owner === pluginId) commandOwners.delete(name);
-    gateway.forget(pluginId, hostDown);
+    const kept = gateway.forget(pluginId, pty);
     const i = active.indexOf(pluginId);
     if (i >= 0) active.splice(i, 1);
+    return kept;
   }
 
   function affected(gone: readonly string[]): string[] {
@@ -594,7 +609,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     stopHost(host, new CoreError('HostGone', `хост ${host.id} ${reason === 'hang' ? 'завис' : 'упал'}`));
     if (unloading) return;
     record({ kind: 'host-down', hostId: host.id, reason, culprits, plugins: victims, affects: affected(victims) });
-    for (const id of [...victims].reverse()) dropPlugin(id, true);
+    for (const id of [...victims].reverse()) dropPlugin(id, 'detach');
 
     for (const id of culprits) {
       const n = (strikes.get(id) ?? 0) + 1;
@@ -659,7 +674,14 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     return started;
   }
 
-  async function activate(pluginId: string): Promise<void> {
+  // Вид поднимается вместе с enable и зовёт команды главной части раньше, чем та их зарегистрирует: run ждёт любую идущую активацию.
+  function activate(pluginId: string): Promise<void> {
+    const started = activateNow(pluginId).finally(() => activating.delete(pluginId));
+    activating.set(pluginId, started);
+    return started;
+  }
+
+  async function activateNow(pluginId: string): Promise<void> {
     const m = manifestOf(pluginId);
     await wakeProviders(m);
     const down = [...(graph.bindings.get(pluginId) ?? [])].find(([c, p]) => c in m.requires && !active.includes(p));
@@ -689,8 +711,12 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   }
 
   async function run(command: string, ...args: unknown[]): Promise<unknown> {
-    const sleeper = [...waiting, ...waking.keys()].find((id) => Object.hasOwn(manifestOf(id).commands, command));
-    if (sleeper !== undefined && !commandOwners.has(command)) await wake(sleeper);
+    const declares = (id: string) => Object.hasOwn(manifestOf(id).commands, command);
+    if (!commandOwners.has(command)) {
+      const sleeper = [...waiting].find(declares);
+      if (sleeper !== undefined) await wake(sleeper);
+      else await [...activating].find(([id]) => declares(id))?.[1];
+    }
     const owner = commandOwners.get(command);
     if (!owner) throw new CoreError('CommandNotFound', `команды ${command} нет`);
     const spec = manifestOf(owner).commands[command];
@@ -743,7 +769,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     return gone;
   }
 
-  async function deactivate(pluginId: string, by: string): Promise<void> {
+  async function deactivate(pluginId: string, by: string, keepPty = false): Promise<void> {
     const host = hosts.get(hostOf(pluginId) ?? '');
     let error: string | undefined;
     try {
@@ -751,13 +777,13 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     } catch (e) {
       error = errorMessage(e);
     }
-    dropPlugin(pluginId);
-    record({ pluginId, kind: 'unloaded', by, ...(error !== undefined && { error }) });
+    const keptPty = dropPlugin(pluginId, keepPty ? 'park' : 'release');
+    record({ pluginId, kind: 'unloaded', by, ...(error !== undefined && { error }), ...(keptPty > 0 && { keptPty }) });
     // Пустой хост гасится: следующая активация импортирует код плагина заново, в новом процессе.
     if (host && !host.down && !active.some((id) => hostOf(id) === host.id)) stopHost(host, new CoreError('HostGone', `хост ${host.id} без плагинов`));
   }
 
-  async function disable(pluginId: string): Promise<void> {
+  async function disable(pluginId: string, options: DisableOptions = {}): Promise<void> {
     guard(pluginId);
     userOff.add(pluginId);
     waiting.delete(pluginId);
@@ -769,7 +795,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
         return;
       }
       const gone = dependents(pluginId);
-      for (const id of [...active].reverse()) if (gone.has(id)) await deactivate(id, pluginId);
+      for (const id of [...active].reverse()) if (gone.has(id)) await deactivate(id, pluginId, options.keepPty === true);
     });
     await idle();
   }
@@ -823,6 +849,11 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       await Promise.race([Promise.all(asks), late]);
     },
     disable,
+    disablePreview(pluginId) {
+      guard(pluginId);
+      const plugins = active.includes(pluginId) ? [...dependents(pluginId)] : [];
+      return { plugins, ptys: plugins.flatMap((id) => gateway.ptysOf(id).map((p) => ({ ...p, pluginId: id }))) };
+    },
     enable,
     run,
     idle,
@@ -854,6 +885,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
         }
         dropPlugin(pluginId);
       }
+      gateway.releaseAllPty();
       for (const host of [...hosts.values()]) stopHost(host, new CoreError('HostGone', 'ядро выгружено'));
     },
   };

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import { constants, type Dirent } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { DirEntry, FileStat, HttpResponse, ProcessResult, SecretValue } from '@cyborg/contracts';
+import type { DirEntry, FileStat, HttpResponse, ProcessResult, PtyInfo, SecretValue } from '@cyborg/contracts';
 import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import { PTY_SIGNALS, PtyTable, type PtyBackend, type TerminalSink, type TerminalView } from './pty.ts';
@@ -131,12 +131,23 @@ export class OsGateway {
     return { data: path.join(this.#env.dataDir, pluginId), temp: path.join(this.#env.tempDir, pluginId) };
   }
 
-  /** Корни, принятые хосты и pty плагина уходят вместе с ним; `hostDown` - упал хост, и pty с `persist` ждут возврата. */
-  forget(pluginId: string, hostDown = false): void {
+  /** Корни, принятые хосты и pty плагина уходят вместе с ним. pty: `detach` - упал хост, ждут только `persist`; `park` - человек оставил все живые; число оставленных. */
+  forget(pluginId: string, pty: 'release' | 'detach' | 'park' = 'release'): number {
     this.#roots.delete(pluginId);
     this.#approved.delete(pluginId);
-    if (hostDown) this.#pty?.detach(pluginId);
+    if (pty === 'park') return this.#pty?.park(pluginId) ?? 0;
+    if (pty === 'detach') this.#pty?.detach(pluginId);
     else this.#pty?.release(pluginId);
+    return 0;
+  }
+
+  /** Живые pty плагина - что завершит выключение без оставления. */
+  ptysOf(pluginId: string): PtyInfo[] {
+    return (this.#pty?.list(pluginId) ?? []).filter((p) => !p.exit);
+  }
+
+  releaseAllPty(): void {
+    this.#pty?.releaseAll();
   }
 
   /** Вид плагина предъявил билет своей главной части; `pluginId` приложение берёт из origin фрейма, а не из слов вида. */

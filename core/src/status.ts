@@ -123,7 +123,8 @@ export function describeEntry(e: JournalEntry): string {
     case 'denied':
       return `отказ ctx.os: ${e.detail}`;
     case 'unloaded': {
-      const what = e.by === e.pluginId ? 'выгружен' : `выгружен вместе с ${e.by}: требует его контракт`;
+      const base = e.by === e.pluginId ? 'выгружен' : `выгружен вместе с ${e.by}: требует его контракт`;
+      const what = e.keptPty ? `${base}; процессов в терминале оставлено: ${String(e.keptPty)}` : base;
       return e.error ? `${what}; deactivate с ошибкой: ${e.error}` : what;
     }
     case 'key-conflict':

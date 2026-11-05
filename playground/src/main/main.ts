@@ -88,7 +88,8 @@ function windowChannel(channel: string, handler: (arg: unknown) => unknown): voi
 
 windowChannel('plugins:snapshot', () => plugins.snapshot());
 windowChannel('plugins:enable', (id) => plugins.enable(id));
-windowChannel('plugins:disable', (id) => plugins.disable(id));
+windowChannel('plugins:disable', (arg) => (isRecord(arg) ? plugins.disable(arg.id, arg.keepPty) : plugins.disable(arg)));
+windowChannel('plugins:disable-preview', (id) => plugins.disablePreview(id));
 windowChannel('plugins:crash', (id) => plugins.crash(id));
 windowChannel('plugins:hang', (id) => plugins.hang(id));
 windowChannel('plugins:run', (command) => plugins.run(command));

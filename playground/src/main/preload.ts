@@ -6,7 +6,8 @@ import { VIEW_SCHEME, type SpikeBridge, type SpikePing, type SpikeReport, type T
 const api = {
   pluginsSnapshot: (): Promise<PluginsSnapshot> => ipcRenderer.invoke('plugins:snapshot'),
   enablePlugin: (id: string): Promise<Reply> => ipcRenderer.invoke('plugins:enable', id),
-  disablePlugin: (id: string): Promise<Reply> => ipcRenderer.invoke('plugins:disable', id),
+  disablePlugin: (id: string, keepPty = false): Promise<Reply> => ipcRenderer.invoke('plugins:disable', { id, keepPty }),
+  disablePreview: (id: string): Promise<Reply> => ipcRenderer.invoke('plugins:disable-preview', id),
   crashHost: (id: string): Promise<Reply> => ipcRenderer.invoke('plugins:crash', id),
   hangHost: (id: string): Promise<Reply> => ipcRenderer.invoke('plugins:hang', id),
   runCommand: (command: string): Promise<Reply> => ipcRenderer.invoke('plugins:run', command),

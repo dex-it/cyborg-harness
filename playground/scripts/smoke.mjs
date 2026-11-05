@@ -217,6 +217,29 @@ async function main() {
     await type('echo после-$((8*9))');
     await waitFor('после перезапуска хоста терминал вида тот же', async () => /после-72/.test(await screen()));
     log('терминал вида: билет share(), вывод и ввод мимо хоста - работают при зависшем хосте и после его перезапуска');
+
+    const sh = /^pty (\d+)$/.exec(await inView('echo', "document.getElementById('term-state').textContent"))[1];
+    const alive = (p) => main(`(() => { try { process.kill(${p}, 0); return true; } catch { return false; } })()`);
+    const ask = () => ev("document.querySelector('dialog.pty-dialog[open]')?.textContent ?? ''");
+    const choose = (choice) => ev(`(() => { const b = document.querySelector('dialog.pty-dialog[open] button[data-choice=${JSON.stringify(choice)}]'); b?.click(); return !!b; })()`);
+    const load = async () => (await button('echo', 'Загрузить')) || button('echo', 'Включить снова');
+    assert.equal(await button('echo', 'Выгрузить'), true);
+    await waitFor('выключение echo спрашивает о его процессах', async () => (await ask()).includes(`/bin/sh - pid ${sh}`));
+    assert.equal(await ev("document.activeElement?.dataset.choice ?? ''"), 'keep', 'фокус вопроса не на безопасном ответе');
+    assert.equal(await choose('keep'), true);
+    await waitFor('echo выгружен, процесс оставлен', async () => (await state('echo')) === 'stopped' && /оставлено: 1/.test(await text('#plugins-journal')));
+    assert.equal(await alive(sh), true, 'оставленный процесс завершён');
+    assert.equal(await load(), true);
+    await waitFor('вернувшийся echo подхватил тот же процесс', async () => (await state('echo')) === 'active' && (await inView('echo', "document.getElementById('term-state').textContent")) === `pty ${sh}` && /после-72/.test(await screen()));
+    await type('echo снова-$((9*9))');
+    await waitFor('терминал ожил', async () => /снова-81/.test(await screen()));
+    assert.equal(await button('echo', 'Выгрузить'), true);
+    await waitFor('второй вопрос', async () => (await ask()).includes(`pid ${sh}`));
+    assert.equal(await choose('kill'), true);
+    await waitFor('процесс echo завершён', async () => (await state('echo')) === 'stopped' && !(await alive(sh)));
+    assert.equal(await load(), true);
+    await waitFor('echo с новым терминалом', async () => (await state('echo')) === 'active' && /^pty \d+$/.test(await inView('echo', "document.getElementById('term-state').textContent")));
+    log('выключение спрашивает о pty: оставленный процесс ждёт плагин, завершённый уходит');
   }
   log('падение и зависание хоста: сторож перезапускает');
 

@@ -237,3 +237,33 @@ test('share: просроченный билет не открывается', a
     Date.now = realNow;
   }
 });
+
+test('выключение: preview называет живые pty; keepPty оставляет их ждать attach вернувшегося плагина; без keepPty и при выгрузке - завершены', async () => {
+  await using s = await setup({ agent: shell, quiet: shell });
+  const term = await s.pty('agent').spawn({ program: '/bin/bash', cols: 90, rows: 20 });
+  await s.pty('agent').spawn({ program: '/bin/bash' });
+  const [termProc, doneProc] = s.backend.procs as [FakeProc, FakeProc];
+  doneProc.exit(0);
+  await tick();
+  assert.deepEqual(s.k.disablePreview('agent'), { plugins: ['agent'], ptys: [{ pluginId: 'agent', id: term.id, pid: termProc.pid, program: '/bin/bash', args: [], persist: false }] });
+  assert.deepEqual(s.k.disablePreview('quiet'), { plugins: ['quiet'], ptys: [] });
+
+  await s.k.disable('agent', { keepPty: true });
+  assert.equal(termProc.killed, undefined, 'keepPty завершил процесс');
+  assert.ok(s.k.journal.some((e) => e.kind === 'unloaded' && e.pluginId === 'agent' && e.keptPty === 1));
+  assert.deepEqual(s.k.disablePreview('agent'), { plugins: [], ptys: [] }, 'выключенный плагин всё ещё что-то заберёт');
+  termProc.emit('пока плагин выключен');
+
+  await s.k.enable('agent');
+  assert.deepEqual((await s.pty('agent').list()).map((p) => p.id), [term.id]);
+  const back = await s.pty('agent').attach(term.id);
+  assert.match(back.backlog, /пока плагин выключен$/);
+
+  await s.k.disable('agent');
+  assert.equal(termProc.killed, 'SIGHUP', 'выключение без keepPty оставило процесс');
+
+  const parked = await s.pty('quiet').spawn({ program: '/bin/bash' });
+  await s.k.disable('quiet', { keepPty: true });
+  await s.k.unload();
+  assert.equal(s.backend.procs.find((p) => p.pid === parked.pid)?.killed, 'SIGHUP', 'припаркованный pty пережил выгрузку ядра');
+});
