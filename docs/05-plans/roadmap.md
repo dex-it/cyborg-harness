@@ -42,9 +42,14 @@ quality-checks: входных записей нет
 | Род области и `order` вида в манифесте ([3.8](../03-architecture/design/sad.md#38-изоляция-рендера)) | не начато; область вида выбирает окно playground |
 | Набор тестов контракта, общий для всех поставщиков ([вопрос 10](../03-architecture/design/sad.md#8-открытые-вопросы)) | не начато |
 | Задержка шлюза `ctx.os` на горячих путях ([вопрос 9](../03-architecture/design/sad.md#8-открытые-вопросы)) | цена RPC замерена, шлюз - нет |
-| Замеры на macOS: хосты и фреймы | мерили только Linux |
+| Замеры на macOS: хосты и фреймы, клавиши во фрейме | мерили только Linux; проверка - [#2](https://github.com/dex-it/cyborg-harness/issues/2) |
 | pty на Windows | не проверялся; в области ли Windows - [вопрос 12](../03-architecture/design/sad.md#8-открытые-вопросы) |
 | Настройка `sessions.restore`, `cwd` и `projectId` сессии | подъём сейчас ручной |
+| pty-хост - отдельный `utilityProcess` ядра, вывод к виду по `MessagePort` ([ADR-CH-0012](../03-architecture/adr/ADR-CH-0012-pty-host.md)) | не начато; `node-pty` и таблица pty в главном процессе |
+| Льготное время осиротевшего pty ([3.6](../03-architecture/design/sad.md#36-ресурсы-дольше-плагина-pty)) | не начато |
+| Группы рендера: `ui.group`, `plugins.uiGroups`, origin кадра по группе ([3.8](../03-architecture/design/sad.md#38-изоляция-рендера)) | не начато; origin кадра - по id плагина |
+| Закрытая CSP вида `default-src 'none'` с явными источниками ([3.8](../03-architecture/design/sad.md#38-изоляция-рендера)) | не начато; `VIEW_CSP` - `default-src 'self'` |
+| Форма API: вклады в меню, `ctx.keys.register` с условием, отмена запросов ([вопрос 15](../03-architecture/design/sad.md#8-открытые-вопросы)) | не начато |
 
 ## 3. Стенд playground
 
@@ -61,8 +66,8 @@ quality-checks: входных записей нет
 
 | Работа | Источник |
 |---|---|
-| Спайк `ses` и `lockdown()` в `utilityProcess` | [вопрос 7](../03-architecture/design/sad.md#8-открытые-вопросы), риск «`ses` не работает в хосте» |
-| `Compartment` в хостах вместо статической проверки импортов | [3.7](../03-architecture/design/sad.md#37-безопасность-данных-и-контроль-плагинов) |
+| Процесс на плагин (Electron как Node) с `--permission`; `utilityProcess` этот флаг не применяет | [6.2](../03-architecture/design/sad.md#62-этап-2-изоляция-доступа-по-поводу), [ADR-CH-0003](../03-architecture/adr/ADR-CH-0003-trust-and-isolation.md), п. 9 |
+| `Compartment` вторым слоем в этих процессах; спайк `ses` сделан, осталась совместимость с бандлами плагинов (zod, marked) | [вопрос 7](../03-architecture/design/sad.md#8-открытые-вопросы) |
 | Окна согласия на права теми же строками, что «Плагины Cyborg» | [3.7](../03-architecture/design/sad.md#37-безопасность-данных-и-контроль-плагинов) |
 | Установка: источник, подпись или хеш, повторное согласие при расширении прав | [вопрос 8](../03-architecture/design/sad.md#8-открытые-вопросы) |
 
