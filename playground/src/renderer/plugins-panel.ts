@@ -20,6 +20,9 @@ export interface PluginsPort {
   onPluginsChanged(listener: () => void): void;
   setViewVisible(id: string, visible: boolean): Promise<void>;
   answerDialog(id: number, choice: string | undefined): Promise<Reply>;
+  closeDocument(id: string): Promise<Reply>;
+  /** Без файла - системный диалог выбора; смена воркспейса перезапускает приложение. */
+  openWorkspace(file?: string): Promise<Reply>;
   onWindowCommand(listener: (command: string) => void): void;
 }
 
@@ -30,6 +33,9 @@ export class PluginsPanel {
   private readonly problemsEl = byId('plugins-problems', HTMLElement);
   private readonly listEl = byId('plugins-list', HTMLElement);
   private readonly keysEl = byId('keys-list', HTMLElement);
+  private readonly documentsEl = byId('documents-list', HTMLElement);
+  private readonly workspaceEl = byId('workspace-current', HTMLElement);
+  private readonly recentEl = byId('workspace-recent', HTMLElement);
   private readonly feedEl = byId('feed', HTMLElement);
   private readonly journalTitle = byId('plugins-journal-title', HTMLElement);
   private readonly journalAll = byId('plugins-journal-all', HTMLButtonElement);
@@ -54,6 +60,7 @@ export class PluginsPanel {
       actions: (row) => actionsFor(row, false).filter((b) => b.action === 'enable' || b.action === 'journal').map((b) => this.button(row.id, b)),
     });
     this.journalAll.addEventListener('click', () => this.showJournal(null));
+    byId('workspace-open', HTMLButtonElement).addEventListener('click', () => void port.openWorkspace());
     port.onPluginsChanged(() => void this.refresh());
     port.onWindowCommand((command) => {
       if (command === 'cyborg.window.focus-next') moveFocus(1);
@@ -99,6 +106,10 @@ export class PluginsPanel {
     this.problemsEl.hidden = snapshot.problems.length === 0;
     this.listEl.replaceChildren(...sortedPlugins(snapshot.plugins).map((row) => this.row(row, snapshot.canHang)));
     this.keysEl.replaceChildren(...(snapshot.keys.length ? snapshot.keys.map((row) => this.keyRow(row)) : [this.emptyKeys()]));
+    const { current, recent } = snapshot.workspace;
+    this.workspaceEl.textContent = current === null ? 'Воркспейс не открыт' : `Воркспейс: ${current}`;
+    this.recentEl.replaceChildren(...recent.map((file) => this.recentRow(file)));
+    this.documentsEl.replaceChildren(...(snapshot.documents.length ? snapshot.documents.map((row) => this.documentRow(row)) : [el('li', 'empty', 'Документов нет')]));
     this.renderFeed();
     this.renderJournal();
     this.views.sync(snapshot.plugins);
@@ -179,6 +190,31 @@ export class PluginsPanel {
     if (ptys.length === 0) return this.port.disablePlugin(id);
     const choice = await askPty(id, plugins, ptys);
     return choice === 'cancel' ? {} : this.port.disablePlugin(id, choice === 'keep');
+  }
+
+  private recentRow(file: string): HTMLElement {
+    const item = el('li');
+    const open = el('button', 'workspace-recent-item', file.split(/[\\/]/).at(-1) ?? file) as HTMLButtonElement;
+    open.type = 'button';
+    open.title = file;
+    open.setAttribute('aria-label', `Открыть воркспейс ${file}`);
+    open.addEventListener('click', () => void this.port.openWorkspace(file));
+    item.append(open);
+    return item;
+  }
+
+  private documentRow(row: PluginsSnapshot['documents'][number]): HTMLElement {
+    const item = el('li', 'document-row');
+    item.dataset.document = row.id;
+    item.dataset.available = String(row.available);
+    item.append(el('span', 'document-title', row.title), el('span', 'document-owner', `${row.pluginId} · ${row.type}`));
+    if (!row.available) item.append(el('span', 'document-off', 'недоступен: владелец не работает'));
+    const close = el('button', '', 'Закрыть') as HTMLButtonElement;
+    close.type = 'button';
+    close.setAttribute('aria-label', `Закрыть ${row.title}`);
+    close.addEventListener('click', () => void this.port.closeDocument(row.id).then(() => this.refresh()));
+    item.append(close);
+    return item;
   }
 
   private keyRow(row: KeyRow): HTMLElement {

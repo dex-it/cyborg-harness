@@ -7,7 +7,7 @@ import { inlineHosts } from '../../../core/src/transports.ts';
 import type { PluginModule } from '../../../core/src/plugin.ts';
 import { WINDOW_OWNER } from '../../../core/src/window-layer.ts';
 import type { KeyRow } from '../shared/plugins.ts';
-import { discoverPlugins, PluginsService, startPlugins } from './plugins.ts';
+import { discoverPlugins, PluginsService, readSchemaFile, startPlugins } from './plugins.ts';
 
 function tmp(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'cyborg-plugins-'));
@@ -267,4 +267,64 @@ test('виды: адрес у плагина с ui в манифесте и у �
   const face = service.snapshot().plugins.find((p) => p.id === 'face');
   assert.deepEqual([face?.state, face?.view], ['stopped', 'cyborg-plugin://face/'], 'снятому плагину окно рисует заглушку на месте вида');
   await service.unload();
+});
+
+test('схема раздела: файл из каталога плагина проверяет config до активации, ссылка наружу - отказ', async () => {
+  const userData = tmp();
+  const file = path.join(userData, 'cyborg.json');
+  fs.writeFileSync(file, JSON.stringify({ plugins: { enabled: ['timer', 'thief'] }, settings: { timer: { minutes: 0 } } }));
+  const dir = path.join(userData, 'plugins');
+  plugin(dir, 'timer', { config: { version: 1, schema: './config.schema.json' } }, 'export default {}');
+  fs.writeFileSync(path.join(dir, 'timer', 'config.schema.json'), JSON.stringify({ type: 'object', properties: { minutes: { type: 'integer', minimum: 1 } } }));
+  plugin(dir, 'thief', { config: { version: 1, schema: './s.json' } }, 'export default {}');
+  fs.symlinkSync(file, path.join(dir, 'thief', 's.json'));
+  assert.throws(() => readSchemaFile(path.join(dir, 'thief'), './s.json'), /вне каталога плагина/);
+  const kernel = await startPlugins({
+    userData,
+    builtinDir: path.join(userData, 'нет'),
+    spawnHost: inlineHosts(async () => ({ activate: () => undefined })),
+    log: () => undefined,
+  });
+  assert.deepEqual(kernel.active, []);
+  assert.deepEqual(
+    kernel.journal.filter((e) => e.kind === 'config'),
+    [
+      { pluginId: 'thief', kind: 'config', result: { status: 'invalid', errors: ['./s.json: файл вне каталога плагина'] } },
+      { pluginId: 'timer', kind: 'config', result: { status: 'invalid', errors: ['/minutes: ожидается >= 1'] } },
+    ],
+  );
+  await kernel.unload();
+});
+
+test('plugins.enabled из файла воркспейса без перезапуска: убранный выключается, вернувшийся включается, новый ждёт перезапуска', async () => {
+  const userData = tmp();
+  const ws = path.join(userData, 'w.cyborg.json');
+  const write = (enabled: string[]) => fs.writeFileSync(ws, JSON.stringify({ cyborg: 2, plugins: { enabled }, settings: {} }));
+  write(['a', 'b']);
+  const dir = path.join(userData, 'plugins');
+  for (const id of ['a', 'b', 'c']) plugin(dir, id, {}, 'export default {}');
+  const problems: string[] = [];
+  let applied = 0;
+  const kernel = await startPlugins({
+    userData,
+    workspace: ws,
+    builtinDir: path.join(userData, 'нет'),
+    spawnHost: inlineHosts(async () => ({ activate: () => undefined })),
+    log: () => undefined,
+    onProblem: (p) => problems.push(p),
+    onEnabled: () => applied++,
+  });
+  const until = async (what: string, ok: () => boolean) => {
+    for (let i = 0; i < 100 && !ok(); i++) await new Promise((r) => setTimeout(r, 20));
+    assert.ok(ok(), what);
+  };
+  assert.deepEqual(kernel.active, ['a', 'b']);
+  write(['a']);
+  await until('b выключен', () => applied === 1);
+  assert.deepEqual(kernel.active, ['a']);
+  write(['a', 'b', 'c']);
+  await until('b включён', () => applied === 2);
+  assert.deepEqual(kernel.active, ['a', 'b']);
+  assert.deepEqual(problems, ['plugins.enabled: c - включатся после перезапуска']);
+  await kernel.unload();
 });

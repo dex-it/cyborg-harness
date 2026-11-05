@@ -3,11 +3,21 @@ import { isRecord } from './wire.ts';
 
 export type { PluginPermissions };
 
-export const AREAS = ['workspace', 'plugin-data', 'plugin-temp'] as const;
+export const AREAS = ['workspace', 'plugin-data', 'plugin-temp', 'granted'] as const;
 
-const KEYS = ['fs.read', 'fs.write', 'process', 'pty', 'net', 'env', 'notify', 'clipboard', 'secrets.ref', 'security.roots', 'ui.lock'] as const;
+const KEYS = ['fs.read', 'fs.write', 'shell', 'process', 'pty', 'launch', 'net', 'env', 'notify', 'clipboard', 'secrets.ref', 'security.roots', 'ui.lock'] as const;
 
-const isArea = (v: string) => (AREAS as readonly string[]).includes(v) || v.startsWith('/') || v === '~' || v.startsWith('~/');
+const isPath = (v: string) => {
+  if (!(v.startsWith('/') || v === '~' || v.startsWith('~/'))) return false;
+  const parts = v.split('/').slice(1);
+  if (parts.some((s) => s === '.' || s === '..')) return false;
+  // Маска держится за названный каталог: `/*` или `~/*` открыли бы всё.
+  return !parts[0]?.includes('*') && parts.every((s) => s === '**' || !s.includes('**'));
+};
+const isArea = (v: string) => (AREAS as readonly string[]).includes(v) || isPath(v);
+const isWriteArea = (v: string) => v === 'workspace.git' || isArea(v);
+// file: открыл бы путь мимо проверки областей, javascript: и data: - не адрес.
+const isScheme = (v: string) => /^[a-z][a-z0-9+.-]*:$/.test(v) && !['file:', 'javascript:', 'data:', 'vbscript:'].includes(v);
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** Программа правила `process` и `pty`: оболочка входа человека; ядро подставляет её путь само. */
@@ -35,9 +45,10 @@ export function readPermissions(raw: unknown, errors: string[]): PluginPermissio
   const set = (key: string, value: unknown) => {
     if (value !== undefined) out[key] = value;
   };
-  const areas = `области ${AREAS.join(', ')} или абсолютные пути`;
+  const areas = `области ${AREAS.join(', ')}, абсолютные пути или маски под названным каталогом`;
   set('fs.read', strings('fs.read', raw['fs.read'], errors, isArea, areas));
-  set('fs.write', strings('fs.write', raw['fs.write'], errors, isArea, areas));
+  set('fs.write', strings('fs.write', raw['fs.write'], errors, isWriteArea, `${areas}, workspace.git`));
+  set('shell', strings('shell', raw.shell, errors, (v) => isArea(v) || isScheme(v), `${areas} или схемы URL с двоеточием, кроме file:`));
   set('net', strings('net', raw.net, errors, (v) => HOST.test(v), 'хосты или config:<поле>'));
   set('env', strings('env', raw.env, errors, (v) => ENV_NAME.test(v), 'имена переменных'));
   set('secrets.ref', strings('secrets.ref', raw['secrets.ref'], errors, (v) => /^[a-z][a-z0-9+.-]*:\/\/./.test(v), 'маски ссылок со схемой'));
@@ -47,7 +58,7 @@ export function readPermissions(raw: unknown, errors: string[]): PluginPermissio
     if (typeof raw[flag] !== 'boolean') errors.push(`permissions.${flag}: ожидается true или false`);
     else if (raw[flag]) set(flag, true);
   }
-  for (const key of ['process', 'pty'] as const) {
+  for (const key of ['process', 'pty', 'launch'] as const) {
     if (raw[key] === undefined) continue;
     const rules = Array.isArray(raw[key]) ? raw[key] : undefined;
     const ok = rules?.every(
@@ -68,7 +79,13 @@ export function readPermissions(raw: unknown, errors: string[]): PluginPermissio
   return out;
 }
 
-const AREA_WORDS: Readonly<Record<string, string>> = { workspace: 'проекты воркспейса', 'plugin-data': 'свои данные', 'plugin-temp': 'свой временный каталог' };
+const AREA_WORDS: Readonly<Record<string, string>> = {
+  workspace: 'проекты воркспейса',
+  'workspace.git': 'проекты воркспейса вместе с .git',
+  'plugin-data': 'свои данные',
+  'plugin-temp': 'свой временный каталог',
+  granted: 'выбранное человеком в диалоге',
+};
 const areaWords = (areas: readonly string[]) => areas.map((a) => AREA_WORDS[a] ?? a).join(', ');
 
 /** Права словами: те же строки покажет окно согласия второго этапа. */
@@ -76,10 +93,12 @@ export function describePermissions(p: PluginPermissions): string[] {
   const out: string[] = [];
   if (p['fs.read']) out.push(`читает файлы: ${areaWords(p['fs.read'])}`);
   if (p['fs.write']) out.push(`пишет файлы: ${areaWords(p['fs.write'])}`);
+  if (p.shell) out.push(`открывает в системе: ${areaWords(p.shell)}`);
   const program = (p: string) => (p === LOGIN_SHELL ? 'оболочка входа' : p);
   const programs = (rules: PluginPermissions['process']) => (rules ?? []).map((r) => (typeof r === 'string' ? r : [program(r.program), ...r.args].join(' ') + (r.env?.length ? ` (окружение: ${r.env.join(', ')})` : ''))).join(', ');
   if (p.process) out.push(`запускает программы: ${programs(p.process)} - полный доступ через программу`);
   if (p.pty) out.push(`запускает в терминале: ${programs(p.pty)} - полный доступ через программу`);
+  if (p.launch) out.push(`предлагает запуск в терминале: ${programs(p.launch)} - его выполнит потребитель`);
   if (p.net) out.push(`ходит в сеть: ${p.net.map((h) => (h.startsWith('config:') ? `хост из настройки ${h.slice('config:'.length)}` : h)).join(', ')}`);
   if (p.env) out.push(`читает переменные окружения: ${p.env.join(', ')}`);
   if (p.notify) out.push('показывает системные уведомления');

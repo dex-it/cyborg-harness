@@ -30,8 +30,14 @@ header {
   border-radius: var(--cy-radius);
 }
 
-#line {
+#line::part(input) {
   font-family: var(--cy-font-mono);
+}
+
+#no-session {
+  height: 100%;
+  white-space: normal;
+  font-family: var(--cy-font);
 }
 
 .agents {

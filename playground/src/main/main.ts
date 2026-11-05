@@ -2,7 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, BrowserWindow, ipcMain, nativeImage, nativeTheme, Notification, powerMonitor, screen, type IpcMainInvokeEvent, type WebContents } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, Notification, powerMonitor, screen, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { viewOrigin } from '../shared/views.ts';
 import { electronOs } from './os-env.ts';
 import { utilityHosts } from './plugin-hosts.ts';
@@ -15,6 +15,7 @@ import { themeTokens } from './theme.ts';
 import { resolveViewRequest } from './view-files.ts';
 import { ViewTerminals, type TerminalFrame } from './view-terminals.ts';
 import { isRecord } from '../../../core/src/manifest.ts';
+import { RecentWorkspaces } from '../../../core/src/recent.ts';
 
 // Своя папка данных: cyborg.json и пользовательские плагины playground не смешиваются с настройками Cyborg.
 app.setName('Cyborg Playground');
@@ -23,19 +24,24 @@ registerViewScheme();
 /** `--spike=<файл>`: замеры видов во фреймах (SAD2, открытый вопрос 11) вместо окна плагинов. */
 const spikeOut = process.argv.find((a) => a.startsWith('--spike='))?.slice('--spike='.length);
 const hostsSpikeOut = process.argv.find((a) => a.startsWith('--spike-hosts='))?.slice('--spike-hosts='.length);
-/** `--workspace=<файл>`: воркспейс по SAD2 §3.1; без флага - `<userData>/workspace.cyborg.json`. */
+const recent = new RecentWorkspaces(path.join(app.getPath('userData'), 'recent.json'));
+/** `--workspace=<файл>` по SAD2 §3.1; без флага - последний из «Недавних», без них - `<userData>/workspace.cyborg.json`; `--no-workspace` - окно без воркспейса. */
 const workspaceArg = process.argv.find((a) => a.startsWith('--workspace='))?.slice('--workspace='.length);
-const workspaceFile = workspaceArg === undefined ? path.join(app.getPath('userData'), 'workspace.cyborg.json') : path.resolve(workspaceArg);
+const workspaceFile = process.argv.includes('--no-workspace')
+  ? undefined
+  : workspaceArg !== undefined
+    ? path.resolve(workspaceArg)
+    : (recent.list()[0] ?? path.join(app.getPath('userData'), 'workspace.cyborg.json'));
 const spiking = spikeOut !== undefined || hostsSpikeOut !== undefined;
 
 // Окон на воркспейс у playground одно; второй запуск того же воркспейса поднимает его окно, а не второе ядро.
-if (!spiking && !app.requestSingleInstanceLock({ workspace: workspaceFile })) app.exit(0);
+if (!spiking && !app.requestSingleInstanceLock({ workspace: workspaceFile ?? null })) app.exit(0);
 
 /** Первый запуск: alice и bob делят хост c - видно, как падение одного процесса снимает обоих, а чат в хосте b живёт. */
 const DEFAULT_CONFIG = {
   plugins: {
-    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'sessions', 'pin-lock'],
-    hosts: { a: ['echo'], b: ['chat'], c: ['alice', 'bob'], d: ['flaky'], agents: ['agent-claude-code', 'agent-shell'] },
+    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'session-isolation', 'sessions', 'pin-lock'],
+    hosts: { a: ['echo'], b: ['chat'], c: ['alice', 'bob'], d: ['flaky'], agents: ['agent-claude-code', 'agent-shell', 'session-isolation'] },
   },
 };
 
@@ -54,7 +60,7 @@ app.on('second-instance', (_event, _argv, _cwd, data) => {
   const asked = (data as { workspace?: unknown } | null)?.workspace;
   showWindow();
   if (asked !== workspaceFile && Notification.isSupported()) {
-    new Notification({ title: 'Cyborg Playground', body: `Открыт воркспейс ${workspaceFile}; другой - отдельным экземпляром с другим userData (несколько окон - второй этап).` }).show();
+    new Notification({ title: 'Cyborg Playground', body: `Открыт воркспейс ${workspaceFile ?? 'нет'}; другой открывается из окна - «Недавние» или «Открыть…» (несколько окон - второй этап).` }).show();
   }
 });
 const plugins = new PluginsService({
@@ -97,6 +103,45 @@ windowChannel('plugins:crash', (id) => plugins.crash(id));
 windowChannel('plugins:hang', (id) => plugins.hang(id));
 windowChannel('plugins:run', (command) => plugins.run(command));
 windowChannel('window:answer', (arg) => plugins.answerDialog(arg));
+windowChannel('documents:close', (id) => plugins.closeDocument(id));
+windowChannel('workspace:open', (file) => openWorkspace(file));
+
+const realOf = (file: string) => {
+  try {
+    return fs.realpathSync(file);
+  } catch {
+    return path.resolve(file);
+  }
+};
+
+function showWorkspace(): void {
+  const current = workspaceFile === undefined ? null : realOf(workspaceFile);
+  plugins.setWorkspace({ current: workspaceFile ?? null, recent: recent.list().filter((f) => f !== current) });
+}
+
+/** Один воркспейс - одно окно на экземпляр: смена воркспейса - перезапуск, выход выключает плагины и снимает замок. */
+async function openWorkspace(arg: unknown): Promise<void> {
+  let file: string | undefined;
+  if (arg === undefined) {
+    const options = { title: 'Открыть воркспейс', filters: [{ name: 'Воркспейс Cyborg', extensions: ['json'] }], properties: ['openFile' as const] };
+    const picked = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+    file = picked.canceled ? undefined : picked.filePaths[0];
+  } else if (typeof arg === 'string' && recent.list().includes(arg)) {
+    file = arg;
+  } else {
+    throw new Error('воркспейса нет в «Недавних»');
+  }
+  if (file === undefined || (workspaceFile !== undefined && realOf(file) === realOf(workspaceFile))) return;
+  const live = plugins.livePty;
+  if (live > 0) {
+    const message = { type: 'question' as const, buttons: ['Открыть', 'Отмена'], defaultId: 1, cancelId: 1, message: `Открыть ${path.basename(file)}?`, detail: `Живых процессов плагинов: ${String(live)}. Они завершатся вместе с воркспейсом.` };
+    const answer = win ? await dialog.showMessageBox(win, message) : await dialog.showMessageBox(message);
+    if (answer.response !== 0) return;
+  }
+  const keep = process.argv.slice(1).filter((a) => a !== '--no-workspace' && !a.startsWith('--workspace='));
+  app.relaunch({ args: [...keep, `--workspace=${file}`] });
+  app.quit();
+}
 ipcMain.handle('view:dialog', (event, view: unknown, spec: unknown) => {
   const pluginId = senderPlugin(event);
   return pluginId === undefined ? { error: 'не вид плагина' } : plugins.dialogFor(pluginId, view, spec);
@@ -184,7 +229,7 @@ function createWindow(): void {
   win = new BrowserWindow({
     width: 1200,
     height: 980,
-    title: `Cyborg Playground - ${path.basename(workspaceFile)}`,
+    title: `Cyborg Playground - ${workspaceFile === undefined ? 'без воркспейса' : path.basename(workspaceFile)}`,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegrationInSubFrames: true },
   });
   void win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
@@ -241,6 +286,11 @@ void app.whenReady().then(() => {
   powerMonitor.on('suspend', () => plugins.emit({ kind: 'suspend' }));
   powerMonitor.on('resume', () => plugins.emit({ kind: 'resume' }));
   powerMonitor.on('lock-screen', () => plugins.emit({ kind: 'screen-lock' }));
+  showWorkspace();
+  if (workspaceFile === undefined) {
+    plugins.withoutWorkspace();
+    return;
+  }
   const hosts = utilityHosts(path.join(__dirname, 'plugin-host.mjs'));
   void plugins.start({
     userData,
@@ -254,5 +304,10 @@ void app.whenReady().then(() => {
     watchdog: { interval: 500, timeout: 2500 },
     // eslint-disable-next-line no-console -- журнал ядра в главном процессе - это stderr приложения
     log: (line) => console.error(line),
+  }).then(() => {
+    // В «Недавние» попадает только открывшийся: чужой замок или ошибка старта воркспейс туда не приносят.
+    if (plugins.snapshot().phase !== 'ready') return;
+    recent.add(workspaceFile);
+    showWorkspace();
   });
 });

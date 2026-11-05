@@ -5,11 +5,18 @@
     "cyborg": "^1"
   },
   "consumes": {
-    "cyborg.agent": "^1"
+    "cyborg.agent": "^1",
+    "cyborg.session-prompt": "^1"
   },
   "commands": {
     "sessions.agents": {},
     "sessions.new": {
+      "args": [
+        "string"
+      ]
+    },
+    "sessions.previous": {},
+    "sessions.restore": {
       "args": [
         "string"
       ]
@@ -31,6 +38,11 @@
         ]
       }
     ]
+  },
+  "documents": {
+    "session": {
+      "restorable": true
+    }
   },
   "ui": {
     "views": {

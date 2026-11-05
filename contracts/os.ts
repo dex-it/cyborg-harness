@@ -5,12 +5,17 @@ export type ProgramRule = string | { readonly program: string; readonly args: re
 
 /** Права главной части плагина: что ядро пропустит через `ctx.os` (SAD2 §3.7). Нет права - нет члена в `ctx.os`. */
 export interface PluginPermissions {
-  /** Области путей: `workspace`, `plugin-data`, `plugin-temp` или абсолютный путь (каталог с поддеревом, `~` - домашний). */
+  /** Области путей: `workspace`, `plugin-data`, `plugin-temp`, `granted` (выбор человека в `dialog`), абсолютный путь (каталог с поддеревом, `~` - домашний) или маска: `*` - часть имени, `**` - любые каталоги. */
   readonly 'fs.read'?: readonly string[];
+  /** Те же области и `workspace.git` - корни воркспейса вместе с записью в `.git`. */
   readonly 'fs.write'?: readonly string[];
+  /** Открыть в системе: области путей, как у `fs.read`, и схемы URL с двоеточием (`https:`, `mailto:`). */
+  readonly shell?: readonly string[];
   readonly process?: readonly ProgramRule[];
   /** Программы в псевдотерминале; правило той же формы, что у `process`. */
   readonly pty?: readonly ProgramRule[];
+  /** Запуски, которые поставщик описывает потребителю (`cyborg.agent`); члена в `ctx.os` не даёт, pty потребителя с `describedBy` сверяется и с ними. */
+  readonly launch?: readonly ProgramRule[];
   /** Хосты HTTP; `config:<поле>` - хост из своего раздела config. */
   readonly net?: readonly string[];
   readonly env?: readonly string[];
@@ -100,6 +105,8 @@ export interface PtySpawnOptions {
   readonly rows?: number;
   /** Пережить перезапуск хоста: процесс ждёт, пока владелец вернётся через `attach`. */
   readonly persist?: boolean;
+  /** Плагин, описавший запуск: ядро пропустит его, только если описание подходит и под правило `launch` этого плагина. */
+  readonly describedBy?: string;
 }
 
 export interface PtyExit {
@@ -154,6 +161,21 @@ export interface PluginOs {
   readonly secrets: OsSecrets;
   readonly security?: { setRoots(paths: readonly string[]): Promise<void> };
   readonly ui?: OsUi;
+  /** Открыть путь или URL программой ОС; исполняемый файл не открывается - это был бы запуск в обход `process`. */
+  readonly shell?: { openPath?(path: string): Promise<void>; openExternal?(url: string): Promise<void> };
+  /** Права не нужно: выбор человека сам становится областью `granted` до конца работы приложения. */
+  readonly dialog: OsDialog;
+}
+
+export interface OpenDialogOptions {
+  readonly title?: string;
+  readonly directory?: boolean;
+  readonly multiple?: boolean;
+}
+
+export interface OsDialog {
+  /** Отмена - пустой список; окно закрыто чужим замком - `Unavailable`. */
+  open(options?: OpenDialogOptions): Promise<string[]>;
 }
 
 /** Замок окна: чужие виды скрыты и `inert`, виден только `ui.overlay` владельца, работают только его сочетания и диалоги. Главные части работают дальше. */

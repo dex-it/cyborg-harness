@@ -35,7 +35,8 @@ async function setup(plugins: Record<string, unknown>, withBackend = true) {
     assert.ok(p, `${id}: нет ctx.os.pty`);
     return p;
   };
-  return { k, backend, pty, handles, work, [Symbol.asyncDispose]: async () => {
+  const hasPty = (id: string) => contexts.get(id)?.os.pty !== undefined;
+  return { k, backend, pty, hasPty, handles, work, [Symbol.asyncDispose]: async () => {
       await k.unload();
       await rm(root, { recursive: true, force: true });
     },
@@ -72,6 +73,32 @@ test('pty.spawn: программа, окружение и cwd по праву; 
   await assert.rejects(s.pty('term').spawn({ program: '/bin/sh' }), { code: 'PermissionDenied' });
   await assert.rejects(s.pty('term').spawn({ program: '/bin/bash', env: { LD_PRELOAD: '/x.so' } }), { code: 'PermissionDenied' });
   assert.equal(s.backend.procs.length, 1, 'запуск без права дошёл до бэкенда');
+});
+
+test('pty.spawn с describedBy: описание поставщика проходит, только если подходит и под его launch (confused deputy)', async () => {
+  const rule = { program: '/bin/bash', args: ['-c', 'exec agent'], env: ['AGENT_FILE'] };
+  await using s = await setup({
+    consumer: { pty: [{ program: '/bin/bash', args: ['-c', 'exec agent'], env: ['AGENT_FILE', 'COLORTERM'] }] },
+    honest: { launch: [rule] },
+    rogue: { launch: [{ program: '/bin/bash', args: ['-c', 'exec other'] }] },
+    silent: undefined,
+  });
+  const spec = { program: '/bin/bash', args: ['-c', 'exec agent', '--x'], env: { AGENT_FILE: '/f' } };
+  await s.pty('consumer').spawn({ ...spec, describedBy: 'honest' });
+  for (const [describedBy, why] of [
+    ['rogue', 'чужое описание под правом потребителя'],
+    ['silent', 'поставщик без launch'],
+    ['nobody', 'плагина нет'],
+  ] as const) {
+    await assert.rejects(s.pty('consumer').spawn({ ...spec, describedBy }), { code: 'PermissionDenied' }, why);
+  }
+  await assert.rejects(s.pty('consumer').spawn({ ...spec, env: { AGENT_FILE: '/f', COLORTERM: 'x' }, describedBy: 'honest' }), { code: 'PermissionDenied' }, 'переменная, которой нет в launch');
+  assert.equal(s.backend.procs.length, 1);
+  assert.equal(s.hasPty('honest'), false, 'launch не даёт поставщику ctx.os.pty');
+  const denied = s.k.journal.flatMap((e) => (e.kind === 'denied' ? [`${e.pluginId}: ${e.detail}`] : []));
+  assert.equal(denied.length, 4);
+  assert.match(denied[0] ?? '', /^consumer: rogue: программа не в launch/);
+  assert.deepEqual(describePermissions({ launch: [rule] }), ['предлагает запуск в терминале: /bin/bash -c exec agent (окружение: AGENT_FILE) - его выполнит потребитель']);
 });
 
 test('pty: чужие не видны и не трогаются; cwd вне права - отказ; без бэкенда - Unavailable; без права - нет члена', async () => {

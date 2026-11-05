@@ -5,11 +5,13 @@ import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { AgentEvent, PluginContext } from '@cyborg/contracts';
+import { SectionStore, type LayerStore } from '../../core/src/config.ts';
 import { load } from '../../core/src/loader.ts';
 import { inlineHosts } from '../../core/src/transports.ts';
 import { fakePty } from '../../core/test/fake-pty.ts';
-import { claudeArgs, LAUNCH_SCRIPT } from '../plugins/agent-claude-code/index.ts';
+import { claudeArgs, LAUNCH_SCRIPT, waitAfterStop } from '../plugins/agent-claude-code/index.ts';
 import { projectDirName } from '../plugins/agent-claude-code/history.ts';
+import { ISOLATION_PROMPT } from '../plugins/session-isolation/index.ts';
 
 const PLUGINS = path.join(import.meta.dirname, '..', 'plugins');
 const PROVIDERS = ['agent-claude-code', 'agent-shell'];
@@ -25,7 +27,7 @@ async function waitFor<T>(what: string, probe: () => T | undefined | false | Pro
 }
 
 /** Настоящие модули плагинов в ядре; probe - потребитель, через которого тест зовёт контракт; claude - скрипт в PATH. */
-async function setup() {
+async function setup(store?: LayerStore) {
   const root = await mkdtemp(path.join(tmpdir(), 'cyborg-agents-'));
   const bin = path.join(root, 'bin');
   await mkdir(bin);
@@ -39,13 +41,14 @@ async function setup() {
   let probe: PluginContext | undefined;
   const k = await load({
     apiVersion: '1.0.0',
-    enabled: [...PROVIDERS, 'sessions', 'probe'],
-    manifests: [...PROVIDERS, 'sessions'].map(manifestOf).concat({ id: 'probe', version: '1.0.0', engines: { cyborg: '^1' }, consumes: { 'cyborg.agent': '^1' } }),
+    enabled: [...PROVIDERS, 'session-isolation', 'sessions', 'probe'],
+    manifests: [...PROVIDERS, 'session-isolation', 'sessions'].map(manifestOf).concat({ id: 'probe', version: '1.0.0', engines: { cyborg: '^1' }, consumes: { 'cyborg.agent': '^1' } }),
     entry: (m) => (m.id === 'probe' ? 'probe' : path.join(PLUGINS, m.id, 'index.ts')),
     spawnHost: inlineHosts(async (entry) => (entry === 'probe' ? { activate: (ctx: PluginContext) => void (probe = ctx) } : ((await import(entry)) as { default: never }).default)),
+    ...(store && { state: await SectionStore.open(store, ['workspace']) }),
     os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), home: root, env: { PATH: `${bin}:/usr/bin:/bin`, HOME: root, SHELL: shell }, pty: backend },
   });
-  assert.deepEqual(k.active.toSorted(), [...PROVIDERS, 'probe', 'sessions'].toSorted(), JSON.stringify(k.journal.filter((e) => e.kind === 'failed')));
+  assert.deepEqual(k.active.toSorted(), [...PROVIDERS, 'probe', 'session-isolation', 'sessions'].toSorted(), JSON.stringify(k.journal.filter((e) => e.kind === 'failed')));
   assert.ok(probe);
   const ctx = probe;
   const agent = (id: string) => {
@@ -85,6 +88,10 @@ test('cyborg.agent, общий набор: факты, запуск через �
   }
   const shell = s.backend.procs.find((p) => p.file === '/bin/sh');
   assert.deepEqual(shell?.args, []);
+  const claude = s.backend.procs.find((p) => p.file === s.shell);
+  const append = claude?.args.indexOf('--append-system-prompt') ?? -1;
+  assert.equal(claude?.args[append + 1], ISOLATION_PROMPT, 'фрагмент изоляции от session-isolation не дошёл до claude');
+  assert.equal(s.k.journal.filter((e) => e.kind === 'denied').length, 0, 'поставщики описали запуск в пределах своего launch');
 });
 
 test('agent-claude-code: запуск как в Cyborg - оболочка входа, --settings с хуками, порядок аргументов', async () => {
@@ -100,6 +107,7 @@ test('agent-claude-code: запуск как в Cyborg - оболочка вхо
     env: { CYBORG_EVENTS: path.join(data, 'sessions', 'a1.jsonl'), CYBORG_SETTINGS: path.join(data, 'claude-hooks.json') },
   });
   assert.deepEqual(claudeArgs({ sessionId: 'b', cwd: '/w' }), [], 'без фрагментов --append-system-prompt не нужен');
+  assert.throws(() => claudeArgs({ sessionId: 'b', cwd: '/w', resumeId: '--dangerously-skip-permissions' }), /--resume/, 'id из данных документа стал бы флагом');
   const settings = JSON.parse(await readFile(spec.env.CYBORG_SETTINGS, 'utf8')) as { hooks: Record<string, { matcher?: string; hooks: { command: string }[] }[]> };
   assert.deepEqual(Object.keys(settings.hooks), ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'Stop', 'Notification']);
   assert.equal(settings.hooks.PostToolUse?.[0]?.matcher, '*');
@@ -108,7 +116,7 @@ test('agent-claude-code: запуск как в Cyborg - оболочка вхо
 
   await s.k.run('sessions.new', 'agent-claude-code');
   const proc = s.backend.procs.at(-1)!;
-  assert.deepEqual([proc.file, proc.args], [s.shell, ['-lc', LAUNCH_SCRIPT, 'cyborg']], '$SHELL не заменён оболочкой входа');
+  assert.deepEqual([proc.file, proc.args], [s.shell, ['-lc', LAUNCH_SCRIPT, 'cyborg', '--append-system-prompt', ISOLATION_PROMPT]], '$SHELL не заменён оболочкой входа');
   assert.deepEqual(Object.keys(proc.options.env).filter((k) => k.startsWith('CYBORG_')).toSorted(), ['CYBORG_EVENTS', 'CYBORG_SETTINGS']);
   const events = proc.options.env.CYBORG_EVENTS!;
   proc.exit(0);
@@ -128,6 +136,8 @@ test('agent-claude-code: хуки в события контракта; прош
   await appendFile(
     file,
     [
+      line({ hook_event_name: 'SessionStart', cwd: '/w', session_id: 'c-1' }),
+      line({ hook_event_name: 'SessionStart', cwd: '/w', session_id: '--help me' }),
       line({ hook_event_name: 'PostToolUse', cwd: '/w', tool_name: 'Bash' }),
       line({ hook_event_name: 'UserPromptSubmit', cwd: '/w' }),
       line({ hook_event_name: 'Stop', cwd: '/w/sub', last_assistant_message: 'готово', background_tasks: [] }),
@@ -138,9 +148,11 @@ test('agent-claude-code: хуки в события контракта; прош
       '{"hook_event_name":"Stop"',
     ].join(''),
   );
-  await waitFor('события хуков', () => seen.length >= 8);
+  await waitFor('события хуков', () => seen.length >= 10);
   assert.deepEqual(seen, [
     { type: 'cwd', cwd: '/w' },
+    { type: 'session', resumeId: 'c-1' },
+    { type: 'activity' },
     { type: 'activity', tool: 'Bash' },
     { type: 'prompt' },
     { type: 'cwd', cwd: '/w/sub' },
@@ -150,9 +162,32 @@ test('agent-claude-code: хуки в события контракта; прош
     { type: 'activity' },
   ]);
   await appendFile(file, '}\n');
-  await waitFor('дописанная строка', () => seen.length === 9);
+  await waitFor('дописанная строка', () => seen.length === 11);
   assert.deepEqual(seen.at(-1), { type: 'turnEnd', background: false });
   sub.dispose();
+});
+
+test('agent-claude-code: «ждёт» после Stop - только если сессия молчит, без фоновой работы и до dispose', async () => {
+  const seen: AgentEvent[] = [];
+  const quiet = waitAfterStop((e) => seen.push(e), 30);
+  const pause = () => new Promise((r) => setTimeout(r, 80));
+  quiet.listener({ type: 'turnEnd', background: false });
+  await pause();
+  quiet.listener({ type: 'turnEnd', background: false });
+  quiet.listener({ type: 'activity', tool: 'Bash' });
+  quiet.listener({ type: 'turnEnd', background: true });
+  await pause();
+  quiet.listener({ type: 'turnEnd', background: false });
+  quiet.dispose();
+  await pause();
+  assert.deepEqual(seen, [
+    { type: 'turnEnd', background: false },
+    { type: 'waiting', reason: 'Ход завершён, ждёт ответа' },
+    { type: 'turnEnd', background: false },
+    { type: 'activity', tool: 'Bash' },
+    { type: 'turnEnd', background: true },
+    { type: 'turnEnd', background: false },
+  ]);
 });
 
 test('agent-claude-code: история - интерактивные сессии каталога и его worktree, заголовок с краёв длинного журнала', async () => {
@@ -180,4 +215,48 @@ test('agent-claude-code: история - интерактивные сесси�
     { id: id(1), cwd, title: 'почини тесты', updated: 1_000_000 },
   ]);
   assert.deepEqual(await agent.history('/nowhere'), []);
+});
+
+test('sessions: вкладка сессии переживает перезапуск окна, человек поднимает её заново или закрывает', async () => {
+  let saved: Record<string, unknown> = {};
+  const store: LayerStore = { load: async () => structuredClone(saved), save: async (_layer, next) => void (saved = structuredClone(next)) };
+  {
+    await using s = await setup(store);
+    await s.k.run('sessions.new', 'agent-shell');
+    assert.deepEqual(await s.k.run('sessions.previous'), [], 'живая сессия - не прошлого запуска');
+    assert.deepEqual(s.k.documents.map((d) => [d.pluginId, d.type, d.available]), [['sessions', 'session', true]]);
+  }
+  await using s = await setup(store);
+  const [prev, ...rest] = (await s.k.run('sessions.previous')) as { id: string; title: string; agent: string }[];
+  assert.ok(prev);
+  assert.deepEqual([rest.length, prev.agent], [0, 'agent-shell']);
+  const before = s.backend.procs.length;
+  assert.equal(typeof (await s.k.run('sessions.restore', prev.id)), 'string');
+  assert.deepEqual(await s.k.run('sessions.previous'), [], 'поднятая сессия снова живая');
+  assert.deepEqual(s.k.documents.map((d) => d.id), [prev.id], 'та же вкладка, не новая');
+  await assert.rejects(s.k.run('sessions.restore', prev.id), /уже идёт/);
+  const proc = s.backend.procs[before];
+  assert.ok(proc);
+  await s.k.closeDocument(prev.id);
+  await waitFor('закрытая вкладка завершила сессию', () => proc.killed);
+  assert.deepEqual(s.k.documents, []);
+});
+
+test('sessions: восстановленная сессия claude продолжается через resume поставщика', async () => {
+  let saved: Record<string, unknown> = {};
+  const store: LayerStore = { load: async () => structuredClone(saved), save: async (_layer, next) => void (saved = structuredClone(next)) };
+  {
+    await using s = await setup(store);
+    await s.k.run('sessions.new', 'agent-claude-code');
+    const events = s.backend.procs.at(-1)!.options.env.CYBORG_EVENTS!;
+    // watch читает только новое, а sessions.new не ждёт, пока он встанет.
+    await new Promise((r) => setTimeout(r, 300));
+    await appendFile(events, `${JSON.stringify({ hook_event_name: 'SessionStart', session_id: 'claude-77' })}\n`);
+    await waitFor('resumeId в данных документа', async () => JSON.stringify(saved).includes('claude-77'));
+  }
+  await using s = await setup(store);
+  const [prev] = (await s.k.run('sessions.previous')) as { id: string; resumable: boolean }[];
+  assert.ok(prev?.resumable);
+  await s.k.run('sessions.restore', prev.id);
+  assert.deepEqual(s.backend.procs.at(-1)!.args.slice(3), ['--resume', 'claude-77', '--append-system-prompt', ISOLATION_PROMPT]);
 });

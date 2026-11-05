@@ -306,3 +306,28 @@ test('keepFocus: фокус, пришедший во фрейм, ложится 
   sub.dispose();
   assert.equal(listeners.size, 0);
 });
+
+test('замок окна: системный диалог чужого плагина не встаёт поверх экрана замка', async () => {
+  const picker: PluginModule = {
+    activate(ctx) {
+      ctx.commands.register('picker.pick', () => ctx.os.dialog.open());
+      return undefined;
+    },
+  };
+  const dir = mkdtempSync(path.join(tmpdir(), 'cyborg-window-dialog-'));
+  const { start } = kernel(
+    { pin, picker },
+    {
+      enabled: ['pin', 'picker'],
+      manifests: [pinManifest(), manifest('picker', { commands: { 'picker.pick': {} } })],
+      os: { dataDir: dir, tempDir: dir, dialog: { open: async () => ['/выбран'] } },
+    },
+  );
+  const k = await start();
+  assert.deepEqual(await k.run('picker.pick'), ['/выбран']);
+  await k.run('pin.lock', false);
+  await assert.rejects(k.run('picker.pick'), { code: 'Unavailable' });
+  await k.run('pin.unlock');
+  assert.deepEqual(await k.run('picker.pick'), ['/выбран']);
+  await k.unload();
+});

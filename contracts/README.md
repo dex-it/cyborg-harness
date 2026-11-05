@@ -24,11 +24,24 @@ export interface Contracts {
 
 `PluginModule`, `PluginContext` и типы вида (`UiModule`, `UiContext`, `ThemeTokens`, `FeedLine`) объявлены здесь же: плагин импортирует только этот пакет и свои модули, а `core/test/plugin-imports.test.ts` проверяет это по каждому файлу плагинов.
 
+Разделы `config` и `state`: манифест объявляет `"config": { "version": 2, "schema": "./config.schema.json" }`, модуль - `config: { defaults, migrate, validate }`. Схема - подмножество JSON Schema (`type`, `properties`, `required`, `additionalProperties`, `items`, `enum`, `const`, границы чисел, длины, `pattern`, `uniqueItems`); прочий ключ вроде `$ref` или `oneOf` - отказ разделу, а не пропуск. Значение не по схеме - плагин не активируется; правка файла извне не по схеме оставляет прежнее значение.
+
 События окна и ОС - `ctx.window.onFocusChange` и `ctx.system`: `onSuspend`, `onResume`, `onScreenLock`, `onIdle(seconds, cb)` (один раз на каждый простой от `seconds`), `onBeforeQuit` (ядро ждёт асинхронного слушателя не дольше бюджета приложения). Подписки снимаются вместе с плагином; упавший слушатель пишет в журнал плагина и соседям не мешает.
 
 Вид плагина - ES-модуль из `"ui": { "views": { "main": "./ui/ui.js" } }` с `export function mount(root, ctx: UiContext): Disposable`. `UiContext` - команды, контракты (`ctx.contracts.get` отдаёт удалённый объект: только методы, ответ - данные), токены темы `--cy-*` уже стоят на `documentElement` до `mount`, `ctx.theme.onChange`, `ctx.onVisibilityChange` (свёрнутый вид не размонтируется), лента журнала, перетаскивание и `ctx.terminal.open(ticket)` - pty по билету `PtyHandle.share()` своей главной части, вывод и ввод мимо хоста, `ctx.state` - память вида в state воркспейса (JSON до 64 КБ, готова до `mount`), `ctx.dialogs.show` - диалог `ask` или меню `menu` в слое окна поверх всех фреймов (ответ - `id` пункта или `undefined`) и `ctx.keys.of(command)` - сочетание своей команды для подсказки. Замок окна - у главной части: `ctx.os.ui.lock()` с правом `ui.lock` и экраном `ui.overlay`, снять его может только `release()` того же плагина. `ctx.os` у вида нет. Мост вида (`ViewBridge`) - внутреннее дело ядра, плагин его не видит.
 
 `"activation": "lazy"` в манифесте откладывает активацию: плагин ждёт первой команды или сочетания, показа своего вида или потребителя своего контракта. Поставщика из `requires` и `optional` ядро поднимает до потребителя, поставщиков `consumes` будит без ожидания.
+
+## Документы: `ctx.documents`
+
+Вкладки плагина, которые окно показывает и переживают перезапуск. Тип документа объявлен в манифесте: `"documents": { "note": { "restorable": true } }`; без `restorable` документ живёт до закрытия окна.
+
+- `open(type, { title, data? })` - новый документ, ответ - id. `data` - JSON до 64 КБ, `title` - непустая строка до 200 символов.
+- `save(id, { title?, data? })` - владелец сам отдаёт данные, когда они меняются: ядро их не опрашивает, после падения опрашивать некого. Не названное поле не меняется, `data: undefined` его стирает.
+- `close(id)`, `list()` - свои документы в порядке окна; после перезапуска `list()` отдаёт `restorable`-документы прошлого запуска, поднимает их владелец.
+- `onClose(id => ...)` - вкладку закрыл человек.
+
+Чужой документ для плагина не существует (`NotFound`), тип не из манифеста - `NotDeclared`.
 
 ## Доступ к ОС: `ctx.os`
 
@@ -36,11 +49,14 @@ export interface Contracts {
 
 ```jsonc
 "permissions": {
-  "fs.read": ["workspace"],                       // ещё plugin-data, plugin-temp, абсолютный путь, ~/...
+  "fs.read": ["workspace", "~/notes/**", "/srv/*/logs", "granted"],  // ещё plugin-data, plugin-temp; * - сегмент, ** - глубина
+  "fs.write": ["workspace", "workspace.git"],     // workspace.git - запись в .git корней воркспейса
+  "shell": ["granted", "https:", "mailto:"],      // openPath по областям, openExternal по схемам; file: и javascript: нельзя
   "process": ["git", { "program": "npm", "args": ["test"], "env": ["CI"] }],  // env - что можно передать программе
   "pty": ["claude"],                              // та же форма; процесс держит ядро
   // $SHELL - оболочка входа человека, путь подставит ядро; только с закреплённым флагом и скриптом
   // "pty": [{ "program": "$SHELL", "args": ["-lc", "exec claude --settings \"$CYBORG_SETTINGS\" \"$@\"", "cyborg"] }]
+  "launch": [ /* правила формы pty */ ],          // что поставщик cyborg.agent описывает потребителю; члена в ctx.os не даёт
   "net": ["api.github.com", "config:baseUrl"],    // config: - хост из своего раздела config
   "env": ["HOME"], "notify": true, "clipboard": ["read"],
   "secrets.ref": ["vault://kv/data/jira*"]
@@ -52,15 +68,36 @@ export interface Contracts {
 | `paths.data`, `paths.temp`, `fs.*` в них | доступны всегда; `paths.home` - домашний каталог, тот же, что `~` в правах |
 | `fs.*` вне своих каталогов | `PermissionDenied` |
 | `secrets.get/set/delete` | свои ключи; без шифрования ОС - `Unavailable` |
-| `process`, `pty`, `net`, `env`, `notify`, `clipboard`, `security` | члена нет |
+| `dialog.open({ title, directory, multiple })` | есть всегда; выбранное человеком становится областью `granted` плагина до перезапуска |
+| `process`, `pty`, `shell`, `net`, `env`, `notify`, `clipboard`, `security` | члена нет |
 
-Путь только абсолютный, проверяется после `realpath`: симлинк наружу области не выводит, файл воркспейса, данные приложения, каталоги других плагинов и запись в `.git` закрыты. Программа из `process` и `pty` получает только базовое окружение (PATH, HOME, локаль) и переменные, названные в `env` её правила.
+Путь только абсолютный, проверяется после `realpath`: симлинк наружу области не выводит, файл воркспейса, данные приложения, каталоги других плагинов и запись в `.git` без `workspace.git` закрыты. `shell.openPath` исполняемый файл не открывает. Программа из `process` и `pty` получает только базовое окружение (PATH, HOME, локаль) и переменные, названные в `env` её правила.
 
 pty держит ядро: `ctx.os.pty.spawn({ program, args, cwd, env, cols, rows, persist })` отдаёт ручку с `onData`, `onExit`, `write`, `resize`, `kill`. С `persist: true` процесс переживает падение хоста плагина; вернувшийся плагин находит его через `list()` и забирает `attach(id)` вместе с хвостом вывода `backlog`. Каждый отказ - запись `denied` в журнале плагинов. `ctx.secrets.resolve('token')` или `resolve({ $secret: 'token' })` берёт секрет из своего хранилища; ссылка со схемой (`vault://...`) должна подходить под маску `secrets.ref`.
 
 ## Агент: `cyborg.agent`
 
-Кратность many, тип - `contracts/agent.ts`. Поставщик описывает запуск (`launch` отдаёт `program`, `args`, `cwd`, `env` - готовый вход `ctx.os.pty.spawn`) и переводит следы агента в события `watch`; процесс запускает потребитель по своему праву `pty`, поэтому в его манифесте - правила программ всех агентов, которые он поднимает. `facts().capabilities` говорит, что звать можно; `ended` после выхода процесса убирает файлы поставщика и называет причину по коду выхода.
+Кратность many, тип - `contracts/agent.ts`. Поставщик описывает запуск (`launch` отдаёт `program`, `args`, `cwd`, `env` - готовый вход `ctx.os.pty.spawn`) и переводит следы агента в события `watch`; процесс запускает потребитель по своему праву `pty`, поэтому в его манифесте - правила программ всех агентов, которые он поднимает. `facts().capabilities` говорит, что звать можно; `ended` после выхода процесса убирает файлы поставщика и называет причину по коду выхода. Событие `session` несёт id сессии самого агента: потребитель хранит его (у `sessions` - в данных документа) и после перезапуска передаёт в `launch({ resumeId })`.
+
+Чужое описание под своим правом - confused deputy: потребитель передаёт `ctx.os.pty.spawn({ ...spec, describedBy: pluginId })`, и ядро пропускает запуск, только если он подходит и под `pty` потребителя, и под `launch` поставщика (программа, закреплённые аргументы, имена переменных). Права пересекаются: назвать чужой плагин в `describedBy` значит только сузить запуск, поэтому ядро не сверяет, кто чей поставщик. Поставщик объявляет `launch` с теми же правилами, что `pty` у потребителя; без него его описание не запустится.
+
+Системный промпт сессии собирается из контракта `cyborg.session-prompt` (кратность many, `fragment(): string`): потребитель берёт фрагменты всех поставщиков по порядку их id, пустые и упавшие пропускает и передаёт в `launch({ promptFragments })`. В playground вклад даёт `session-isolation` - текст изоляции сегодняшнего Cyborg.
+
+## Элементы ядра
+
+Оболочка вида определяет их до `mount`: плагин пишет `document.createElement('cy-list')` без импорта и не может занять имя `cy-*` своим классом. Данные свойств и событий - `contracts/elements.ts`. Стили - на токенах `--cy-*` темы, поэтому вид не задаёт им цвета; внутренности открыты через `::part`, где это названо.
+
+| Тег | Атрибуты и свойства | События |
+|---|---|---|
+| `cy-button` | `variant` (`primary`, `danger`), `disabled`; часть `button` | `click`; при `disabled` не доходит и от `host.click()` |
+| `cy-field` | `label`, `placeholder`, `value`, `type` (`text`, `search`, `password`), `disabled`; свойство `value`; часть `input` | `input`, `change`, `keydown` |
+| `cy-list` | свойство `items: ListItem[]`, `selected`, `label`; слот `empty` - когда пунктов нет | `cy-select`, `cy-activate` (Enter, двойной клик) |
+| `cy-tree` | свойства `items: TreeItem[]`, `expanded: string[]`; `selected`, `label` | `cy-select`, `cy-activate`, `cy-toggle` |
+| `cy-tabs` | свойство `tabs: TabItem[]`, `selected`, `label`; без `selected` выделена первая | `cy-select` |
+| `cy-empty` | `heading`; текст - содержимое | - |
+| `cy-spinner` | `label` (по умолчанию «Загрузка»), `role="status"` | - |
+
+`id` пунктов - непустые и уникальные (в дереве - во всём дереве), иначе присваивание свойства бросает `TypeError` с местом. События всплывают и выходят из тени (`composed`), `detail` - `{ id }`, у `cy-toggle` ещё `expanded`. Программная смена `selected` событий не шлёт. Клавиши - по WAI-ARIA: стрелки, `Home`, `End`, `Enter`; в дереве вправо раскрывает ветвь и входит в неё, влево сворачивает и выходит к родителю; вкладки по стрелкам ходят по кругу. В пределах мажорной версии `engines.cyborg` тег не удаляется и не меняет атрибуты.
 
 ## Сторонние контракты
 

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import { constants, watch as watchFs, type Dirent } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { DirEntry, FileSlice, FileStat, HttpResponse, ProcessResult, PtyInfo, SecretValue } from '@cyborg/contracts';
+import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, ProcessResult, PtyInfo, SecretValue } from '@cyborg/contracts';
 import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import { LOGIN_SHELL } from './permissions.ts';
@@ -40,7 +40,23 @@ export interface OsEnvironment {
   readonly pty?: PtyBackend;
   /** Хвост вывода pty, символов; по умолчанию 256 К. */
   readonly ptyBacklog?: number;
+  /** Открыть программой ОС; путь и URL шлюз уже проверил. */
+  readonly shell?: { openPath(path: string): Promise<void>; openExternal(url: string): Promise<void> };
+  /** Системный выбор файла; ответ - выбранные пути, отмена - пустой список. */
+  readonly dialog?: { open(options: OpenDialogOptions): Promise<readonly string[]> };
 }
+
+/** Область пути: каталог после realpath и хвост маски; `git` - запись в `.git` разрешена (`workspace.git`). */
+interface Area {
+  readonly root: string;
+  readonly segs: readonly string[];
+  readonly git: boolean;
+}
+
+// Открыть такой файл - запустить его: это право `process`, а не `shell`.
+// PATHEXT и список высокого риска Windows, пакеты и ярлыки macOS, установщики и скрипты Linux: всё, что система откроет запуском.
+const EXECUTABLE =
+  /\.(exe|bat|cmd|com|pif|scr|ps1|ps1xml|psc1|psm1|msi|msp|mst|msc|msix|appx|appinstaller|application|appref-ms|gadget|lnk|url|scf|settingcontent-ms|library-ms|reg|inf|ins|isp|chm|hta|cpl|xll|xbap|diagcab|vsix|vb|vbs|vbe|js|jse|mjs|cjs|ws|wsf|wsh|jar|py|pyw|pl|rb|iso|img|vhd|vhdx|app|bundle|prefpane|workflow|action|scpt|applescript|terminal|fileloc|inetloc|webloc|command|tool|sh|bash|zsh|csh|ksh|fish|desktop|appimage|run|bin|deb|rpm|snap|flatpakref|pkg|mpkg|dmg)$/i;
 
 export interface Denial {
   readonly pluginId: string;
@@ -117,9 +133,39 @@ async function containsGit(dir: string): Promise<boolean> {
   return false;
 }
 
+const segmentGlob = (seg: string) => new RegExp(`^${seg.split('*').map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^/\\\\]*')}$`);
+
+function segsMatch(segs: readonly string[], parts: readonly string[]): boolean {
+  const [head, ...rest] = segs;
+  if (head === undefined) return parts.length === 0;
+  if (head === '**') return parts.some((_, i) => segsMatch(rest, parts.slice(i))) || segsMatch(rest, []);
+  const [part, ...tail] = parts;
+  return part !== undefined && segmentGlob(head).test(part) && segsMatch(rest, tail);
+}
+
+/** Каталог области, внутри которого лежит путь: корень или самый короткий префикс под маску. */
+function areaDir(area: Area, target: string): string | undefined {
+  if (!inside(area.root, target)) return undefined;
+  if (area.segs.length === 0) return area.root;
+  const parts = path.relative(area.root, target).split(path.sep).filter(Boolean);
+  for (let k = 1; k <= parts.length; k++) if (segsMatch(area.segs, parts.slice(0, k))) return path.join(area.root, ...parts.slice(0, k));
+  return undefined;
+}
+
 function wildcard(mask: string, value: string): boolean {
   const re = new RegExp(`^${mask.split('*').map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`);
   return re.test(value);
+}
+
+function readDialogOptions(method: string, raw: unknown): OpenDialogOptions {
+  if (raw === undefined) return {};
+  if (!isRecord(raw)) throw new CoreError('Invalid', `${method}: ожидается { title?, directory?, multiple? }`);
+  const { title, directory, multiple, ...extra } = raw;
+  const unknownKey = Object.keys(extra)[0];
+  if (unknownKey !== undefined) throw new CoreError('Invalid', `${method}: нет поля ${unknownKey}`);
+  if (title !== undefined && (typeof title !== 'string' || title.length > 200)) throw new CoreError('Invalid', `${method}: title - строка до 200 символов`);
+  for (const [name, v] of [['directory', directory], ['multiple', multiple]] as const) if (v !== undefined && typeof v !== 'boolean') throw new CoreError('Invalid', `${method}: ${name} - true или false`);
+  return { ...(title !== undefined && { title }), ...(directory === true && { directory: true }), ...(multiple === true && { multiple: true }) };
 }
 
 const str = (method: string, v: unknown, name: string): string => {
@@ -128,10 +174,24 @@ const str = (method: string, v: unknown, name: string): string => {
 };
 
 /** Шлюз ОС в главном процессе: вызывающего знает ядро по каналу хоста, права - из его манифеста. */
+/** Причина отказа правила `process`, `pty` или `launch`; undefined - запуск подходит. */
+function ruleRefusal(m: PluginManifest, key: 'process' | 'pty' | 'launch', program: string, argv: readonly string[], envNames: readonly string[]): string | undefined {
+  const rule = (m.permissions[key] ?? []).find((r) => {
+    if (typeof r === 'string') return r === program;
+    return r.program === program && r.args.every((a, i) => argv[i] === a);
+  });
+  if (rule === undefined) return `программа не в ${key}: ${[program, ...argv.slice(0, 2)].join(' ')}`;
+  // Окружение - тоже ввод программы (GIT_CONFIG_*, NODE_OPTIONS, LD_PRELOAD): только имена из правила.
+  const allowedEnv = typeof rule === 'string' ? [] : (rule.env ?? []);
+  const foreign = envNames.filter((k) => !allowedEnv.includes(k));
+  return foreign.length > 0 ? `переменные не в правиле ${key}: ${foreign.join(', ')}` : undefined;
+}
+
 export class OsGateway {
   readonly #env: OsEnvironment;
   readonly #deny: (denial: Denial) => void;
   readonly #configOf: (pluginId: string) => Readonly<Record<string, unknown>>;
+  readonly #manifestOf: (pluginId: string) => PluginManifest | undefined;
   readonly #roots = new Map<string, readonly string[]>();
   /** Хосты `config:<поле>` на момент активации или правки файла человеком: своя запись плагина в config их не меняет. */
   readonly #approved = new Map<string, Readonly<Record<string, unknown>>>();
@@ -139,14 +199,18 @@ export class OsGateway {
   readonly #pty: PtyTable | undefined;
   readonly #push: (pluginId: string, method: PushMethod, params: unknown) => void;
   readonly #watches = new Map<string, () => void>();
+  /** Выбор человека в `dialog`: область `granted` плагина до конца работы приложения. */
+  readonly #granted = new Map<string, Set<string>>();
 
   constructor(
     env: OsEnvironment,
     deny: (denial: Denial) => void,
     configOf: (pluginId: string) => Readonly<Record<string, unknown>> = () => ({}),
     push: (pluginId: string, method: PushMethod, params: unknown) => void = () => undefined,
+    manifestOf: (pluginId: string) => PluginManifest | undefined = () => undefined,
   ) {
     this.#env = env;
+    this.#manifestOf = manifestOf;
     this.#push = push;
     this.#deny = deny;
     this.#configOf = configOf;
@@ -196,24 +260,39 @@ export class OsGateway {
     return new CoreError('PermissionDenied', `${m.id}: ${method} - ${detail}`);
   }
 
-  async #areas(m: PluginManifest, right: 'fs.read' | 'fs.write'): Promise<string[]> {
+  async #areas(m: PluginManifest, right: 'fs.read' | 'fs.write' | 'shell'): Promise<Area[]> {
     const own = this.pathsOf(m.id);
     const named = m.permissions[right] ?? [];
-    const out: string[] = [own.data, own.temp];
+    const plain = async (p: string, git = false): Promise<Area> => ({ root: await real(p), segs: [], git });
+    const workspace = () => [...(this.#env.roots?.() ?? []), ...[...this.#roots.values()].flat()];
+    // У shell своих каталогов нет: открыть свой файл в системе - тоже выход наружу, и он объявляется.
+    const out: Promise<Area>[] = right === 'shell' ? [] : [plain(own.data), plain(own.temp)];
     for (const area of named) {
-      if (area === 'workspace') out.push(...(this.#env.roots?.() ?? []), ...[...this.#roots.values()].flat());
-      else if (area !== 'plugin-data' && area !== 'plugin-temp') out.push(this.#expand(area));
+      if (area === 'workspace' || area === 'workspace.git') out.push(...workspace().map((r) => plain(r, area === 'workspace.git')));
+      else if (area === 'granted') out.push(...[...(this.#granted.get(m.id) ?? [])].map((g) => plain(g)));
+      else if (area === 'plugin-data' || area === 'plugin-temp') out.push(...(right === 'shell' ? [plain(area === 'plugin-data' ? own.data : own.temp)] : []));
+      else if (area.startsWith('/') || area.startsWith('~')) out.push(this.#maskArea(area));
     }
-    return Promise.all(out.map(real));
+    return Promise.all(out);
   }
 
-  async #checkPath(m: PluginManifest, method: string, raw: unknown, write: boolean): Promise<string> {
+  async #maskArea(area: string): Promise<Area> {
+    const parts = this.#expand(area).split(/[\\/]/);
+    const at = parts.findIndex((s) => s.includes('*'));
+    if (at === -1) return { root: await real(this.#expand(area)), segs: [], git: false };
+    return { root: await real(parts.slice(0, at).join(path.sep) || path.sep), segs: parts.slice(at).filter(Boolean), git: false };
+  }
+
+  async #checkPath(m: PluginManifest, method: string, raw: unknown, write: boolean, right: 'fs.read' | 'fs.write' | 'shell' = write ? 'fs.write' : 'fs.read'): Promise<string> {
     const given = str(method, raw, 'путь');
     if (!path.isAbsolute(given) || given.includes('\0')) throw this.#denied(m, method, `путь не абсолютный: ${given}`);
     const target = await realOrParent(given);
-    const areas = await this.#areas(m, write ? 'fs.write' : 'fs.read');
-    const area = areas.find((a) => inside(a, target));
-    if (area === undefined) throw this.#denied(m, method, `вне области ${write ? 'fs.write' : 'fs.read'}: ${given}`);
+    const matched = (await this.#areas(m, right)).flatMap((a) => {
+      const dir = areaDir(a, target);
+      return dir === undefined ? [] : [{ dir, git: a.git }];
+    });
+    const area = matched[0]?.dir;
+    if (area === undefined) throw this.#denied(m, method, `вне области ${right}: ${given}`);
     const own = this.pathsOf(m.id);
     const isOwn = inside(await real(own.data), target) || inside(await real(own.temp), target);
     if (isOwn) return target;
@@ -227,7 +306,8 @@ export class OsGateway {
       // Предок защищённого пути закрыт только для записи: удаление или перезапись каталога унесли бы и его.
       if (inside(protectedPath, target) || (write && inside(target, protectedPath))) throw this.#denied(m, method, `защищённый путь: ${given}`);
     }
-    if (write && path.relative(area, target).split(path.sep).includes('.git')) throw this.#denied(m, method, `запись в .git: ${given}`);
+    const gitOk = matched.some((a) => a.git);
+    if (write && !gitOk && path.relative(area, target).split(path.sep).includes('.git')) throw this.#denied(m, method, `запись в .git: ${given}`);
     return target;
   }
 
@@ -348,7 +428,7 @@ export class OsGateway {
         const own = this.pathsOf(m.id);
         if (target === (await real(own.data)) || target === (await real(own.temp))) throw this.#denied(m, method, 'свой каталог целиком не удаляется');
         const areas = await this.#areas(m, 'fs.write');
-        if (areas.includes(target)) throw this.#denied(m, method, `корень области не удаляется: ${String(args[0])}`);
+        if (areas.some((a) => areaDir(a, target) === target)) throw this.#denied(m, method, `корень области не удаляется: ${String(args[0])}`);
         if (!inside(await real(own.data), target) && !inside(await real(own.temp), target) && (await containsGit(target))) {
           throw this.#denied(m, method, `внутри есть .git: ${String(args[0])}`);
         }
@@ -363,6 +443,14 @@ export class OsGateway {
         const program = str(method, o.program, 'программа');
         const argv = o.args ?? [];
         const checked = await this.#program(m, 'pty', method, program, argv, o);
+        // Confused deputy: описание чужого поставщика идёт под правом потребителя, только если поставщик сам его объявил.
+        if (o.describedBy !== undefined) {
+          const id = str(method, o.describedBy, 'describedBy');
+          const provider = this.#manifestOf(id);
+          if (!provider) throw this.#denied(m, method, `плагина ${id} нет`);
+          const refused = ruleRefusal(provider, 'launch', program, checked.argv, Object.keys(isRecord(o.env) ? o.env : {}));
+          if (refused) throw this.#denied(m, method, `${id}: ${refused}`);
+        }
         const size = (v: unknown, fallback: number) => (Number.isInteger(v) && (v as number) > 0 && (v as number) <= 1000 ? (v as number) : fallback);
         return table.spawn(m.id, { program: checked.file, args: checked.argv, ...(checked.cwd !== undefined && { cwd: checked.cwd }), env: checked.env, cols: size(o.cols, 80), rows: size(o.rows, 24), persist: o.persist === true });
       }
@@ -420,6 +508,37 @@ export class OsGateway {
       }
       case 'secrets.resolve':
         return this.#resolve(m, args[0]);
+      case 'shell.openPath': {
+        const target = await this.#checkPath(m, method, args[0], false, 'shell');
+        const st = await fs.stat(target).catch(() => undefined);
+        if (st === undefined) throw new CoreError('NotFound', `${method}: нет ${String(args[0])}`);
+        if (EXECUTABLE.test(target) || (st.isFile() && (st.mode & 0o111) !== 0)) throw this.#denied(m, method, `исполняемый файл: ${String(args[0])}`);
+        if (!this.#env.shell) throw new CoreError('Unavailable', 'открытия в системе нет в этой среде');
+        await this.#env.shell.openPath(target);
+        return undefined;
+      }
+      case 'shell.openExternal': {
+        const raw = str(method, args[0], 'URL');
+        let url: URL;
+        try {
+          url = new URL(raw);
+        } catch {
+          throw new CoreError('Invalid', `${method}: не URL: ${raw}`);
+        }
+        if (!(p.shell ?? []).includes(url.protocol)) throw this.#denied(m, method, `схема ${url.protocol} не в праве shell`);
+        if (!this.#env.shell) throw new CoreError('Unavailable', 'открытия в системе нет в этой среде');
+        await this.#env.shell.openExternal(url.href);
+        return undefined;
+      }
+      case 'dialog.open': {
+        const options = readDialogOptions(method, args[0]);
+        if (!this.#env.dialog) throw new CoreError('Unavailable', 'диалога выбора нет в этой среде');
+        const chosen = (await this.#env.dialog.open(options)).filter((c) => path.isAbsolute(c));
+        const grants = this.#granted.get(m.id) ?? new Set<string>();
+        for (const c of chosen) grants.add(await real(c));
+        this.#granted.set(m.id, grants);
+        return chosen;
+      }
       case 'security.setRoots': {
         if (!p['security.roots']) throw this.#denied(m, method, 'нет права security.roots');
         const roots = args[0];
@@ -469,20 +588,13 @@ export class OsGateway {
   /** Одна проверка на `process` и `pty`: копии разъехались бы, и отставшая открыла бы обход. */
   async #program(m: PluginManifest, key: 'process' | 'pty', method: string, program: string, argv: unknown, options: Record<string, unknown>) {
     if (!Array.isArray(argv) || !argv.every((a): a is string => typeof a === 'string')) throw new CoreError('Invalid', `${method}: аргументы не список строк`);
-    const rule = (m.permissions[key] ?? []).find((r) => {
-      if (typeof r === 'string') return r === program;
-      return r.program === program && r.args.every((a, i) => argv[i] === a);
-    });
-    if (rule === undefined) throw this.#denied(m, method, `программа не в ${key}: ${[program, ...argv.slice(0, 2)].join(' ')}`);
+    const extra = isRecord(options.env) ? Object.fromEntries(Object.entries(options.env).filter((e): e is [string, string] => typeof e[1] === 'string')) : {};
+    const refused = ruleRefusal(m, key, program, argv, Object.keys(extra));
+    if (refused) throw this.#denied(m, method, refused);
     const env0 = this.#env.env ?? process.env;
     // Оболочка входа даёт программе PATH из профиля человека: окно, открытое из Dock или меню, его не наследует.
     const file = program === LOGIN_SHELL ? (env0.SHELL?.length ? env0.SHELL : '/bin/sh') : program;
     const cwd = options.cwd === undefined ? undefined : await this.#checkPath(m, method, options.cwd, false);
-    const extra = isRecord(options.env) ? Object.fromEntries(Object.entries(options.env).filter((e): e is [string, string] => typeof e[1] === 'string')) : {};
-    // Окружение - тоже ввод программы (GIT_CONFIG_*, NODE_OPTIONS, LD_PRELOAD): только имена из правила.
-    const allowedEnv = typeof rule === 'string' ? [] : (rule.env ?? []);
-    const foreign = Object.keys(extra).filter((k) => !allowedEnv.includes(k));
-    if (foreign.length > 0) throw this.#denied(m, method, `переменные не в правиле ${key}: ${foreign.join(', ')}`);
     const base = Object.fromEntries(Object.entries(env0).filter((e): e is [string, string] => typeof e[1] === 'string' && BASE_ENV.test(e[0])));
     return { file, argv, cwd, env: { ...base, ...extra } };
   }

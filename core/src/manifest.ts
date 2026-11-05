@@ -41,8 +41,9 @@ export interface PluginManifest {
   readonly commands: Readonly<Record<string, CommandSpec>>;
   /** Читаются до запуска кода: конфликт сочетаний виден при загрузке, а не при нажатии. */
   readonly keybindings: readonly KeybindingSpec[];
-  readonly config?: { readonly version: number };
-  readonly state?: { readonly version: number };
+  /** `schema` - путь `./<файл>.json` внутри каталога плагина; раздел проверяется по нему до активации и после правки извне. */
+  readonly config?: SectionDecl;
+  readonly state?: SectionDecl;
   /** `own` - просьба о своём хосте; пользователь вправе переопределить группой в `plugins.hosts`. */
   readonly host?: 'own';
   /** `lazy` - не при старте, а по первой команде, сочетанию, показу вида или потребителю своего контракта. */
@@ -55,6 +56,8 @@ export interface PluginManifest {
   };
   /** `onStart` - окно закрыто с первого кадра, плагин активируется сразу, даже `lazy`. */
   readonly lock?: { readonly onStart: true };
+  /** Типы документов плагина; `restorable` - документ переживает перезапуск окна. */
+  readonly documents?: Readonly<Record<string, { readonly restorable: boolean }>>;
   readonly permissions: PluginPermissions;
 }
 
@@ -100,6 +103,7 @@ export function parseManifest(raw: unknown): ManifestResult {
   const state = readSchemaVersion('state', raw.state, errors);
   const permissions = readPermissions(raw.permissions, errors);
   const ui = readUi(raw.ui, errors);
+  const documents = readDocuments(raw.documents, errors);
   if (raw.host !== undefined && raw.host !== 'own') errors.push(`host: допустимо только "own", получено ${show(raw.host)}`);
   if (raw.activation !== undefined && raw.activation !== 'lazy') errors.push(`activation: допустимо только "lazy", получено ${show(raw.activation)}`);
   const lock = isRecord(raw.lock) && raw.lock.onStart === true && Object.keys(raw.lock).length === 1;
@@ -129,6 +133,7 @@ export function parseManifest(raw: unknown): ManifestResult {
       ...(raw.activation === 'lazy' && { activation: 'lazy' as const }),
       ...(ui && { ui }),
       ...(lock && { lock: { onStart: true as const } }),
+      ...(documents && { documents }),
     },
   };
 }
@@ -305,6 +310,25 @@ function readUi(raw: unknown, errors: string[]): { views: Record<string, string>
   return { views, overlay: raw.overlay };
 }
 
+const MAX_DOCUMENT_TYPES = 16;
+
+function readDocuments(raw: unknown, errors: string[]): Record<string, { restorable: boolean }> | undefined {
+  if (raw === undefined) return undefined;
+  const form = 'documents: ожидается { "<тип>": { "restorable": true } }';
+  if (!isRecord(raw) || Object.keys(raw).length === 0) {
+    errors.push(form);
+    return undefined;
+  }
+  if (Object.keys(raw).length > MAX_DOCUMENT_TYPES) errors.push(`documents: не больше ${String(MAX_DOCUMENT_TYPES)} типов`);
+  const out: Record<string, { restorable: boolean }> = {};
+  for (const [type, spec] of Object.entries(raw)) {
+    if (!VIEW_NAME.test(type)) errors.push(`documents.${type}: имя типа - строчные латинские буквы, цифры и дефис`);
+    else if (!isRecord(spec) || Object.keys(spec).some((k) => k !== 'restorable') || (spec.restorable !== undefined && typeof spec.restorable !== 'boolean')) errors.push(`documents.${type}: ${form.slice('documents: '.length)}`);
+    else out[type] = { restorable: spec.restorable === true };
+  }
+  return out;
+}
+
 /** Модуль вида по имени: `overlay` - экран замка из `ui.overlay`. */
 export function viewEntry(m: PluginManifest, view: string): string | undefined {
   if (typeof view !== 'string') return undefined;
@@ -313,14 +337,27 @@ export function viewEntry(m: PluginManifest, view: string): string | undefined {
   return views && Object.hasOwn(views, view) ? views[view] : undefined;
 }
 
-function readSchemaVersion(field: string, raw: unknown, errors: string[]): { version: number } | undefined {
+export interface SectionDecl {
+  readonly version: number;
+  readonly schema?: string;
+}
+
+const SCHEMA_FILE = /^\.\/(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*\/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\.json$/;
+
+function readSchemaVersion(field: string, raw: unknown, errors: string[]): SectionDecl | undefined {
   if (raw === undefined) return undefined;
   const version = isRecord(raw) ? raw.version : undefined;
   if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) {
     errors.push(`${field}.version: ожидается целое >= 1, получено ${show(version)}`);
     return undefined;
   }
-  return { version };
+  const schema = isRecord(raw) ? raw.schema : undefined;
+  if (schema === undefined) return { version };
+  if (typeof schema !== 'string' || !SCHEMA_FILE.test(schema) || schema.split('/').includes('..')) {
+    errors.push(`${field}.schema: ожидается путь "./<файл>.json" внутри каталога плагина, получено ${show(schema)}`);
+    return undefined;
+  }
+  return { version, schema };
 }
 
 function show(value: unknown): string {

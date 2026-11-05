@@ -6,6 +6,9 @@ const HOOK_COMMAND = '{ cat; echo; } >> "$CYBORG_EVENTS"';
 const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'Stop', 'Notification'];
 export const LAUNCH_SCRIPT = 'exec claude --settings "$CYBORG_SETTINGS" "$@"';
 const SLICE_BYTES = 256 * 1024;
+// Первый символ не дефис: id идёт в argv claude и не должен стать флагом.
+const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+export const STOP_QUIET_MS = 30_000;
 
 // Белый список: новый тип Notification в следующей версии CC не уведомляет; idle_prompt повторяет Stop через минуту.
 const WAITING: ReadonlyMap<string, string> = new Map([
@@ -19,6 +22,7 @@ const WAITING: ReadonlyMap<string, string> = new Map([
 
 interface HookEvent {
   hook_event_name?: string;
+  session_id?: string;
   cwd?: string;
   tool_name?: string;
   notification_type?: string;
@@ -29,6 +33,8 @@ interface HookEvent {
 
 /** Аргументы claude после --settings; промпт до --add-dir: тот вариадический и забрал бы промпт, стоящий после каталогов. */
 export function claudeArgs(request: LaunchRequest): string[] {
+  // resumeId приходит из данных документа, а их правит не только плагин: чужая форма стала бы флагом claude.
+  if (request.resumeId !== undefined && !SESSION_ID.test(request.resumeId)) throw new Error(`id сессии для --resume не годится: ${request.resumeId}`);
   const fragments = request.promptFragments ?? [];
   const dirs = request.extraDirs ?? [];
   return [
@@ -47,6 +53,11 @@ export function translate(hook: HookEvent, cwd: string | undefined): AgentEvent[
     out.push({ type: 'prompt' });
     return out;
   }
+  // id уходит в argv `--resume` и в state воркспейса: чужая форма не доходит ни туда, ни туда.
+  if (name === 'SessionStart' && typeof hook.session_id === 'string' && SESSION_ID.test(hook.session_id)) {
+    out.push({ type: 'session', resumeId: hook.session_id });
+    return out;
+  }
   if (name === 'Stop') {
     const background = (hook.background_tasks?.length ?? 0) > 0 || (hook.session_crons?.length ?? 0) > 0;
     out.push({ type: 'turnEnd', background, ...(typeof hook.last_assistant_message === 'string' && { text: hook.last_assistant_message }) });
@@ -58,7 +69,27 @@ export function translate(hook: HookEvent, cwd: string | undefined): AgentEvent[
   return out;
 }
 
-const SESSION_ID = /^[A-Za-z0-9_-]{1,64}$/;
+// Чужой Stop-хук может продолжить ход: «ждёт» после Stop объявляется, только если сессия молчит quietMs.
+export function waitAfterStop(listener: (event: AgentEvent) => void, quietMs: number): { listener: (event: AgentEvent) => void; dispose(): void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const dispose = () => {
+    clearTimeout(timer);
+    timer = undefined;
+  };
+  return {
+    listener: (event) => {
+      dispose();
+      listener(event);
+      if (event.type === 'turnEnd' && !event.background) {
+        timer = setTimeout(() => {
+          timer = undefined;
+          listener({ type: 'waiting', reason: 'Ход завершён, ждёт ответа' });
+        }, quietMs);
+      }
+    },
+    dispose,
+  };
+}
 
 const plugin: PluginModule = {
   async activate(ctx) {
@@ -91,7 +122,9 @@ const plugin: PluginModule = {
         await fs.writeText(file, '');
         return { program: '$SHELL', args: ['-lc', LAUNCH_SCRIPT, 'cyborg', ...claudeArgs(request)], cwd: request.cwd, env: { CYBORG_EVENTS: file, CYBORG_SETTINGS: settings } };
       },
-      watch(sessionId, listener) {
+      watch(sessionId, onEvent) {
+        const quiet = waitAfterStop(onEvent, STOP_QUIET_MS);
+        const listener = quiet.listener;
         const file = eventsFile(sessionId);
         const name = file.slice(sessions.length + 1);
         let consumed: number | undefined;
@@ -150,6 +183,7 @@ const plugin: PluginModule = {
         return {
           dispose: () => {
             closed = true;
+            quiet.dispose();
             void watching.then((w) => w?.dispose());
           },
         };

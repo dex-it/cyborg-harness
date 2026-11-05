@@ -331,3 +331,51 @@ test('хосты: из поставки - по группам, сторонни�
   assert.deepEqual([unknown.hostOf('p'), unknown.hostOf('q')], ['p', 'q'], 'без bundled все сторонние');
   await unknown.unload();
 });
+
+test('схема раздела из манифеста: значение не по схеме - отказ плагину, правка извне не по схеме - значение прежнее', async () => {
+  const { docs, store } = memory({ user: { timer: { $version: 1, minutes: 'пять' } } });
+  const schema = { type: 'object', properties: { minutes: { type: 'integer', minimum: 1 } }, additionalProperties: false };
+  const files: Record<string, unknown> = { './config.schema.json': schema, './broken.json': { type: 'date' } };
+  const read = (_m: unknown, file: string) => {
+    if (!(file in files)) throw new Error('нет файла');
+    return files[file];
+  };
+  const seen: unknown[] = [];
+  const timer: PluginModule = {
+    config: { defaults: { minutes: 10 } },
+    activate(ctx) {
+      seen.push(ctx.config?.get());
+      ctx.config?.onChange((v) => seen.push(v));
+    },
+  };
+  const options = (schemaFile: string) => ({
+    enabled: ['timer'],
+    manifests: [manifest('timer', { config: { version: 1, schema: schemaFile } })],
+    schema: read,
+  });
+  const config = await SectionStore.open(store, ['user', 'workspace']);
+  const refused = await kernel({ timer }, { ...options('./config.schema.json'), config });
+  assert.deepEqual(refused.active, []);
+  assert.deepEqual(refused.journal, [{ pluginId: 'timer', kind: 'config', result: { status: 'invalid', errors: ['/minutes: ожидается integer, получено string'] } }]);
+  await refused.unload();
+
+  const broken: [string, string][] = [['./broken.json', './broken.json: #/type: ожидается тип из object, array, string, number, integer, boolean, null или их список'], ['./none.json', './none.json: нет файла']];
+  for (const [file, error] of broken) {
+    const k = await kernel({ timer }, { ...options(file), config });
+    assert.deepEqual(k.journal, [{ pluginId: 'timer', kind: 'config', result: { status: 'invalid', errors: [error] } }]);
+    await k.unload();
+  }
+
+  docs.set('user', { timer: { $version: 1, minutes: 5 } });
+  await config.reload();
+  const k = await kernel({ timer }, { ...options('./config.schema.json'), config });
+  assert.deepEqual(k.active, ['timer']);
+  docs.set('user', { timer: { $version: 1, minutes: 0 } });
+  await k.reloadSections('config', await config.reload());
+  docs.set('user', { timer: { $version: 1, minutes: 7 } });
+  await k.reloadSections('config', await config.reload());
+  assert.deepEqual(seen, [{ minutes: 5 }, { minutes: 7 }]);
+  assert.deepEqual(kinds(k).slice(-1), ['timer:config']);
+  assert.deepEqual(k.journal.at(-1), { pluginId: 'timer', kind: 'config', result: { status: 'invalid', errors: ['/minutes: ожидается >= 1'] } });
+  await k.unload();
+});

@@ -1,5 +1,6 @@
 // Оболочка вида: страницу и этот скрипт отдаёт приложение под origin плагина, модуль плагина получает готовый UiContext.
 
+import { defineElements } from '../../../../core/elements/elements.ts';
 import { connectView, keepFocus, mountModule } from '../../../../core/src/ui-shell.ts';
 import type { ViewBridge } from '../../shared/views.ts';
 
@@ -17,6 +18,7 @@ function fail(error: unknown): void {
 }
 
 async function start(): Promise<void> {
+  defineElements();
   const ctx = await connectView(bridge, {
     pluginId: plugin,
     view,

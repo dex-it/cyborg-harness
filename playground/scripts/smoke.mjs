@@ -1,7 +1,7 @@
 // Дымовой тест собранного playground по DevTools Protocol; нужен дисплей (на Linux - xvfb-run ... --no-sandbox).
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -121,7 +121,7 @@ async function main() {
   };
 
   await waitFor('демо-плагины работают, flaky выключен с причиной', async () =>
-    (await states({ echo: 'active', chat: 'active', alice: 'active', bob: 'active', flaky: 'stopped', 'agent-claude-code': 'active', 'agent-shell': 'active', sessions: 'active' })) &&
+    (await states({ echo: 'active', chat: 'active', alice: 'active', bob: 'active', flaky: 'stopped', 'agent-claude-code': 'active', 'agent-shell': 'active', 'session-isolation': 'active', sessions: 'active' })) &&
     /всегда падает/.test(await text('#plugins-list [data-plugin="flaky"] .plugin-reason')),
   );
   await waitFor('alice и bob подписаны на чат', () => lines().includes('[plugins] chat: подписчиков: 2'));
@@ -304,7 +304,7 @@ async function main() {
   await press('F6');
   await waitFor('F6: фокус на первой панели', async () => /pane-plugins/.test(await focusedArea()));
   await press('F6');
-  await waitFor('F6: следующая панель', async () => /pane-keys/.test(await focusedArea()));
+  await waitFor('F6: следующая панель', async () => /pane-documents/.test(await focusedArea()));
   await press('Shift+F6');
   await press('Shift+F6');
   await waitFor('Shift+F6 с первой панели - на последний вид', async () => /^вид /.test(await focusedArea()));
@@ -312,13 +312,73 @@ async function main() {
   await waitFor('фокус вида лёг на его элемент, а не на body', async () => !['BODY', null].includes(await inView(last, 'document.activeElement?.tagName ?? null')));
   log(`порядок фокуса: F6 по панелям, Shift+F6 по кругу на вид ${last}, внутри вида - первый элемент`);
 
-  const agentButtons = () => inView('sessions', "[...document.querySelectorAll('#agents button')].map((b) => b.dataset.agent + (b.disabled ? '-' : '+')).sort().join(',')");
+  const agentButtons = () => inView('sessions', "[...document.querySelectorAll('#agents cy-button')].map((b) => b.dataset.agent + (b.disabled ? '-' : '+')).sort().join(',')");
   await waitFor('sessions видит обоих поставщиков cyborg.agent', async () => /^claude-code[+-],shell\+$/.test(await agentButtons()));
-  await inView('sessions', "document.querySelector('#agents button[data-agent=\"shell\"]').click()");
+  await inView('sessions', "document.querySelector('#agents cy-button[data-agent=\"shell\"]').click()");
   await waitFor('сессия агента shell открыта', async () => /^Оболочка: pid \d+$/.test(await inView('sessions', "document.getElementById('session-state').textContent")));
   await inView('sessions', `(() => { const l = document.getElementById('line'); l.value = 'echo агент-$((5*5))'; l.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); })()`);
   await waitFor('терминал сессии ответил', async () => /агент-25/.test(await inView('sessions', "document.getElementById('screen').textContent")));
   log(`cyborg.agent: два поставщика (${await agentButtons()}), sessions запускает pty по описанию агента`);
+
+  // Элементы ядра: оболочка определила их до mount; клавиши шлём в тень, как их шлёт браузер с фокусом там.
+  const kit = await inView('sessions', `(() => {
+    const seen = [];
+    const box = document.createElement('div');
+    document.body.append(box);
+    const list = document.createElement('cy-list');
+    list.items = [{ id: 'a', label: 'A' }, { id: 'b', label: 'B', detail: 'вторая' }];
+    const tree = document.createElement('cy-tree');
+    tree.items = [{ id: 'src', label: 'src', children: [{ id: 'x', label: 'x.ts' }] }];
+    const tabs = document.createElement('cy-tabs');
+    tabs.tabs = [{ id: 'one', label: 'Один' }, { id: 'two', label: 'Два' }];
+    const off = document.createElement('cy-button');
+    off.disabled = true;
+    off.addEventListener('click', () => seen.push('click'));
+    box.append(list, tree, tabs, off);
+    for (const e of [list, tree, tabs]) for (const t of ['cy-select', 'cy-activate', 'cy-toggle']) box.addEventListener(t, (ev) => ev.target === e && seen.push(e.localName + ' ' + t + ' ' + ev.detail.id));
+    const key = (e, role, k) => e.shadowRoot.querySelector('[role="' + role + '"]').dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, composed: true }));
+    for (const k of ['ArrowDown', 'ArrowDown', 'Enter']) key(list, 'listbox', k);
+    for (const k of ['ArrowDown', 'ArrowRight', 'ArrowRight']) key(tree, 'tree', k);
+    key(tabs, 'tablist', 'ArrowRight');
+    off.click();
+    try { list.items = [{ id: '', label: 'пусто' }]; } catch (e) { seen.push(e.name); }
+    const styled = getComputedStyle(list).display === 'block' && getComputedStyle(off).display === 'inline-block';
+    const defined = ['cy-button', 'cy-field', 'cy-list', 'cy-tree', 'cy-tabs', 'cy-empty', 'cy-spinner'].every((t) => customElements.get(t));
+    box.remove();
+    return JSON.stringify({ seen, styled, defined, selected: [list.selected, tree.selected, tabs.selected] });
+  })()`);
+  assert.deepEqual(JSON.parse(kit), {
+    seen: ['cy-list cy-select a', 'cy-list cy-select b', 'cy-list cy-activate b', 'cy-tree cy-select src', 'cy-tree cy-toggle src', 'cy-tree cy-select x', 'cy-tabs cy-select two', 'TypeError'],
+    styled: true,
+    defined: true,
+    selected: ['b', 'x', 'two'],
+  });
+  log('элементы ядра: определены до mount, стили под CSP вида, клавиши и события списка, дерева и вкладок, disabled у кнопки');
+
+  const docRows = () => ev("[...document.querySelectorAll('#documents-list .document-row')].map((r) => r.querySelector('.document-owner').textContent + ':' + r.dataset.available).join(',')");
+  await waitFor('вкладка сессии в панели «Документы»', async () => (await docRows()) === 'sessions · session:true');
+  await ev("document.querySelector('#documents-list .document-row button').click()");
+  await waitFor('человек закрыл вкладку - сессия завершена, строки нет', async () => (await docRows()) === '' && /вышла/.test(await inView('sessions', "document.getElementById('session-state').textContent")));
+  log('документы: вкладка сессии в окне, «Закрыть» уводит onClose владельцу и завершает его сессию');
+
+  // Живой claude нужен с входом в аккаунт и сетью: шаг по CYBORG_SMOKE_CLAUDE=1, в CI его нет.
+  if (process.env.CYBORG_SMOKE_CLAUDE === '1') {
+    assert.match(await agentButtons(), /claude-code\+/, 'CYBORG_SMOKE_CLAUDE=1, а claude не найден в PATH оболочки входа');
+    await inView('sessions', "document.querySelector('#agents cy-button[data-agent=\"claude-code\"]').click()");
+    const screen = () => inView('sessions', "document.getElementById('screen').textContent");
+    // Новый каталог сессий claude сначала спрашивает о доверии; уже доверенный сразу начинает сессию.
+    await waitFor('живой claude: вопрос о доверии к каталогу или начало сессии', async () => /trust\s*this\s*folder/.test(await screen()) || lines().some((l) => /claude-code s\S+: сессия агента/.test(l)), 60_000);
+    let reached = 'хук SessionStart дошёл событием session';
+    if (/trust\s*this\s*folder/.test(await screen())) {
+      await inView('sessions', "(() => { const l = document.getElementById('line'); l.value = ''; l.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' })); })()");
+      await waitFor('стрелка из пустого поля дошла до диалога claude', async () => /❯\s*Yes,\s*I\s*trust/.test((await screen()).slice(-400)));
+      reached = 'вопрос о доверии к каталогу, стрелка из вида меняет выбор';
+    }
+    await waitFor('вкладка сессии claude в панели «Документы»', async () => (await docRows()) === 'sessions · session:true');
+    await ev("document.querySelector('#documents-list .document-row button').click()");
+    await waitFor('сессия claude закрыта', async () => (await docRows()) === '' && /вышла/.test(await inView('sessions', "document.getElementById('session-state').textContent")));
+    log(`живой claude: оболочка входа по праву launch поставщика, ${reached}; вкладка закрывает сессию`);
+  } else log('живой claude пропущен: CYBORG_SMOKE_CLAUDE не задан');
 
   assert.equal(await button('flaky', 'Журнал'), true, 'у flaky нет кнопки «Журнал»');
   assert.equal(await text('#plugins-journal-title'), 'Журнал: flaky');
@@ -335,7 +395,38 @@ async function main() {
   assert.equal(code, 0, 'второй экземпляр на том же воркспейсе не ушёл сам');
   assert.equal(app.exitCode, null, 'первый экземпляр закрылся вместе со вторым');
   assert.equal(await state('echo'), 'active');
-  log('воркспейс: замок с pid, второй запуск отдаёт фокус первому и уходит');
+  assert.match(await text('#workspace-current'), /workspace\.cyborg\.json$/);
+  const recent = JSON.parse(readFileSync(join(userData, 'recent.json'), 'utf8')).recent;
+  assert.ok(recent.some((f) => f.endsWith('workspace.cyborg.json')), 'открытый воркспейс не попал в «Недавние»');
+  log('воркспейс: замок с pid, второй запуск отдаёт фокус первому и уходит, открытый - в «Недавних»');
+
+  await bareWindow();
+}
+
+/** Окно без воркспейса: свой userData, плагины не грузятся, «Недавние» - кнопками. */
+async function bareWindow() {
+  const dir = mkdtempSync(join(tmpdir(), 'cyborg-playground-bare-'));
+  const other = join(dir, 'team.cyborg.json');
+  writeFileSync(other, '{}');
+  writeFileSync(join(dir, 'recent.json'), JSON.stringify({ recent: [other, join(dir, 'пропал.cyborg.json')] }));
+  const bare = spawn(join(repo, 'node_modules', '.bin', 'electron'), [repo, `--user-data-dir=${dir}`, '--remote-debugging-port=0', '--no-workspace', ...electronArgs], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let err = '';
+  bare.stderr.on('data', (d) => (err += d));
+  try {
+    const port = await waitFor('порт DevTools окна без воркспейса', () => /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//.exec(err)?.[1]);
+    const page = await waitFor('окно без воркспейса', async () => (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page'));
+    const ev = await connect(page.webSocketDebuggerUrl);
+    await waitFor('надпись «Воркспейс не открыт»', async () => /Воркспейс не открыт:/.test(await ev("document.getElementById('plugins-summary').textContent")));
+    assert.equal(await ev("document.getElementById('workspace-current').textContent"), 'Воркспейс не открыт');
+    assert.deepEqual(await ev("[...document.querySelectorAll('#workspace-recent button')].map((b) => b.title)"), [other], 'пропавший файл в «Недавних»');
+    assert.equal(await ev("document.querySelectorAll('#plugins-list [data-plugin]').length"), 0, 'плагины загрузились без воркспейса');
+    log('окно без воркспейса: плагины не грузятся, «Недавние» без пропавших файлов');
+  } finally {
+    bare.kill('SIGTERM');
+    await Promise.race([new Promise((r) => bare.once('exit', r)), sleep(8000)]);
+    if (bare.exitCode === null) bare.kill('SIGKILL');
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 let failed = false;

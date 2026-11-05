@@ -1,5 +1,6 @@
 import type { FeedLine, Reply } from '@cyborg/contracts';
 import type { WindowSnapshot } from '../../../core/src/window-layer.ts';
+import type { DocumentRow } from '../../../core/src/documents.ts';
 
 export type { FeedLine, Reply };
 // Окно playground: снимок, который главный процесс отдаёт интерфейсу (SAD2 §3.2, §3.5).
@@ -52,8 +53,15 @@ export interface PluginJournalLine {
   readonly level: 'info' | 'warn' | 'error';
 }
 
+export interface WorkspaceInfo {
+  /** null - окно без воркспейса: плагины не загружены. */
+  readonly current: string | null;
+  /** «Недавние» без текущего, последний открытый первым. */
+  readonly recent: readonly string[];
+}
+
 export interface PluginsSnapshot {
-  readonly phase: 'starting' | 'ready' | 'failed';
+  readonly phase: 'starting' | 'ready' | 'failed' | 'no-workspace';
   readonly error?: string;
   /** Что не дошло до ядра: битый cyborg.json, непрочитанный манифест. */
   readonly problems: readonly string[];
@@ -65,5 +73,8 @@ export interface PluginsSnapshot {
   readonly canHang: boolean;
   /** Диалог на экране и замки окна. */
   readonly window: WindowSnapshot;
+  /** Открытые документы плагинов в порядке окна. */
+  readonly documents: readonly DocumentRow[];
+  readonly workspace: WorkspaceInfo;
 }
 

@@ -230,8 +230,9 @@ export interface FocusRoot {
   querySelector(selectors: string): { focus(): void } | null;
 }
 
-// Не `[href]`: под него попадает <link> стилей вида, а focus() на нём пустой.
-const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+// Не `[href]`: под него попадает <link> стилей вида; cy-* - хосты, их фокус в тени.
+const FOCUSABLE =
+  'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), cy-button:not([disabled]), cy-field:not([disabled]), cy-list, cy-tree, cy-tabs';
 
 /** Фокус пришёл во фрейм снаружи: в первый раз он лёг бы на body, и человек не видел бы, где он. Дальше документ сам помнит свой элемент. */
 export function keepFocus(win: FocusWindow, root: FocusRoot): Disposable {

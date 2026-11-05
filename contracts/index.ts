@@ -6,6 +6,7 @@ export interface Contracts {
   'cyborg.files': { 1: FilesV1; 2: FilesV2 };
   'cyborg.lock': { 1: Lock };
   'cyborg.projects': { 1: Projects };
+  'cyborg.session-prompt': { 1: SessionPrompt };
   'cyborg.tab': { 1: Tab };
 }
 
@@ -13,6 +14,7 @@ export type * from './plugin.ts';
 export type * from './view.ts';
 export type * from './os.ts';
 export type * from './agent.ts';
+export type * from './elements.ts';
 
 /** Ответ метода-подписки: снятие идёт поставщику через ядро, а при выгрузке любой из сторон ядро снимает подписку само. */
 export interface Subscription {
@@ -48,6 +50,12 @@ export interface Project {
 export interface Projects {
   list(): Promise<Project[]>;
   current(): Promise<Project | undefined>;
+}
+
+/** Кратность many (ADR-CH-0004, п. 6): потребитель сессий собирает фрагменты всех поставщиков и передаёт в `launch({ promptFragments })`. */
+export interface SessionPrompt {
+  /** Пустая строка - вклада нет. */
+  fragment(): string;
 }
 
 export interface Tab {

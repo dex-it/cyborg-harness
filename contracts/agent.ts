@@ -51,6 +51,8 @@ export interface LaunchSpec {
 
 export type AgentEvent =
   | { readonly type: 'cwd'; readonly cwd: string }
+  /** Сессия агента началась или сменилась; `launch({ resumeId })` её продолжит. */
+  | { readonly type: 'session'; readonly resumeId: string }
   /** Агент работает; `tool` - инструмент, если известен. */
   | { readonly type: 'activity'; readonly tool?: string }
   /** Человек отправил запрос: прошлые предложения агента больше не к месту. */

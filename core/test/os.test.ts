@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFile, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, PluginOs } from '@cyborg/contracts';
@@ -392,4 +392,80 @@ test('fs.remove: каталог с .git внутри и корень облас�
   await fs.remove(path.join(box.work, 'plain'));
   assert.deepEqual((await fs.list(box.work)).map((e) => e.name).sort(), ['cyborg.json', 'repo']);
   await k.unload();
+});
+
+test('права: маски путей, workspace.git, выбор в dialog как granted, shell - без исполняемых и только свои схемы', async () => {
+  await using box = await sandbox();
+  const logs = path.join(box.work, 'proj', 'logs');
+  const deep = path.join(box.work, 'a', 'b', 'notes');
+  for (const d of [logs, deep, path.join(box.work, 'proj', '.git')]) await mkdir(d, { recursive: true });
+  await writeFile(path.join(logs, 'x.log'), 'лог');
+  await writeFile(path.join(box.work, 'proj', 'secret.txt'), 'нет');
+  const picked = path.join(box.outside, 'picked.txt');
+  const tool = path.join(box.outside, 'tool');
+  for (const [f, text] of [[picked, 'выбран'], [path.join(box.outside, 'run.sh'), '#!/bin/sh'], [path.join(box.outside, 'doc.txt'), 'd'], [tool, '#!/bin/sh']]) await writeFile(f!, text!);
+  await chmod(tool, 0o755);
+  const opened: string[] = [];
+  let pick: string[] = [];
+  const { k, os, denied } = await kernel(
+    {
+      masks: { 'fs.read': [`${box.work}/*/logs`, `${box.work}/**/notes`], 'fs.write': [`${box.work}/*/logs`] },
+      git: { 'fs.write': ['workspace.git'] },
+      plain: { 'fs.write': ['workspace'] },
+      picker: { 'fs.read': ['granted'], shell: ['granted', 'https:'] },
+    },
+    {
+      dataDir: box.data,
+      tempDir: box.temp,
+      roots: () => [box.work],
+      dialog: { open: async () => pick },
+      shell: { openPath: async (p) => void opened.push(p), openExternal: async (u) => void opened.push(u) },
+    },
+  );
+  assert.equal(await os('masks').fs.readText(path.join(logs, 'x.log')), 'лог');
+  assert.deepEqual(await os('masks').fs.list(deep), []);
+  await assert.rejects(os('masks').fs.readText(path.join(box.work, 'proj', 'secret.txt')), { code: 'PermissionDenied' });
+  await assert.rejects(os('masks').fs.remove(logs), { code: 'PermissionDenied' }, 'каталог под маской - корень области');
+
+  await os('git').fs.writeText(path.join(box.work, 'proj', '.git', 'HEAD'), 'ref');
+  await assert.rejects(os('plain').fs.writeText(path.join(box.work, 'proj', '.git', 'HEAD'), 'x'), { code: 'PermissionDenied' });
+
+  await assert.rejects(os('picker').fs.readText(picked), { code: 'PermissionDenied' });
+  pick = [picked];
+  assert.deepEqual(await os('picker').dialog.open({ title: 'Файл' }), [picked]);
+  assert.equal(await os('picker').fs.readText(picked), 'выбран');
+  await assert.rejects(os('masks').fs.readText(picked), { code: 'PermissionDenied' }, 'выбор одного плагина - не право другого');
+  await assert.rejects(os('picker').dialog.open({ extra: 1 } as never), { code: 'Invalid' });
+
+  const shell = os('picker').shell;
+  if (typeof shell?.openPath !== 'function' || typeof shell.openExternal !== 'function') throw new Error('у picker нет shell.openPath и openExternal');
+  assert.equal(os('masks').shell, undefined);
+  await shell.openPath(picked);
+  await shell.openExternal('https://example.com/a');
+  await assert.rejects(shell.openExternal('mailto:a@b.c'), { code: 'PermissionDenied' });
+  await assert.rejects(shell.openPath(path.join(box.outside, 'doc.txt')), { code: 'PermissionDenied' }, 'не выбран');
+  pick = [path.join(box.outside, 'run.sh'), tool];
+  await os('picker').dialog.open({ multiple: true });
+  await assert.rejects(shell.openPath(path.join(box.outside, 'run.sh')), { code: 'PermissionDenied' }, 'исполняемый по расширению');
+  const risky = ['a.webloc', 'a.terminal', 'a.REG', 'a.py'].map((name) => path.join(box.outside, name));
+  for (const file of risky) await writeFile(file, '');
+  pick = risky;
+  await os('picker').dialog.open({ multiple: true });
+  for (const file of risky) await assert.rejects(shell.openPath(file), { code: 'PermissionDenied' }, `ярлык или скрипт: ${file}`);
+  if (process.platform !== 'win32') await assert.rejects(shell.openPath(tool), { code: 'PermissionDenied' }, 'исполняемый по биту');
+  assert.deepEqual(opened, [picked, 'https://example.com/a']);
+  assert.ok(denied().includes('picker:shell.openExternal'));
+  await k.unload();
+});
+
+test('права в манифесте: маска под названным каталогом, workspace.git только у записи, shell без file:', () => {
+  const errors = (permissions: unknown) => {
+    const r = parseManifest(manifest('x', permissions));
+    return r.ok ? [] : r.errors;
+  };
+  assert.deepEqual(errors({ 'fs.read': ['/a/*/b', '~/x/**', 'granted'], 'fs.write': ['workspace.git'], shell: ['https:', 'mailto:', 'workspace'] }), []);
+  for (const bad of [{ 'fs.read': ['/*'] }, { 'fs.read': ['~/*/x'] }, { 'fs.read': ['/a/../b'] }, { 'fs.read': ['/a/x**'] }, { 'fs.read': ['workspace.git'] }, { shell: ['file:'] }, { shell: ['javascript:'] }, { shell: ['https'] }]) {
+    assert.notDeepEqual(errors(bad), [], JSON.stringify(bad));
+  }
+  assert.ok(describePermissions({ shell: ['granted', 'https:'], 'fs.write': ['workspace.git'] }).includes('открывает в системе: выбранное человеком в диалоге, https:'));
 });

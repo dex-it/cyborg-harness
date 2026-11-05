@@ -83,7 +83,40 @@ export interface PluginContext {
   readonly secrets: PluginSecrets;
   readonly window: PluginWindow;
   readonly system: PluginSystem;
+  readonly documents: PluginDocuments;
   log(message: string): void;
+}
+
+/** Документ плагина в окне; тип - из `documents` манифеста. */
+export interface DocumentInfo {
+  readonly id: string;
+  readonly type: string;
+  readonly title: string;
+  /** JSON до 64 КБ: с ним владелец поднимет документ после перезапуска. */
+  readonly data?: unknown;
+}
+
+export interface DocumentInit {
+  readonly title: string;
+  readonly data?: unknown;
+}
+
+/** `data: undefined` - забыть данные; поле не названо - не трогать. */
+export interface DocumentChange {
+  readonly title?: string;
+  readonly data?: unknown;
+}
+
+/** Документы, которые ядро держит в порядке окна; тип с `restorable` переживает перезапуск, остальные - нет. */
+export interface PluginDocuments {
+  /** Свои документы: открытые в этой работе и, после перезапуска, сохранённые прошлой - их плагин поднимает при активации. */
+  list(): Promise<DocumentInfo[]>;
+  open(type: string, init: DocumentInit): Promise<string>;
+  /** Данные пишет владелец по ходу работы: после падения хоста опросить его некому. */
+  save(id: string, change: DocumentChange): Promise<void>;
+  close(id: string): Promise<void>;
+  /** Документ закрыл человек из окна. */
+  onClose(listener: (id: string) => void): Disposable;
 }
 
 export interface PluginWindow {

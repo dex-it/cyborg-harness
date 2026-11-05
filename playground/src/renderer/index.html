@@ -12,11 +12,21 @@
         <h1>Cyborg Playground</h1>
         <p id="plugins-summary" class="plugins-summary" aria-live="polite"></p>
         <div id="plugins-problems" class="plugins-problems" hidden></div>
+        <div class="workspace">
+          <span id="workspace-current" class="workspace-current"></span>
+          <button id="workspace-open" type="button">Открыть…</button>
+          <ul id="workspace-recent" class="workspace-recent" aria-label="Недавние воркспейсы"></ul>
+        </div>
       </header>
 
       <section class="pane pane-plugins" aria-labelledby="plugins-title">
         <h2 id="plugins-title">Плагины</h2>
         <ul id="plugins-list" class="plugins-list" aria-label="Плагины"></ul>
+      </section>
+
+      <section class="pane pane-documents" aria-labelledby="documents-title">
+        <h2 id="documents-title">Документы</h2>
+        <ul id="documents-list" class="documents-list" aria-label="Открытые документы"></ul>
       </section>
 
       <section class="pane pane-keys" aria-labelledby="keys-title">

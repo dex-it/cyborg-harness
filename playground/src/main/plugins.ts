@@ -23,7 +23,7 @@ import {
 } from '../../../core/src/index.ts';
 import { isRecord } from '../../../core/src/manifest.ts';
 import { WINDOW_OWNER } from '../../../core/src/window-layer.ts';
-import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply } from '../shared/plugins.ts';
+import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from '../shared/plugins.ts';
 import { viewOrigin } from '../shared/views.ts';
 import type { PluginUi } from './view-files.ts';
 
@@ -39,12 +39,14 @@ export interface Discovered {
   readonly origins: Map<string, string>;
   /** id -> каталог плагина, объявившего `ui` в манифесте; сами виды берутся из разобранного ядром манифеста. */
   readonly views: Map<string, string>;
+  /** id -> каталог плагина: оттуда ядро берёт файлы схем разделов. */
+  readonly homes: Map<string, string>;
   readonly problems: string[];
 }
 
 /** Каталоги по порядку приоритета: встроенные раньше пользовательских. */
 export function discoverPlugins(dirs: readonly string[]): Discovered {
-  const found: Discovered = { manifests: [], entries: new Map(), origins: new Map(), views: new Map(), problems: [] };
+  const found: Discovered = { manifests: [], entries: new Map(), origins: new Map(), views: new Map(), homes: new Map(), problems: [] };
   for (const dir of dirs) {
     let names: string[];
     try {
@@ -67,11 +69,21 @@ export function discoverPlugins(dirs: readonly string[]): Discovered {
       if (id && entry && !found.entries.has(id)) found.entries.set(id, pathToFileURL(entry).href);
       if (id && !found.origins.has(id)) {
         found.origins.set(id, dir);
+        found.homes.set(id, home);
         if (isRecord(raw) && raw.ui !== undefined) found.views.set(id, home);
       }
     }
   }
   return found;
+}
+
+/** Ссылка из каталога плагина наружу отдала бы хосту плагина чужой JSON, например файл пользователя. */
+export function readSchemaFile(home: string | undefined, file: string): unknown {
+  if (home === undefined) throw new Error('каталог плагина не найден');
+  const root = fs.realpathSync(home);
+  const real = fs.realpathSync(path.join(home, file));
+  if (!real.startsWith(root + path.sep)) throw new Error('файл вне каталога плагина');
+  return JSON.parse(fs.readFileSync(real, 'utf8'));
 }
 
 export interface StartOptions {
@@ -94,6 +106,9 @@ export interface StartOptions {
   readonly onProblem?: (problem: string) => void;
   readonly onDiscovered?: (found: Discovered) => void;
   readonly onWindow?: () => void;
+  readonly onDocuments?: () => void;
+  /** `plugins.enabled` из файла применён. */
+  readonly onEnabled?: () => void;
 }
 
 export async function startPlugins(options: StartOptions): Promise<Kernel & { readonly workspace: string }> {
@@ -123,6 +138,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     entry: (m) => found.entries.get(m.id) ?? m.id,
     config: ws.config,
     state: ws.state,
+    schema: (m, file) => readSchemaFile(found.homes.get(m.id), file),
     onJournal: (entry) => {
       options.log(`[plugins] ${JSON.stringify(entry)}`);
       options.onJournal?.(entry);
@@ -132,6 +148,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     platform: options.platform,
     idleSeconds: options.idleSeconds,
     onWindow: () => options.onWindow?.(),
+    onDocuments: () => options.onDocuments?.(),
     onLog: (id, message) => {
       options.log(`[plugins] ${id}: ${message}`);
       options.onLog?.(id, message);
@@ -140,12 +157,27 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     ws.close();
     throw error;
   });
-  const watching = ws.watch((ids) => void kernel.reloadSections('config', ids), report);
+  const watching = ws.watch(
+    (ids) => void kernel.reloadSections('config', ids),
+    report,
+    (enabled) =>
+      void kernel.setEnabled(enabled).then(
+        ({ restart, failed }) => {
+          if (restart.length > 0) report(`plugins.enabled: ${restart.join(', ')} - включатся после перезапуска`);
+          for (const f of failed) report(`plugins.enabled: ${f}`);
+          options.onEnabled?.();
+        },
+        (error: unknown) => report(`plugins.enabled: ${error instanceof Error ? error.message : String(error)}`),
+      ),
+  );
   return {
     ...kernel,
     // Спред вычисляет геттер один раз: без этого снимок слоя застыл бы на старте.
     get window() {
       return kernel.window;
+    },
+    get documents() {
+      return kernel.documents;
     },
     workspace: ws.file,
     async unload() {
@@ -170,7 +202,7 @@ export interface PluginsEvents {
   windowCommand?(command: string): void;
 }
 
-export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProblem' | 'onLog' | 'onDiscovered' | 'onWindow'> {
+export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProblem' | 'onLog' | 'onDiscovered' | 'onWindow' | 'onDocuments'> {
   /** Процесс хоста для «Уронить» и «Повесить»; у хостов в том же процессе его нет. */
   readonly pidOf?: (hostId: string) => number | undefined;
 }
@@ -181,6 +213,7 @@ const FEED_LIMIT = 300;
 export class PluginsService {
   private kernel: Kernel | undefined;
   private phase: PluginsSnapshot['phase'] = 'starting';
+  private workspace: WorkspaceInfo = { current: null, recent: [] };
   private error: string | undefined;
   private pidOf: ServiceOptions['pidOf'];
   private readonly entries: { at: number; entry: JournalEntry }[] = [];
@@ -197,6 +230,24 @@ export class PluginsService {
     this.now = now;
   }
 
+  setWorkspace(info: WorkspaceInfo): void {
+    this.workspace = info;
+    this.events.changed();
+  }
+
+  /** Окно без воркспейса: ядро не запускается, в окне - только выбор воркспейса. */
+  withoutWorkspace(): void {
+    this.phase = 'no-workspace';
+    this.events.changed();
+  }
+
+  /** Живые pty плагинов: их завершит смена воркспейса, о них окно спрашивает человека. */
+  get livePty(): number {
+    const kernel = this.kernel;
+    if (!kernel) return 0;
+    return kernel.active.reduce((n, id) => n + kernel.disablePreview(id).ptys.filter((p) => p.pluginId === id).length, 0);
+  }
+
   async start(options: ServiceOptions): Promise<void> {
     this.pidOf = options.pidOf;
     try {
@@ -209,6 +260,7 @@ export class PluginsService {
         },
         onDiscovered: (found) => (this.views = found.views),
         onWindow: () => this.events.changed(),
+        onDocuments: () => this.events.changed(),
         onLog: (pluginId, text) => {
           const line = this.say({ kind: 'log', subject: pluginId, text });
           this.events.log?.(pluginId, line);
@@ -319,6 +371,11 @@ export class PluginsService {
     return this.kernel?.keysOf(pluginId) ?? {};
   }
 
+  /** Человек закрыл вкладку документа в окне. */
+  closeDocument(id: unknown): Promise<Reply> {
+    return this.act(id, 'нет id документа', (kernel, docId) => kernel.closeDocument(docId));
+  }
+
   /** Ответ человека из окна. */
   answerDialog(arg: unknown): Reply {
     if (!isRecord(arg) || typeof arg.id !== 'number' || (arg.choice !== undefined && typeof arg.choice !== 'string')) return { error: 'ответ диалога: { id, choice? }' };
@@ -408,6 +465,8 @@ export class PluginsService {
       journal,
       canHang: process.platform !== 'win32' && this.pidOf !== undefined,
       window: kernel?.window ?? { queued: 0, locks: [] },
+      documents: kernel?.documents ?? [],
+      workspace: this.workspace,
     };
   }
 

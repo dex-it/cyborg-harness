@@ -564,3 +564,46 @@ body[data-locked='true'] main {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+.documents-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.document-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.document-title {
+  flex: 1;
+}
+
+.document-owner,
+.document-off {
+  color: var(--fg-dim);
+}
+
+.workspace {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-dim);
+}
+
+.workspace-current {
+  overflow-wrap: anywhere;
+}
+
+.workspace-recent {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}

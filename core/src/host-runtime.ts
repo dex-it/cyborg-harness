@@ -1,6 +1,7 @@
 import { resolveSection, VERSION_KEY, type SectionResult } from './config.ts';
 import { DisposableStore, toDisposable, type Disposable } from './disposable.ts';
-import type { ContractName, ContractType, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue } from '@cyborg/contracts';
+import { compileSchema } from './json-schema.ts';
+import type { ContractName, ContractType, DocumentChange, DocumentInfo, DocumentInit, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue } from '@cyborg/contracts';
 import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';
@@ -21,6 +22,8 @@ export interface ContractDescriptor {
 export interface SectionInput {
   readonly version: number;
   readonly layers: readonly (readonly [string, unknown])[];
+  /** Схема из файла манифеста; ядро уже проверило, что она разбирается. */
+  readonly schema?: unknown;
 }
 
 export type ActivateResult =
@@ -149,7 +152,7 @@ class HostWatches {
 
 export type SystemEvent = { readonly kind: 'focus'; readonly focused: boolean } | { readonly kind: 'suspend' | 'resume' | 'screen-lock' };
 
-type Listener = (focused?: boolean) => unknown;
+type Listener = (value?: boolean | string) => unknown;
 
 /** Слушатели событий окна и ОС всех плагинов хоста; ядро шлёт событие хосту один раз. */
 class HostSystem {
@@ -201,6 +204,11 @@ class HostSystem {
     }));
   }
 
+  /** Документ закрыл человек: событие только его владельцу. */
+  documentClosed(p: { readonly pluginId: string; readonly id: string }): void {
+    for (const l of [...this.#listeners]) if (l.kind === 'document-closed' && l.pluginId === p.pluginId) this.#safely(l.pluginId, 'documents.onClose', () => l.fn(p.id));
+  }
+
   forget(pluginId: string): void {
     for (const l of [...this.#listeners]) if (l.pluginId === pluginId) this.#listeners.delete(l);
     for (const id of [...this.#idle.keys()]) if (id.startsWith(`${pluginId}#`)) this.#idle.delete(id);
@@ -225,6 +233,12 @@ function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths:
     <R>(method: string) =>
     (...args: unknown[]): Promise<R> =>
       endpoint.request<R>('os', { pluginId, method, args });
+  const opens = p.shell ?? [];
+  const schemes = opens.filter((v) => v.endsWith(':') && !v.startsWith('/') && !v.startsWith('~'));
+  const shell = opens.length > 0 && {
+    ...(opens.length > schemes.length && { openPath: call<undefined>('shell.openPath') }),
+    ...(schemes.length > 0 && { openExternal: call<undefined>('shell.openExternal') }),
+  };
   const clipboard = p.clipboard && {
     ...(p.clipboard.includes('read') && { readText: call<string>('clipboard.readText') }),
     ...(p.clipboard.includes('write') && { writeText: call<undefined>('clipboard.writeText') }),
@@ -255,6 +269,8 @@ function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths:
     ...(p.notify && { notify: Object.freeze({ show: call('notify.show') }) }),
     ...(clipboard && { clipboard: Object.freeze(clipboard) }),
     ...(p['security.roots'] && { security: Object.freeze({ setRoots: call('security.setRoots') }) }),
+    ...(shell && { shell: Object.freeze(shell) }),
+    dialog: Object.freeze({ open: call<string[]>('dialog.open') }),
     ...(p['ui.lock'] && {
       ui: Object.freeze({
         lock: async (options?: { hideNotifications?: boolean }) => {
@@ -282,6 +298,7 @@ export function runHost(port: Port, importer: Importer): Endpoint {
   const system = new HostSystem(endpoint);
   endpoint.handle('system', (event: SystemEvent | { kind: 'idle'; id: string }) => system.dispatch(event));
   endpoint.handle('system.beforeQuit', () => system.beforeQuit());
+  endpoint.handle('document.closed', (p: { pluginId: string; id: string }) => system.documentClosed(p));
 
   endpoint.handle('ping', () => true);
 
@@ -489,6 +506,13 @@ function context(
     os: osOf(endpoint, pluginId, manifest.permissions, paths, ptys, watches),
     secrets: { resolve: (ref) => endpoint.request<SecretValue>('os', { pluginId, method: 'secrets.resolve', args: [ref] }) },
     window: Object.freeze({ onFocusChange: (listener: (focused: boolean) => void) => track(system.on(pluginId, 'focus', (focused) => listener(focused === true))) }),
+    documents: Object.freeze({
+      list: () => endpoint.request<DocumentInfo[]>('documents', { pluginId, method: 'list', args: [] }),
+      open: (type: string, init: DocumentInit) => endpoint.request<string>('documents', { pluginId, method: 'open', args: [type, init] }),
+      save: (id: string, change: DocumentChange) => endpoint.request<undefined>('documents', { pluginId, method: 'save', args: [id, change] }),
+      close: (id: string) => endpoint.request<undefined>('documents', { pluginId, method: 'close', args: [id] }),
+      onClose: (listener: (id: string) => void) => track(system.on(pluginId, 'document-closed', (id) => listener(String(id)))),
+    }),
     system: Object.freeze({
       onSuspend: (listener: () => void) => track(system.on(pluginId, 'suspend', listener)),
       onResume: (listener: () => void) => track(system.on(pluginId, 'resume', listener)),
@@ -563,7 +587,11 @@ async function section(
   input: SectionInput | undefined,
 ): Promise<{ handle: PluginSection; reload: (layers: SectionInput['layers']) => Promise<SectionResult> } | { failed: SectionResult } | undefined> {
   if (!input) return undefined;
-  const spec = { ...module[kind], version: input.version };
+  const own = module[kind];
+  const compiled = input.schema === undefined ? undefined : compileSchema(input.schema);
+  if (compiled && !compiled.ok) return { failed: { status: 'invalid', errors: compiled.errors } };
+  const check = compiled?.check;
+  const spec = { ...own, version: input.version, ...(check && { validate: (v: Readonly<Record<string, unknown>>) => [...check(v), ...(own?.validate?.(v) ?? [])] }) };
   let raw = new Map(input.layers.map(([layer, value]) => [layer, value]));
   const order = input.layers.map(([layer]) => layer);
   const resolve = () => resolveSection(spec, order.map((l) => [l, raw.get(l)] as const));
