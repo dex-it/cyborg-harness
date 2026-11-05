@@ -34,6 +34,13 @@ export interface FileStat {
   readonly mtimeMs: number;
 }
 
+export interface FileSlice {
+  readonly text: string;
+  /** Сколько байт файла покрывает `text`: незаконченный символ UTF-8 на конце куска не входит - на столько сдвинуть `offset`. */
+  readonly bytes: number;
+  readonly size: number;
+}
+
 export interface ProcessResult {
   readonly code: number | null;
   readonly signal: string | null;
@@ -66,6 +73,10 @@ export interface OsFs {
   readText(path: string): Promise<string>;
   list(dir: string): Promise<DirEntry[]>;
   stat(path: string): Promise<FileStat>;
+  /** Кусок файла с байта `offset`, от 4 байт до 1 МиБ: длинный журнал читается частями, а не целиком. */
+  readSlice(path: string, offset: number, maxBytes: number): Promise<FileSlice>;
+  /** Изменения файла или каталога по праву чтения; у каталога - имена изменённых, события склеиваются за 50 мс. */
+  watch(path: string, listener: (names: readonly string[]) => void): Promise<Disposable>;
   writeText(path: string, text: string): Promise<void>;
   mkdir(path: string): Promise<void>;
   remove(path: string): Promise<void>;
@@ -131,7 +142,7 @@ export interface OsPty {
 
 export interface PluginOs {
   /** Свои каталоги: данные и временный; читать и писать в них можно без права. */
-  readonly paths: { readonly data: string; readonly temp: string };
+  readonly paths: { readonly data: string; readonly temp: string; readonly home: string };
   readonly fs: OsFs;
   readonly pty?: OsPty;
   readonly process?: { run(program: string, args: readonly string[], options?: ProcessOptions): Promise<ProcessResult> };

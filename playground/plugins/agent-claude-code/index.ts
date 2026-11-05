@@ -1,10 +1,11 @@
-import type { Agent, AgentEvent, LaunchRequest, PluginModule } from '@cyborg/contracts';
+import type { Agent, AgentEvent, Disposable, LaunchRequest, PluginModule } from '@cyborg/contracts';
+import { listHistory } from './history.ts';
 
 // Claude Code не оборачивается: хуки из --settings дописывают JSON события в файл сессии, плагин его читает.
 const HOOK_COMMAND = '{ cat; echo; } >> "$CYBORG_EVENTS"';
 const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'Stop', 'Notification'];
 export const LAUNCH_SCRIPT = 'exec claude --settings "$CYBORG_SETTINGS" "$@"';
-const POLL_MS = 250;
+const SLICE_BYTES = 256 * 1024;
 
 // Белый список: новый тип Notification в следующей версии CC не уведомляет; idle_prompt повторяет Stop через минуту.
 const WAITING: ReadonlyMap<string, string> = new Map([
@@ -82,8 +83,7 @@ const plugin: PluginModule = {
           title: 'Claude Code',
           found: result?.code === 0,
           ...(version !== undefined && { version }),
-          // История ждёт чтения файла по кускам: журнал длинной сессии - мегабайты, а ctx.os.fs читает файл целиком.
-          capabilities: { resume: true, history: false, events: true },
+          capabilities: { resume: true, history: true, events: true },
         };
       },
       async launch(request) {
@@ -93,59 +93,73 @@ const plugin: PluginModule = {
       },
       watch(sessionId, listener) {
         const file = eventsFile(sessionId);
-        let seen = -1;
-        let consumed = -1;
+        const name = file.slice(sessions.length + 1);
+        let consumed: number | undefined;
         let cwd: string | undefined;
         let busy = false;
-        // fs.watch у ctx.os ещё нет: опрос размера, а подписка начинается с конца файла - прошлые события уже показаны.
-        const poll = async () => {
-          if (busy) return;
-          busy = true;
+        let again = false;
+        let closed = false;
+        const emit = (line: string) => {
+          let hook: HookEvent;
           try {
-            const size = (await fs.stat(file)).size;
-            if (size === seen) return;
-            seen = size;
-            const text = await fs.readText(file);
-            if (consumed < 0) {
-              consumed = text.lastIndexOf('\n') + 1;
-              return;
-            }
-            // Хук может дописывать строку прямо сейчас: читаем только до последнего полного перевода строки.
-            const end = text.lastIndexOf('\n') + 1;
-            if (end <= consumed) return;
-            const lines = text.slice(consumed, end).split('\n');
-            consumed = end;
-            for (const line of lines) {
-              if (!line.trim()) continue;
-              let hook: HookEvent;
-              try {
-                hook = JSON.parse(line) as HookEvent;
-              } catch {
-                continue;
-              }
-              for (const event of translate(hook, cwd)) {
-                if (event.type === 'cwd') cwd = event.cwd;
-                listener(event);
-              }
-            }
+            hook = JSON.parse(line) as HookEvent;
           } catch {
-            // Файла ещё нет или его уже убрал ended: следующий опрос попробует снова.
-          } finally {
-            busy = false;
+            return;
+          }
+          for (const event of translate(hook, cwd)) {
+            if (event.type === 'cwd') cwd = event.cwd;
+            listener(event);
           }
         };
-        void poll();
-        const timer = setInterval(() => void poll(), POLL_MS);
-        return { dispose: () => clearInterval(timer) };
+        // Хук может дописывать строку прямо сейчас: сдвиг только до последнего полного перевода строки, хвост придёт следующим событием.
+        const pull = async () => {
+          if (busy) {
+            again = true;
+            return;
+          }
+          busy = true;
+          try {
+            for (;;) {
+              if (closed) return;
+              const from = consumed ?? (await fs.stat(file)).size;
+              consumed = from;
+              const slice = await fs.readSlice(file, from, SLICE_BYTES);
+              const end = slice.text.lastIndexOf('\n') + 1;
+              if (end === 0) break;
+              const whole = slice.text.slice(0, end);
+              consumed = from + new TextEncoder().encode(whole).length;
+              for (const line of whole.split('\n')) if (line.trim()) emit(line);
+              if (slice.bytes < SLICE_BYTES) break;
+            }
+          } catch {
+            // Файл убрал ended или его ещё нет: следующее изменение попробует снова.
+          } finally {
+            busy = false;
+            if (again) {
+              again = false;
+              void pull();
+            }
+          }
+        };
+        // Подписка начинается с конца файла: прошлые события уже показаны.
+        const watching: Promise<Disposable | undefined> = pull().then(() =>
+          fs.watch(sessions, (names) => {
+            if (names.length === 0 || names.includes(name)) void pull();
+          }),
+        ).catch(() => undefined);
+        return {
+          dispose: () => {
+            closed = true;
+            void watching.then((w) => w?.dispose());
+          },
+        };
       },
       async ended(sessionId, exit) {
         await fs.remove(eventsFile(sessionId)).catch(() => undefined);
         // 127 - оболочка входа не нашла claude в своём PATH.
         return exit.code === 127 ? { kind: 'notFound', message: 'claude не найден в PATH оболочки входа' } : null;
       },
-      async history() {
-        return [];
-      },
+      history: (cwd) => listHistory(fs, `${paths.home}/.claude/projects`, cwd),
     };
     ctx.contracts.provide('cyborg.agent', '1.0', agent);
     return undefined;

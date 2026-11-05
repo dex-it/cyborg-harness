@@ -53,6 +53,7 @@ export const handleKey = (pluginId: string, contract: string, version: string): 
 export interface OsPaths {
   readonly data: string;
   readonly temp: string;
+  readonly home: string;
 }
 
 /** `ctx.os` по правам манифеста: нет права - нет члена; проверяет всё равно шлюз ядра, здесь только форма. */
@@ -103,6 +104,42 @@ class HostPtys {
     this.#items.delete(key);
     item.exited = p.exit;
     for (const l of item.exit) l(p.exit);
+  }
+
+  forget(pluginId: string): void {
+    for (const key of [...this.#items.keys()]) if (key.startsWith(`${pluginId}\0`)) this.#items.delete(key);
+  }
+}
+
+/** Слушатели `fs.watch` в хосте: id даёт хост, чтобы событие, пришедшее раньше ответа ядра, нашло слушателя. */
+class HostWatches {
+  readonly #items = new Map<string, (names: readonly string[]) => void>();
+  #seq = 0;
+
+  async watch(endpoint: Endpoint, pluginId: string, target: unknown, listener: (names: readonly string[]) => void): Promise<Disposable> {
+    if (typeof listener !== 'function') throw new CoreError('Invalid', `${pluginId}: fs.watch ждёт слушателя`);
+    const id = `w${String(++this.#seq)}`;
+    const key = `${pluginId}\0${id}`;
+    this.#items.set(key, listener);
+    try {
+      await endpoint.request('os', { pluginId, method: 'fs.watch', args: [target, id] });
+    } catch (error) {
+      this.#items.delete(key);
+      throw error;
+    }
+    return toDisposable(() => {
+      if (this.#items.delete(key)) void endpoint.request('os', { pluginId, method: 'fs.unwatch', args: [id] }).catch(() => undefined);
+    });
+  }
+
+  change(endpoint: Endpoint, p: { pluginId: string; id: string; names: string[] }): void {
+    const listener = this.#items.get(`${p.pluginId}\0${p.id}`);
+    if (!listener) return;
+    try {
+      listener(p.names);
+    } catch (error) {
+      endpoint.notify('log', { pluginId: p.pluginId, message: `слушатель fs.watch упал: ${error instanceof Error ? error.message : String(error)}` });
+    }
   }
 
   forget(pluginId: string): void {
@@ -183,7 +220,7 @@ class HostSystem {
   }
 }
 
-function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths: OsPaths, ptys: HostPtys): PluginOs {
+function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths: OsPaths, ptys: HostPtys, watches: HostWatches): PluginOs {
   const call =
     <R>(method: string) =>
     (...args: unknown[]): Promise<R> =>
@@ -198,6 +235,8 @@ function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths:
       readText: call('fs.readText'),
       list: call('fs.list'),
       stat: call('fs.stat'),
+      readSlice: call('fs.readSlice'),
+      watch: (target: string, listener: (names: readonly string[]) => void) => watches.watch(endpoint, pluginId, target, listener),
       writeText: call('fs.writeText'),
       mkdir: call('fs.mkdir'),
       remove: call('fs.remove'),
@@ -230,6 +269,8 @@ export function runHost(port: Port, importer: Importer): Endpoint {
   const ptys = new HostPtys();
   endpoint.handle('pty.data', (p: { pluginId: string; id: string; data: string }) => ptys.data(p));
   endpoint.handle('pty.exit', (p: { pluginId: string; id: string; exit: PtyExit }) => ptys.exit(p));
+  const watches = new HostWatches();
+  endpoint.handle('fs.change', (p: { pluginId: string; id: string; names: string[] }) => watches.change(endpoint, p));
   const system = new HostSystem(endpoint);
   endpoint.handle('system', (event: SystemEvent | { kind: 'idle'; id: string }) => system.dispatch(event));
   endpoint.handle('system.beforeQuit', () => system.beforeQuit());
@@ -266,7 +307,7 @@ export function runHost(port: Port, importer: Importer): Endpoint {
       loaded.store.add(toDisposable(() => reloaders.delete(`${p.pluginId}/${kind}`)));
     }
     try {
-      const result = await module.activate(context(endpoint, proxies, manifest, mirror, loaded, p.paths, config?.handle, state?.handle, ptys, system));
+      const result = await module.activate(context(endpoint, proxies, manifest, mirror, loaded, p.paths, config?.handle, state?.handle, ptys, system, watches));
       if (result) loaded.store.add(result);
       return { ok: true } satisfies ActivateResult;
     } catch (error) {
@@ -286,6 +327,7 @@ export function runHost(port: Port, importer: Importer): Endpoint {
     const loaded = plugins.get(p.pluginId);
     plugins.delete(p.pluginId);
     ptys.forget(p.pluginId);
+    watches.forget(p.pluginId);
     loaded?.store.dispose();
     system.forget(p.pluginId);
   });
@@ -425,6 +467,7 @@ function context(
   state: PluginSection | undefined,
   ptys: HostPtys,
   system: HostSystem,
+  watches: HostWatches,
 ): PluginContext {
   const pluginId = manifest.id;
   const track = (d: Disposable) => {
@@ -435,7 +478,7 @@ function context(
     pluginId,
     subscriptions: loaded.store,
     log: (message) => endpoint.notify('log', { pluginId, message }),
-    os: osOf(endpoint, pluginId, manifest.permissions, paths, ptys),
+    os: osOf(endpoint, pluginId, manifest.permissions, paths, ptys, watches),
     secrets: { resolve: (ref) => endpoint.request<SecretValue>('os', { pluginId, method: 'secrets.resolve', args: [ref] }) },
     window: Object.freeze({ onFocusChange: (listener: (focused: boolean) => void) => track(system.on(pluginId, 'focus', (focused) => listener(focused === true))) }),
     system: Object.freeze({

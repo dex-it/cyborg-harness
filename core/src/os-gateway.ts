@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
-import { constants, type Dirent } from 'node:fs';
+import { constants, watch as watchFs, type Dirent } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { DirEntry, FileStat, HttpResponse, ProcessResult, PtyInfo, SecretValue } from '@cyborg/contracts';
+import type { DirEntry, FileSlice, FileStat, HttpResponse, ProcessResult, PtyInfo, SecretValue } from '@cyborg/contracts';
 import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import { LOGIN_SHELL } from './permissions.ts';
@@ -23,6 +23,8 @@ export interface OsEnvironment {
   /** Каталог данных плагинов: `<dataDir>/<pluginId>` - область `plugin-data`. */
   readonly dataDir: string;
   readonly tempDir: string;
+  /** Домашний каталог: `~` в правах и `paths.home`; по умолчанию - домашний каталог ОС. */
+  readonly home?: string;
   /** Закрыты всегда: файл воркспейса, его замок, файл пользователя. */
   readonly protectedPaths?: readonly string[];
   /** Каталог данных приложения: закрыт целиком, кроме своих каталогов плагина и корней проектов от приложения. */
@@ -48,12 +50,32 @@ export interface Denial {
 }
 
 const MAX_OUTPUT = 16 * 1024 * 1024;
+const MAX_SLICE = 1024 * 1024;
+const MAX_WATCHES = 64;
+const WATCH_COALESCE_MS = 50;
+
+type PushMethod = 'pty.data' | 'pty.exit' | 'fs.change';
+
+// Конец куска внутри многобайтного символа: кусок обрезается до его начала, символ придёт следующим куском.
+function utf8End(buf: Buffer, n: number): number {
+  for (let i = n - 1; i >= Math.max(0, n - 4); i--) {
+    const b = buf[i] ?? 0;
+    if ((b & 0xc0) === 0x80) continue;
+    const len = b < 0x80 ? 1 : b >= 0xf0 ? 4 : b >= 0xe0 ? 3 : b >= 0xc0 ? 2 : 1;
+    return i + len > n ? i : n;
+  }
+  return n;
+}
+
+const int = (method: string, v: unknown, name: string, min: number, max: number): number => {
+  if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < min || v > max) throw new CoreError('Invalid', `${method}: ${name} - целое от ${String(min)} до ${String(max)}`);
+  return v;
+};
 
 /** Окружение запущенной программы: то, без чего она не найдёт себя и пользователя; остальное - по правилу. */
 const BASE_ENV = /^(PATH|HOME|USER|LOGNAME|SHELL|TERM|TMPDIR|LANG|LC_[A-Z]+|SystemRoot|SYSTEMROOT|ComSpec|PATHEXT|USERPROFILE|APPDATA|LOCALAPPDATA|TEMP|TMP|WINDIR)$/;
 
 const inside = (dir: string, target: string) => target === dir || target.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);
-const expand = (p: string) => (p === '~' ? os.homedir() : p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p);
 
 async function real(p: string): Promise<string> {
   try {
@@ -115,27 +137,35 @@ export class OsGateway {
   readonly #approved = new Map<string, Readonly<Record<string, unknown>>>();
 
   readonly #pty: PtyTable | undefined;
+  readonly #push: (pluginId: string, method: PushMethod, params: unknown) => void;
+  readonly #watches = new Map<string, () => void>();
 
   constructor(
     env: OsEnvironment,
     deny: (denial: Denial) => void,
     configOf: (pluginId: string) => Readonly<Record<string, unknown>> = () => ({}),
-    push: (pluginId: string, method: 'pty.data' | 'pty.exit', params: unknown) => void = () => undefined,
+    push: (pluginId: string, method: PushMethod, params: unknown) => void = () => undefined,
   ) {
     this.#env = env;
+    this.#push = push;
     this.#deny = deny;
     this.#configOf = configOf;
     this.#pty = env.pty && new PtyTable(env.pty, push, env.ptyBacklog);
   }
 
-  pathsOf(pluginId: string): { data: string; temp: string } {
-    return { data: path.join(this.#env.dataDir, pluginId), temp: path.join(this.#env.tempDir, pluginId) };
+  pathsOf(pluginId: string): { data: string; temp: string; home: string } {
+    return { data: path.join(this.#env.dataDir, pluginId), temp: path.join(this.#env.tempDir, pluginId), home: this.#home() };
   }
+
+  #home = (): string => this.#env.home ?? os.homedir();
+
+  #expand = (p: string): string => (p === '~' ? this.#home() : p.startsWith('~/') ? path.join(this.#home(), p.slice(2)) : p);
 
   /** Корни, принятые хосты и pty плагина уходят вместе с ним. pty: `detach` - упал хост, ждут только `persist`; `park` - человек оставил все живые; число оставленных. */
   forget(pluginId: string, pty: 'release' | 'detach' | 'park' = 'release'): number {
     this.#roots.delete(pluginId);
     this.#approved.delete(pluginId);
+    for (const [key, close] of this.#watches) if (key.startsWith(`${pluginId}\0`)) close();
     if (pty === 'park') return this.#pty?.park(pluginId) ?? 0;
     if (pty === 'detach') this.#pty?.detach(pluginId);
     else this.#pty?.release(pluginId);
@@ -172,7 +202,7 @@ export class OsGateway {
     const out: string[] = [own.data, own.temp];
     for (const area of named) {
       if (area === 'workspace') out.push(...(this.#env.roots?.() ?? []), ...[...this.#roots.values()].flat());
-      else if (area !== 'plugin-data' && area !== 'plugin-temp') out.push(expand(area));
+      else if (area !== 'plugin-data' && area !== 'plugin-temp') out.push(this.#expand(area));
     }
     return Promise.all(out.map(real));
   }
@@ -220,6 +250,55 @@ export class OsGateway {
         } finally {
           await handle.close();
         }
+      }
+      case 'fs.readSlice': {
+        await this.#ownDirs(m.id);
+        const file = await this.#checkPath(m, method, args[0], false);
+        const offset = int(method, args[1], 'offset', 0, Number.MAX_SAFE_INTEGER);
+        const max = int(method, args[2], 'maxBytes', 4, MAX_SLICE);
+        const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+        try {
+          const size = (await handle.stat()).size;
+          const buf = Buffer.alloc(Math.min(max, Math.max(0, size - offset)));
+          const { bytesRead } = await handle.read(buf, 0, buf.length, offset);
+          const end = offset + bytesRead >= size ? bytesRead : utf8End(buf, bytesRead);
+          return { text: buf.toString('utf8', 0, end), bytes: end, size } satisfies FileSlice;
+        } finally {
+          await handle.close();
+        }
+      }
+      case 'fs.watch': {
+        const id = str(method, args[1], 'id');
+        const key = `${m.id}\0${id}`;
+        if (this.#watches.has(key)) throw new CoreError('Invalid', `${method}: id ${id} уже занят`);
+        if ([...this.#watches.keys()].filter((k) => k.startsWith(`${m.id}\0`)).length >= MAX_WATCHES) throw new CoreError('Invalid', `${method}: больше ${String(MAX_WATCHES)} слежений`);
+        await this.#ownDirs(m.id);
+        const target = await this.#checkPath(m, method, args[0], false);
+        await fs.stat(target);
+        const names = new Set<string>();
+        let timer: NodeJS.Timeout | undefined;
+        const watcher = watchFs(target, (_event, name) => {
+          if (name) names.add(name);
+          timer ??= setTimeout(() => {
+            timer = undefined;
+            const list = [...names];
+            names.clear();
+            this.#push(m.id, 'fs.change', { pluginId: m.id, id, names: list });
+          }, WATCH_COALESCE_MS);
+        });
+        const close = () => {
+          clearTimeout(timer);
+          watcher.close();
+          this.#watches.delete(key);
+        };
+        // Без слушателя ошибка наблюдателя (удалён каталог, кончились inotify) уронила бы главный процесс.
+        watcher.on('error', close);
+        this.#watches.set(key, close);
+        return undefined;
+      }
+      case 'fs.unwatch': {
+        this.#watches.get(`${m.id}\0${str(method, args[0], 'id')}`)?.();
+        return undefined;
       }
       case 'fs.list': {
         await this.#ownDirs(m.id);
@@ -334,7 +413,7 @@ export class OsGateway {
         if (!Array.isArray(roots) || !roots.every((r): r is string => typeof r === 'string' && path.isAbsolute(r))) throw new CoreError('Invalid', `${method}: ожидается список абсолютных путей`);
         const accepted: string[] = [];
         // Корень - каталог проекта: корень ФС, домашний каталог или каталог приложения открыли бы плагинам с workspace всё.
-        const closed = await Promise.all([os.homedir(), this.#env.dataDir, this.#env.tempDir, ...(this.#env.appDir === undefined ? [] : [this.#env.appDir]), ...(this.#env.protectedPaths ?? [])].map(real));
+        const closed = await Promise.all([this.#home(), this.#env.dataDir, this.#env.tempDir, ...(this.#env.appDir === undefined ? [] : [this.#env.appDir]), ...(this.#env.protectedPaths ?? [])].map(real));
         for (const r of roots) {
           const dir = await real(r);
           const stat = await fs.stat(dir).catch(() => undefined);

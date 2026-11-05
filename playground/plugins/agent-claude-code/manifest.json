@@ -16,6 +16,9 @@
           "claude --version"
         ]
       }
+    ],
+    "fs.read": [
+      "~/.claude/projects"
     ]
   }
 }

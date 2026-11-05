@@ -146,6 +146,9 @@ async function main() {
   log('виды во фреймах: свой мост, лента плагина, чужая команда отклонена');
 
   assert.match(await viewVar('alice', '--cy-scheme'), /^(light|dark)$/, 'токены темы не дошли до вида');
+  // Тема рабочего стола бывает тёмной: без шага через светлую смена на dark не случится, и onChange не позовётся.
+  await theme('light');
+  await waitFor('светлая тема в виде alice', async () => (await viewVar('alice', '--cy-bg')) === '#ffffff');
   await theme('dark');
   await waitFor('тёмная тема в виде alice, onChange в его модуле', async () => (await viewVar('alice', '--cy-bg')) === '#0d1117' && /тема: dark/.test(await viewLog('alice')));
   await theme('light');

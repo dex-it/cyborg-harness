@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -9,6 +9,7 @@ import { load } from '../../core/src/loader.ts';
 import { inlineHosts } from '../../core/src/transports.ts';
 import { fakePty } from '../../core/test/fake-pty.ts';
 import { claudeArgs, LAUNCH_SCRIPT } from '../plugins/agent-claude-code/index.ts';
+import { projectDirName } from '../plugins/agent-claude-code/history.ts';
 
 const PLUGINS = path.join(import.meta.dirname, '..', 'plugins');
 const PROVIDERS = ['agent-claude-code', 'agent-shell'];
@@ -42,7 +43,7 @@ async function setup() {
     manifests: [...PROVIDERS, 'sessions'].map(manifestOf).concat({ id: 'probe', version: '1.0.0', engines: { cyborg: '^1' }, consumes: { 'cyborg.agent': '^1' } }),
     entry: (m) => (m.id === 'probe' ? 'probe' : path.join(PLUGINS, m.id, 'index.ts')),
     spawnHost: inlineHosts(async (entry) => (entry === 'probe' ? { activate: (ctx: PluginContext) => void (probe = ctx) } : ((await import(entry)) as { default: never }).default)),
-    os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), env: { PATH: `${bin}:/usr/bin:/bin`, HOME: root, SHELL: shell }, pty: backend },
+    os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), home: root, env: { PATH: `${bin}:/usr/bin:/bin`, HOME: root, SHELL: shell }, pty: backend },
   });
   assert.deepEqual(k.active.toSorted(), [...PROVIDERS, 'probe', 'sessions'].toSorted(), JSON.stringify(k.journal.filter((e) => e.kind === 'failed')));
   assert.ok(probe);
@@ -89,7 +90,7 @@ test('cyborg.agent, общий набор: факты, запуск через �
 test('agent-claude-code: запуск как в Cyborg - оболочка входа, --settings с хуками, порядок аргументов', async () => {
   await using s = await setup();
   const agent = s.agent('agent-claude-code');
-  assert.deepEqual(await agent.facts(), { id: 'claude-code', title: 'Claude Code', found: true, version: '2.1.7', capabilities: { resume: true, history: false, events: true } });
+  assert.deepEqual(await agent.facts(), { id: 'claude-code', title: 'Claude Code', found: true, version: '2.1.7', capabilities: { resume: true, history: true, events: true } });
   const spec = await agent.launch({ sessionId: 'a1', cwd: '/w', resumeId: 'r-1', promptFragments: ['изоляция', 'кнопки'], prompt: 'привет', extraDirs: ['/x', '/y'] });
   const data = s.data('agent-claude-code');
   assert.deepEqual(spec, {
@@ -152,4 +153,31 @@ test('agent-claude-code: хуки в события контракта; прош
   await waitFor('дописанная строка', () => seen.length === 9);
   assert.deepEqual(seen.at(-1), { type: 'turnEnd', background: false });
   sub.dispose();
+});
+
+test('agent-claude-code: история - интерактивные сессии каталога и его worktree, заголовок с краёв длинного журнала', async () => {
+  await using s = await setup();
+  const agent = s.agent('agent-claude-code');
+  const cwd = '/home/u/repo';
+  const projects = path.join(s.root, '.claude', 'projects');
+  const line = (o: object) => `${JSON.stringify(o)}\n`;
+  const journal = async (dir: string, id: string, lines: string, mtime: number) => {
+    await mkdir(path.join(projects, dir), { recursive: true });
+    const file = path.join(projects, dir, `${id}.jsonl`);
+    await writeFile(file, lines);
+    await utimes(file, mtime, mtime);
+  };
+  const id = (n: number) => `0000000${String(n)}-0000-4000-8000-000000000000`;
+  const own = projectDirName(cwd);
+  await journal(own, id(1), line({ entrypoint: 'cli' }) + line({ type: 'user', message: { content: '<local-command-caveat>' } }) + line({ type: 'user', message: { content: [{ type: 'text', text: 'почини   тесты' }] } }), 1000);
+  await journal(own, id(2), line({ entrypoint: 'sdk-cli' }) + line({ type: 'user', message: { content: 'из claude -p' } }), 3000);
+  const long = line({ entrypoint: 'cli' }) + line({ type: 'user', message: { content: 'первый запрос' } }) + 'x'.repeat(200 * 1024) + '\n' + line({ type: 'ai-title', aiTitle: 'Длинная сессия' });
+  await journal(`${own}--claude-worktrees-feat`, id(3), long, 2000);
+  await journal(projectDirName('/home/u/other'), id(4), line({ entrypoint: 'cli' }) + line({ type: 'user', message: { content: 'чужой' } }), 4000);
+  await journal(own, 'не-сессия', line({ entrypoint: 'cli' }), 5000);
+  assert.deepEqual(await agent.history(cwd), [
+    { id: id(3), cwd, title: 'Длинная сессия', updated: 2_000_000 },
+    { id: id(1), cwd, title: 'почини тесты', updated: 1_000_000 },
+  ]);
+  assert.deepEqual(await agent.history('/nowhere'), []);
 });

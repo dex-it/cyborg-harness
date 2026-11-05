@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, PluginOs } from '@cyborg/contracts';
@@ -188,6 +188,62 @@ test('секреты: ключи своего плагина, $secret, без ш
   const locked = await kernel({ x: undefined }, { dataDir: box.data, tempDir: box.temp, secrets: memorySecrets(false) });
   await assert.rejects(locked.os('x').secrets.set('k', 'v'), { code: 'Unavailable' });
   await locked.k.unload();
+});
+
+test('fs.readSlice: кусок по байтам, символ UTF-8 не рвётся, пределы и права', async () => {
+  await using box = await sandbox();
+  const file = path.join(box.work, 'log.jsonl');
+  await writeFile(file, 'ab' + 'я'.repeat(3) + 'z');
+  const { k, os } = await kernel({ reader: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  const fs = os('reader').fs;
+  const size = Buffer.byteLength('ab' + 'я'.repeat(3) + 'z');
+  assert.deepEqual(await fs.readSlice(file, 0, 5), { text: 'abя', bytes: 4, size }, 'полсимвола на конце не входит');
+  let text = '';
+  for (let offset = 0; offset < size; ) {
+    const slice = await fs.readSlice(file, offset, 5);
+    text += slice.text;
+    offset += slice.bytes;
+  }
+  assert.equal(text, 'ab' + 'я'.repeat(3) + 'z');
+  assert.deepEqual(await fs.readSlice(file, size + 10, 64), { text: '', bytes: 0, size });
+  await assert.rejects(fs.readSlice(file, -1, 64), { code: 'Invalid' });
+  await assert.rejects(fs.readSlice(file, 0, 3), { code: 'Invalid' });
+  await assert.rejects(fs.readSlice(file, 0, 2 * 1024 * 1024), { code: 'Invalid' });
+  await writeFile(path.join(box.outside, 'secret'), 'x');
+  await assert.rejects(fs.readSlice(path.join(box.outside, 'secret'), 0, 64), { code: 'PermissionDenied' });
+  await k.unload();
+});
+
+test('fs.watch: имена изменённых в каталоге склеены, снятие и выгрузка закрывают наблюдение, вне области - отказ', async () => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ reader: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  const fs = os('reader').fs;
+  const batches: (readonly string[])[] = [];
+  const sub = await fs.watch(box.work, (names) => batches.push(names));
+  await writeFile(path.join(box.work, 'a.jsonl'), '1\n');
+  await appendFile(path.join(box.work, 'a.jsonl'), '2\n');
+  await writeFile(path.join(box.work, 'b.jsonl'), '1\n');
+  for (let i = 0; i < 100 && !batches.flat().includes('b.jsonl'); i++) await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual([...new Set(batches.flat())].toSorted(), ['a.jsonl', 'b.jsonl']);
+  assert.ok(batches.length < 4, `события не склеены: ${JSON.stringify(batches)}`);
+  sub.dispose();
+  await new Promise((r) => setTimeout(r, 100));
+  const seen = batches.length;
+  await writeFile(path.join(box.work, 'c.jsonl'), '1\n');
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(batches.length, seen, 'после dispose событий нет');
+
+  const fileEvents: (readonly string[])[] = [];
+  await fs.watch(path.join(box.work, 'a.jsonl'), (names) => fileEvents.push(names));
+  await appendFile(path.join(box.work, 'a.jsonl'), '3\n');
+  for (let i = 0; i < 100 && fileEvents.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.ok(fileEvents.length > 0, 'дописанный файл не замечен');
+
+  await assert.rejects(fs.watch(box.outside, () => undefined), { code: 'PermissionDenied' });
+  await assert.rejects(fs.watch(path.join(box.work, 'нет'), () => undefined));
+  await k.unload();
+  await appendFile(path.join(box.work, 'a.jsonl'), '4\n');
+  await new Promise((r) => setTimeout(r, 100));
 });
 
 test('$SHELL: оболочка входа из окружения приложения, только с закреплённым скриптом', async () => {

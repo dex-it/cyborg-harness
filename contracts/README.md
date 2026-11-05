@@ -49,7 +49,7 @@ export interface Contracts {
 
 | Член | Без права |
 |---|---|
-| `paths.data`, `paths.temp`, `fs.*` в них | доступны всегда |
+| `paths.data`, `paths.temp`, `fs.*` в них | доступны всегда; `paths.home` - домашний каталог, тот же, что `~` в правах |
 | `fs.*` вне своих каталогов | `PermissionDenied` |
 | `secrets.get/set/delete` | свои ключи; без шифрования ОС - `Unavailable` |
 | `process`, `pty`, `net`, `env`, `notify`, `clipboard`, `security` | члена нет |
