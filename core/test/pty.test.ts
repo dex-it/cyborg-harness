@@ -181,3 +181,59 @@ test('pty завершился без владельца: list показыва�
   assert.deepEqual(exits, [{ code: 0 }]);
   assert.deepEqual(await s.pty('agent').list(), []);
 });
+
+test('share: билет одноразовый и только для своего UI; вид видит вывод и пишет мимо хоста, в том числе пока хоста нет', async () => {
+  await using s = await setup({ term: shell, other: shell });
+  const h = await s.pty('term').spawn({ program: '/bin/bash', persist: true, cols: 80, rows: 24 });
+  const proc = s.backend.procs[0]!;
+  await tick();
+  const sink = () => {
+    const got = { data: [] as string[], exit: [] as PtyExit[] };
+    return { got, sink: { data: (c: string) => void got.data.push(c), exit: (e: PtyExit) => void got.exit.push(e) } };
+  };
+
+  const stolen = await h.share();
+  assert.throws(() => s.k.openTerminal('other', stolen, sink().sink), { code: 'NotFound' }, 'чужой плагин открыл билет');
+  assert.throws(() => s.k.openTerminal('term', stolen, sink().sink), { code: 'NotFound' }, 'билет пережил первое предъявление');
+  assert.throws(() => s.k.openTerminal('term', 'выдуманный', sink().sink), { code: 'NotFound' });
+
+  const a = sink();
+  const view = s.k.openTerminal('term', await h.share(), a.sink);
+  assert.deepEqual([view.id, view.pid, view.backlog], [h.id, proc.pid, '$ ']);
+  view.write('ls\r');
+  view.resize(100, 30);
+  assert.deepEqual([proc.writes, proc.resizes.at(-1)], [['ls\r'], [100, 30]]);
+  await assert.rejects(s.pty('other').attach(h.id), { code: 'NotFound' });
+
+  s.handles.get('term')!.kill();
+  proc.emit('хост лежит, вид видит');
+  view.write('pwd\r');
+  assert.deepEqual(a.got.data, ['хост лежит, вид видит'], 'вывод в вид ходит через хост');
+  assert.equal(proc.writes.at(-1), 'pwd\r');
+  await s.k.idle();
+
+  view.close();
+  proc.emit('после close');
+  assert.deepEqual(a.got.data, ['хост лежит, вид видит']);
+  assert.throws(() => view.write('x'), { code: 'NotFound' });
+
+  const b = sink();
+  const back = await s.pty('term').attach(h.id);
+  s.k.openTerminal('term', await back.share(), b.sink);
+  proc.exit(0);
+  assert.deepEqual(b.got.exit, [{ code: 0 }]);
+  await assert.rejects(back.share(), { code: 'NotFound' }, 'билет на завершённый pty');
+});
+
+test('share: просроченный билет не открывается', async () => {
+  await using s = await setup({ term: shell });
+  const h = await s.pty('term').spawn({ program: '/bin/bash' });
+  const ticket = await h.share();
+  const realNow = Date.now;
+  Date.now = () => realNow() + 31_000;
+  try {
+    assert.throws(() => s.k.openTerminal('term', ticket, { data: () => {}, exit: () => {} }), { code: 'NotFound' });
+  } finally {
+    Date.now = realNow;
+  }
+});

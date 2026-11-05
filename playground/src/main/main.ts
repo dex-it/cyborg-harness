@@ -13,6 +13,7 @@ import { resolveDragFile, ViewDrags } from './view-drag.ts';
 import { framesOf, fromWindow, registerViewScheme, senderPlugin, serveViews, viewFrames } from './views.ts';
 import { themeTokens } from './theme.ts';
 import { resolveViewRequest } from './view-files.ts';
+import { ViewTerminals, type TerminalFrame } from './view-terminals.ts';
 import { isRecord } from '../../../core/src/manifest.ts';
 
 // Своя папка данных: cyborg.json и пользовательские плагины playground не смешиваются с настройками Cyborg.
@@ -106,6 +107,19 @@ ipcMain.handle('view:contract', (event, contract: unknown, major: unknown) => {
 ipcMain.handle('view:call', (event, contract: unknown, major: unknown, method: unknown, args: unknown) => {
   const pluginId = senderPlugin(event);
   return pluginId === undefined ? { error: 'не вид плагина' } : plugins.callFor(pluginId, contract, major, method, args);
+});
+const terminals = new ViewTerminals((pluginId, ticket, sink) => plugins.openTerminal(pluginId, ticket, sink));
+function terminalChannel(channel: string, handler: (frame: TerminalFrame, pluginId: string, ...args: unknown[]) => unknown): void {
+  ipcMain.handle(channel, (event: IpcMainInvokeEvent, ...args: unknown[]) => {
+    const pluginId = senderPlugin(event);
+    return pluginId === undefined || !event.senderFrame ? { error: 'не вид плагина' } : handler(event.senderFrame, pluginId, ...args);
+  });
+}
+terminalChannel('view:terminal:open', (frame, pluginId, ticket) => terminals.open(frame, pluginId, ticket));
+terminalChannel('view:terminal:write', (frame, _pluginId, tid, data) => terminals.write(frame, tid, data));
+terminalChannel('view:terminal:resize', (frame, _pluginId, tid, cols, rows) => terminals.resize(frame, tid, cols, rows));
+ipcMain.on('view:terminal:close', (event, tid: unknown) => {
+  if (senderPlugin(event) !== undefined && event.senderFrame) terminals.close(event.senderFrame, tid);
 });
 ipcMain.handle('view:theme', () => themeTokens(nativeTheme.shouldUseDarkColors));
 windowChannel('views:visibility', (arg) => {

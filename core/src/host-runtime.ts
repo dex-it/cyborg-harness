@@ -85,6 +85,7 @@ class HostPtys {
       write: call('pty.write'),
       resize: call('pty.resize'),
       kill: call('pty.kill'),
+      share: () => endpoint.request<string>('os', { pluginId, method: 'pty.share', args: [wire.id] }),
     });
   }
 

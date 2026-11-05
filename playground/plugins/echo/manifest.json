@@ -10,7 +10,8 @@
   "commands": [
     "echo.ping",
     "echo.files",
-    "echo.tty"
+    "echo.tty",
+    "echo.terminal"
   ],
   "permissions": {
     "fs.read": [
@@ -25,5 +26,10 @@
       "key": "F2",
       "command": "echo.ping"
     }
-  ]
+  ],
+  "ui": {
+    "views": {
+      "main": "./ui/ui.js"
+    }
+  }
 }

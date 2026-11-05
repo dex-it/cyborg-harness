@@ -1,6 +1,6 @@
 // Оболочка вида в его <iframe> (SAD2 §3.8) идёт в браузер: здесь нет node-модулей.
 
-import type { Disposable, FeedLine, Reply, ThemeTokens, UiContext, ViewDrop } from '@cyborg/contracts';
+import type { Disposable, FeedLine, PtyExit, PtyInfo, Reply, ThemeTokens, UiContext, UiTerminal, ViewDrop } from '@cyborg/contracts';
 import { toDisposable } from './disposable.ts';
 
 /** Мост вида к главному процессу, его выдаёт preload приложения; плагин работает с `UiContext`, а не с ним. */
@@ -16,7 +16,21 @@ export interface ViewBridge {
   onLog(listener: (line: FeedLine) => void): void;
   startDrag(path: string): void;
   drop(): Promise<ViewDrop | null>;
+  /** `value` - `TerminalOpened`. */
+  terminalOpen(ticket: string): Promise<Reply>;
+  terminalWrite(tid: number, data: string): Promise<Reply>;
+  terminalResize(tid: number, cols: number, rows: number): Promise<Reply>;
+  terminalClose(tid: number): void;
+  onTerminal(listener: (event: TerminalEvent) => void): void;
 }
+
+/** Ответ на `terminalOpen`: описание pty, хвост и номер терминала в этом документе. */
+export interface TerminalOpened extends PtyInfo {
+  readonly tid: number;
+  readonly backlog: string;
+}
+
+export type TerminalEvent = { readonly tid: number; readonly data: string } | { readonly tid: number; readonly exit: PtyExit };
 
 export interface ViewTarget {
   readonly pluginId: string;
@@ -46,6 +60,10 @@ class Listeners<T> {
     return toDisposable(() => this.#set.delete(wrapped));
   }
 
+  get size(): number {
+    return this.#set.size;
+  }
+
   emit(value: T): void {
     for (const listener of [...this.#set]) {
       try {
@@ -62,6 +80,79 @@ function remote(bridge: ViewBridge, contract: string, major: number): object {
   return new Proxy(Object.freeze({}), {
     get: (_target, key) => (typeof key !== 'string' || key === 'then' ? undefined : (...args: unknown[]) => bridge.call(contract, major, key, args).then(unwrap)),
   });
+}
+
+interface OpenTerminal {
+  readonly data: Listeners<string>;
+  readonly exit: Listeners<PtyExit>;
+  readonly early: string[];
+  exited?: PtyExit;
+}
+
+/** Терминалы документа: события по `tid` могут прийти раньше ответа на open, они ждут в `early`. */
+class Terminals {
+  readonly #bridge: ViewBridge;
+  readonly #report: (error: unknown) => void;
+  readonly #open = new Map<number, OpenTerminal>();
+  readonly #pending = new Map<number, TerminalEvent[]>();
+
+  constructor(bridge: ViewBridge, report: (error: unknown) => void) {
+    this.#bridge = bridge;
+    this.#report = report;
+    bridge.onTerminal((event) => {
+      const t = this.#open.get(event.tid);
+      if (!t) {
+        this.#pending.set(event.tid, [...(this.#pending.get(event.tid) ?? []), event]);
+        return;
+      }
+      if ('data' in event) {
+        if (t.data.size === 0) t.early.push(event.data);
+        else t.data.emit(event.data);
+        return;
+      }
+      t.exited = event.exit;
+      t.exit.emit(event.exit);
+      this.#open.delete(event.tid);
+    });
+  }
+
+  async open(ticket: string): Promise<UiTerminal> {
+    if (typeof ticket !== 'string') throw new Error('terminal.open: билет - строка от PtyHandle.share()');
+    const { tid, ...info } = unwrap(await this.#bridge.terminalOpen(ticket)) as TerminalOpened;
+    const t: OpenTerminal = { data: new Listeners<string>(this.#report), exit: new Listeners<PtyExit>(this.#report), early: [] };
+    this.#open.set(tid, t);
+    const pending = this.#pending.get(tid) ?? [];
+    this.#pending.delete(tid);
+    for (const event of pending) {
+      if ('data' in event) t.early.push(event.data);
+      else {
+        t.exited = event.exit;
+        this.#open.delete(tid);
+      }
+    }
+    let closed = false;
+    return Object.freeze({
+      ...info,
+      onData: (listener: (chunk: string) => void) => {
+        const sub = t.data.add(listener);
+        for (const chunk of t.early.splice(0)) t.data.emit(chunk);
+        return sub;
+      },
+      onExit: (listener: (exit: PtyExit) => void) => {
+        const exited = t.exited;
+        if (exited) queueMicrotask(() => listener(exited));
+        return t.exit.add(listener);
+      },
+      write: async (data: string) => void unwrap(await this.#bridge.terminalWrite(tid, data)),
+      resize: async (cols: number, rows: number) => void unwrap(await this.#bridge.terminalResize(tid, cols, rows)),
+      close: () => {
+        if (closed) return;
+        closed = true;
+        this.#open.delete(tid);
+        this.#bridge.terminalClose(tid);
+      },
+    });
+  }
 }
 
 /** Тема ставится до возврата: модуль плагина монтируется уже на своих токенах, без вспышки чужих цветов. */
@@ -83,6 +174,7 @@ export async function connectView(bridge: ViewBridge, target: ViewTarget): Promi
     visibility.emit(next);
   });
   bridge.onLog((line) => logs.emit(line));
+  const terminals = new Terminals(bridge, target.report);
   return Object.freeze({
     pluginId: target.pluginId,
     view: target.view,
@@ -102,6 +194,7 @@ export async function connectView(bridge: ViewBridge, target: ViewTarget): Promi
     onVisibilityChange: (listener: (visible: boolean) => void) => visibility.add(listener),
     logs: () => bridge.logs(),
     onLog: (listener: (line: FeedLine) => void) => logs.add(listener),
+    terminal: Object.freeze({ open: (ticket: string) => terminals.open(ticket) }),
     drag: Object.freeze({ start: (path: string) => bridge.startDrag(path), drop: () => bridge.drop() }),
   });
 }

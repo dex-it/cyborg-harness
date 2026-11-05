@@ -15,6 +15,7 @@ import { satisfies } from './semver.ts';
 import { OsGateway, type OsEnvironment } from './os-gateway.ts';
 import { isRecord, parseWire, type Parsed, type WireSpec } from './wire.ts';
 import type { HostHandle, SpawnHost } from './transports.ts';
+import type { TerminalSink, TerminalView } from './pty.ts';
 
 export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'invalid'; readonly errors: readonly string[] }
@@ -134,6 +135,8 @@ export interface Kernel {
   idle(): Promise<void>;
   /** Плагин с `activation: "lazy"` нужен сейчас - например, показан его вид; активному или не ленивому ничего не делает. */
   wake(pluginId: string): Promise<void>;
+  /** Вид плагина открывает pty по билету `share()` его главной части; вывод идёт в `sink` мимо хоста. */
+  openTerminal(pluginId: string, ticket: string, sink: TerminalSink): TerminalView;
   /** Событие окна или ОС от приложения: ядро раздаёт его активным плагинам. */
   emit(event: SystemEvent): void;
   /** Слушатели `onBeforeQuit` всех хостов, не дольше `budget` мс; после него приложение зовёт `unload`. */
@@ -807,6 +810,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       return k && (active.includes(k.pluginId) || waiting.has(k.pluginId) || waking.has(k.pluginId)) ? k : undefined;
     },
     wake,
+    openTerminal: (pluginId, ticket, sink) => gateway.openTerminal(pluginId, ticket, sink),
     emit(event) {
       if (!['focus', 'suspend', 'resume', 'screen-lock'].includes(event.kind)) throw new CoreError('Invalid', `событие ${event.kind as string} ядру не известно`);
       for (const host of hosts.values()) if (!host.down) host.endpoint.notify('system', event);

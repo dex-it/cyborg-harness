@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { FeedLine, Reply, ThemeTokens } from '@cyborg/contracts';
+import type { FeedLine, PtyExit, Reply, ThemeTokens } from '@cyborg/contracts';
 import { parseManifest } from '../src/manifest.ts';
-import { connectView, mountModule, type ViewBridge } from '../src/ui-shell.ts';
+import { connectView, mountModule, type TerminalEvent, type ViewBridge } from '../src/ui-shell.ts';
 
 function fakeBridge(tokens: ThemeTokens) {
   const calls: unknown[][] = [];
-  const on: { theme?: (t: ThemeTokens) => void; visibility?: (v: boolean) => void; log?: (l: FeedLine) => void } = {};
+  const on: { theme?: (t: ThemeTokens) => void; visibility?: (v: boolean) => void; log?: (l: FeedLine) => void; terminal?: (e: TerminalEvent) => void } = {};
   const bridge: ViewBridge = {
     run: async (command, args) => (calls.push(['run', command, ...args]), command === 'own.go' ? { value: args.length } : { error: `${command}: не команда плагина own` }),
     contract: async (contract): Promise<Reply> => (contract === 'test.files' ? { value: true } : contract === 'test.tab' ? { value: false } : { error: `${contract} нет в requires и optional` }),
@@ -18,6 +18,17 @@ function fakeBridge(tokens: ThemeTokens) {
     onLog: (l) => (on.log = l),
     startDrag: (path) => calls.push(['drag', path]),
     drop: async () => null,
+    terminalOpen: async (ticket) => {
+      calls.push(['open', ticket]);
+      if (ticket !== 'билет') return { error: 'билет терминала не найден, просрочен или уже использован' };
+      // Вывод, обогнавший ответ на open: вид не должен его потерять.
+      on.terminal?.({ tid: 7, data: 'ранний ' });
+      return { value: { tid: 7, id: 'pty-1', pid: 42, program: '/bin/sh', args: [], persist: true, backlog: '$ ' } };
+    },
+    terminalWrite: async (tid, data) => (calls.push(['write', tid, data]), {}),
+    terminalResize: async (tid, cols, rows) => (calls.push(['resize', tid, cols, rows]), cols > 0 ? {} : { error: 'размер' }),
+    terminalClose: (tid) => calls.push(['close', tid]),
+    onTerminal: (l) => (on.terminal = l),
   };
   return { bridge, calls, on };
 }
@@ -90,4 +101,28 @@ test('манифест ui.views: путь модуля только вниз о�
   assert.ok(errorsOf({ views: {} }).includes('ui.views: нет ни одного вида'));
   assert.ok(errorsOf({ overlay: './lock.js', views: { main: './ui.js' } }).includes('ui.overlay: ядро знает только ui.views'));
   assert.ok(errorsOf('./ui.js').some((e) => e.startsWith('ui:')));
+});
+
+test('terminal.open: хвост и вывод до подписки не теряются, ввод и размер идут по tid, выход и close', async () => {
+  const { bridge, calls, on } = fakeBridge({});
+  const ctx = await connectView(bridge, { pluginId: 'own', view: 'main', applyTheme: () => {}, report: () => {} });
+  await assert.rejects(ctx.terminal.open('чужой'), /билет терминала не найден/);
+  const term = await ctx.terminal.open('билет');
+  assert.deepEqual([term.id, term.pid, term.backlog], ['pty-1', 42, '$ ']);
+  on.terminal?.({ tid: 7, data: 'вывод' });
+  const seen: string[] = [];
+  term.onData((c) => seen.push(c));
+  on.terminal?.({ tid: 7, data: ' дальше' });
+  on.terminal?.({ tid: 8, data: 'чужой tid' });
+  assert.deepEqual(seen, ['ранний ', 'вывод', ' дальше']);
+  await term.write('ls\r');
+  await term.resize(100, 30);
+  await assert.rejects(term.resize(0, 30), /размер/);
+  const exits: PtyExit[] = [];
+  term.onExit((e) => exits.push(e));
+  on.terminal?.({ tid: 7, exit: { code: 0 } });
+  assert.deepEqual(exits, [{ code: 0 }]);
+  term.close();
+  term.close();
+  assert.deepEqual(calls.filter((c) => c[0] !== 'open'), [['write', 7, 'ls\r'], ['resize', 7, 100, 30], ['resize', 7, 0, 30], ['close', 7]]);
 });

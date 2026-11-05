@@ -17,6 +17,8 @@ import {
   type OsEnvironment,
   type SpawnHost,
   type SystemEvent,
+  type TerminalSink,
+  type TerminalView,
   type WatchdogOptions,
 } from '../../../core/src/index.ts';
 import { isRecord } from '../../../core/src/manifest.ts';
@@ -261,6 +263,12 @@ export class PluginsService {
     const own = this.kernel?.manifests.find((m) => m.id === pluginId)?.commands ?? {};
     if (!Object.hasOwn(own, command)) return Promise.resolve({ error: `${command}: не команда плагина ${pluginId}` });
     return this.run(command, args);
+  }
+
+  /** Терминал вида по билету `share()` его главной части; плагин - из origin фрейма. */
+  openTerminal(pluginId: string, ticket: string, sink: TerminalSink): TerminalView {
+    if (!this.kernel) throw new Error('ядро плагинов не запущено');
+    return this.kernel.openTerminal(pluginId, ticket, sink);
   }
 
   /** Есть ли у плагина вида поставщик контракта; права те же, что у главной части: только requires и optional манифеста. */

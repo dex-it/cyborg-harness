@@ -114,7 +114,12 @@ export interface PtyHandle extends PtyInfo {
   write(data: string): Promise<void>;
   resize(cols: number, rows: number): Promise<void>;
   kill(signal?: 'SIGTERM' | 'SIGKILL' | 'SIGINT' | 'SIGHUP'): Promise<void>;
+  /** Одноразовый билет для своего UI (`ctx.terminal.open` в виде): живёт 30 с, чужой плагин его не откроет. */
+  share(): Promise<PtyTicket>;
 }
+
+/** Строка-билет: главная часть передаёт её своему виду, например ответом своей команды. */
+export type PtyTicket = string;
 
 /** Процесс держит ядро: он переживает хост плагина, если просили `persist`. */
 export interface OsPty {

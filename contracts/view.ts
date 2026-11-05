@@ -1,4 +1,5 @@
 import type { ContractName, ContractType, Major } from './index.ts';
+import type { PtyExit, PtyInfo, PtyTicket } from './os.ts';
 import type { Disposable } from './plugin.ts';
 
 /** Строка ленты, которую ядро показывает виду его плагина. */
@@ -29,6 +30,19 @@ export type UiRemote<T> = {
   readonly [P in keyof T as NonNullable<T[P]> extends (...args: never[]) => unknown ? P : never]: NonNullable<T[P]> extends (...args: infer A) => infer R ? (...args: A) => Promise<Awaited<R>> : never;
 };
 
+/** pty, который показала виду его главная часть: вывод и ввод идут через ядро мимо хоста, так что зависший хост терминал не останавливает. */
+export interface UiTerminal extends PtyInfo {
+  /** Хвост вывода на момент открытия; может начинаться посреди escape-последовательности. */
+  readonly backlog: string;
+  /** Вывод до первой подписки копится и отдаётся ей. */
+  onData(listener: (chunk: string) => void): Disposable;
+  onExit(listener: (exit: PtyExit) => void): Disposable;
+  write(data: string): Promise<void>;
+  resize(cols: number, rows: number): Promise<void>;
+  /** Перестать смотреть; процесс живёт дальше - завершает его главная часть. */
+  close(): void;
+}
+
 /** Урезанный `ctx` для UI плагина (SAD2 §3.8): права - те же, что у главной части, но `ctx.os` нет. */
 export interface UiContext {
   readonly pluginId: string;
@@ -52,6 +66,10 @@ export interface UiContext {
   /** Сообщения своего плагина, накопленные до открытия вида. */
   logs(): Promise<readonly FeedLine[]>;
   onLog(listener: (line: FeedLine) => void): Disposable;
+  readonly terminal: {
+    /** Билет от `PtyHandle.share()` своей главной части; чужой, просроченный или использованный - исключение. */
+    open(ticket: PtyTicket): Promise<UiTerminal>;
+  };
   readonly drag: {
     /** Перетаскивание файла ведёт ядро: Chromium не пускает перетаскивание из страницы во фрейм другого процесса. Путь - от корня рабочей папки. */
     start(path: string): void;

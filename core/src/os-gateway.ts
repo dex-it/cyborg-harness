@@ -6,7 +6,7 @@ import path from 'node:path';
 import type { DirEntry, FileStat, HttpResponse, ProcessResult, SecretValue } from '@cyborg/contracts';
 import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
-import { PTY_SIGNALS, PtyTable, type PtyBackend } from './pty.ts';
+import { PTY_SIGNALS, PtyTable, type PtyBackend, type TerminalSink, type TerminalView } from './pty.ts';
 import { isRecord } from './wire.ts';
 
 /** Хранилище секретов ядра: ключи `<pluginId>/<key>`; без шифрования ОС `available()` - false, и ядро отказывает, а не пишет открытым текстом. */
@@ -139,6 +139,11 @@ export class OsGateway {
     else this.#pty?.release(pluginId);
   }
 
+  /** Вид плагина предъявил билет своей главной части; `pluginId` приложение берёт из origin фрейма, а не из слов вида. */
+  openTerminal(pluginId: string, ticket: string, sink: TerminalSink): TerminalView {
+    return this.#ptyTable().openTerminal(pluginId, ticket, sink);
+  }
+
   /** Запомнить config плагина как принятый: зовётся при активации и после правки файла извне, но не после записи самого плагина. */
   approve(pluginId: string): void {
     this.#approved.set(pluginId, structuredClone(this.#configOf(pluginId)));
@@ -257,6 +262,8 @@ export class OsGateway {
         const size = (v: unknown, fallback: number) => (Number.isInteger(v) && (v as number) > 0 && (v as number) <= 1000 ? (v as number) : fallback);
         return table.spawn(m.id, { program, args: checked.argv, ...(checked.cwd !== undefined && { cwd: checked.cwd }), env: checked.env, cols: size(o.cols, 80), rows: size(o.rows, 24), persist: o.persist === true });
       }
+      case 'pty.share':
+        return this.#ptyTable().share(m.id, str(method, args[0], 'id'));
       case 'pty.list':
         return this.#ptyTable().list(m.id);
       case 'pty.attach':

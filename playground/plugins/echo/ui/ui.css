@@ -1,0 +1,35 @@
+#cyborg-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cy-gap);
+  padding: 8px 10px;
+  box-sizing: border-box;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-gap);
+}
+
+.state {
+  flex: 1;
+  color: var(--cy-muted);
+}
+
+.screen {
+  flex: 1;
+  min-height: 6em;
+  margin: 0;
+  padding: 6px 8px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: var(--cy-font-mono);
+  background: var(--cy-surface);
+  border: 1px solid var(--cy-border);
+  border-radius: var(--cy-radius);
+}
+
+#line {
+  font-family: var(--cy-font-mono);
+}

@@ -1,4 +1,4 @@
-import type { PluginModule } from '@cyborg/contracts';
+import type { PluginModule, PtyHandle } from '@cyborg/contracts';
 
 // Плагин на TypeScript без сборки: хост грузит его как есть, типы снимает Node.
 const echo: PluginModule = {
@@ -22,6 +22,18 @@ const echo: PluginModule = {
       pty.onData((chunk) => (out += chunk));
       pty.onExit(({ code }) => ctx.log(`pty ${String(pty.pid)} вышел с ${String(code)}: ${out.replace(/\s+/g, ' ').trim()}`));
       await pty.write('tty; stty size; exit\r');
+    });
+    let shared: PtyHandle | undefined;
+    // Вид просит билет командой: share() есть только у главной части, а pty с persist переживает перезапуск хоста.
+    ctx.commands.register('echo.terminal', async () => {
+      const pty = ctx.os.pty;
+      if (!pty) throw new Error('у приложения нет pty');
+      if (!shared) {
+        const alive = (await pty.list()).find((p) => p.persist && !p.exit);
+        shared = alive ? await pty.attach(alive.id) : await pty.spawn({ program: '/bin/sh', persist: true, cols: 80, rows: 12 });
+        shared.onExit(() => (shared = undefined));
+      }
+      return shared.share();
     });
     ctx.log(`загружен в процесс ${process.pid}`);
     return undefined;

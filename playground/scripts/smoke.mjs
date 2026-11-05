@@ -104,7 +104,7 @@ async function main() {
       return frame ? frame.executeJavaScript(${JSON.stringify(expression)}) : null;
     })()`);
   const viewLog = (id) => inView(id, "[...document.querySelectorAll('#log li')].map((l) => l.textContent).join('\\n')");
-  const views = () => ev("[...document.querySelectorAll('#views iframe')].map((f) => f.closest('[data-plugin]').dataset.plugin).join(',')");
+  const views = () => ev("[...document.querySelectorAll('#views iframe')].map((f) => f.closest('[data-plugin]').dataset.plugin).sort().join(',')");
   const viewVar = (id, name) => inView(id, `getComputedStyle(document.documentElement).getPropertyValue(${JSON.stringify(name)}).trim()`);
   const theme = (source) => main(`process.mainModule.require('electron').nativeTheme.themeSource = ${JSON.stringify(source)}`);
   const states = async (expected) => {
@@ -136,7 +136,7 @@ async function main() {
   await waitFor('свободное сочетание дошло до окна', () => feedHas(re('Z', 'до окна дошло')));
   log('перехват клавиш, конфликт, обмен сообщениями через три хоста');
 
-  await waitFor('виды alice и bob во фреймах', async () => (await views()) === 'alice,bob' && (await inView('bob', "document.readyState")) === 'complete');
+  await waitFor('виды echo, alice и bob во фреймах', async () => (await views()) === 'alice,bob,echo' && (await inView('bob', "document.readyState")) === 'complete');
   assert.equal(await inView('alice', 'typeof window.playground'), 'undefined', 'вид получил мост окна');
   await inView('alice', "document.getElementById('hello').click()");
   await waitFor('вид alice → чат → вид bob', async () => /→ привет, bob/.test(await viewLog('alice')) && /← alice: привет, bob/.test(await viewLog('bob')));
@@ -186,7 +186,7 @@ async function main() {
     (await states({ chat: 'stopped', alice: 'stopped', bob: 'active' })) && lines().includes('[plugins] bob: чат пропал'),
   );
   assert.match(await text('#plugins-list [data-plugin="alice"] .plugin-reason'), /выгружен вместе с chat/);
-  await waitFor('на месте вида снятой alice - заглушка с причиной', async () => (await views()) === 'bob' && /выгружен вместе с chat/.test(await text('#views [data-plugin="alice"] .view-reason')));
+  await waitFor('на месте вида снятой alice - заглушка с причиной', async () => (await views()) === 'bob,echo' && /выгружен вместе с chat/.test(await text('#views [data-plugin="alice"] .view-reason')));
   assert.ok(await ev(`[...document.querySelectorAll('#views [data-plugin="alice"] button')].some((b) => b.textContent === 'Журнал')`), 'у заглушки нет «Журнал»');
   assert.equal((await keyRow(combo('A')))?.live, 'false');
   await press(combo('A'));
@@ -196,15 +196,27 @@ async function main() {
     (await states({ chat: 'active', alice: 'active' })) && lines().includes('[plugins] bob: чат вернулся, подписываюсь снова'),
   );
   assert.notEqual(await pid('chat'), chatPid, 'после выгрузки chat должен подняться в новом процессе');
-  await waitFor('вид alice вернулся', async () => (await views()) === 'alice,bob');
+  await waitFor('вид alice вернулся', async () => (await views()) === 'alice,bob,echo');
   log('выгрузка с зависимыми, загрузка в новый процесс, переподписка');
 
   const chatPid2 = await pid('chat');
   assert.equal(await button('chat', 'Уронить хост'), true);
   await waitFor('хост b упал и поднялся', async () => /хост b упал/.test(await text('#plugins-journal')) && (await state('chat')) === 'active' && (await pid('chat')) !== chatPid2);
+  const screen = () => inView('echo', "document.getElementById('screen').textContent");
+  const type = (command) => inView('echo', `(() => { const l = document.getElementById('line'); l.value = ${JSON.stringify(command)}; l.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); })()`);
+  await waitFor('вид echo открыл pty по билету главной части', async () => /^pty \d+$/.test(await inView('echo', "document.getElementById('term-state').textContent")));
+  await type('echo до-$((6*7))');
+  await waitFor('терминал вида ответил', async () => /до-42/.test(await screen()));
   if (process.platform !== 'win32') {
+    const hung = await pid('echo');
     assert.equal(await button('echo', 'Повесить хост'), true);
+    await waitFor('хост echo остановлен SIGSTOP', async () => /^T/.test(await main(`process.mainModule.require('child_process').execSync('ps -o stat= -p ${hung}').toString().trim()`)));
+    await type('echo завис-$((7*8))');
+    await waitFor('хост echo стоит, а терминал вида работает', async () => /завис-56/.test(await screen()));
     await waitFor('сторож признал хост a зависшим и перезапустил', async () => /хост a завис/.test(await text('#plugins-journal')) && (await state('echo')) === 'active' && (await pid('echo')) !== echoPid);
+    await type('echo после-$((8*9))');
+    await waitFor('после перезапуска хоста терминал вида тот же', async () => /после-72/.test(await screen()));
+    log('терминал вида: билет share(), вывод и ввод мимо хоста - работают при зависшем хосте и после его перезапуска');
   }
   log('падение и зависание хоста: сторож перезапускает');
 

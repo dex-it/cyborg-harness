@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { ThemeTokens } from '@cyborg/contracts';
 import type { FeedLine, PluginsSnapshot, Reply } from '../shared/plugins.ts';
-import { VIEW_SCHEME, type SpikeBridge, type SpikePing, type SpikeReport, type ViewBridge } from '../shared/views.ts';
+import { VIEW_SCHEME, type SpikeBridge, type SpikePing, type SpikeReport, type TerminalEvent, type ViewBridge } from '../shared/views.ts';
 
 const api = {
   pluginsSnapshot: (): Promise<PluginsSnapshot> => ipcRenderer.invoke('plugins:snapshot'),
@@ -27,6 +27,11 @@ const view: ViewBridge = {
   onLog: (listener) => void ipcRenderer.on('view:log', (_event, line: FeedLine) => listener(line)),
   startDrag: (path) => ipcRenderer.send('view:drag', path),
   drop: () => ipcRenderer.invoke('view:drop'),
+  terminalOpen: (ticket) => ipcRenderer.invoke('view:terminal:open', ticket),
+  terminalWrite: (tid, data) => ipcRenderer.invoke('view:terminal:write', tid, data),
+  terminalResize: (tid, cols, rows) => ipcRenderer.invoke('view:terminal:resize', tid, cols, rows),
+  terminalClose: (tid) => ipcRenderer.send('view:terminal:close', tid),
+  onTerminal: (listener) => void ipcRenderer.on('view:terminal', (_event, event: TerminalEvent) => listener(event)),
 };
 
 const spike: SpikeBridge = {
