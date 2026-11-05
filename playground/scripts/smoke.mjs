@@ -1,7 +1,7 @@
 // Дымовой тест собранного playground по DevTools Protocol; нужен дисплей (на Linux - xvfb-run ... --no-sandbox).
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -140,7 +140,21 @@ async function main() {
   await waitFor('вид alice → чат → вид bob', async () => /→ привет, bob/.test(await viewLog('alice')) && /← alice: привет, bob/.test(await viewLog('bob')));
   await inView('bob', "document.getElementById('foreign').click()");
   await waitFor('чужая команда из вида bob отклонена', async () => /отказ: alice\.hello: не команда плагина bob/.test(await viewLog('bob')));
+  assert.equal(await inView('bob', 'window.cyborgView.drop()'), null, 'вид получил путь без перетаскивания');
   log('виды во фреймах: свой мост, лента плагина, чужая команда отклонена');
+
+  assert.match(await text('#plugins-list [data-plugin="echo"] .plugin-permissions'), /читает файлы: проекты воркспейса/, 'права echo словами не показаны');
+  assert.ok(await button('echo', 'echo.files'), 'нет кнопки echo.files');
+  await waitFor('echo пишет в свой каталог, путь вне прав отклонён и записан', () =>
+    lines().some((l) => /echo: свой каталог: .*seen\.txt/.test(l)) &&
+    lines().includes('[plugins] echo: /etc/hostname: PermissionDenied') &&
+    lines().some((l) => l.includes('"kind":"denied"') && l.includes('"method":"fs.readText"')),
+  );
+  log('ctx.os: свой каталог без права, отказ вне прав с записью в журнале, права словами');
+
+  assert.ok(await button('echo', 'echo.tty'), 'нет кнопки echo.tty');
+  await waitFor('pty: /bin/sh в псевдотерминале ядра ответил своим tty и размером', () => lines().some((l) => /echo: pty \d+ вышел с 0: .*\/dev\/(pts\/|tty).* 10 100/.test(l)));
+  log('ctx.os.pty: процесс в главном процессе, вывод в хост плагина, размер дошёл до терминала');
 
   assert.equal(await button('chat', 'Выгрузить'), true, 'у chat нет «Выгрузить»');
   await waitFor('chat выгружен, alice снята с ним, bob живёт без чата', async () =>
@@ -174,6 +188,16 @@ async function main() {
   assert.equal(await button('flaky', 'Включить снова'), true, 'у выключенного flaky нет «Включить снова»');
   await waitFor('flaky включён снова', async () => (await state('flaky')) === 'active');
   log('окно: заглушка с причиной, журнал плагина, «Включить снова»');
+
+  const lock = JSON.parse(readFileSync(join(userData, 'workspace.cyborg.json.lock'), 'utf8'));
+  assert.equal(typeof lock.pid, 'number', 'замок воркспейса без pid');
+  const second = spawn(join(repo, 'node_modules', '.bin', 'electron'), [repo, `--user-data-dir=${userData}`, ...electronArgs], { stdio: 'ignore' });
+  const code = await Promise.race([new Promise((r) => second.once('exit', r)), sleep(15000).then(() => 'висит')]);
+  if (code === 'висит') second.kill('SIGKILL');
+  assert.equal(code, 0, 'второй экземпляр на том же воркспейсе не ушёл сам');
+  assert.equal(app.exitCode, null, 'первый экземпляр закрылся вместе со вторым');
+  assert.equal(await state('echo'), 'active');
+  log('воркспейс: замок с pid, второй запуск отдаёт фокус первому и уходит');
 }
 
 let failed = false;

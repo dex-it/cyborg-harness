@@ -4,7 +4,7 @@ import type { SpikeBridge } from '../shared/views.ts';
 import { byId } from './dom.ts';
 
 const spike = (window as unknown as { spike: SpikeBridge }).spike;
-const box = byId('frames', HTMLElement);
+const box = byId('views', HTMLElement);
 const frames: { frame: HTMLIFrameElement; origin: string }[] = [];
 
 /** Ставит фреймы и ждёт load каждого; возвращает, сколько это заняло, мс. */
@@ -17,6 +17,7 @@ async function mountFrames(urls: readonly string[]): Promise<number> {
       const loaded = new Promise<void>((resolve) => frame.addEventListener('load', () => resolve(), { once: true }));
       frame.src = url;
       const parsed = new URL(url);
+      frame.dataset.plugin = parsed.host;
       frames.push({ frame, origin: `${parsed.protocol}//${parsed.host}` });
       box.append(frame);
       return loaded;

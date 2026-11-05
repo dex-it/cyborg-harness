@@ -129,6 +129,40 @@ test('манифест: сочетание - на свою команду без
   assert.match(problem({ keybindings: [{ key: 'F2', command: 'pad.open' }, { key: 'f2', command: 'pad.open' }] }), /повторяется/);
 });
 
+test('plugins.keybindings: выбор пользователя перекрывает манифесты, null отдаёт сочетание окну, неверное - в журнал', async () => {
+  const pad = (id: string): PluginModule => ({ activate: (ctx) => ctx.commands.register(`${id}.go`, () => id) });
+  const keyed = (id: string, key: string) => manifest(id, { commands: [`${id}.go`, `${id}.alt`], keybindings: [{ key, command: `${id}.go` }] });
+  const { start } = kernel(
+    { alpha: pad('alpha'), zeta: pad('zeta') },
+    {
+      enabled: ['alpha', 'zeta'],
+      manifests: [keyed('alpha', 'Ctrl+K'), keyed('zeta', 'Ctrl+K'), keyed('beta', 'F5')],
+      platform: 'linux',
+      keybindings: [
+        { key: 'cmdorctrl+k', command: 'zeta.go' },
+        { key: 'F5', command: null },
+        { key: 'F6', command: 'alpha.alt' },
+        { key: 'K', command: 'alpha.go' },
+        { key: 'F7', command: 'nobody.go' },
+      ],
+    },
+  );
+  const k = await start();
+  assert.deepEqual(
+    k.keybindings.map((b) => [b.key, b.command, b.user ?? false, b.shadowed.map((x) => x.command)]),
+    [
+      ['Ctrl+K', 'zeta.go', true, ['alpha.go']],
+      ['F6', 'alpha.alt', true, []],
+    ],
+  );
+  assert.equal(k.keybinding('F5'), undefined, 'освобождённое сочетание осталось у плагина');
+  assert.deepEqual(
+    k.journal.flatMap((e) => (e.kind === 'key-ignored' ? [`${e.key}:${e.reason}`] : [])),
+    ['K:сочетание не разобрано', 'F7:команды нет ни у одного плагина'],
+  );
+  await k.unload();
+});
+
 test('конфликт сочетаний: встроенный побеждает сторонний, между равными - первый по id; нажатие идёт активному владельцу', async () => {
   const pad = (id: string): PluginModule => ({ activate: (ctx) => ctx.commands.register(`${id}.go`, () => id) });
   const keyed = (id: string, key: string) => manifest(id, { commands: [`${id}.go`], keybindings: [{ key, command: `${id}.go` }] });

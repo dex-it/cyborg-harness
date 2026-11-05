@@ -1,14 +1,6 @@
-export type CoreErrorCode =
-  | 'NotDeclared'
-  | 'AlreadyProvided'
-  | 'Unavailable'
-  | 'NotCloneable'
-  | 'Invalid'
-  | 'CommandNotFound'
-  | 'CommandConflict'
-  | 'HostGone'
-  | 'Timeout'
-  | 'Remote';
+import type { CoreErrorCode } from '@cyborg/contracts';
+
+export type { CoreErrorCode };
 
 export class CoreError extends Error {
   readonly code: CoreErrorCode;

@@ -1,29 +1,13 @@
 // Вид плагина в своём <iframe> с origin cyborg-plugin://<id> (SAD2 §3.8) и мост к главному процессу через preload в подфрейме.
 
-import type { FeedLine, Reply } from './plugins.ts';
+import type { ViewBridge, ViewDrop } from '@cyborg/contracts';
+
+export type { ViewBridge, ViewDrop };
 
 export const VIEW_SCHEME = 'cyborg-plugin';
 
 /** Перетаскиваемый путь файла: MIME контракта, а не text/plain - чужой вид не примет его за текст. */
 export const PATH_MIME = 'application/x-cyborg-path';
-
-/** Что видит вид плагина в `window.cyborgView`: только своё - главный процесс узнаёт плагин по origin фрейма, а не по словам вида. */
-export interface ViewBridge {
-  /** Свои команды плагина; чужую главный процесс отклонит. */
-  run(command: string): Promise<Reply>;
-  /** Сообщения своего плагина, накопленные до открытия вида. */
-  logs(): Promise<readonly FeedLine[]>;
-  onLog(listener: (line: FeedLine) => void): void;
-  /** Перетаскивание пути ведёт ядро: Chromium не пускает перетаскивание из страницы во фрейм другого процесса той же страницы. */
-  startDrag(path: string): void;
-  /** Путь, сброшенный в этот вид, и плагин-источник; сброс не из вида - null. */
-  drop(): Promise<ViewDrop | null>;
-}
-
-export interface ViewDrop {
-  readonly from: string;
-  readonly path: string;
-}
 
 /** Сообщение замера: `ack` - ответить сразу, без него вид молчит до последнего куска потока. */
 export interface SpikePing {

@@ -19,6 +19,7 @@ const REVIVABLE = new Set<JournalEntry['kind']>(['switched-off', 'failed', 'skip
 /** Плагины, которых касается запись: свой id или перечень у записей хоста. */
 export function entryPlugins(entry: JournalEntry): readonly string[] {
   if (entry.pluginId !== undefined) return [entry.pluginId];
+  if (entry.kind === 'key-ignored') return [];
   return entry.kind === 'host-down' ? [...new Set([...entry.plugins, ...entry.culprits])] : entry.plugins;
 }
 
@@ -41,7 +42,9 @@ export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[]
           set(id, 'restarting', entry);
           break;
         case 'key-conflict':
-          // Конфликт сочетаний о работе плагина ничего не говорит: плагин запускается как обычно.
+        case 'key-ignored':
+        case 'denied':
+          // Ни конфликт сочетаний, ни отказ шлюза о работе плагина ничего не говорят: плагин работает как обычно.
           break;
         case 'host-restart':
           // Причиной остаётся падение: «перезапуск» без «почему» человеку ничего не говорит.
@@ -112,12 +115,16 @@ export function describeEntry(e: JournalEntry): string {
       return e.error ? `снят с ошибкой: ${e.error}` : 'снят';
     case 'revived':
       return 'включён снова';
+    case 'denied':
+      return `отказ ctx.os: ${e.detail}`;
     case 'unloaded': {
       const what = e.by === e.pluginId ? 'выгружен' : `выгружен вместе с ${e.by}: требует его контракт`;
       return e.error ? `${what}; deactivate с ошибкой: ${e.error}` : what;
     }
     case 'key-conflict':
       return `сочетание ${e.key} (${e.command}) уже у ${e.winner}: нажатие получает ${e.winner}`;
+    case 'key-ignored':
+      return `plugins.keybindings: ${e.key} -> ${String(e.command)} не применено: ${e.reason}`;
     case 'host-isolated':
       return `сторонний плагин не делит хост: группа ${e.group} из plugins.hosts не действует, работает в своём хосте ${e.hostId}`;
     case 'switched-off':
@@ -145,6 +152,8 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
     case 'unloaded':
       return e.error ? 'warn' : 'info';
     case 'key-conflict':
+    case 'key-ignored':
+    case 'denied':
       return 'warn';
     case 'deactivated':
       return e.error ? 'warn' : 'info';

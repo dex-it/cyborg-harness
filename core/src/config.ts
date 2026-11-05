@@ -1,23 +1,8 @@
+import type { Layer, SectionResult, SectionSpec } from '@cyborg/contracts';
 import { toDisposable, type Disposable } from './disposable.ts';
 import { isRecord } from './manifest.ts';
 
-/** Слои от нижнего к верхнему: верхний перекрывает нижний. Для config - user и workspace. */
-export type Layer = string;
-
-export interface SectionSpec {
-  readonly version: number;
-  readonly defaults?: Readonly<Record<string, unknown>>;
-  /** Приводит данные слоя из `fromVersion` к `version`; бросок - отказ миграции. */
-  readonly migrate?: (fromVersion: number, data: Record<string, unknown>) => Record<string, unknown>;
-  /** Ошибки итогового значения; пустой список - значение годно. */
-  readonly validate?: (value: Readonly<Record<string, unknown>>) => readonly string[];
-}
-
-export type SectionResult =
-  | { readonly status: 'ok'; readonly value: Record<string, unknown>; readonly migrated: readonly Layer[] }
-  | { readonly status: 'newer'; readonly layer: Layer; readonly found: number; readonly expected: number }
-  | { readonly status: 'migrate-error'; readonly layer: Layer; readonly from: number; readonly error: string }
-  | { readonly status: 'invalid'; readonly errors: readonly string[] };
+export type { Layer, SectionResult, SectionSpec };
 
 export const VERSION_KEY = '$version';
 
@@ -141,6 +126,22 @@ export class SectionStore {
         return toDisposable(() => listeners.delete(listener));
       },
     };
+  }
+
+  /** Перечитывает слои после правки извне; возвращает id разделов, которые поменялись. Ошибка чтения - документы прежние. */
+  async reload(): Promise<string[]> {
+    const next = new Map<Layer, Record<string, unknown>>();
+    for (const layer of this.#layers) {
+      const doc = await this.#store.load(layer);
+      next.set(layer, isRecord(doc) ? doc : {});
+    }
+    const changed = new Set<string>();
+    for (const [layer, doc] of next) {
+      const prev = this.#documents.get(layer) ?? {};
+      for (const id of new Set([...Object.keys(prev), ...Object.keys(doc)])) if (JSON.stringify(prev[id]) !== JSON.stringify(doc[id])) changed.add(id);
+    }
+    for (const [layer, doc] of next) this.#documents.set(layer, doc);
+    return [...changed];
   }
 
   /** Пишет раздел в слой как есть; миграцию и проверку уже сделал хост плагина. */

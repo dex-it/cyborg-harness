@@ -1,11 +1,12 @@
 import { resolveSection, VERSION_KEY, type SectionResult } from './config.ts';
 import { DisposableStore, toDisposable, type Disposable } from './disposable.ts';
-import type { ContractName, ContractType, Major, Remote } from '@cyborg/contracts';
+import type { ContractName, ContractType, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue } from '@cyborg/contracts';
 import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';
 import { ContractRegistry, type ContractImpl } from './registry.ts';
 import { Endpoint, type Port } from './rpc.ts';
+import type { PtyWire } from './pty.ts';
 import { isRecord } from './wire.ts';
 
 /** Описание отданного контракта на проводе: данные как есть, методы - только именами. */
@@ -49,13 +50,112 @@ const isDisposable = (value: unknown): value is Disposable => isRecord(value) &&
 
 export const handleKey = (pluginId: string, contract: string, version: string): string => `${pluginId}|${contract}|${version}`;
 
+export interface OsPaths {
+  readonly data: string;
+  readonly temp: string;
+}
+
+/** `ctx.os` по правам манифеста: нет права - нет члена; проверяет всё равно шлюз ядра, здесь только форма. */
+/** Слушатели pty в хосте; вывод, пришедший до первого onData, копится - иначе первые байты ушли бы мимо подписки. */
+class HostPtys {
+  readonly #items = new Map<string, { data: Set<(c: string) => void>; exit: Set<(e: PtyExit) => void>; early: string[]; exited?: PtyExit }>();
+
+  #key = (pluginId: string, id: string) => `${pluginId}\0${id}`;
+
+  open(endpoint: Endpoint, pluginId: string, wire: PtyWire): PtyHandle {
+    const item = { data: new Set<(c: string) => void>(), exit: new Set<(e: PtyExit) => void>(), early: [] as string[], ...(wire.exit && { exited: wire.exit }) };
+    if (!wire.exit) this.#items.set(this.#key(pluginId, wire.id), item);
+    const call =
+      (method: string) =>
+      (...args: unknown[]): Promise<undefined> =>
+        endpoint.request<undefined>('os', { pluginId, method, args: [wire.id, ...args] });
+    return Object.freeze({
+      ...wire,
+      onData: (listener: (c: string) => void) => {
+        item.data.add(listener);
+        for (const chunk of item.early.splice(0)) listener(chunk);
+        return toDisposable(() => item.data.delete(listener));
+      },
+      onExit: (listener: (e: PtyExit) => void) => {
+        const exited = item.exited;
+        if (exited) queueMicrotask(() => listener(exited));
+        else item.exit.add(listener);
+        return toDisposable(() => item.exit.delete(listener));
+      },
+      write: call('pty.write'),
+      resize: call('pty.resize'),
+      kill: call('pty.kill'),
+    });
+  }
+
+  data(p: { pluginId: string; id: string; data: string }): void {
+    const item = this.#items.get(this.#key(p.pluginId, p.id));
+    if (!item) return;
+    if (item.data.size === 0) item.early.push(p.data);
+    for (const l of item.data) l(p.data);
+  }
+
+  exit(p: { pluginId: string; id: string; exit: PtyExit }): void {
+    const key = this.#key(p.pluginId, p.id);
+    const item = this.#items.get(key);
+    if (!item) return;
+    this.#items.delete(key);
+    item.exited = p.exit;
+    for (const l of item.exit) l(p.exit);
+  }
+
+  forget(pluginId: string): void {
+    for (const key of [...this.#items.keys()]) if (key.startsWith(`${pluginId}\0`)) this.#items.delete(key);
+  }
+}
+
+function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths: OsPaths, ptys: HostPtys): PluginOs {
+  const call =
+    <R>(method: string) =>
+    (...args: unknown[]): Promise<R> =>
+      endpoint.request<R>('os', { pluginId, method, args });
+  const clipboard = p.clipboard && {
+    ...(p.clipboard.includes('read') && { readText: call<string>('clipboard.readText') }),
+    ...(p.clipboard.includes('write') && { writeText: call<undefined>('clipboard.writeText') }),
+  };
+  return Object.freeze({
+    paths: Object.freeze({ ...paths }),
+    fs: Object.freeze({
+      readText: call('fs.readText'),
+      list: call('fs.list'),
+      stat: call('fs.stat'),
+      writeText: call('fs.writeText'),
+      mkdir: call('fs.mkdir'),
+      remove: call('fs.remove'),
+    }),
+    secrets: Object.freeze({ get: call('secrets.get'), set: call('secrets.set'), delete: call('secrets.delete') }),
+    ...(p.process && { process: Object.freeze({ run: call('process.run') }) }),
+    ...(p.pty && {
+      pty: Object.freeze({
+        spawn: async (options: unknown) => ptys.open(endpoint, pluginId, await call<PtyWire>('pty.spawn')(options)),
+        list: call('pty.list'),
+        attach: async (id: string) => ptys.open(endpoint, pluginId, await call<PtyWire>('pty.attach')(id)),
+      }),
+    }),
+    ...(p.net && { net: Object.freeze({ fetch: call('net.fetch') }) }),
+    ...(p.env && { env: Object.freeze({ get: call('env.get') }) }),
+    ...(p.notify && { notify: Object.freeze({ show: call('notify.show') }) }),
+    ...(clipboard && { clipboard: Object.freeze(clipboard) }),
+    ...(p['security.roots'] && { security: Object.freeze({ setRoots: call('security.setRoots') }) }),
+  }) as PluginOs;
+}
+
 /** Среда хоста: плагины видят только ctx, всё остальное - сообщения в ядро. */
 export function runHost(port: Port, importer: Importer): Endpoint {
   const endpoint = new Endpoint(port);
   let manifests = new Map<string, PluginManifest>();
   let mirror: ContractRegistry | undefined;
   const plugins = new Map<string, Loaded>();
+  const reloaders = new Map<string, (layers: SectionInput['layers']) => Promise<SectionResult>>();
   const proxies = new Proxies(endpoint, (caller) => plugins.get(caller)?.store);
+  const ptys = new HostPtys();
+  endpoint.handle('pty.data', (p: { pluginId: string; id: string; data: string }) => ptys.data(p));
+  endpoint.handle('pty.exit', (p: { pluginId: string; id: string; exit: PtyExit }) => ptys.exit(p));
 
   endpoint.handle('ping', () => true);
 
@@ -71,7 +171,7 @@ export function runHost(port: Port, importer: Importer): Endpoint {
     );
   });
 
-  endpoint.handle('activate', async (p: { pluginId: string; entry: string; config?: SectionInput; state?: SectionInput }) => {
+  endpoint.handle('activate', async (p: { pluginId: string; entry: string; paths: OsPaths; config?: SectionInput; state?: SectionInput }) => {
     const manifest = manifests.get(p.pluginId);
     if (!manifest || !mirror) throw new CoreError('Remote', `хост не знает плагин ${p.pluginId}`);
     const module = await importer(p.entry);
@@ -83,8 +183,13 @@ export function runHost(port: Port, importer: Importer): Endpoint {
     if (state && 'failed' in state) return { ok: false, kind: 'state', result: state.failed } satisfies ActivateResult;
 
     plugins.set(p.pluginId, loaded);
+    for (const [kind, s] of [['config', config], ['state', state]] as const) {
+      if (!s) continue;
+      reloaders.set(`${p.pluginId}/${kind}`, s.reload);
+      loaded.store.add(toDisposable(() => reloaders.delete(`${p.pluginId}/${kind}`)));
+    }
     try {
-      const result = await module.activate(context(endpoint, proxies, manifest, mirror, loaded, config?.handle, state?.handle));
+      const result = await module.activate(context(endpoint, proxies, manifest, mirror, loaded, p.paths, config?.handle, state?.handle, ptys));
       if (result) loaded.store.add(result);
       return { ok: true } satisfies ActivateResult;
     } catch (error) {
@@ -94,9 +199,16 @@ export function runHost(port: Port, importer: Importer): Endpoint {
     }
   });
 
+  endpoint.handle('section.reload', (p: { pluginId: string; kind: 'config' | 'state'; layers: SectionInput['layers'] }) => {
+    const reload = reloaders.get(`${p.pluginId}/${p.kind}`);
+    if (!reload) throw new CoreError('Unavailable', `${p.pluginId}: раздела ${p.kind} нет`);
+    return reload(p.layers);
+  });
+
   endpoint.handle('deactivate', (p: { pluginId: string }) => {
     const loaded = plugins.get(p.pluginId);
     plugins.delete(p.pluginId);
+    ptys.forget(p.pluginId);
     loaded?.store.dispose();
   });
 
@@ -230,8 +342,10 @@ function context(
   manifest: PluginManifest,
   mirror: ContractRegistry,
   loaded: Loaded,
+  paths: OsPaths,
   config: PluginSection | undefined,
   state: PluginSection | undefined,
+  ptys: HostPtys,
 ): PluginContext {
   const pluginId = manifest.id;
   const track = (d: Disposable) => {
@@ -242,6 +356,8 @@ function context(
     pluginId,
     subscriptions: loaded.store,
     log: (message) => endpoint.notify('log', { pluginId, message }),
+    os: osOf(endpoint, pluginId, manifest.permissions, paths, ptys),
+    secrets: { resolve: (ref) => endpoint.request<SecretValue>('os', { pluginId, method: 'secrets.resolve', args: [ref] }) },
     contracts: {
       provide(contract: string, version: string, impl: unknown) {
         if (typeof impl !== 'object' || impl === null) throw new CoreError('Invalid', `${pluginId}: реализация ${contract}@${version} не объект`);
@@ -307,7 +423,7 @@ async function section(
   kind: 'config' | 'state',
   module: PluginModule,
   input: SectionInput | undefined,
-): Promise<{ handle: PluginSection } | { failed: SectionResult } | undefined> {
+): Promise<{ handle: PluginSection; reload: (layers: SectionInput['layers']) => Promise<SectionResult> } | { failed: SectionResult } | undefined> {
   if (!input) return undefined;
   const spec = { ...module[kind], version: input.version };
   let raw = new Map(input.layers.map(([layer, value]) => [layer, value]));
@@ -327,6 +443,23 @@ async function section(
   let value = first.result.value;
   const listeners = new Set<(value: Record<string, unknown>) => void>();
   return {
+    // Правка файла извне: не прошла проверку - значение прежнее, ядро пишет отказ в журнал.
+    reload: async (layers) => {
+      const next = new Map(layers.map(([layer, v]) => [layer, v]));
+      const resolved = resolveSection(spec, order.map((l) => [l, next.get(l)] as const));
+      if (resolved.result.status !== 'ok') return resolved.result;
+      for (const [layer, data] of resolved.layers) {
+        if (!resolved.result.migrated.includes(layer)) continue;
+        await write(layer, data);
+        next.set(layer, { ...data, [VERSION_KEY]: spec.version });
+      }
+      raw = next;
+      if (JSON.stringify(resolved.result.value) !== JSON.stringify(value)) {
+        value = resolved.result.value;
+        for (const listener of [...listeners]) listener(structuredClone(value));
+      }
+      return resolved.result;
+    },
     handle: {
       result: first.result,
       get: () => structuredClone(value),

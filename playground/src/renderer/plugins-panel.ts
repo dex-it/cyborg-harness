@@ -98,6 +98,12 @@ export class PluginsPanel {
     head.append(el('span', 'spacer'), el('span', 'plugin-state', STATE_LABEL[row.state]));
     item.append(head);
     if (row.reason) item.append(el('p', 'plugin-reason', row.reason));
+    if (row.permissions.length > 0) {
+      const list = el('ul', 'plugin-permissions');
+      list.setAttribute('aria-label', `Права ${row.id}`);
+      list.append(...row.permissions.map((p) => el('li', '', p)));
+      item.append(list);
+    }
     const error = this.errors.get(row.id);
     if (error) {
       const line = el('p', 'plugin-error', error);

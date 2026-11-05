@@ -28,7 +28,8 @@
 | `npm run demo` | сценарии ядра в консоли, без Electron |
 | `npm run smoke` | дымовой тест окна; на Linux — `xvfb-run --auto-servernum node playground/scripts/smoke.mjs --no-sandbox` после `npm run build` |
 | `npm run spike` | замер видов во фреймах: память, задержка, клавиши, перетаскивание ([итоги](docs/04-verification/spike-iframe-ui.md)); на Linux — через `xvfb-run`, как smoke |
+| `npm run spike:hosts` | замер хостов плагинов: память на хост, цена вызова, пороги сторожа ([итоги](docs/04-verification/spike-hosts.md)); на Linux — через `xvfb-run` |
 
-Что попробовать в окне: `Ctrl+Shift+A` (на macOS `Cmd+Shift+A`) — alice пишет bob, тот отвечает через эхо из другого процесса; `F2` занят и у `echo`, и у `bob`, побеждает `bob`; «Выгрузить» у `chat` снимает и `alice` вместе с её видом, а `bob` продолжает работать без чата. В видах: путь `/demo/notes.md` из alice перетаскивается в зону сброса bob; при фокусе в поле bob `Ctrl+Shift+A` всё равно забирает ядро; кнопка `alice.hello` в виде bob получает отказ — чужую команду вид не вызовет.
+Что попробовать в окне: `Ctrl+Shift+A` (на macOS `Cmd+Shift+A`) — alice пишет bob, тот отвечает через эхо из другого процесса; `F2` занят и у `echo`, и у `bob`, побеждает `bob`; «Выгрузить» у `chat` снимает и `alice` вместе с её видом, а `bob` продолжает работать без чата. В видах: файл `notes.md` из alice перетаскивается в зону сброса bob (ядро отдаёт путь только виду, над которым отпущена кнопка, и только из рабочей папки playground); при фокусе в поле bob `Ctrl+Shift+A` всё равно забирает ядро; кнопка `alice.hello` в виде bob получает отказ — чужую команду вид не вызовет.
 
 Данные playground лежат в своей папке (`~/.config/Cyborg Playground` на Linux): `cyborg.json` с включёнными плагинами и их хостами создаётся при первом запуске, свои плагины кладутся в `plugins/` рядом.

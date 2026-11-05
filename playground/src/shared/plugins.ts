@@ -1,3 +1,6 @@
+import type { FeedLine, Reply } from '@cyborg/contracts';
+
+export type { FeedLine, Reply };
 // Окно playground: снимок, который главный процесс отдаёт интерфейсу (SAD2 §3.2, §3.5).
 
 export type PluginState = 'active' | 'restarting' | 'stopped' | 'disabled';
@@ -17,6 +20,8 @@ export interface PluginRow {
   readonly unloaded: boolean;
   /** Свои команды без обязательных аргументов: их можно вызвать кнопкой. */
   readonly commands: readonly string[];
+  /** Права главной части словами - те же строки покажет окно согласия. */
+  readonly permissions: readonly string[];
   /** Адрес вида для <iframe>: есть у активного плагина с каталогом view. */
   readonly view?: string;
 }
@@ -32,13 +37,6 @@ export interface KeyRow {
   readonly shadowed: readonly { readonly pluginId: string; readonly command: string }[];
 }
 
-export interface FeedLine {
-  readonly at: number;
-  /** `log` - сообщение плагина, `key` - нажатие, перехваченное ядром, `window` - нажатие, дошедшее до страницы, `error` - отказ команды. */
-  readonly kind: 'log' | 'key' | 'window' | 'error';
-  readonly subject: string;
-  readonly text: string;
-}
 
 export interface PluginJournalLine {
   /** Время записи, мс от эпохи. */
@@ -64,6 +62,3 @@ export interface PluginsSnapshot {
   readonly canHang: boolean;
 }
 
-export interface Reply {
-  readonly error?: string;
-}

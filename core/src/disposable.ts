@@ -1,6 +1,6 @@
-export interface Disposable {
-  dispose(): void;
-}
+import type { Disposable, DisposableStore as Store } from '@cyborg/contracts';
+
+export type { Disposable };
 
 export function toDisposable(fn: () => void): Disposable {
   let done = false;
@@ -14,7 +14,7 @@ export function toDisposable(fn: () => void): Disposable {
 }
 
 /** Снимает добавленное в обратном порядке; ошибка одного не мешает снять остальные. */
-export class DisposableStore implements Disposable {
+export class DisposableStore implements Store {
   #items: Disposable[] = [];
   #disposed = false;
 

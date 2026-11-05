@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { inlineHosts } from '../../../core/src/transports.ts';
 import type { PluginModule } from '../../../core/src/plugin.ts';
-import { discoverPlugins, PluginsService, readUserConfig, startPlugins } from './plugins.ts';
+import { discoverPlugins, PluginsService, startPlugins } from './plugins.ts';
 
 function tmp(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'cyborg-plugins-'));
@@ -46,14 +46,19 @@ test('старт: плагин из каталога пользователя - 
   await kernel.unload();
 });
 
-test('cyborg.json: нет файла - пусто без жалобы, битый - пусто с жалобой, мусор в полях отброшен', () => {
-  const dir = tmp();
-  const file = path.join(dir, 'cyborg.json');
-  assert.deepEqual(readUserConfig(file), { config: { enabled: [], hosts: {} } });
-  fs.writeFileSync(file, '{');
-  assert.match(readUserConfig(file).problem!, /cyborg\.json/);
-  fs.writeFileSync(file, JSON.stringify({ plugins: { enabled: ['a', 1], hosts: { ui: ['a', null], bad: 'x' } } }));
-  assert.deepEqual(readUserConfig(file).config, { enabled: ['a'], hosts: { ui: ['a'], bad: [] } });
+test('воркспейс: битый cyborg.json - жалоба, а не отказ; второй старт на том же воркспейсе получает отказ замка', async () => {
+  const userData = tmp();
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), '{');
+  const problems: string[] = [];
+  const kernel = await startPlugins({ userData, builtinDir: path.join(userData, 'нет'), spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {}, onProblem: (p) => problems.push(p) });
+  assert.ok(problems.some((p) => p.includes('cyborg.json')));
+  assert.equal(kernel.workspace, path.join(userData, 'workspace.cyborg.json'));
+  assert.equal(fs.readFileSync(path.join(userData, 'cyborg.json'), 'utf8'), '{');
+  await kernel.unload();
+  assert.ok(!fs.existsSync(`${kernel.workspace}.lock`), 'замок не снят');
+  // Живой чужой процесс держит замок: родитель тестового процесса.
+  fs.writeFileSync(`${kernel.workspace}.lock`, JSON.stringify({ pid: process.ppid }));
+  await assert.rejects(startPlugins({ userData, builtinDir: userData, spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {} }), /уже открыт процессом/);
 });
 
 test('старт: включённый плагин активен, миграция config пишется в settings, раздел plugins не теряется', async () => {
@@ -111,8 +116,8 @@ test('служба окна: снимок с причиной и журнало�
   assert.equal(before.phase, 'ready');
   assert.equal(before.problems.length, 1);
   assert.deepEqual(before.plugins, [
-    { id: 'spare', state: 'disabled', revivable: false, unloaded: false, commands: [], version: '1.0.0', reason: 'не включён в настройках (plugins.enabled)' },
-    { id: 'disk', state: 'stopped', revivable: true, unloaded: false, commands: [], version: '1.0.0', host: 'io', reason: 'не поднялся в хосте io: нет диска' },
+    { id: 'spare', state: 'disabled', revivable: false, unloaded: false, commands: [], permissions: [], version: '1.0.0', reason: 'не включён в настройках (plugins.enabled)' },
+    { id: 'disk', state: 'stopped', revivable: true, unloaded: false, commands: [], permissions: [], version: '1.0.0', host: 'io', reason: 'не поднялся в хосте io: нет диска' },
   ]);
   assert.deepEqual(before.journal.at(-1), { at: 1000, subject: 'disk', plugins: ['disk'], text: 'не поднялся в хосте io: нет диска', level: 'error' });
 

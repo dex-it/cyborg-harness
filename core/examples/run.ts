@@ -119,10 +119,14 @@ function journalLine(e: JournalEntry): string {
       return `${red('✖')} ${bold(`хост ${e.hostId}`)} брошен после ${e.failures} сбоев без виновника; выключены ${e.plugins.join(', ') || 'никто'}`;
     case 'revived':
       return `${yellow('↻')} ${id} включён снова`;
+    case 'denied':
+      return `${yellow('⛔')} ${id} отказ ctx.os: ${e.detail}`;
     case 'unloaded':
       return `${dim('⏏')} ${id} выгружен${e.by === e.pluginId ? '' : ` вместе с ${e.by}`}${e.error ? `, ошибка: ${e.error}` : ''}`;
     case 'key-conflict':
       return `${yellow('⌨')} ${id}: ${e.key} уже у ${e.winner}, ${e.command} не получит нажатие`;
+    case 'key-ignored':
+      return `${yellow('⌨')} plugins.keybindings: ${e.key} -> ${String(e.command)} не применено: ${e.reason}`;
     case 'host-isolated':
       return `${yellow('◌')} ${id} сторонний: группа ${e.group} не действует, свой хост ${e.hostId}`;
   }

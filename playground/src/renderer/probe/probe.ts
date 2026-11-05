@@ -33,7 +33,7 @@ document.getElementById('drag')?.addEventListener('dragstart', (event) => {
 });
 document.getElementById('kdrag')?.addEventListener('dragstart', (event) => {
   event.preventDefault();
-  view.startDrag('/demo/notes.md');
+  view.startDrag('notes.md');
   spike.report({ kind: 'dragstart' });
 });
 const drop = document.getElementById('drop');

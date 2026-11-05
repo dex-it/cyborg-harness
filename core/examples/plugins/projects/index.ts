@@ -1,5 +1,4 @@
-import type { Project } from '@cyborg/contracts';
-import type { PluginModule } from '../../../src/index.ts';
+import type { PluginModule, Project } from '@cyborg/contracts';
 
 const plugin: PluginModule = {
   config: {

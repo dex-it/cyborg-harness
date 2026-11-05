@@ -1,4 +1,4 @@
-import type { PluginModule } from '../../../src/index.ts';
+import type { PluginModule } from '@cyborg/contracts';
 
 const disk = new Map([
   ['/work/cyborg/README.md', '# Cyborg'],

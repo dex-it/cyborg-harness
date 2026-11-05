@@ -1,4 +1,4 @@
-import type { PluginModule } from '../../../core/src/index.ts';
+import type { PluginModule } from '@cyborg/contracts';
 
 // Чат в requires: без него alice не запускается, а выгрузка чата снимает и её.
 const alice: PluginModule = {

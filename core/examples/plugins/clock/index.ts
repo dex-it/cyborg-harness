@@ -1,4 +1,4 @@
-import type { PluginModule } from '../../../src/index.ts';
+import type { PluginModule } from '@cyborg/contracts';
 
 // Нарочно испытывает границу хоста: синхронный метод, подписка с колбэком, функция в ответе команды.
 const plugin: PluginModule = {

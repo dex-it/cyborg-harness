@@ -1,7 +1,6 @@
 // Вид alice: свой документ в <iframe> с origin cyborg-plugin://alice; до ядра - только через window.cyborgView.
 
-import type { FeedLine } from '../../../src/shared/plugins.ts';
-import type { ViewBridge } from '../../../src/shared/views.ts';
+import type { FeedLine, ViewBridge } from '@cyborg/contracts';
 
 const cyborg = (window as unknown as { cyborgView: ViewBridge }).cyborgView;
 const log = document.getElementById('log');
@@ -20,7 +19,7 @@ document.getElementById('hello')?.addEventListener('click', () => {
 });
 document.getElementById('file')?.addEventListener('dragstart', (event) => {
   event.preventDefault();
-  cyborg.startDrag('/demo/notes.md');
+  cyborg.startDrag('notes.md');
 });
 
 cyborg.onLog(show);

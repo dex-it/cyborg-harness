@@ -1,4 +1,7 @@
-import { CoreError, errorMessage, type PluginModule } from '../../../src/index.ts';
+import type { PluginModule } from '@cyborg/contracts';
+
+/** Отказ ядра приходит как Error с полем code; класс CoreError плагину не виден. */
+const codeOf = (error: unknown): string => (error instanceof Error && 'code' in error ? String(error.code) : 'ошибка');
 
 const plugin: PluginModule = {
   activate(ctx) {
@@ -10,7 +13,7 @@ const plugin: PluginModule = {
         try {
           out.push(`${label}: ок ${JSON.stringify(await call())}`);
         } catch (error) {
-          out.push(`${label}: ${error instanceof CoreError ? error.code : 'ошибка'} - ${errorMessage(error)}`);
+          out.push(`${label}: ${codeOf(error)} - ${error instanceof Error ? error.message : String(error)}`);
         }
       };
       await attempt('now()', () => clock.now());

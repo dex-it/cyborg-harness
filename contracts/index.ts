@@ -6,6 +6,10 @@ export interface Contracts {
   'cyborg.tab': { 1: Tab };
 }
 
+export type * from './plugin.ts';
+export type * from './view.ts';
+export type * from './os.ts';
+
 /** Ответ метода-подписки: снятие идёт поставщику через ядро, а при выгрузке любой из сторон ядро снимает подписку само. */
 export interface Subscription {
   dispose(): void;

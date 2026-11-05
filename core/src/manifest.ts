@@ -1,6 +1,7 @@
 import { CoreError } from './errors.ts';
 import { isValidRange, parseVersion } from './semver.ts';
 import { normalizeKey } from './keys.ts';
+import { readPermissions, type PluginPermissions } from './permissions.ts';
 import { isRecord, isWireKind, matchesKind, type WireKind } from './wire.ts';
 
 export { isRecord };
@@ -43,6 +44,7 @@ export interface PluginManifest {
   readonly state?: { readonly version: number };
   /** `own` - просьба о своём хосте; пользователь вправе переопределить группой в `plugins.hosts`. */
   readonly host?: 'own';
+  readonly permissions: PluginPermissions;
 }
 
 export type ManifestResult =
@@ -84,6 +86,7 @@ export function parseManifest(raw: unknown): ManifestResult {
   const keybindings = readKeybindings(raw.keybindings, commands, errors);
   const config = readSchemaVersion('config', raw.config, errors);
   const state = readSchemaVersion('state', raw.state, errors);
+  const permissions = readPermissions(raw.permissions, errors);
   if (raw.host !== undefined && raw.host !== 'own') errors.push(`host: допустимо только "own", получено ${show(raw.host)}`);
 
   if (errors.length > 0 || id === undefined || typeof version !== 'string' || typeof engines !== 'string') return { ok: false, id, errors };
@@ -99,6 +102,7 @@ export function parseManifest(raw: unknown): ManifestResult {
       consumes,
       commands,
       keybindings,
+      permissions,
       ...(config && { config }),
       ...(state && { state }),
       ...(raw.host === 'own' && { host: 'own' as const }),

@@ -2,12 +2,14 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, BrowserWindow, ipcMain, nativeImage, Notification, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeImage, Notification, screen, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { viewOrigin } from '../shared/views.ts';
+import { electronOs } from './os-env.ts';
 import { utilityHosts } from './plugin-hosts.ts';
 import { PluginsService } from './plugins.ts';
 import { runSpike } from './spike.ts';
-import { ViewDrags } from './view-drag.ts';
+import { runHostsSpike } from './spike-hosts.ts';
+import { resolveDragFile, ViewDrags } from './view-drag.ts';
 import { framesOf, fromWindow, registerViewScheme, senderPlugin, serveViews } from './views.ts';
 
 // Своя папка данных: cyborg.json и пользовательские плагины playground не смешиваются с настройками Cyborg.
@@ -16,6 +18,14 @@ registerViewScheme();
 
 /** `--spike=<файл>`: замеры видов во фреймах (SAD2, открытый вопрос 11) вместо окна плагинов. */
 const spikeOut = process.argv.find((a) => a.startsWith('--spike='))?.slice('--spike='.length);
+const hostsSpikeOut = process.argv.find((a) => a.startsWith('--spike-hosts='))?.slice('--spike-hosts='.length);
+/** `--workspace=<файл>`: воркспейс по SAD2 §3.1; без флага - `<userData>/workspace.cyborg.json`. */
+const workspaceArg = process.argv.find((a) => a.startsWith('--workspace='))?.slice('--workspace='.length);
+const workspaceFile = workspaceArg === undefined ? path.join(app.getPath('userData'), 'workspace.cyborg.json') : path.resolve(workspaceArg);
+const spiking = spikeOut !== undefined || hostsSpikeOut !== undefined;
+
+// Окон на воркспейс у playground одно; второй запуск того же воркспейса поднимает его окно, а не второе ядро.
+if (!spiking && !app.requestSingleInstanceLock({ workspace: workspaceFile })) app.exit(0);
 
 /** Первый запуск: alice и bob делят хост c - видно, как падение одного процесса снимает обоих, а чат в хосте b живёт. */
 const DEFAULT_CONFIG = {
@@ -35,6 +45,14 @@ function showWindow(): void {
 }
 
 const notices = new Set<Notification>();
+
+app.on('second-instance', (_event, _argv, _cwd, data) => {
+  const asked = (data as { workspace?: unknown } | null)?.workspace;
+  showWindow();
+  if (asked !== workspaceFile && Notification.isSupported()) {
+    new Notification({ title: 'Cyborg Playground', body: `Открыт воркспейс ${workspaceFile}; другой - отдельным экземпляром с другим userData (несколько окон - второй этап).` }).show();
+  }
+});
 const plugins = new PluginsService({
   changed: () => {
     if (win && !win.isDestroyed()) win.webContents.send('plugins:changed');
@@ -78,22 +96,44 @@ ipcMain.handle('view:run', (event, command: unknown) => {
   const pluginId = senderPlugin(event);
   return pluginId === undefined ? { error: 'не вид плагина' } : plugins.runFor(pluginId, command);
 });
+/** Корень файлов, которые виды могут перетаскивать; в Cyborg это проекты, доступные плагину на чтение. */
+let workspace = '';
 const drags = new ViewDrags();
-ipcMain.on('view:drag', (event, file: unknown) => {
+
+/** Вид под точкой экрана: прямоугольники фреймов знает только документ окна. */
+async function viewAt(contents: WebContents, point: Electron.Point): Promise<string | undefined> {
+  const owner = BrowserWindow.fromWebContents(contents);
+  if (!owner) return undefined;
+  const bounds = owner.getContentBounds();
+  const [x, y] = [point.x - bounds.x, point.y - bounds.y];
+  const id: unknown = await contents
+    .executeJavaScript(
+      `(() => { for (const f of document.querySelectorAll('#views iframe')) { const r = f.getBoundingClientRect(); if (${x} >= r.left && ${x} < r.right && ${y} >= r.top && ${y} < r.bottom) return f.closest('[data-plugin]')?.dataset.plugin ?? null; } return null; })()`,
+    )
+    .catch(() => null);
+  return typeof id === 'string' ? id : undefined;
+}
+
+ipcMain.on('view:drag', (event, relative: unknown) => {
   const pluginId = senderPlugin(event);
-  const drag = pluginId === undefined ? undefined : drags.start(pluginId, file);
-  if (!drag) return;
-  event.sender.startDrag({ file: drag.path, icon: nativeImage.createFromBitmap(Buffer.alloc(16 * 16 * 4, 0x99), { width: 16, height: 16 }) });
-  // На Linux startDrag держит вызов до отпускания кнопки, а view:drop приёмника приходит через десятки мс после.
+  const file = resolveDragFile(workspace, relative);
+  if (pluginId === undefined || file === undefined || typeof relative !== 'string') return;
+  const drag = drags.start(pluginId, relative);
+  event.sender.startDrag({ file, icon: nativeImage.createFromBitmap(Buffer.alloc(16 * 16 * 4, 0x99), { width: 16, height: 16 }) });
+  // На Linux startDrag держит вызов до отпускания кнопки: курсор сейчас - точка сброса, а view:drop приёмника придёт позже.
+  void viewAt(event.sender, screen.getCursorScreenPoint()).then((target) => drags.landed(drag, target));
   setTimeout(() => drags.end(drag), 1000);
 });
-ipcMain.handle('view:drop', (event) => (senderPlugin(event) === undefined ? null : (drags.take() ?? null)));
+ipcMain.handle('view:drop', async (event) => {
+  const pluginId = senderPlugin(event);
+  return pluginId === undefined ? null : ((await drags.take(pluginId)) ?? null);
+});
 
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1200,
     height: 980,
-    title: 'Cyborg Playground',
+    title: `Cyborg Playground - ${path.basename(workspaceFile)}`,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegrationInSubFrames: true },
   });
   void win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
@@ -107,10 +147,18 @@ function createWindow(): void {
 app.on('before-quit', () => void plugins.unload());
 // Замер сам открывает и закрывает окна по сценариям и сам завершает приложение.
 app.on('window-all-closed', () => {
-  if (spikeOut === undefined) app.quit();
+  if (!spiking) app.quit();
 });
 
 void app.whenReady().then(() => {
+  if (hostsSpikeOut !== undefined) {
+    void runHostsSpike({ out: hostsSpikeOut, hostEntry: path.join(__dirname, 'plugin-host.mjs'), benchDir: path.join(__dirname, 'bench') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
+    return;
+  }
+  workspace = path.join(app.getPath('userData'), 'workspace');
+  fs.mkdirSync(workspace, { recursive: true });
+  const notes = path.join(workspace, 'notes.md');
+  if (!fs.existsSync(notes)) fs.writeFileSync(notes, '# Заметки\n\nФайл для перетаскивания между видами playground.\n');
   if (spikeOut !== undefined) {
     void runSpike({ out: spikeOut, preload: path.join(__dirname, 'preload.js'), rendererDir: path.join(__dirname, 'renderer') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
     return;
@@ -126,9 +174,11 @@ void app.whenReady().then(() => {
   const hosts = utilityHosts(path.join(__dirname, 'plugin-host.mjs'));
   void plugins.start({
     userData,
+    workspace: workspaceFile,
     builtinDir: path.join(__dirname, 'plugins'),
     spawnHost: hosts.spawn,
     pidOf: hosts.pidOf,
+    os: electronOs({ userData, roots: () => [workspace], protectedPaths: [] }),
     // Короче, чем в Cyborg: зависание по кнопке «Повесить хост» видно через пару секунд.
     watchdog: { interval: 500, timeout: 2500 },
     // eslint-disable-next-line no-console -- журнал ядра в главном процессе - это stderr приложения

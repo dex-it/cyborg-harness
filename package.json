@@ -12,9 +12,12 @@
     "demo": "node core/examples/run.ts",
     "smoke": "npm run build && node playground/scripts/smoke.mjs",
     "spike": "npm run build && node playground/scripts/spike-iframe.mjs",
-    "lint": "eslint --max-warnings 0 ."
+    "spike:hosts": "npm run build && node playground/scripts/spike-hosts.mjs",
+    "lint": "eslint --max-warnings 0 .",
+    "postinstall": "electron-rebuild -f -w node-pty"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.1",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.5",
     "electron": "^45.0.0",
@@ -25,6 +28,10 @@
     "typescript7": "npm:typescript@^7.0.2"
   },
   "allowScripts": {
-    "esbuild@0.28.2": true
+    "esbuild@0.28.2": true,
+    "node-pty@1.1.0": true
+  },
+  "dependencies": {
+    "node-pty": "^1.1.0"
   }
 }

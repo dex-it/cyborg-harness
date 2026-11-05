@@ -3,24 +3,24 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   describeEntry,
+  describePermissions,
   entryLevel,
   errorMessage,
   entryPlugins,
   keyOfInput,
   load,
   pluginStatuses,
-  SectionStore,
+  openWorkspace,
   type JournalEntry,
   type Kernel,
   type KeyInput,
-  type LayerStore,
+  type OsEnvironment,
   type SpawnHost,
   type WatchdogOptions,
 } from '../../../core/src/index.ts';
 import { isRecord } from '../../../core/src/manifest.ts';
 import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply } from '../shared/plugins.ts';
 import { viewOrigin } from '../shared/views.ts';
-import { writeJsonAtomic } from './jsonfile.ts';
 
 export const PLUGIN_API_VERSION = '1.0.0';
 
@@ -70,56 +70,16 @@ export function discoverPlugins(dirs: readonly string[]): Discovered {
   return found;
 }
 
-export interface UserConfig {
-  readonly enabled: string[];
-  readonly hosts: Record<string, string[]>;
-}
-
-const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
-
-/** Файл пользователя в форме главного конфига SAD2 §3.10: `plugins` - ядру, `settings` - разделы плагинов. */
-export function readUserConfig(file: string): { config: UserConfig; problem?: string } {
-  let doc: unknown;
-  try {
-    doc = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch (error) {
-    const missing = (error as NodeJS.ErrnoException).code === 'ENOENT';
-    return { config: { enabled: [], hosts: {} }, ...(!missing && { problem: `${file}: ${(error as Error).message}` }) };
-  }
-  const plugins = isRecord(doc) && isRecord(doc.plugins) ? doc.plugins : {};
-  const hosts = isRecord(plugins.hosts) ? Object.fromEntries(Object.entries(plugins.hosts).map(([h, ids]) => [h, strings(ids)])) : {};
-  return { config: { enabled: strings(plugins.enabled), hosts } };
-}
-
-/** Слой user поверх `settings` того же файла; битый файл не перезаписывается. */
-export function userLayerStore(file: string): LayerStore {
-  const read = (): Record<string, unknown> => {
-    try {
-      const doc: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (!isRecord(doc)) throw new Error('корень не объект');
-      return doc;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
-      throw new Error(`${file} не разобран, запись отменена: ${errorMessage(error)}`, { cause: error });
-    }
-  };
-  return {
-    async load() {
-      const settings = read().settings;
-      return isRecord(settings) ? settings : undefined;
-    },
-    async save(_layer, settings) {
-      writeJsonAtomic(file, { ...read(), settings });
-    },
-  };
-}
-
 export interface StartOptions {
   readonly userData: string;
+  /** Файл воркспейса; по умолчанию `<userData>/workspace.cyborg.json`. */
+  readonly workspace?: string;
   readonly builtinDir: string;
   readonly spawnHost: SpawnHost;
   readonly log: (line: string) => void;
   readonly watchdog?: WatchdogOptions;
+  /** Среда шлюза ctx.os; без неё - каталоги во временном каталоге ОС, без секретов и уведомлений. */
+  readonly os?: OsEnvironment;
   /** Под какую платформу читать CmdOrCtrl; по умолчанию - текущая. */
   readonly platform?: string;
   readonly onJournal?: (entry: JournalEntry) => void;
@@ -129,39 +89,61 @@ export interface StartOptions {
   readonly onDiscovered?: (found: Discovered) => void;
 }
 
-export async function startPlugins(options: StartOptions): Promise<Kernel> {
-  const file = path.join(options.userData, 'cyborg.json');
+export async function startPlugins(options: StartOptions): Promise<Kernel & { readonly workspace: string }> {
   const report = (p: string) => {
     options.log(`[plugins] ${p}`);
     options.onProblem?.(p);
   };
-  const { config: user, problem } = readUserConfig(file);
-  if (problem) report(problem);
+  const file = options.workspace ?? path.join(options.userData, 'workspace.cyborg.json');
+  const opened = await openWorkspace({ file, userFile: path.join(options.userData, 'cyborg.json'), stateDir: path.join(options.userData, 'state') });
+  if (!opened.ok) throw new Error(`воркспейс ${file} уже открыт процессом ${opened.owner}`);
+  const ws = opened.workspace;
+  for (const p of ws.problems) report(p);
+  for (const m of ws.migrated) options.log(`[plugins] ${m}`);
   const found = discoverPlugins([options.builtinDir, path.join(options.userData, 'plugins')]);
   for (const p of found.problems) report(p);
   options.onDiscovered?.(found);
 
-  return load({
+  const kernel = await load({
     apiVersion: PLUGIN_API_VERSION,
-    enabled: user.enabled,
+    enabled: ws.plugins.enabled,
     manifests: found.manifests,
-    hosts: user.hosts,
+    hosts: ws.plugins.hosts,
+    keybindings: ws.plugins.keybindings,
     // Признак поставки - каталог установки, а не манифест: сторонний автор пишет в манифест что угодно.
     bundled: [...found.origins].filter(([, dir]) => dir === options.builtinDir).map(([id]) => id),
     spawnHost: options.spawnHost,
     entry: (m) => found.entries.get(m.id) ?? m.id,
-    config: await SectionStore.open(userLayerStore(file), ['user']),
+    config: ws.config,
+    state: ws.state,
     onJournal: (entry) => {
       options.log(`[plugins] ${JSON.stringify(entry)}`);
       options.onJournal?.(entry);
     },
     watchdog: options.watchdog,
+    os: options.os,
     platform: options.platform,
     onLog: (id, message) => {
       options.log(`[plugins] ${id}: ${message}`);
       options.onLog?.(id, message);
     },
+  }).catch((error: unknown) => {
+    ws.close();
+    throw error;
   });
+  const watching = ws.watch((ids) => void kernel.reloadSections('config', ids), report);
+  return {
+    ...kernel,
+    workspace: ws.file,
+    async unload() {
+      watching.dispose();
+      try {
+        await kernel.unload();
+      } finally {
+        ws.close();
+      }
+    },
+  };
 }
 
 export interface PluginsEvents {
@@ -273,6 +255,7 @@ export class PluginsService {
         revivable: s.revivable && kernel !== undefined,
         unloaded: s.cause?.kind === 'unloaded' && s.cause.by === s.id,
         commands,
+        permissions: manifest ? describePermissions(manifest.permissions) : [],
         ...(manifest && { version: manifest.version }),
         ...(s.state === 'active' && this.views.has(s.id) && { view: `${viewOrigin(s.id)}/` }),
         ...(host !== undefined && { host }),
@@ -289,7 +272,7 @@ export class PluginsService {
     }));
     const journal: PluginJournalLine[] = this.entries.map(({ at, entry }) => ({
       at,
-      subject: entry.pluginId ?? `хост ${entry.hostId}`,
+      subject: entry.pluginId ?? (entry.kind === 'key-ignored' ? 'сочетания' : `хост ${entry.hostId}`),
       // Задетые потребители тоже: в журнале плагина видно, что его поставщик пропадал.
       plugins: [...new Set([...entryPlugins(entry), ...('affects' in entry ? entry.affects : [])])],
       text: describeEntry(entry),

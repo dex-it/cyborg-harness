@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import type { PluginJournalLine, PluginRow, PluginsSnapshot } from '../src/shared/plugins.ts';
 import { actionsFor, conflictText, journalFor, keyStatus, mergeFeed, sortedPlugins, summary } from '../src/renderer/plugins-model.ts';
 
-const row = (id: string, state: PluginRow['state'], over: Partial<PluginRow> = {}): PluginRow => ({ id, state, revivable: state === 'stopped', unloaded: false, commands: [], ...over });
+const row = (id: string, state: PluginRow['state'], over: Partial<PluginRow> = {}): PluginRow => ({ id, state, revivable: state === 'stopped', unloaded: false, commands: [], permissions: [], ...over });
 const snapshot = (plugins: PluginRow[], over: Partial<PluginsSnapshot> = {}): PluginsSnapshot => ({ phase: 'ready', problems: [], plugins, keys: [], feed: [], journal: [], canHang: true, ...over });
 
 describe('окно «Плагины Cyborg»: модель', () => {

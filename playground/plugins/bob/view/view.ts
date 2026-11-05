@@ -1,7 +1,6 @@
 // Вид bob: принимает путь файла из чужого фрейма по MIME контракта и показывает отказ на чужую команду.
 
-import type { FeedLine } from '../../../src/shared/plugins.ts';
-import type { ViewBridge } from '../../../src/shared/views.ts';
+import type { FeedLine, ViewBridge } from '@cyborg/contracts';
 
 const cyborg = (window as unknown as { cyborgView: ViewBridge }).cyborgView;
 const log = document.getElementById('log');

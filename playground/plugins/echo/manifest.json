@@ -1,8 +1,29 @@
 {
   "id": "echo",
   "version": "1.0.0",
-  "engines": { "cyborg": "^1" },
-  "provides": { "demo.echo": "1.0" },
-  "commands": ["echo.ping"],
-  "keybindings": [{ "key": "F2", "command": "echo.ping" }]
+  "engines": {
+    "cyborg": "^1"
+  },
+  "provides": {
+    "demo.echo": "1.0"
+  },
+  "commands": [
+    "echo.ping",
+    "echo.files",
+    "echo.tty"
+  ],
+  "permissions": {
+    "fs.read": [
+      "workspace"
+    ],
+    "pty": [
+      "/bin/sh"
+    ]
+  },
+  "keybindings": [
+    {
+      "key": "F2",
+      "command": "echo.ping"
+    }
+  ]
 }
