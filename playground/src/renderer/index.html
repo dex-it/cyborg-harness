@@ -2,7 +2,7 @@
 <html lang="ru">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; frame-src cyborg-plugin:" />
     <title>Cyborg Playground</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
@@ -41,6 +41,12 @@
           <button type="button" id="plugins-journal-all" hidden>Весь журнал</button>
         </div>
         <ol id="plugins-journal" class="log plugins-journal" aria-labelledby="plugins-journal-title"></ol>
+      </section>
+
+      <section class="pane pane-views" aria-labelledby="views-title">
+        <h2 id="views-title">Виды плагинов</h2>
+        <p class="pane-hint">Каждый вид - свой документ в &lt;iframe&gt; с origin cyborg-plugin://&lt;id&gt;. Путь из alice перетаскивается в bob; сочетания ядра работают и при фокусе во фрейме.</p>
+        <div id="views" class="views"></div>
       </section>
     </main>
     <script src="app.js"></script>

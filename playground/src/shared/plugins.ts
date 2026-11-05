@@ -17,6 +17,8 @@ export interface PluginRow {
   readonly unloaded: boolean;
   /** Свои команды без обязательных аргументов: их можно вызвать кнопкой. */
   readonly commands: readonly string[];
+  /** Адрес вида для <iframe>: есть у активного плагина с каталогом view. */
+  readonly view?: string;
 }
 
 export interface KeyRow {

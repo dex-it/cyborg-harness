@@ -81,11 +81,12 @@ button:focus-visible {
 .playground {
   display: grid;
   grid-template-columns: minmax(420px, 1.1fr) minmax(360px, 1fr);
-  grid-template-rows: auto minmax(0, 1.4fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1.4fr) minmax(0, 1fr) minmax(220px, 0.9fr);
   grid-template-areas:
     'head head'
     'plugins feed'
-    'keys journal';
+    'keys journal'
+    'views views';
   gap: 12px 16px;
   height: 100vh;
   padding: 14px 18px;
@@ -109,6 +110,37 @@ button:focus-visible {
 
 .pane-journal {
   grid-area: journal;
+}
+
+.pane-views {
+  grid-area: views;
+}
+
+.views {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+.view {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin: 0;
+}
+
+.view-origin {
+  color: var(--fg-faint);
+  font: 11px var(--font-mono);
+}
+
+.view iframe {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 
 .pane {

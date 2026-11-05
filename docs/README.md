@@ -20,6 +20,7 @@
 | SAD2 - общая архитектура: цели ядра, взаимодействие плагинов, базовая часть как пример, этапы, риски; пересматривает границу ядра из SAD | [03-architecture/design/sad2.md](03-architecture/design/sad2.md) |
 | Устройство: SAD и 8 ADR | [03-architecture/design/sad.md](03-architecture/design/sad.md), [adr/](03-architecture/adr/) |
 | Как проверяем, что ничего не потеряно | [04-verification/parity-plan.md](04-verification/parity-plan.md) |
+| Спайк UI во фреймах: память, задержка, мост, клавиши, перетаскивание | [04-verification/spike-iframe-ui.md](04-verification/spike-iframe-ui.md) |
 | Дорожная карта по фазам P0-P5 | [05-plans/roadmap.md](05-plans/roadmap.md) |
 | Термины | [glossary.md](glossary.md) |
 

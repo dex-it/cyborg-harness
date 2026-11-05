@@ -3,6 +3,7 @@
 import { keyOfInput } from '../../../core/src/keys.ts';
 import type { FeedLine, KeyRow, PluginRow, PluginsSnapshot, Reply } from '../shared/plugins.ts';
 import { byId, el } from './dom.ts';
+import { ViewsPanel } from './views-panel.ts';
 import { actionsFor, clock, conflictText, journalFor, keyStatus, mergeFeed, sortedPlugins, STATE_LABEL, summary, type ActionButton } from './plugins-model.ts';
 
 export interface PluginsPort {
@@ -26,6 +27,7 @@ export class PluginsPanel {
   private readonly journalTitle = byId('plugins-journal-title', HTMLElement);
   private readonly journalAll = byId('plugins-journal-all', HTMLButtonElement);
   private readonly journalEl = byId('plugins-journal', HTMLElement);
+  private readonly views = new ViewsPanel(byId('views', HTMLElement));
   private snapshot: PluginsSnapshot | null = null;
   private focus: string | null = null;
   private readonly errors = new Map<string, string>();
@@ -82,6 +84,7 @@ export class PluginsPanel {
     this.keysEl.replaceChildren(...(snapshot.keys.length ? snapshot.keys.map((row) => this.keyRow(row)) : [this.emptyKeys()]));
     this.renderFeed();
     this.renderJournal();
+    this.views.sync(snapshot.plugins);
   }
 
   private row(row: PluginRow, canHang: boolean): HTMLElement {

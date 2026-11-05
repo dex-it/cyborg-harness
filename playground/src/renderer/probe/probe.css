@@ -1,0 +1,12 @@
+body {
+  margin: 4px;
+  font: 12px system-ui, sans-serif;
+}
+
+#drag,
+#kdrag,
+#drop {
+  margin: 4px 0;
+  padding: 6px;
+  border: 1px dashed #888;
+}

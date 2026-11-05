@@ -19,6 +19,7 @@ import {
 } from '../../../core/src/index.ts';
 import { isRecord } from '../../../core/src/manifest.ts';
 import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply } from '../shared/plugins.ts';
+import { viewOrigin } from '../shared/views.ts';
 import { writeJsonAtomic } from './jsonfile.ts';
 
 export const PLUGIN_API_VERSION = '1.0.0';
@@ -31,12 +32,14 @@ export interface Discovered {
   readonly entries: Map<string, string>;
   /** id -> каталог, где найден первым. */
   readonly origins: Map<string, string>;
+  /** id -> каталог вида плагина, если в его каталоге есть view/index.html. */
+  readonly views: Map<string, string>;
   readonly problems: string[];
 }
 
 /** Каталоги по порядку приоритета: встроенные раньше пользовательских. */
 export function discoverPlugins(dirs: readonly string[]): Discovered {
-  const found: Discovered = { manifests: [], entries: new Map(), origins: new Map(), problems: [] };
+  const found: Discovered = { manifests: [], entries: new Map(), origins: new Map(), views: new Map(), problems: [] };
   for (const dir of dirs) {
     let names: string[];
     try {
@@ -57,7 +60,11 @@ export function discoverPlugins(dirs: readonly string[]): Discovered {
       const id = isRecord(raw) && typeof raw.id === 'string' ? raw.id : undefined;
       const entry = ENTRY_FILES.map((f) => path.join(home, f)).find((f) => fs.existsSync(f));
       if (id && entry && !found.entries.has(id)) found.entries.set(id, pathToFileURL(entry).href);
-      if (id && !found.origins.has(id)) found.origins.set(id, dir);
+      if (id && !found.origins.has(id)) {
+        found.origins.set(id, dir);
+        const view = path.join(home, 'view');
+        if (fs.existsSync(path.join(view, 'index.html'))) found.views.set(id, view);
+      }
     }
   }
   return found;
@@ -119,6 +126,7 @@ export interface StartOptions {
   readonly onLog?: (pluginId: string, message: string) => void;
   /** Что не дошло до ядра; по умолчанию - в log. */
   readonly onProblem?: (problem: string) => void;
+  readonly onDiscovered?: (found: Discovered) => void;
 }
 
 export async function startPlugins(options: StartOptions): Promise<Kernel> {
@@ -131,6 +139,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel> {
   if (problem) report(problem);
   const found = discoverPlugins([options.builtinDir, path.join(options.userData, 'plugins')]);
   for (const p of found.problems) report(p);
+  options.onDiscovered?.(found);
 
   return load({
     apiVersion: PLUGIN_API_VERSION,
@@ -160,9 +169,11 @@ export interface PluginsEvents {
   changed(): void;
   /** Плагин выключился во время работы: видов у плагинов пока нет, поэтому одно уведомление ядра (SAD2 §3.5). */
   alert(title: string, body: string): void;
+  /** Сообщение плагина: его вид получает строку сразу, без снимка. */
+  log?(pluginId: string, line: FeedLine): void;
 }
 
-export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProblem' | 'onLog'> {
+export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProblem' | 'onLog' | 'onDiscovered'> {
   /** Процесс хоста для «Уронить» и «Повесить»; у хостов в том же процессе его нет. */
   readonly pidOf?: (hostId: string) => number | undefined;
 }
@@ -178,6 +189,7 @@ export class PluginsService {
   private readonly entries: { at: number; entry: JournalEntry }[] = [];
   private readonly problems: string[] = [];
   private readonly feed: FeedLine[] = [];
+  private views = new Map<string, string>();
 
   private readonly events: PluginsEvents;
   private readonly now: () => number;
@@ -197,7 +209,11 @@ export class PluginsService {
           this.problems.push(problem);
           this.events.changed();
         },
-        onLog: (pluginId, text) => this.say({ kind: 'log', subject: pluginId, text }),
+        onDiscovered: (found) => (this.views = found.views),
+        onLog: (pluginId, text) => {
+          const line = this.say({ kind: 'log', subject: pluginId, text });
+          this.events.log?.(pluginId, line);
+        },
       });
       this.phase = 'ready';
     } catch (error) {
@@ -215,10 +231,30 @@ export class PluginsService {
     this.events.changed();
   }
 
-  private say(line: Omit<FeedLine, 'at'>): void {
-    this.feed.push({ at: this.now(), ...line });
+  private say(line: Omit<FeedLine, 'at'>): FeedLine {
+    const stamped = { at: this.now(), ...line };
+    this.feed.push(stamped);
     if (this.feed.length > FEED_LIMIT) this.feed.splice(0, this.feed.length - FEED_LIMIT);
     this.events.changed();
+    return stamped;
+  }
+
+  /** Каталог вида: по нему протокол cyborg-plugin отдаёт файлы. */
+  viewDir(pluginId: string): string | undefined {
+    return this.views.get(pluginId);
+  }
+
+  /** Лента одного плагина: её вид показывает при открытии. */
+  logsOf(pluginId: string): FeedLine[] {
+    return this.feed.filter((line) => line.kind === 'log' && line.subject === pluginId);
+  }
+
+  /** Команда из вида: плагин назван origin фрейма, и чужую команду вид не вызовет. */
+  runFor(pluginId: string, command: unknown): Promise<Reply> {
+    if (typeof command !== 'string') return Promise.resolve({ error: 'нет имени команды' });
+    const own = this.kernel?.manifests.find((m) => m.id === pluginId)?.commands ?? {};
+    if (!(command in own)) return Promise.resolve({ error: `${command}: не команда плагина ${pluginId}` });
+    return this.run(command);
   }
 
   snapshot(): PluginsSnapshot {
@@ -238,6 +274,7 @@ export class PluginsService {
         unloaded: s.cause?.kind === 'unloaded' && s.cause.by === s.id,
         commands,
         ...(manifest && { version: manifest.version }),
+        ...(s.state === 'active' && this.views.has(s.id) && { view: `${viewOrigin(s.id)}/` }),
         ...(host !== undefined && { host }),
         ...(pid !== undefined && { pid }),
         ...(s.cause && s.state !== 'active' && { reason: describeEntry(s.cause) }),

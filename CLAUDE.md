@@ -12,7 +12,7 @@
 - `docs/` - проект Cyborg Harness: ресёрч, BRD и SRS фич (`CH-`), сценарии, SAD, SAD2 и ADR-CH, план паритета, дорожная карта; вход - docs/README.md
 - `core/` - ядро плагинов по SAD2 без зависимостей: загрузчик, граф контрактов, хосты со сторожем, журнал и состояние плагинов; тесты `core/test`, сценарии `core/examples`
 - `contracts/` - пакет объявлений `@cyborg/contracts`: карта контрактов имя -> мажорная версия -> тип; правила и пример - `contracts/README.md`, проверки компилятора - `core/test/contracts-types.ts`
-- `playground/` - Electron-приложение для проверки ядра вживую: `src/main` (служба PluginsService, хосты в utilityProcess, процесс хоста), `src/renderer` (окно: плагины, клавиши, сообщения, журнал), `plugins/` (демо-плагины echo, chat, alice, bob, flaky), `scripts/` (build, smoke)
+- `playground/` - Electron-приложение для проверки ядра вживую: `src/main` (служба PluginsService, хосты в utilityProcess, процесс хоста, схема cyborg-plugin и мост видов - views, замер фреймов - spike), `src/renderer` (окно: плагины, клавиши, сообщения, журнал, виды плагинов во фреймах; страница замера spike и пробный вид probe), `plugins/` (демо-плагины echo, chat, alice, bob, flaky; виды alice и bob в `view/`), `scripts/` (build, smoke, spike-iframe - замер фреймов, xtest.py - настоящий ввод X11 для него)
 
 ## Правила
 

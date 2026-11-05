@@ -95,6 +95,16 @@ async function main() {
   // Запись ядра: модификаторы в порядке Ctrl, Alt, Shift, Meta - на macOS это Shift+Meta+A.
   const combo = (key) => (process.platform === 'darwin' ? `Shift+Meta+${key}` : `Ctrl+Shift+${key}`);
   const re = (key, rest) => new RegExp(combo(key).replaceAll('+', '\\+') + rest);
+  // Вид плагина - во фрейме другого процесса: до его документа достаём из главного процесса.
+  const inView = (id, expression) =>
+    main(`(async () => {
+      const { webContents } = process.mainModule.require('electron');
+      const page = webContents.getAllWebContents().find((w) => w.getType() === 'window');
+      const frame = page.mainFrame.framesInSubtree.find((f) => f.origin === 'cyborg-plugin://${id}');
+      return frame ? frame.executeJavaScript(${JSON.stringify(expression)}) : null;
+    })()`);
+  const viewLog = (id) => inView(id, "[...document.querySelectorAll('#log li')].map((l) => l.textContent).join('\\n')");
+  const views = () => ev("[...document.querySelectorAll('#views [data-plugin]')].map((v) => v.dataset.plugin).join(',')");
   const states = async (expected) => {
     for (const [id, want] of Object.entries(expected)) if ((await state(id)) !== want) return false;
     return true;
@@ -124,11 +134,20 @@ async function main() {
   await waitFor('свободное сочетание дошло до окна', () => feedHas(re('Z', 'до окна дошло')));
   log('перехват клавиш, конфликт, обмен сообщениями через три хоста');
 
+  await waitFor('виды alice и bob во фреймах', async () => (await views()) === 'alice,bob' && (await inView('bob', "document.readyState")) === 'complete');
+  assert.equal(await inView('alice', 'typeof window.playground'), 'undefined', 'вид получил мост окна');
+  await inView('alice', "document.getElementById('hello').click()");
+  await waitFor('вид alice → чат → вид bob', async () => /→ привет, bob/.test(await viewLog('alice')) && /← alice: привет, bob/.test(await viewLog('bob')));
+  await inView('bob', "document.getElementById('foreign').click()");
+  await waitFor('чужая команда из вида bob отклонена', async () => /отказ: alice\.hello: не команда плагина bob/.test(await viewLog('bob')));
+  log('виды во фреймах: свой мост, лента плагина, чужая команда отклонена');
+
   assert.equal(await button('chat', 'Выгрузить'), true, 'у chat нет «Выгрузить»');
   await waitFor('chat выгружен, alice снята с ним, bob живёт без чата', async () =>
     (await states({ chat: 'stopped', alice: 'stopped', bob: 'active' })) && lines().includes('[plugins] bob: чат пропал'),
   );
   assert.match(await text('#plugins-list [data-plugin="alice"] .plugin-reason'), /выгружен вместе с chat/);
+  await waitFor('вид снятой alice убран', async () => (await views()) === 'bob');
   assert.equal((await keyRow(combo('A')))?.live, 'false');
   await press(combo('A'));
   await waitFor('сочетание выгруженной alice дошло до окна', () => feedHas(re('A', 'до окна дошло')));
@@ -137,6 +156,7 @@ async function main() {
     (await states({ chat: 'active', alice: 'active' })) && lines().includes('[plugins] bob: чат вернулся, подписываюсь снова'),
   );
   assert.notEqual(await pid('chat'), chatPid, 'после выгрузки chat должен подняться в новом процессе');
+  await waitFor('вид alice вернулся', async () => (await views()) === 'alice,bob');
   log('выгрузка с зависимыми, загрузка в новый процесс, переподписка');
 
   const chatPid2 = await pid('chat');

@@ -198,3 +198,47 @@ test('служба окна: сочетания с конфликтом, пер�
   );
   await service.unload();
 });
+
+test('виды: адрес у активного плагина с view/index.html, лента вида - только свои строки, команда из вида - только своя', async () => {
+  const userData = tmp();
+  const dir = path.join(userData, 'plugins');
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['face', 'voice'] } }));
+  plugin(dir, 'face', { commands: ['face.hi'] }, 'export default {}');
+  plugin(dir, 'voice', { commands: ['voice.ping'] }, 'export default {}');
+  fs.mkdirSync(path.join(dir, 'face', 'view'));
+  fs.writeFileSync(path.join(dir, 'face', 'view', 'index.html'), '<!doctype html>');
+  const modules: Record<string, PluginModule> = {
+    face: { activate: (ctx) => void ctx.commands.register('face.hi', () => ctx.log('привет')) },
+    voice: { activate: (ctx) => void ctx.commands.register('voice.ping', () => ctx.log('pong')) },
+  };
+  const pushed: [string, string][] = [];
+  const service = new PluginsService({ changed: () => {}, alert: () => {}, log: (id, line) => pushed.push([id, line.text]) }, () => 7);
+  await service.start({
+    userData,
+    builtinDir: path.join(userData, 'нет'),
+    spawnHost: inlineHosts(async (entry) => modules[/\/(\w+)\/index\.mjs$/.exec(entry)?.[1] ?? ''] ?? { activate() {} }),
+    log: () => {},
+  });
+
+  assert.deepEqual(
+    service.snapshot().plugins.map((p) => [p.id, p.view]),
+    [
+      ['face', 'cyborg-plugin://face/'],
+      ['voice', undefined],
+    ],
+  );
+  assert.equal(service.viewDir('face'), path.join(dir, 'face', 'view'));
+  assert.deepEqual(await service.runFor('face', 'face.hi'), {});
+  assert.deepEqual(await service.run('voice.ping'), {});
+  assert.deepEqual(await service.runFor('face', 'voice.ping'), { error: 'voice.ping: не команда плагина face' });
+  assert.deepEqual(await service.runFor('face', 42), { error: 'нет имени команды' });
+  assert.deepEqual(service.logsOf('face'), [{ at: 7, kind: 'log', subject: 'face', text: 'привет' }]);
+  assert.deepEqual(pushed, [
+    ['face', 'привет'],
+    ['voice', 'pong'],
+  ]);
+
+  assert.deepEqual(await service.disable('face'), {});
+  assert.equal(service.snapshot().plugins.find((p) => p.id === 'face')?.view, undefined, 'у выгруженного плагина вида нет');
+  await service.unload();
+});
