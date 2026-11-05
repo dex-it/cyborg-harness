@@ -246,6 +246,33 @@ test('fs.watch: имена изменённых в каталоге склеен
   await new Promise((r) => setTimeout(r, 100));
 });
 
+test('fs.watch: лимит не обходится параллельными вызовами; сузились корни - наблюдение закрыто', async () => {
+  await using box = await sandbox();
+  const { k, os } = await kernel(
+    { projects: { 'security.roots': true }, tool: { 'fs.read': ['workspace'] } },
+    { dataDir: box.data, tempDir: box.temp },
+  );
+  const fs = os('tool').fs;
+  const results = await Promise.allSettled(Array.from({ length: 70 }, () => fs.watch(os('tool').paths.data, () => undefined)));
+  assert.equal(results.filter((r) => r.status === 'fulfilled').length, 64);
+  for (const r of results) if (r.status === 'fulfilled') r.value.dispose();
+  await new Promise((r) => setTimeout(r, 50));
+
+  await os('projects').security!.setRoots([box.outside]);
+  const seen: (readonly string[])[] = [];
+  await fs.watch(box.outside, (names) => seen.push(names));
+  await writeFile(path.join(box.outside, 'a'), '1');
+  for (let i = 0; i < 100 && seen.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(seen.flat(), ['a']);
+  await os('projects').security!.setRoots([]);
+  await writeFile(path.join(box.outside, 'b'), '1');
+  await new Promise((r) => setTimeout(r, 200));
+  await writeFile(path.join(box.outside, 'c'), '1');
+  await new Promise((r) => setTimeout(r, 200));
+  assert.deepEqual(seen.flat(), ['a'], 'после сужения корней событий нет');
+  await k.unload();
+});
+
 test('$SHELL: оболочка входа из окружения приложения, только с закреплённым скриптом', async () => {
   assert.equal(parseManifest(manifest('p', { process: ['$SHELL'] })).ok, false, 'голая оболочка запустила бы что угодно');
   assert.equal(parseManifest(manifest('p', { process: [{ program: '$SHELL', args: ['-lc'] }] })).ok, false);

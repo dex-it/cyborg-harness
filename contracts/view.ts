@@ -70,6 +70,12 @@ export interface UiContext {
     /** Билет от `PtyHandle.share()` своей главной части; чужой, просроченный или использованный - исключение. */
     open(ticket: PtyTicket): Promise<UiTerminal>;
   };
+  readonly state: {
+    /** Память вида в state воркспейса, какой её оставил прошлый документ; не писали - undefined. Схемы и миграций нет: формат - забота плагина. */
+    readonly value: unknown;
+    /** JSON до 64 КБ; undefined - забыть. У каждого воркспейса своя память, поэтому не localStorage origin плагина. */
+    set(value: unknown): Promise<void>;
+  };
   readonly drag: {
     /** Перетаскивание файла ведёт ядро: Chromium не пускает перетаскивание из страницы во фрейм другого процесса. Путь - от корня рабочей папки. */
     start(path: string): void;

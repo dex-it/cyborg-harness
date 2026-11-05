@@ -22,6 +22,9 @@ export interface ViewBridge {
   terminalResize(tid: number, cols: number, rows: number): Promise<Reply>;
   terminalClose(tid: number): void;
   onTerminal(listener: (event: TerminalEvent) => void): void;
+  /** `value` - память вида или undefined. */
+  state(view: string): Promise<Reply>;
+  setState(view: string, value: unknown): Promise<Reply>;
 }
 
 /** Ответ на `terminalOpen`: описание pty, хвост и номер терминала в этом документе. */
@@ -157,7 +160,7 @@ class Terminals {
 
 /** Тема ставится до возврата: модуль плагина монтируется уже на своих токенах, без вспышки чужих цветов. */
 export async function connectView(bridge: ViewBridge, target: ViewTarget): Promise<UiContext> {
-  let tokens = await bridge.theme();
+  let [tokens, memory] = await Promise.all([bridge.theme(), bridge.state(target.view).then(unwrap)]);
   target.applyTheme(tokens);
   let visible = true;
   const themes = new Listeners<ThemeTokens>(target.report);
@@ -195,6 +198,15 @@ export async function connectView(bridge: ViewBridge, target: ViewTarget): Promi
     logs: () => bridge.logs(),
     onLog: (listener: (line: FeedLine) => void) => logs.add(listener),
     terminal: Object.freeze({ open: (ticket: string) => terminals.open(ticket) }),
+    state: Object.freeze({
+      get value() {
+        return memory === undefined ? undefined : structuredClone(memory);
+      },
+      set: async (value: unknown) => {
+        unwrap(await bridge.setState(target.view, value));
+        memory = value === undefined ? undefined : structuredClone(value);
+      },
+    }),
     drag: Object.freeze({ start: (path: string) => bridge.startDrag(path), drop: () => bridge.drop() }),
   });
 }

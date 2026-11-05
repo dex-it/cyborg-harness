@@ -200,6 +200,7 @@ async function main() {
   );
   assert.notEqual(await pid('chat'), chatPid, 'после выгрузки chat должен подняться в новом процессе');
   await waitFor('вид alice вернулся', async () => (await views()) === 'alice,bob,echo,sessions');
+  await waitFor('новый документ alice помнит приветы из state воркспейса', async () => (await inView('alice', "document.getElementById('greeted')?.textContent")) === 'приветов: 1');
   log('выгрузка с зависимыми, загрузка в новый процесс, переподписка');
 
   const chatPid2 = await pid('chat');

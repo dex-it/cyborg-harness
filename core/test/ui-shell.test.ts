@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { FeedLine, PtyExit, Reply, ThemeTokens } from '@cyborg/contracts';
+import { SectionStore, type LayerStore } from '../src/config.ts';
+import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
+import { inlineHosts } from '../src/transports.ts';
 import { connectView, mountModule, type TerminalEvent, type ViewBridge } from '../src/ui-shell.ts';
 
 function fakeBridge(tokens: ThemeTokens) {
@@ -29,6 +32,8 @@ function fakeBridge(tokens: ThemeTokens) {
     terminalResize: async (tid, cols, rows) => (calls.push(['resize', tid, cols, rows]), cols > 0 ? {} : { error: 'размер' }),
     terminalClose: (tid) => calls.push(['close', tid]),
     onTerminal: (l) => (on.terminal = l),
+    state: async (view) => (view === 'main' ? { value: { opened: 1 } } : {}),
+    setState: async (view, value) => (calls.push(['state', view, value]), (value === undefined ? 0 : JSON.stringify(value).length) > 20 ? { error: 'память вида больше 20 байт' } : {}),
   };
   return { bridge, calls, on };
 }
@@ -125,4 +130,47 @@ test('terminal.open: хвост и вывод до подписки не тер�
   term.close();
   term.close();
   assert.deepEqual(calls.filter((c) => c[0] !== 'open'), [['write', 7, 'ls\r'], ['resize', 7, 100, 30], ['resize', 7, 0, 30], ['close', 7]]);
+});
+
+test('память вида: до mount, set меняет value, отказ ядра - исключение и прежнее значение', async () => {
+  const { bridge, calls } = fakeBridge({});
+  const ctx = await connectView(bridge, { pluginId: 'own', view: 'main', applyTheme: () => undefined, report: () => undefined });
+  assert.deepEqual(ctx.state.value, { opened: 1 });
+  const seen = ctx.state.value;
+  seen.opened = 99;
+  assert.deepEqual(ctx.state.value, { opened: 1 }, 'value отдаёт копию');
+  await ctx.state.set({ opened: 2 });
+  assert.deepEqual(ctx.state.value, { opened: 2 });
+  await assert.rejects(ctx.state.set({ text: 'x'.repeat(40) }), /больше 20 байт/);
+  assert.deepEqual(ctx.state.value, { opened: 2 });
+  await ctx.state.set(undefined);
+  assert.equal(ctx.state.value, undefined);
+  assert.deepEqual(calls.filter((c) => c[0] === 'state'), [['state', 'main', { opened: 2 }], ['state', 'main', { text: 'x'.repeat(40) }], ['state', 'main', undefined]]);
+  const other = await connectView(bridge, { pluginId: 'own', view: 'side', applyTheme: () => undefined, report: () => undefined });
+  assert.equal(other.state.value, undefined);
+});
+
+test('ядро: память вида в разделе $views state воркспейса, только объявленный вид, предел 64 КБ, параллельные записи не теряются', async () => {
+  let doc: Record<string, unknown> = { own: { $version: 1, keep: true } };
+  const store: LayerStore = { load: async () => structuredClone(doc), save: async (_layer, next) => void (doc = structuredClone(next)) };
+  const state = await SectionStore.open(store, ['workspace']);
+  const k = await load({
+    apiVersion: '1.0.0',
+    spawnHost: inlineHosts(async () => ({ activate: () => undefined })),
+    enabled: ['own'],
+    manifests: [{ id: 'own', version: '1.0.0', engines: { cyborg: '^1' }, ui: { views: { main: './ui.js', side: './side.js' } } }],
+    state,
+  });
+  assert.equal(k.viewState('own', 'main'), undefined);
+  await Promise.all([k.setViewState('own', 'main', { a: 1 }), k.setViewState('own', 'side', { b: 2 })]);
+  assert.deepEqual(doc.$views, { $version: 1, 'own/main': { a: 1 }, 'own/side': { b: 2 } });
+  assert.deepEqual(doc.own, { $version: 1, keep: true }, 'раздел плагина не тронут');
+  assert.deepEqual(k.viewState('own', 'side'), { b: 2 });
+  assert.throws(() => k.viewState('own', 'нет'), { code: 'Invalid' });
+  assert.throws(() => k.viewState('chat', 'main'), { code: 'Invalid' });
+  assert.throws(() => k.setViewState('own', 'main', 'x'.repeat(64 * 1024)), { code: 'Invalid' });
+  assert.throws(() => k.setViewState('own', 'main', 1n), TypeError);
+  await k.setViewState('own', 'side', undefined);
+  assert.deepEqual(doc.$views, { $version: 1, 'own/main': { a: 1 } });
+  await k.unload();
 });

@@ -109,6 +109,14 @@ ipcMain.handle('view:call', (event, contract: unknown, major: unknown, method: u
   const pluginId = senderPlugin(event);
   return pluginId === undefined ? { error: 'не вид плагина' } : plugins.callFor(pluginId, contract, major, method, args);
 });
+ipcMain.handle('view:state', (event, view: unknown) => {
+  const pluginId = senderPlugin(event);
+  return pluginId === undefined ? { error: 'не вид плагина' } : plugins.viewStateFor(pluginId, view);
+});
+ipcMain.handle('view:state:set', (event, view: unknown, value: unknown) => {
+  const pluginId = senderPlugin(event);
+  return pluginId === undefined ? { error: 'не вид плагина' } : plugins.setViewStateFor(pluginId, view, value);
+});
 const terminals = new ViewTerminals((pluginId, ticket, sink) => plugins.openTerminal(pluginId, ticket, sink));
 function terminalChannel(channel: string, handler: (frame: TerminalFrame, pluginId: string, ...args: unknown[]) => unknown): void {
   ipcMain.handle(channel, (event: IpcMainInvokeEvent, ...args: unknown[]) => {

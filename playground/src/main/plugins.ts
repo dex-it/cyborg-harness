@@ -271,6 +271,27 @@ export class PluginsService {
     return this.kernel.openTerminal(pluginId, ticket, sink);
   }
 
+  /** Память вида: плагин - из origin фрейма, имя вида - из слов вида, но чужого плагина вид так не достанет. */
+  viewStateFor(pluginId: string, view: unknown): Reply {
+    if (!this.kernel) return { error: 'ядро плагинов не запущено' };
+    try {
+      const value = this.kernel.viewState(pluginId, view as string);
+      return value === undefined ? {} : { value };
+    } catch (error) {
+      return { error: errorMessage(error) };
+    }
+  }
+
+  async setViewStateFor(pluginId: string, view: unknown, value: unknown): Promise<Reply> {
+    if (!this.kernel) return { error: 'ядро плагинов не запущено' };
+    try {
+      await this.kernel.setViewState(pluginId, view as string, value);
+      return {};
+    } catch (error) {
+      return { error: errorMessage(error) };
+    }
+  }
+
   /** Есть ли у плагина вида поставщик контракта; права те же, что у главной части: только requires и optional манифеста. */
   contractFor(pluginId: string, contract: unknown, major: unknown): Reply {
     if (typeof contract !== 'string' || typeof major !== 'number') return { error: 'контракт: ожидаются имя и мажорная версия' };

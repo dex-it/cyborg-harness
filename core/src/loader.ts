@@ -3,7 +3,7 @@ import type { PtyInfo } from '@cyborg/contracts';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import type { SectionResult, SectionStore } from './config.ts';
+import { VERSION_KEY, type SectionResult, type SectionStore } from './config.ts';
 import type { Disposable } from './disposable.ts';
 import { CoreError, errorMessage, ignore } from './errors.ts';
 import { providesMatching, resolveGraph, type ContractGraph, type Rejection } from './graph.ts';
@@ -122,6 +122,10 @@ export interface DisablePreview {
   readonly ptys: readonly (PtyInfo & { readonly pluginId: string })[];
 }
 
+// Id раздела ядра: плагин не может так называться, `$` манифест не пропустит.
+const VIEW_STATE = '$views';
+const VIEW_STATE_MAX = 64 * 1024;
+
 export interface Kernel {
   readonly journal: readonly JournalEntry[];
   /** Активные сейчас, в порядке активации. */
@@ -150,6 +154,10 @@ export interface Kernel {
   wake(pluginId: string): Promise<void>;
   /** Вид плагина открывает pty по билету `share()` его главной части; вывод идёт в `sink` мимо хоста. */
   openTerminal(pluginId: string, ticket: string, sink: TerminalSink): TerminalView;
+  /** Память вида из state воркспейса: раздел ядра `$views`, ключ `<плагин>/<вид>`; вида нет в манифесте - `Invalid`. */
+  viewState(pluginId: string, view: string): unknown;
+  /** JSON до 64 КБ, undefined - забыть; записи идут по очереди, чтобы параллельные не затёрли друг друга. */
+  setViewState(pluginId: string, view: string, value: unknown): Promise<void>;
   /** Событие окна или ОС от приложения: ядро раздаёт его активным плагинам. */
   emit(event: SystemEvent): void;
   /** Слушатели `onBeforeQuit` всех хостов, не дольше `budget` мс; после него приложение зовёт `unload`. */
@@ -301,6 +309,17 @@ export async function load(options: LoadOptions): Promise<Kernel> {
 
   const manifests: PluginManifest[] = [];
   const known: PluginManifest[] = [];
+  let viewWrites: Promise<unknown> = Promise.resolve();
+  const viewKey = (pluginId: string, view: string): string => {
+    const views = known.find((m) => m.id === pluginId)?.ui?.views;
+    if (typeof view !== 'string' || !views || !Object.hasOwn(views, view)) throw new CoreError('Invalid', `${pluginId}: вида ${JSON.stringify(view)} нет в манифесте`);
+    return `${pluginId}/${view}`;
+  };
+  const viewMemory = (): Record<string, unknown> => {
+    const raw = options.state?.raw(VIEW_STATE).find(([layer]) => layer === 'workspace')?.[1];
+    if (!isRecord(raw)) return {};
+    return Object.fromEntries(Object.entries(raw).filter(([key]) => key !== VERSION_KEY));
+  };
   for (const raw of options.manifests) {
     const parsed = parseManifest(raw);
     const id = parsed.ok ? parsed.manifest.id : parsed.id;
@@ -837,6 +856,24 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     },
     wake,
     openTerminal: (pluginId, ticket, sink) => gateway.openTerminal(pluginId, ticket, sink),
+    viewState: (pluginId, view) => {
+      const value = viewMemory()[viewKey(pluginId, view)];
+      return value === undefined ? undefined : structuredClone(value);
+    },
+    setViewState(pluginId, view, value) {
+      const key = viewKey(pluginId, view);
+      const text = JSON.stringify(value) as string | undefined;
+      if (text !== undefined && Buffer.byteLength(text) > VIEW_STATE_MAX) throw new CoreError('Invalid', `${key}: память вида больше ${String(VIEW_STATE_MAX)} байт`);
+      const data: unknown = text === undefined ? undefined : JSON.parse(text);
+      const write = viewWrites.then(async () => {
+        if (!options.state) throw new CoreError('Unavailable', 'state воркспейса нет');
+        const doc = Object.fromEntries(Object.entries(viewMemory()).filter(([k]) => k !== key));
+        if (data !== undefined) doc[key] = data;
+        await options.state.write('workspace', VIEW_STATE, 1, doc);
+      });
+      viewWrites = write.catch(() => undefined);
+      return write;
+    },
     emit(event) {
       if (!['focus', 'suspend', 'resume', 'screen-lock'].includes(event.kind)) throw new CoreError('Invalid', `событие ${event.kind as string} ядру не известно`);
       for (const host of hosts.values()) if (!host.down) host.endpoint.notify('system', event);

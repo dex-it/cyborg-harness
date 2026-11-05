@@ -272,25 +272,38 @@ export class OsGateway {
         const key = `${m.id}\0${id}`;
         if (this.#watches.has(key)) throw new CoreError('Invalid', `${method}: id ${id} уже занят`);
         if ([...this.#watches.keys()].filter((k) => k.startsWith(`${m.id}\0`)).length >= MAX_WATCHES) throw new CoreError('Invalid', `${method}: больше ${String(MAX_WATCHES)} слежений`);
-        await this.#ownDirs(m.id);
-        const target = await this.#checkPath(m, method, args[0], false);
-        await fs.stat(target);
+        // Место занято до первого await: иначе параллельные вызовы прошли бы лимит, а выгрузка посреди вызова оставила бы наблюдателя.
+        const reserved = () => void this.#watches.delete(key);
+        this.#watches.set(key, reserved);
+        let target: string;
+        try {
+          await this.#ownDirs(m.id);
+          target = await this.#checkPath(m, method, args[0], false);
+          await fs.stat(target);
+        } catch (error) {
+          if (this.#watches.get(key) === reserved) this.#watches.delete(key);
+          throw error;
+        }
+        if (this.#watches.get(key) !== reserved) throw new CoreError('Unavailable', `${method}: плагин выгружен`);
         const names = new Set<string>();
         let timer: NodeJS.Timeout | undefined;
-        const watcher = watchFs(target, (_event, name) => {
-          if (name) names.add(name);
-          timer ??= setTimeout(() => {
-            timer = undefined;
-            const list = [...names];
-            names.clear();
-            this.#push(m.id, 'fs.change', { pluginId: m.id, id, names: list });
-          }, WATCH_COALESCE_MS);
-        });
         const close = () => {
           clearTimeout(timer);
           watcher.close();
           this.#watches.delete(key);
         };
+        // Право проверяется на каждой пачке: корни воркспейса могли сузиться после подписки.
+        const send = async () => {
+          timer = undefined;
+          const list = [...names];
+          names.clear();
+          if ((await this.#checkPath(m, method, args[0], false).catch(() => undefined)) !== target) close();
+          else if (this.#watches.get(key) === close) this.#push(m.id, 'fs.change', { pluginId: m.id, id, names: list });
+        };
+        const watcher = watchFs(target, (_event, name) => {
+          if (name) names.add(name);
+          timer ??= setTimeout(() => void send(), WATCH_COALESCE_MS);
+        });
         // Без слушателя ошибка наблюдателя (удалён каталог, кончились inotify) уронила бы главный процесс.
         watcher.on('error', close);
         this.#watches.set(key, close);

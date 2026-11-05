@@ -32,6 +32,8 @@ const view: ViewBridge = {
   terminalWrite: (tid, data) => ipcRenderer.invoke('view:terminal:write', tid, data),
   terminalResize: (tid, cols, rows) => ipcRenderer.invoke('view:terminal:resize', tid, cols, rows),
   terminalClose: (tid) => ipcRenderer.send('view:terminal:close', tid),
+  state: (viewName) => ipcRenderer.invoke('view:state', viewName),
+  setState: (viewName, value) => ipcRenderer.invoke('view:state:set', viewName, value),
   onTerminal: (listener) => void ipcRenderer.on('view:terminal', (_event, event: TerminalEvent) => listener(event)),
 };
 
