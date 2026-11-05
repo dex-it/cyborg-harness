@@ -9,6 +9,9 @@ const KEYS = ['fs.read', 'fs.write', 'process', 'pty', 'net', 'env', 'notify', '
 
 const isArea = (v: string) => (AREAS as readonly string[]).includes(v) || v.startsWith('/') || v === '~' || v.startsWith('~/');
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** Программа правила `process` и `pty`: оболочка входа человека; ядро подставляет её путь само. */
+export const LOGIN_SHELL = '$SHELL';
 const HOST = /^(?:config:[A-Za-z][\w.]*|[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d+)?)$/i;
 
 function strings(field: string, raw: unknown, errors: string[], ok: (v: string) => boolean, expected: string): string[] | undefined {
@@ -49,15 +52,17 @@ export function readPermissions(raw: unknown, errors: string[]): PluginPermissio
     const rules = Array.isArray(raw[key]) ? raw[key] : undefined;
     const ok = rules?.every(
       (r) =>
-        (typeof r === 'string' && r.length > 0) ||
+        (typeof r === 'string' && r.length > 0 && r !== LOGIN_SHELL) ||
         (isRecord(r) &&
           typeof r.program === 'string' &&
           r.program.length > 0 &&
           Array.isArray(r.args) &&
+          // Оболочка без закреплённого скрипта (`-lc` и текст) запустила бы что угодно.
+          (r.program !== LOGIN_SHELL || r.args.length >= 2) &&
           r.args.every((a) => typeof a === 'string') &&
           (r.env === undefined || (Array.isArray(r.env) && r.env.every((v) => typeof v === 'string' && ENV_NAME.test(v))))),
     );
-    if (!ok) errors.push(`permissions.${key}: ожидается список программ или {program, args, env?}`);
+    if (!ok) errors.push(`permissions.${key}: ожидается список программ или {program, args, env?}; ${LOGIN_SHELL} - только с флагом и скриптом в args`);
     else set(key, rules);
   }
   return out;
@@ -71,7 +76,8 @@ export function describePermissions(p: PluginPermissions): string[] {
   const out: string[] = [];
   if (p['fs.read']) out.push(`читает файлы: ${areaWords(p['fs.read'])}`);
   if (p['fs.write']) out.push(`пишет файлы: ${areaWords(p['fs.write'])}`);
-  const programs = (rules: PluginPermissions['process']) => (rules ?? []).map((r) => (typeof r === 'string' ? r : [r.program, ...r.args].join(' ') + (r.env?.length ? ` (окружение: ${r.env.join(', ')})` : ''))).join(', ');
+  const program = (p: string) => (p === LOGIN_SHELL ? 'оболочка входа' : p);
+  const programs = (rules: PluginPermissions['process']) => (rules ?? []).map((r) => (typeof r === 'string' ? r : [program(r.program), ...r.args].join(' ') + (r.env?.length ? ` (окружение: ${r.env.join(', ')})` : ''))).join(', ');
   if (p.process) out.push(`запускает программы: ${programs(p.process)} - полный доступ через программу`);
   if (p.pty) out.push(`запускает в терминале: ${programs(p.pty)} - полный доступ через программу`);
   if (p.net) out.push(`ходит в сеть: ${p.net.map((h) => (h.startsWith('config:') ? `хост из настройки ${h.slice('config:'.length)}` : h)).join(', ')}`);

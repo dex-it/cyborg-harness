@@ -190,6 +190,23 @@ test('секреты: ключи своего плагина, $secret, без ш
   await locked.k.unload();
 });
 
+test('$SHELL: оболочка входа из окружения приложения, только с закреплённым скриптом', async () => {
+  assert.equal(parseManifest(manifest('p', { process: ['$SHELL'] })).ok, false, 'голая оболочка запустила бы что угодно');
+  assert.equal(parseManifest(manifest('p', { process: [{ program: '$SHELL', args: ['-lc'] }] })).ok, false);
+  await using box = await sandbox();
+  const script = 'printf "%s|%s" "$0" "$1"';
+  const rule = { program: '$SHELL', args: ['-c', script] };
+  const { k, os } = await kernel({ runner: { process: [rule] } }, { dataDir: box.data, tempDir: box.temp, env: { PATH: process.env.PATH, HOME: '/h', SHELL: '/bin/sh' } });
+  const r = await os('runner').process!.run('$SHELL', ['-c', script, 'arg0', 'arg1']);
+  assert.deepEqual([r.code, r.stdout], [0, 'arg0|arg1']);
+  await assert.rejects(os('runner').process!.run('$SHELL', ['-c', 'id']), { code: 'PermissionDenied' });
+  await assert.rejects(os('runner').process!.run('/bin/sh', ['-c', script]), { code: 'PermissionDenied' }, 'путь оболочки не равен праву на $SHELL');
+  const p = parseManifest(manifest('p', { pty: [{ program: '$SHELL', args: ['-lc', 'exec claude'] }] }));
+  assert.ok(p.ok);
+  assert.deepEqual(describePermissions(p.manifest.permissions), ['запускает в терминале: оболочка входа -lc exec claude - полный доступ через программу']);
+  await k.unload();
+});
+
 test('права в манифесте: неизвестное право и неверная форма - ошибки манифеста; права словами', () => {
   const bad = parseManifest(manifest('p', { 'fs.raed': ['workspace'], net: ['https://x'], process: [{ program: 'git' }], notify: 'yes' }));
   assert.equal(bad.ok, false);

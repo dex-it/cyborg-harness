@@ -3,7 +3,7 @@ import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig(
-  { ignores: ['node_modules/', 'playground/dist/'] },
+  { ignores: ['node_modules/', 'playground/dist/', '.claude/'] },
   { linterOptions: { reportUnusedDisableDirectives: 'error' } },
   js.configs.recommended,
   {

@@ -1,0 +1,40 @@
+{
+  "id": "sessions",
+  "version": "1.0.0",
+  "engines": {
+    "cyborg": "^1"
+  },
+  "consumes": {
+    "cyborg.agent": "^1"
+  },
+  "commands": {
+    "sessions.agents": {},
+    "sessions.new": {
+      "args": [
+        "string"
+      ]
+    }
+  },
+  "permissions": {
+    "pty": [
+      "/bin/sh",
+      {
+        "program": "$SHELL",
+        "args": [
+          "-lc",
+          "exec claude --settings \"$CYBORG_SETTINGS\" \"$@\"",
+          "cyborg"
+        ],
+        "env": [
+          "CYBORG_EVENTS",
+          "CYBORG_SETTINGS"
+        ]
+      }
+    ]
+  },
+  "ui": {
+    "views": {
+      "main": "./ui/ui.js"
+    }
+  }
+}

@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { DirEntry, FileStat, HttpResponse, ProcessResult, PtyInfo, SecretValue } from '@cyborg/contracts';
 import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
+import { LOGIN_SHELL } from './permissions.ts';
 import { PTY_SIGNALS, PtyTable, type PtyBackend, type TerminalSink, type TerminalView } from './pty.ts';
 import { isRecord } from './wire.ts';
 
@@ -271,7 +272,7 @@ export class OsGateway {
         const argv = o.args ?? [];
         const checked = await this.#program(m, 'pty', method, program, argv, o);
         const size = (v: unknown, fallback: number) => (Number.isInteger(v) && (v as number) > 0 && (v as number) <= 1000 ? (v as number) : fallback);
-        return table.spawn(m.id, { program, args: checked.argv, ...(checked.cwd !== undefined && { cwd: checked.cwd }), env: checked.env, cols: size(o.cols, 80), rows: size(o.rows, 24), persist: o.persist === true });
+        return table.spawn(m.id, { program: checked.file, args: checked.argv, ...(checked.cwd !== undefined && { cwd: checked.cwd }), env: checked.env, cols: size(o.cols, 80), rows: size(o.rows, 24), persist: o.persist === true });
       }
       case 'pty.share':
         return this.#ptyTable().share(m.id, str(method, args[0], 'id'));
@@ -381,24 +382,27 @@ export class OsGateway {
       return r.program === program && r.args.every((a, i) => argv[i] === a);
     });
     if (rule === undefined) throw this.#denied(m, method, `программа не в ${key}: ${[program, ...argv.slice(0, 2)].join(' ')}`);
+    const env0 = this.#env.env ?? process.env;
+    // Оболочка входа даёт программе PATH из профиля человека: окно, открытое из Dock или меню, его не наследует.
+    const file = program === LOGIN_SHELL ? (env0.SHELL?.length ? env0.SHELL : '/bin/sh') : program;
     const cwd = options.cwd === undefined ? undefined : await this.#checkPath(m, method, options.cwd, false);
     const extra = isRecord(options.env) ? Object.fromEntries(Object.entries(options.env).filter((e): e is [string, string] => typeof e[1] === 'string')) : {};
     // Окружение - тоже ввод программы (GIT_CONFIG_*, NODE_OPTIONS, LD_PRELOAD): только имена из правила.
     const allowedEnv = typeof rule === 'string' ? [] : (rule.env ?? []);
     const foreign = Object.keys(extra).filter((k) => !allowedEnv.includes(k));
     if (foreign.length > 0) throw this.#denied(m, method, `переменные не в правиле ${key}: ${foreign.join(', ')}`);
-    const base = Object.fromEntries(Object.entries(this.#env.env ?? process.env).filter((e): e is [string, string] => typeof e[1] === 'string' && BASE_ENV.test(e[0])));
-    return { argv, cwd, env: { ...base, ...extra } };
+    const base = Object.fromEntries(Object.entries(env0).filter((e): e is [string, string] => typeof e[1] === 'string' && BASE_ENV.test(e[0])));
+    return { file, argv, cwd, env: { ...base, ...extra } };
   }
 
   async #run(m: PluginManifest, args: readonly unknown[]): Promise<ProcessResult> {
     const method = 'process.run';
     const program = str(method, args[0], 'программа');
     const options = isRecord(args[2]) ? args[2] : {};
-    const { argv, cwd, env } = await this.#program(m, 'process', method, program, args[1], options);
+    const { file, argv, cwd, env } = await this.#program(m, 'process', method, program, args[1], options);
     const timeout = typeof options.timeoutMs === 'number' ? options.timeoutMs : 0;
     return new Promise((resolve, reject) => {
-      const child = spawn(program, argv, { cwd, env, shell: false, timeout, stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = spawn(file, argv, { cwd, env, shell: false, timeout, stdio: ['pipe', 'pipe', 'pipe'] });
       let stdout = '';
       let stderr = '';
       const cap = (s: string, chunk: Buffer) => (s.length < MAX_OUTPUT ? s + chunk.toString('utf8') : s);

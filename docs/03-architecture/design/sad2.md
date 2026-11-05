@@ -183,9 +183,10 @@ flowchart TB
 Ресурс ОС, который должен пережить своего владельца, держит ядро. Сегодня это pty: плагин решает, что запустить, ядро запускает процесс и держит его у себя. Ядро не знает, что это агент: для него это pty с программой из права плагина.
 
 ```ts
-// главная часть agent-claude-code; манифест: "permissions": { "pty": ["claude"] }
+// главная часть sessions; запуск описал поставщик cyborg.agent, право pty - у sessions
+const spec = await agent.launch({ sessionId, cwd });   // program, args, cwd, env
 const pty = await ctx.os.pty.spawn({
-  program: 'claude', args, cwd, env,   // аргументы и env собирает плагин
+  ...spec,
   cols, rows,
   persist: true,                       // пережить перезапуск хоста и окна
 });
@@ -530,10 +531,12 @@ flowchart LR
 | Плагин | Даёт | Потребляет | Права |
 |---|---|---|---|
 | `sessions` | `cyborg.sessions`: реестр сессий, документ-терминал, события, `create` / `send` / `paste` / `reveal`, приём броска пути; команда `sessions.new` | `cyborg.agent` (many), `cyborg.projects` (optional) | `pty` по списку агентов, `security.roots` (cwd живых сессий) |
-| `agent-claude-code` | `cyborg.agent`: запуск `claude` с хуками, адаптер событий `Stop` / `Notification`, `resume`; вид «Сессии» (история) | - | `pty: ["claude"]`, `fs.read: ["~/.claude/projects"]` |
+| `agent-claude-code` | `cyborg.agent`: запуск `claude` с хуками, адаптер событий `Stop` / `Notification`, `resume`; вид «Сессии» (история) | - | `process`: `$SHELL -lc 'claude --version'`, `fs.read: ["~/.claude/projects"]`; pty запускает `sessions` по описанию `launch` |
 | `files` | вид «Файлы»; бросок пути как MIME | `cyborg.sessions`, `cyborg.projects` (optional), `cyborg.tree-decoration` (many); команда `file.open` | `fs.read`, `fs.watch`: `workspace` |
 | `viewer` | документ «файл» (Monaco), исполнитель `file.open`, `cyborg.editor` | - | `fs.read: workspace`, `shell.openPath: workspace` |
 | `projects` | `cyborg.projects`, диалог проекта, команды `projects.new` / `projects.edit` | `cyborg.project-settings` (many) | `security.roots` |
+
+**`cyborg.agent` - сделано.** Контракт - `contracts/agent.ts`: `facts` (найдена ли программа, версия, `capabilities`: `resume`, `history`, `events`), `launch` (готовый вход `ctx.os.pty.spawn`), `watch` (события `cwd`, `activity`, `prompt`, `turnEnd`, `waiting`), `ended` (уборка и причина выхода по коду: 127 - `notFound`), `history`. Поставщик процессов не создаёт ([ADR-CH-0004](../adr/ADR-CH-0004-agent-provider-contract.md)), pty запускает потребитель по своему праву. Программа правила `process` и `pty` может быть `$SHELL` - оболочка входа человека: ядро подставляет её путь, а правило обязано закрепить флаг и скрипт; так `agent-claude-code` запускает `$SHELL -lc 'exec claude --settings "$CYBORG_SETTINGS" "$@"'`, как сегодняшний Cyborg, и `claude` находится по PATH из профиля. В playground: `agent-claude-code` (хуки `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`, `Notification` пишут JSON в файл сессии в `plugin-data`, `watch` читает его опросом с конца файла: `fs.watch` у `ctx.os` ещё нет), второй поставщик `agent-shell` (агент без следов: только запуск и вывод) и потребитель `sessions` с видом - кнопка на поставщика и терминал сессии по билету. Общий набор тестов поставщика и паритет аргументов и хуков - `playground/test/agents.test.ts`; дымовой тест открывает сессию `agent-shell` в окне. Ещё нет: `history` у `agent-claude-code` (журнал сессии - мегабайты, нужно чтение файла по кускам), задержка «ждёт» после `Stop` и восстановление сессий в `sessions`, фрагменты промпта (изоляция, кнопки), живой прогон `claude` в дымовом тесте.
 
 Корни дерева - репозитории активного проекта и cwd активной сессии. Без `projects` дерево показывает только cwd сессий. Терминал сессии и файл - документы разных типов в одной группе: вкладки группы заменяют нынешнюю полосу сессий, а её кнопки («Статус», «Задачи», «MR/PR», «Новая сессия») переходят на панель инструментов основной области.
 

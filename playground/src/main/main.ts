@@ -34,8 +34,8 @@ if (!spiking && !app.requestSingleInstanceLock({ workspace: workspaceFile })) ap
 /** Первый запуск: alice и bob делят хост c - видно, как падение одного процесса снимает обоих, а чат в хосте b живёт. */
 const DEFAULT_CONFIG = {
   plugins: {
-    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later'],
-    hosts: { a: ['echo'], b: ['chat'], c: ['alice', 'bob'], d: ['flaky'] },
+    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'sessions'],
+    hosts: { a: ['echo'], b: ['chat'], c: ['alice', 'bob'], d: ['flaky'], agents: ['agent-claude-code', 'agent-shell'] },
   },
 };
 

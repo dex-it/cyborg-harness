@@ -113,7 +113,7 @@ async function main() {
   };
 
   await waitFor('демо-плагины работают, flaky выключен с причиной', async () =>
-    (await states({ echo: 'active', chat: 'active', alice: 'active', bob: 'active', flaky: 'stopped' })) &&
+    (await states({ echo: 'active', chat: 'active', alice: 'active', bob: 'active', flaky: 'stopped', 'agent-claude-code': 'active', 'agent-shell': 'active', sessions: 'active' })) &&
     /всегда падает/.test(await text('#plugins-list [data-plugin="flaky"] .plugin-reason')),
   );
   await waitFor('alice и bob подписаны на чат', () => lines().includes('[plugins] chat: подписчиков: 2'));
@@ -136,7 +136,7 @@ async function main() {
   await waitFor('свободное сочетание дошло до окна', () => feedHas(re('Z', 'до окна дошло')));
   log('перехват клавиш, конфликт, обмен сообщениями через три хоста');
 
-  await waitFor('виды echo, alice и bob во фреймах', async () => (await views()) === 'alice,bob,echo' && (await inView('bob', "document.readyState")) === 'complete');
+  await waitFor('виды echo, alice и bob во фреймах', async () => (await views()) === 'alice,bob,echo,sessions' && (await inView('bob', "document.readyState")) === 'complete');
   assert.equal(await inView('alice', 'typeof window.playground'), 'undefined', 'вид получил мост окна');
   await inView('alice', "document.getElementById('hello').click()");
   await waitFor('вид alice → чат → вид bob', async () => /→ привет, bob/.test(await viewLog('alice')) && /← alice: привет, bob/.test(await viewLog('bob')));
@@ -186,7 +186,7 @@ async function main() {
     (await states({ chat: 'stopped', alice: 'stopped', bob: 'active' })) && lines().includes('[plugins] bob: чат пропал'),
   );
   assert.match(await text('#plugins-list [data-plugin="alice"] .plugin-reason'), /выгружен вместе с chat/);
-  await waitFor('на месте вида снятой alice - заглушка с причиной', async () => (await views()) === 'bob,echo' && /выгружен вместе с chat/.test(await text('#views [data-plugin="alice"] .view-reason')));
+  await waitFor('на месте вида снятой alice - заглушка с причиной', async () => (await views()) === 'bob,echo,sessions' && /выгружен вместе с chat/.test(await text('#views [data-plugin="alice"] .view-reason')));
   assert.ok(await ev(`[...document.querySelectorAll('#views [data-plugin="alice"] button')].some((b) => b.textContent === 'Журнал')`), 'у заглушки нет «Журнал»');
   assert.equal((await keyRow(combo('A')))?.live, 'false');
   await press(combo('A'));
@@ -196,7 +196,7 @@ async function main() {
     (await states({ chat: 'active', alice: 'active' })) && lines().includes('[plugins] bob: чат вернулся, подписываюсь снова'),
   );
   assert.notEqual(await pid('chat'), chatPid, 'после выгрузки chat должен подняться в новом процессе');
-  await waitFor('вид alice вернулся', async () => (await views()) === 'alice,bob,echo');
+  await waitFor('вид alice вернулся', async () => (await views()) === 'alice,bob,echo,sessions');
   log('выгрузка с зависимыми, загрузка в новый процесс, переподписка');
 
   const chatPid2 = await pid('chat');
@@ -261,6 +261,14 @@ async function main() {
   await inView('bob', "document.getElementById('status').click()");
   await waitFor('вид после перезапуска зовёт новый хост', async () => (await statuses()) > before);
   log('перезапуск хоста: вид под плашкой без ввода, документ вида жив, мост ходит в новый хост');
+
+  const agentButtons = () => inView('sessions', "[...document.querySelectorAll('#agents button')].map((b) => b.dataset.agent + (b.disabled ? '-' : '+')).sort().join(',')");
+  await waitFor('sessions видит обоих поставщиков cyborg.agent', async () => /^claude-code[+-],shell\+$/.test(await agentButtons()));
+  await inView('sessions', "document.querySelector('#agents button[data-agent=\"shell\"]').click()");
+  await waitFor('сессия агента shell открыта', async () => /^Оболочка: pid \d+$/.test(await inView('sessions', "document.getElementById('session-state').textContent")));
+  await inView('sessions', `(() => { const l = document.getElementById('line'); l.value = 'echo агент-$((5*5))'; l.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); })()`);
+  await waitFor('терминал сессии ответил', async () => /агент-25/.test(await inView('sessions', "document.getElementById('screen').textContent")));
+  log(`cyborg.agent: два поставщика (${await agentButtons()}), sessions запускает pty по описанию агента`);
 
   assert.equal(await button('flaky', 'Журнал'), true, 'у flaky нет кнопки «Журнал»');
   assert.equal(await text('#plugins-journal-title'), 'Журнал: flaky');

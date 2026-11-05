@@ -39,6 +39,8 @@ export interface Contracts {
   "fs.read": ["workspace"],                       // ещё plugin-data, plugin-temp, абсолютный путь, ~/...
   "process": ["git", { "program": "npm", "args": ["test"], "env": ["CI"] }],  // env - что можно передать программе
   "pty": ["claude"],                              // та же форма; процесс держит ядро
+  // $SHELL - оболочка входа человека, путь подставит ядро; только с закреплённым флагом и скриптом
+  // "pty": [{ "program": "$SHELL", "args": ["-lc", "exec claude --settings \"$CYBORG_SETTINGS\" \"$@\"", "cyborg"] }]
   "net": ["api.github.com", "config:baseUrl"],    // config: - хост из своего раздела config
   "env": ["HOME"], "notify": true, "clipboard": ["read"],
   "secrets.ref": ["vault://kv/data/jira*"]
@@ -55,6 +57,10 @@ export interface Contracts {
 Путь только абсолютный, проверяется после `realpath`: симлинк наружу области не выводит, файл воркспейса, данные приложения, каталоги других плагинов и запись в `.git` закрыты. Программа из `process` и `pty` получает только базовое окружение (PATH, HOME, локаль) и переменные, названные в `env` её правила.
 
 pty держит ядро: `ctx.os.pty.spawn({ program, args, cwd, env, cols, rows, persist })` отдаёт ручку с `onData`, `onExit`, `write`, `resize`, `kill`. С `persist: true` процесс переживает падение хоста плагина; вернувшийся плагин находит его через `list()` и забирает `attach(id)` вместе с хвостом вывода `backlog`. Каждый отказ - запись `denied` в журнале плагинов. `ctx.secrets.resolve('token')` или `resolve({ $secret: 'token' })` берёт секрет из своего хранилища; ссылка со схемой (`vault://...`) должна подходить под маску `secrets.ref`.
+
+## Агент: `cyborg.agent`
+
+Кратность many, тип - `contracts/agent.ts`. Поставщик описывает запуск (`launch` отдаёт `program`, `args`, `cwd`, `env` - готовый вход `ctx.os.pty.spawn`) и переводит следы агента в события `watch`; процесс запускает потребитель по своему праву `pty`, поэтому в его манифесте - правила программ всех агентов, которые он поднимает. `facts().capabilities` говорит, что звать можно; `ended` после выхода процесса убирает файлы поставщика и называет причину по коду выхода.
 
 ## Сторонние контракты
 
