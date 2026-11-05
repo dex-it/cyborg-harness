@@ -19,6 +19,17 @@ test('журнал: отказов не больше предела, старе�
   );
 });
 
+test('журнал: поток разных отказов одного плагина не вытесняет отказы другого', () => {
+  const list: JournalEntry[] = [];
+  for (let i = 0; i < 3; i++) appendBounded(list, { pluginId: 'quiet', kind: 'denied', method: 'net.fetch', detail: `q${String(i)}` }, (e) => e, 10);
+  for (let i = 0; i < 500; i++) appendBounded(list, denied(String(i)), (e) => e, 10);
+  assert.deepEqual(
+    list.filter((e) => e.kind === 'denied' && e.pluginId === 'quiet').map((e) => (e.kind === 'denied' ? e.detail : '')),
+    ['q0', 'q1', 'q2'],
+  );
+  assert.equal(list.length, 10);
+});
+
 test('журнал: одинаковые отказы за окно - первая запись сразу, повторы одной записью с repeats; разные не склеиваются', () => {
   const out: JournalEntry[] = [];
   const c = new DeniedCollapse((e) => out.push(e), 60_000);

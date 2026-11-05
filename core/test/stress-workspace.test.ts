@@ -96,6 +96,25 @@ test('stress-workspace: битый файл state попадает в problems �
   }
 });
 
+test('stress-workspace: новый воркспейс за симлинком - state, записанный при первом открытии, виден при следующем', async () => {
+  await using s = await scratch();
+  const real = path.join(s.dir, 'real');
+  fs.mkdirSync(real);
+  fs.symlinkSync(real, path.join(s.dir, 'link'));
+  const via = { ...s, file: path.join(s.dir, 'link', 'ws.json') };
+  const first = await openIn(via);
+  await first.state.write('workspace', 'alpha', 1, { n: 1 });
+  const key = first.stateFile;
+  first.close();
+  const second = await openIn(via);
+  try {
+    assert.equal(second.stateFile, key, 'ключ воркспейса сменился, когда файл появился');
+    assert.deepEqual(second.state.raw('alpha'), [['workspace', { $version: 1, n: 1 }]]);
+  } finally {
+    second.close();
+  }
+});
+
 test('stress-workspace: правка файла воркспейса извне не стирается записью другого раздела до того, как слежение её подхватило', async () => {
   await using s = await scratch();
   const ws = await openIn(s);

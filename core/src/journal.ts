@@ -5,13 +5,25 @@ export const DENIED_WINDOW_MS = 5000;
 
 type Denied = Extract<JournalEntry, { kind: 'denied' }>;
 
-/** Отказов в списке не больше `limit`, старейший уходит; прочие записи не трогаются: из них выводится состояние плагинов. */
+/** Отказов в списке не больше `limit`; прочие записи не трогаются: из них выводится состояние плагинов. */
 export function appendBounded<T>(list: T[], item: T, entryOf: (item: T) => JournalEntry, limit = MAX_DENIED): void {
   list.push(item);
   if (entryOf(item).kind !== 'denied') return;
+  const byPlugin = new Map<string, number>();
   let denied = 0;
-  for (const x of list) if (entryOf(x).kind === 'denied') denied++;
-  if (denied > limit) list.splice(list.findIndex((x) => entryOf(x).kind === 'denied'), 1);
+  for (const x of list) {
+    const e = entryOf(x);
+    if (e.kind !== 'denied') continue;
+    denied++;
+    byPlugin.set(e.pluginId, (byPlugin.get(e.pluginId) ?? 0) + 1);
+  }
+  if (denied <= limit) return;
+  // Уходит старейший отказ самого шумного плагина: поток разных отказов одного не вытесняет чужие.
+  const [loudest] = [...byPlugin].reduce((a, b) => (b[1] > a[1] ? b : a));
+  list.splice(list.findIndex((x) => {
+    const e = entryOf(x);
+    return e.kind === 'denied' && e.pluginId === loudest;
+  }), 1);
 }
 
 /** Одинаковые отказы плагина склеиваются: первый пишется сразу, повторы за окно - одной записью с `repeats` в его конце. */

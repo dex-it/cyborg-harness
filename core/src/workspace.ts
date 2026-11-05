@@ -34,13 +34,20 @@ export function readJson(file: string): Record<string, unknown> | undefined {
 
 /** Ключ state: один и тот же воркспейс, открытый по разным путям (симлинк, относительный путь), - одно состояние. */
 export function workspaceKey(file: string): string {
-  let real: string;
+  return createHash('sha256').update(realFile(file)).digest('hex').slice(0, 16);
+}
+
+// Файла ещё нет - realpath каталога: иначе за симлинком (tmpdir на macOS) ключ сменится, как только файл появится, и state потеряется.
+function realFile(file: string): string {
   try {
-    real = fs.realpathSync(file);
+    return fs.realpathSync(file);
   } catch {
-    real = path.resolve(file);
+    try {
+      return path.join(fs.realpathSync(path.dirname(file)), path.basename(file));
+    } catch {
+      return path.resolve(file);
+    }
   }
-  return createHash('sha256').update(real).digest('hex').slice(0, 16);
 }
 
 export type LockResult = { readonly ok: true; readonly release: () => void } | { readonly ok: false; readonly owner: number };
