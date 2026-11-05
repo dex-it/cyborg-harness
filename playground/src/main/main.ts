@@ -34,7 +34,7 @@ const workspaceFile = process.argv.includes('--no-workspace')
     : (recent.list()[0] ?? path.join(app.getPath('userData'), 'workspace.cyborg.json'));
 const spiking = spikeOut !== undefined || hostsSpikeOut !== undefined;
 
-// Окон на воркспейс у playground одно; второй запуск того же воркспейса поднимает его окно, а не второе ядро.
+// Один экземпляр - один воркспейс - одно окно: второй запуск с любым воркспейсом поднимает открытое окно, а не второе ядро.
 if (!spiking && !app.requestSingleInstanceLock({ workspace: workspaceFile ?? null })) app.exit(0);
 
 /** Первый запуск: alice и bob делят хост c - видно, как падение одного процесса снимает обоих, а чат в хосте b живёт. */
@@ -60,7 +60,7 @@ app.on('second-instance', (_event, _argv, _cwd, data) => {
   const asked = (data as { workspace?: unknown } | null)?.workspace;
   showWindow();
   if (asked !== workspaceFile && Notification.isSupported()) {
-    new Notification({ title: 'Cyborg Playground', body: `Открыт воркспейс ${workspaceFile ?? 'нет'}; другой открывается из окна - «Недавние» или «Открыть…» (несколько окон - второй этап).` }).show();
+    new Notification({ title: 'Cyborg Playground', body: `Открыт воркспейс ${workspaceFile ?? 'нет'}; другой открывается из окна - «Недавние» или «Открыть…».` }).show();
   }
 });
 const plugins = new PluginsService({
@@ -119,7 +119,7 @@ function showWorkspace(): void {
   plugins.setWorkspace({ current: workspaceFile ?? null, recent: recent.list().filter((f) => f !== current) });
 }
 
-/** Один воркспейс - одно окно на экземпляр: смена воркспейса - перезапуск, выход выключает плагины и снимает замок. */
+/** Один экземпляр - один воркспейс - одно окно: смена воркспейса - перезапуск, выход выключает плагины и снимает замок. */
 async function openWorkspace(arg: unknown): Promise<void> {
   let file: string | undefined;
   if (arg === undefined) {
