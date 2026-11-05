@@ -289,7 +289,7 @@ export class OsGateway {
     const target = await realOrParent(given);
     const matched = (await this.#areas(m, right)).flatMap((a) => {
       const dir = areaDir(a, target);
-      return dir === undefined ? [] : [{ dir, git: a.git }];
+      return dir === undefined ? [] : [{ dir, root: a.root, git: a.git }];
     });
     const area = matched[0]?.dir;
     if (area === undefined) throw this.#denied(m, method, `вне области ${right}: ${given}`);
@@ -307,7 +307,9 @@ export class OsGateway {
       if (inside(protectedPath, target) || (write && inside(target, protectedPath))) throw this.#denied(m, method, `защищённый путь: ${given}`);
     }
     const gitOk = matched.some((a) => a.git);
-    if (write && !gitOk && path.relative(area, target).split(path.sep).includes('.git')) throw this.#denied(m, method, `запись в .git: ${given}`);
+    // От корня области, а не от каталога под маску: `*` совпадает и с самим `.git`, и путь внутри него был бы без сегмента `.git`.
+    const inGit = matched.some((a) => path.relative(a.root, target).split(path.sep).includes('.git'));
+    if (write && !gitOk && inGit) throw this.#denied(m, method, `запись в .git: ${given}`);
     return target;
   }
 

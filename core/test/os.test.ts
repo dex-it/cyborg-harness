@@ -409,7 +409,7 @@ test('права: маски путей, workspace.git, выбор в dialog к�
   let pick: string[] = [];
   const { k, os, denied } = await kernel(
     {
-      masks: { 'fs.read': [`${box.work}/*/logs`, `${box.work}/**/notes`], 'fs.write': [`${box.work}/*/logs`] },
+      masks: { 'fs.read': [`${box.work}/*/logs`, `${box.work}/**/notes`], 'fs.write': [`${box.work}/*/logs`, `${box.work}/proj/*`] },
       git: { 'fs.write': ['workspace.git'] },
       plain: { 'fs.write': ['workspace'] },
       picker: { 'fs.read': ['granted'], shell: ['granted', 'https:'] },
@@ -423,6 +423,7 @@ test('права: маски путей, workspace.git, выбор в dialog к�
     },
   );
   assert.equal(await os('masks').fs.readText(path.join(logs, 'x.log')), 'лог');
+  await assert.rejects(os('masks').fs.writeText(path.join(box.work, 'proj', '.git', 'config'), 'x'), { code: 'PermissionDenied' }, 'маска * совпала с .git');
   assert.deepEqual(await os('masks').fs.list(deep), []);
   await assert.rejects(os('masks').fs.readText(path.join(box.work, 'proj', 'secret.txt')), { code: 'PermissionDenied' });
   await assert.rejects(os('masks').fs.remove(logs), { code: 'PermissionDenied' }, 'каталог под маской - корень области');
