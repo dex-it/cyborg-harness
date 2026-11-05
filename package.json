@@ -8,7 +8,7 @@
     "build": "node playground/scripts/build.mjs",
     "start": "npm run build && electron .",
     "typecheck": "node node_modules/typescript7/bin/tsc --noEmit -p core && node node_modules/typescript7/bin/tsc --noEmit -p core/elements && node node_modules/typescript7/bin/tsc --noEmit -p playground",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test 'core/test/*.test.ts' 'playground/src/**/*.test.ts' 'playground/test/*.test.ts'",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-timeout=120000 'core/test/*.test.ts' 'playground/src/**/*.test.ts' 'playground/test/*.test.ts'",
     "demo": "node core/examples/run.ts",
     "smoke": "npm run build && node playground/scripts/smoke.mjs",
     "spike": "npm run build && node playground/scripts/spike-iframe.mjs",
