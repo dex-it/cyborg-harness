@@ -22,7 +22,7 @@ export interface PluginRow {
   readonly commands: readonly string[];
   /** Права главной части словами - те же строки покажет окно согласия. */
   readonly permissions: readonly string[];
-  /** Адрес вида для <iframe>: есть у активного плагина с каталогом view. */
+  /** Адрес вида для <iframe>: есть у включённого плагина с `ui` в манифесте; у снятого окно рисует заглушку вместо фрейма. */
   readonly view?: string;
 }
 

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { app, BrowserWindow, ipcMain, type WebFrameMain } from 'electron';
 import { PATH_MIME, viewOrigin, type SpikePing, type SpikeReport } from '../shared/views.ts';
+import { resolveStaticFile } from './view-files.ts';
 import { framesOf, serveViews } from './views.ts';
 
 export interface SpikeOptions {
@@ -305,7 +306,7 @@ class Spike {
 }
 
 export async function runSpike(options: SpikeOptions): Promise<void> {
-  serveViews((id) => (/^probe(?:-\d+)?$/.test(id) ? path.join(options.rendererDir, 'probe') : undefined));
+  serveViews((url) => resolveStaticFile(url, (id) => (/^probe(?:-\d+)?$/.test(id) ? path.join(options.rendererDir, 'probe') : undefined)), path.join(options.rendererDir, 'shell'));
   const spike = new Spike(options);
   const result: Record<string, unknown> = {
     platform: process.platform,

@@ -8,6 +8,7 @@ const src = join(root, 'src');
 const dist = join(root, 'dist');
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(join(dist, 'renderer', 'probe'), { recursive: true });
+mkdirSync(join(dist, 'renderer', 'shell'), { recursive: true });
 
 const common = { bundle: true, sourcemap: true, logLevel: 'warning' };
 // import.meta в transports.ts нужен только хостам на node:child_process, а playground держит хосты в utilityProcess.
@@ -17,9 +18,10 @@ await build({ ...common, entryPoints: [join(src, 'main/plugin-host.ts')], outfil
 await build({ ...common, entryPoints: [join(src, 'main/preload.ts')], outfile: join(dist, 'preload.js'), platform: 'node', format: 'cjs', target: 'node22', external: ['electron'] });
 const browser = { ...common, platform: 'browser', format: 'iife', target: 'chrome130' };
 for (const page of ['app', 'spike', 'probe/probe']) await build({ ...browser, entryPoints: [join(src, `renderer/${page}.ts`)], outfile: join(dist, `renderer/${page}.js`) });
-for (const file of ['index.html', 'styles.css', 'spike.html', 'spike.css', 'probe/index.html', 'probe/probe.css']) cpSync(join(src, 'renderer', file), join(dist, 'renderer', file));
-// Вид плагина - страница в браузере: его TypeScript собирается, а код главной части хост грузит как есть.
-const views = readdirSync(join(root, 'plugins'), { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync(join(root, 'plugins', d.name, 'view', 'view.ts')));
-cpSync(join(root, 'plugins'), join(dist, 'plugins'), { recursive: true, filter: (from) => !/[/\\]view[/\\][^/\\]+\.ts$/.test(from) });
+for (const file of ['index.html', 'styles.css', 'spike.html', 'spike.css', 'probe/index.html', 'probe/probe.css', 'shell/shell.css']) cpSync(join(src, 'renderer', file), join(dist, 'renderer', file));
+await build({ ...browser, entryPoints: [join(src, 'renderer/shell/shell.ts')], outfile: join(dist, 'renderer/shell/shell.js') });
+// Модуль вида грузит браузер через import(): его TypeScript собирается в ESM, а код главной части хост грузит как есть.
+const views = readdirSync(join(root, 'plugins'), { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync(join(root, 'plugins', d.name, 'ui', 'ui.ts')));
+cpSync(join(root, 'plugins'), join(dist, 'plugins'), { recursive: true, filter: (from) => !/[/\\]ui[/\\][^/\\]+\.ts$/.test(from) });
 cpSync(join(root, 'bench'), join(dist, 'bench'), { recursive: true });
-for (const { name } of views) await build({ ...browser, entryPoints: [join(root, 'plugins', name, 'view', 'view.ts')], outfile: join(dist, 'plugins', name, 'view', 'view.js') });
+for (const { name } of views) await build({ ...browser, format: 'esm', entryPoints: [join(root, 'plugins', name, 'ui', 'ui.ts')], outfile: join(dist, 'plugins', name, 'ui', 'ui.js') });

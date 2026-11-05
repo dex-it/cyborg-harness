@@ -22,6 +22,7 @@ import {
 import { isRecord } from '../../../core/src/manifest.ts';
 import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply } from '../shared/plugins.ts';
 import { viewOrigin } from '../shared/views.ts';
+import type { PluginUi } from './view-files.ts';
 
 export const PLUGIN_API_VERSION = '1.0.0';
 
@@ -33,7 +34,7 @@ export interface Discovered {
   readonly entries: Map<string, string>;
   /** id -> каталог, где найден первым. */
   readonly origins: Map<string, string>;
-  /** id -> каталог вида плагина, если в его каталоге есть view/index.html. */
+  /** id -> каталог плагина, объявившего `ui` в манифесте; сами виды берутся из разобранного ядром манифеста. */
   readonly views: Map<string, string>;
   readonly problems: string[];
 }
@@ -63,8 +64,7 @@ export function discoverPlugins(dirs: readonly string[]): Discovered {
       if (id && entry && !found.entries.has(id)) found.entries.set(id, pathToFileURL(entry).href);
       if (id && !found.origins.has(id)) {
         found.origins.set(id, dir);
-        const view = path.join(home, 'view');
-        if (fs.existsSync(path.join(view, 'index.html'))) found.views.set(id, view);
+        if (isRecord(raw) && raw.ui !== undefined) found.views.set(id, home);
       }
     }
   }
@@ -226,12 +226,14 @@ export class PluginsService {
     return stamped;
   }
 
-  /** Каталог вида: по нему протокол cyborg-plugin отдаёт файлы. */
-  viewDir(pluginId: string): string | undefined {
+  /** Виды плагина: по ним протокол cyborg-plugin отдаёт оболочку и файлы; `wake` - запрос пришёл от показа вида. */
+  uiOf(pluginId: string, wake = false): PluginUi | undefined {
     const dir = this.views.get(pluginId);
+    const views = this.kernel?.manifests.find((m) => m.id === pluginId)?.ui?.views;
+    if (dir === undefined || views === undefined) return undefined;
     // Показ вида - вызов ленивого плагина: мосту вида нужна его главная часть.
-    if (dir !== undefined) void this.kernel?.wake(pluginId).catch(() => undefined);
-    return dir;
+    if (wake) void this.kernel?.wake(pluginId).catch(() => undefined);
+    return { dir, views };
   }
 
   emit(event: SystemEvent): void {
@@ -253,11 +255,39 @@ export class PluginsService {
   }
 
   /** Команда из вида: плагин назван origin фрейма, и чужую команду вид не вызовет. */
-  runFor(pluginId: string, command: unknown): Promise<Reply> {
+  runFor(pluginId: string, command: unknown, args: unknown = []): Promise<Reply> {
     if (typeof command !== 'string') return Promise.resolve({ error: 'нет имени команды' });
+    if (!Array.isArray(args)) return Promise.resolve({ error: `${command}: аргументы - не массив` });
     const own = this.kernel?.manifests.find((m) => m.id === pluginId)?.commands ?? {};
-    if (!(command in own)) return Promise.resolve({ error: `${command}: не команда плагина ${pluginId}` });
-    return this.run(command);
+    if (!Object.hasOwn(own, command)) return Promise.resolve({ error: `${command}: не команда плагина ${pluginId}` });
+    return this.run(command, args);
+  }
+
+  /** Есть ли у плагина вида поставщик контракта; права те же, что у главной части: только requires и optional манифеста. */
+  contractFor(pluginId: string, contract: unknown, major: unknown): Reply {
+    if (typeof contract !== 'string' || typeof major !== 'number') return { error: 'контракт: ожидаются имя и мажорная версия' };
+    if (!this.kernel) return { error: 'ядро плагинов не запущено' };
+    try {
+      return { value: this.kernel.contracts.get(pluginId, contract, major) !== undefined };
+    } catch (error) {
+      return { error: errorMessage(error) };
+    }
+  }
+
+  /** Метод контракта из вида: вызов идёт от имени плагина вида, аргументы и ответ - данные. */
+  async callFor(pluginId: string, contract: unknown, major: unknown, method: unknown, args: unknown): Promise<Reply> {
+    if (typeof contract !== 'string' || typeof major !== 'number' || typeof method !== 'string' || !Array.isArray(args)) return { error: 'вызов контракта: ожидаются имя, мажорная версия, метод и аргументы' };
+    if (!this.kernel) return { error: 'ядро плагинов не запущено' };
+    try {
+      const impl = this.kernel.contracts.get(pluginId, contract, major) as Record<string, unknown> | undefined;
+      if (impl === undefined) return { error: `${contract}: поставщика сейчас нет` };
+      const member = Object.hasOwn(impl, method) ? impl[method] : undefined;
+      if (typeof member !== 'function') return { error: `${contract}.${method}: не метод контракта` };
+      const value: unknown = await member.apply(impl, args);
+      return value === undefined ? {} : { value };
+    } catch (error) {
+      return { error: errorMessage(error) };
+    }
   }
 
   snapshot(): PluginsSnapshot {
@@ -278,7 +308,7 @@ export class PluginsService {
         commands,
         permissions: manifest ? describePermissions(manifest.permissions) : [],
         ...(manifest && { version: manifest.version }),
-        ...((s.state === 'active' || s.state === 'waiting') && this.views.has(s.id) && { view: `${viewOrigin(s.id)}/` }),
+        ...(s.state !== 'disabled' && manifest?.ui && this.views.has(s.id) && { view: `${viewOrigin(s.id)}/` }),
         ...(host !== undefined && { host }),
         ...(pid !== undefined && { pid }),
         ...(s.cause && s.state !== 'active' && { reason: describeEntry(s.cause) }),
@@ -322,10 +352,10 @@ export class PluginsService {
     return true;
   }
 
-  run(command: unknown): Promise<Reply> {
+  run(command: unknown, args: readonly unknown[] = []): Promise<Reply> {
     return this.act(command, 'нет имени команды', async (kernel, name) => {
       try {
-        await kernel.run(name);
+        return await kernel.run(name, ...args);
       } catch (error) {
         this.say({ kind: 'error', subject: name, text: errorMessage(error) });
         throw error;
@@ -367,8 +397,8 @@ export class PluginsService {
     if (typeof value !== 'string') return { error: missing };
     if (!this.kernel) return { error: 'ядро плагинов не запущено' };
     try {
-      await action(this.kernel, value);
-      return {};
+      const result = await action(this.kernel, value);
+      return result === undefined ? {} : { value: result };
     } catch (error) {
       return { error: errorMessage(error) };
     } finally {

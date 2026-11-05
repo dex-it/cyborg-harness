@@ -204,17 +204,25 @@ test('служба окна: сочетания с конфликтом, пер�
   await service.unload();
 });
 
-test('виды: адрес у активного плагина с view/index.html, лента вида - только свои строки, команда из вида - только своя', async () => {
+test('виды: адрес у плагина с ui в манифесте и у снятого, лента вида - только свои строки, команда и контракт из вида - только свои', async () => {
   const userData = tmp();
   const dir = path.join(userData, 'plugins');
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['face', 'voice'] } }));
-  plugin(dir, 'face', { commands: ['face.hi'] }, 'export default {}');
-  plugin(dir, 'voice', { commands: ['voice.ping'] }, 'export default {}');
-  fs.mkdirSync(path.join(dir, 'face', 'view'));
-  fs.writeFileSync(path.join(dir, 'face', 'view', 'index.html'), '<!doctype html>');
+  plugin(dir, 'face', { commands: { 'face.hi': {}, 'face.sum': { args: ['number', 'number'] } }, optional: { 'demo.echo': '^1' }, ui: { views: { main: './ui/ui.js' } } }, 'export default {}');
+  plugin(dir, 'voice', { commands: ['voice.ping'], provides: { 'demo.echo': '1.0' } }, 'export default {}');
   const modules: Record<string, PluginModule> = {
-    face: { activate: (ctx) => void ctx.commands.register('face.hi', () => ctx.log('привет')) },
-    voice: { activate: (ctx) => void ctx.commands.register('voice.ping', () => ctx.log('pong')) },
+    face: {
+      activate(ctx) {
+        ctx.commands.register('face.hi', () => ctx.log('привет'));
+        ctx.commands.register('face.sum', (a, b) => Number(a) + Number(b));
+      },
+    },
+    voice: {
+      activate(ctx) {
+        ctx.commands.register('voice.ping', () => ctx.log('pong'));
+        ctx.contracts.provide('demo.echo', '1.0', { say: async (text: string) => `эхо: ${text}`, onMessage: () => ({ dispose() {} }) } as never);
+      },
+    },
   };
   const pushed: [string, string][] = [];
   const service = new PluginsService({ changed: () => {}, alert: () => {}, log: (id, line) => pushed.push([id, line.text]) }, () => 7);
@@ -225,15 +233,21 @@ test('виды: адрес у активного плагина с view/index.ht
     log: () => {},
   });
 
-  assert.deepEqual(
-    service.snapshot().plugins.map((p) => [p.id, p.view]),
-    [
-      ['face', 'cyborg-plugin://face/'],
-      ['voice', undefined],
-    ],
-  );
-  assert.equal(service.viewDir('face'), path.join(dir, 'face', 'view'));
+  assert.deepEqual(Object.fromEntries(service.snapshot().plugins.map((p) => [p.id, p.view])), { face: 'cyborg-plugin://face/', voice: undefined });
+  assert.deepEqual(service.uiOf('face'), { dir: path.join(dir, 'face'), views: { main: './ui/ui.js' } });
+  assert.equal(service.uiOf('voice'), undefined);
   assert.deepEqual(await service.runFor('face', 'face.hi'), {});
+  assert.deepEqual(await service.runFor('face', 'face.sum', [2, 3]), { value: 5 });
+  assert.deepEqual(await service.runFor('face', 'face.sum', 'x'), { error: 'face.sum: аргументы - не массив' });
+  assert.deepEqual(await service.runFor('face', 'constructor'), { error: 'constructor: не команда плагина face' });
+
+  assert.deepEqual(service.contractFor('face', 'demo.echo', 1), { value: true });
+  assert.deepEqual(await service.callFor('face', 'demo.echo', 1, 'say', ['вид']), { value: 'эхо: вид' });
+  assert.match((await service.callFor('voice', 'demo.echo', 1, 'say', ['x'])).error ?? '', /NotDeclared|нет в requires/, 'вид вызвал контракт, которого нет в манифесте его плагина');
+  assert.match(service.contractFor('face', 'demo.chat', 1).error ?? '', /нет в requires/);
+  assert.deepEqual(await service.callFor('face', 'demo.echo', 1, 'constructor', []), { error: 'demo.echo.constructor: не метод контракта' });
+  assert.match((await service.callFor('face', 'demo.echo', 1, 'onMessage', [])).error ?? '', /structuredClone/, 'подписка из вида - отказ границы хоста');
+  assert.deepEqual(await service.callFor('face', 'demo.echo', '1', 'say', []), { error: 'вызов контракта: ожидаются имя, мажорная версия, метод и аргументы' });
   assert.deepEqual(await service.run('voice.ping'), {});
   assert.deepEqual(await service.runFor('face', 'voice.ping'), { error: 'voice.ping: не команда плагина face' });
   assert.deepEqual(await service.runFor('face', 42), { error: 'нет имени команды' });
@@ -243,7 +257,11 @@ test('виды: адрес у активного плагина с view/index.ht
     ['voice', 'pong'],
   ]);
 
+  assert.deepEqual(await service.disable('voice'), {});
+  assert.deepEqual(service.contractFor('face', 'demo.echo', 1), { value: false });
+  assert.deepEqual(await service.callFor('face', 'demo.echo', 1, 'say', ['x']), { error: 'demo.echo: поставщика сейчас нет' });
   assert.deepEqual(await service.disable('face'), {});
-  assert.equal(service.snapshot().plugins.find((p) => p.id === 'face')?.view, undefined, 'у выгруженного плагина вида нет');
+  const face = service.snapshot().plugins.find((p) => p.id === 'face');
+  assert.deepEqual([face?.state, face?.view], ['stopped', 'cyborg-plugin://face/'], 'снятому плагину окно рисует заглушку на месте вида');
   await service.unload();
 });

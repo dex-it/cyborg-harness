@@ -22,9 +22,11 @@ export interface Contracts {
 
 ## API плагина
 
-`PluginModule`, `PluginContext` и типы вида (`ViewBridge`, `FeedLine`) объявлены здесь же: плагин импортирует только этот пакет и свои модули, а `core/test/plugin-imports.test.ts` проверяет это по каждому файлу плагинов.
+`PluginModule`, `PluginContext` и типы вида (`UiModule`, `UiContext`, `ThemeTokens`, `FeedLine`) объявлены здесь же: плагин импортирует только этот пакет и свои модули, а `core/test/plugin-imports.test.ts` проверяет это по каждому файлу плагинов.
 
 События окна и ОС - `ctx.window.onFocusChange` и `ctx.system`: `onSuspend`, `onResume`, `onScreenLock`, `onIdle(seconds, cb)` (один раз на каждый простой от `seconds`), `onBeforeQuit` (ядро ждёт асинхронного слушателя не дольше бюджета приложения). Подписки снимаются вместе с плагином; упавший слушатель пишет в журнал плагина и соседям не мешает.
+
+Вид плагина - ES-модуль из `"ui": { "views": { "main": "./ui/ui.js" } }` с `export function mount(root, ctx: UiContext): Disposable`. `UiContext` - команды, контракты (`ctx.contracts.get` отдаёт удалённый объект: только методы, ответ - данные), токены темы `--cy-*` уже стоят на `documentElement` до `mount`, `ctx.theme.onChange`, `ctx.onVisibilityChange` (свёрнутый вид не размонтируется), лента журнала и перетаскивание. `ctx.os` у вида нет. Мост вида (`ViewBridge`) - внутреннее дело ядра, плагин его не видит.
 
 `"activation": "lazy"` в манифесте откладывает активацию: плагин ждёт первой команды или сочетания, показа своего вида или потребителя своего контракта. Поставщика из `requires` и `optional` ядро поднимает до потребителя, поставщиков `consumes` будит без ожидания.
 

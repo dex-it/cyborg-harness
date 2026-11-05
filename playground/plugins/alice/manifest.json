@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "engines": { "cyborg": "^1" },
   "requires": { "demo.chat": "^1" },
+  "ui": { "views": { "main": "./ui/ui.js" } },
   "commands": ["alice.hello"],
   "keybindings": [{ "key": "CmdOrCtrl+Shift+A", "command": "alice.hello" }]
 }

@@ -1,0 +1,20 @@
+:root {
+  color-scheme: var(--cy-scheme, light dark);
+}
+
+body {
+  margin: 0;
+  background: var(--cy-bg, Canvas);
+  color: var(--cy-fg, CanvasText);
+  font: var(--cy-font-size, 12px) / 1.4 var(--cy-font, system-ui, sans-serif);
+}
+
+#cyborg-view {
+  height: 100vh;
+}
+
+.cyborg-view-error {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--cy-danger, #cf222e);
+}

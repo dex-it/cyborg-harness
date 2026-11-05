@@ -131,9 +131,27 @@ button:focus-visible {
   margin: 0;
 }
 
+.view-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .view-origin {
   color: var(--fg-faint);
   font: 11px var(--font-mono);
+}
+
+.view-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.view-body[hidden] {
+  display: none;
 }
 
 .view iframe {
@@ -141,6 +159,37 @@ button:focus-visible {
   min-height: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
+}
+
+.view-plaque {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius);
+  background: var(--bg-active);
+  font-weight: 600;
+}
+
+.view-plaque[hidden] {
+  display: none;
+}
+
+.view-placeholder {
+  gap: 6px;
+  padding: 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+.view-reason {
+  margin: 0;
+  color: var(--danger);
+}
+
+.view-actions {
+  display: flex;
+  gap: 6px;
 }
 
 .pane {

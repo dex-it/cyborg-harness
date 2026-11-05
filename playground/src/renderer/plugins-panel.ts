@@ -14,6 +14,7 @@ export interface PluginsPort {
   hangHost(id: string): Promise<Reply>;
   runCommand(command: string): Promise<Reply>;
   onPluginsChanged(listener: () => void): void;
+  setViewVisible(id: string, visible: boolean): Promise<void>;
 }
 
 const LOCAL_LIMIT = 50;
@@ -27,7 +28,7 @@ export class PluginsPanel {
   private readonly journalTitle = byId('plugins-journal-title', HTMLElement);
   private readonly journalAll = byId('plugins-journal-all', HTMLButtonElement);
   private readonly journalEl = byId('plugins-journal', HTMLElement);
-  private readonly views = new ViewsPanel(byId('views', HTMLElement));
+  private readonly views: ViewsPanel;
   private snapshot: PluginsSnapshot | null = null;
   private focus: string | null = null;
   private readonly errors = new Map<string, string>();
@@ -40,6 +41,10 @@ export class PluginsPanel {
 
   constructor(port: PluginsPort) {
     this.port = port;
+    this.views = new ViewsPanel(byId('views', HTMLElement), {
+      setViewVisible: (id, visible) => port.setViewVisible(id, visible),
+      actions: (row) => actionsFor(row, false).filter((b) => b.action === 'enable' || b.action === 'journal').map((b) => this.button(row.id, b)),
+    });
     this.journalAll.addEventListener('click', () => this.showJournal(null));
     port.onPluginsChanged(() => void this.refresh());
     window.addEventListener('keydown', (event) => this.reached(event));

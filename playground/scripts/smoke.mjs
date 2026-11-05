@@ -104,7 +104,9 @@ async function main() {
       return frame ? frame.executeJavaScript(${JSON.stringify(expression)}) : null;
     })()`);
   const viewLog = (id) => inView(id, "[...document.querySelectorAll('#log li')].map((l) => l.textContent).join('\\n')");
-  const views = () => ev("[...document.querySelectorAll('#views [data-plugin]')].map((v) => v.dataset.plugin).join(',')");
+  const views = () => ev("[...document.querySelectorAll('#views iframe')].map((f) => f.closest('[data-plugin]').dataset.plugin).join(',')");
+  const viewVar = (id, name) => inView(id, `getComputedStyle(document.documentElement).getPropertyValue(${JSON.stringify(name)}).trim()`);
+  const theme = (source) => main(`process.mainModule.require('electron').nativeTheme.themeSource = ${JSON.stringify(source)}`);
   const states = async (expected) => {
     for (const [id, want] of Object.entries(expected)) if ((await state(id)) !== want) return false;
     return true;
@@ -143,6 +145,22 @@ async function main() {
   assert.equal(await inView('bob', 'window.cyborgView.drop()'), null, 'вид получил путь без перетаскивания');
   log('виды во фреймах: свой мост, лента плагина, чужая команда отклонена');
 
+  assert.match(await viewVar('alice', '--cy-scheme'), /^(light|dark)$/, 'токены темы не дошли до вида');
+  await theme('dark');
+  await waitFor('тёмная тема в виде alice, onChange в его модуле', async () => (await viewVar('alice', '--cy-bg')) === '#0d1117' && /тема: dark/.test(await viewLog('alice')));
+  await theme('light');
+  await waitFor('светлая тема в виде bob', async () => (await viewVar('bob', '--cy-bg')) === '#ffffff');
+  await inView('bob', "document.getElementById('echo').click()");
+  await waitFor('вид bob вызвал demo.echo через ядро', async () => /вид: из вида bob \(эхо из \d+\)/.test(await viewLog('bob')));
+  const toggle = () => ev(`document.querySelector('#views [data-plugin="bob"] .view-toggle').click()`);
+  await inView('bob', "document.getElementById('field').value = 'набрано до сворачивания'");
+  await toggle();
+  await waitFor('свёрнутый вид получил onVisibilityChange', async () => /вид скрыт, DOM жив/.test(await viewLog('bob')));
+  await toggle();
+  await waitFor('развёрнутый вид получил onVisibilityChange', async () => /вид снова показан/.test(await viewLog('bob')));
+  assert.equal(await inView('bob', "document.getElementById('field').value"), 'набрано до сворачивания', 'сворачивание размонтировало вид');
+  log('UiContext: тема до mount и при смене, контракт из вида, сворачивание без размонтирования');
+
   assert.match(await text('#plugins-list [data-plugin="echo"] .plugin-permissions'), /читает файлы: проекты воркспейса/, 'права echo словами не показаны');
   assert.ok(await button('echo', 'echo.files'), 'нет кнопки echo.files');
   await waitFor('echo пишет в свой каталог, путь вне прав отклонён и записан', () =>
@@ -168,7 +186,8 @@ async function main() {
     (await states({ chat: 'stopped', alice: 'stopped', bob: 'active' })) && lines().includes('[plugins] bob: чат пропал'),
   );
   assert.match(await text('#plugins-list [data-plugin="alice"] .plugin-reason'), /выгружен вместе с chat/);
-  await waitFor('вид снятой alice убран', async () => (await views()) === 'bob');
+  await waitFor('на месте вида снятой alice - заглушка с причиной', async () => (await views()) === 'bob' && /выгружен вместе с chat/.test(await text('#views [data-plugin="alice"] .view-reason')));
+  assert.ok(await ev(`[...document.querySelectorAll('#views [data-plugin="alice"] button')].some((b) => b.textContent === 'Журнал')`), 'у заглушки нет «Журнал»');
   assert.equal((await keyRow(combo('A')))?.live, 'false');
   await press(combo('A'));
   await waitFor('сочетание выгруженной alice дошло до окна', () => feedHas(re('A', 'до окна дошло')));
@@ -188,6 +207,25 @@ async function main() {
     await waitFor('сторож признал хост a зависшим и перезапустил', async () => /хост a завис/.test(await text('#plugins-journal')) && (await state('echo')) === 'active' && (await pid('echo')) !== echoPid);
   }
   log('падение и зависание хоста: сторож перезапускает');
+
+  await inView('bob', "window.beforeCrash = 'документ до сбоя'");
+  await ev(`(() => {
+    window.plaqueSeen = false;
+    const views = document.getElementById('views');
+    new MutationObserver(() => {
+      if (views.querySelector('[data-plugin="bob"][data-state="restarting"] iframe[inert]') && views.querySelector('[data-plugin="bob"] .view-plaque:not([hidden])')) window.plaqueSeen = true;
+    }).observe(views, { subtree: true, attributes: true, childList: true });
+  })()`);
+  const bobPid2 = await pid('bob');
+  assert.equal(await button('bob', 'Уронить хост'), true);
+  await waitFor('хост c поднялся, bob снова работает', async () => (await state('bob')) === 'active' && (await pid('bob')) !== bobPid2);
+  assert.equal(await ev('window.plaqueSeen'), true, 'на время перезапуска вид не закрыт плашкой');
+  assert.equal(await inView('bob', 'window.beforeCrash'), 'документ до сбоя', 'перезапуск хоста пересоздал документ вида');
+  const statuses = async () => (await viewLog('bob')).split('\n').filter((l) => /чат есть/.test(l)).length;
+  const before = await statuses();
+  await inView('bob', "document.getElementById('status').click()");
+  await waitFor('вид после перезапуска зовёт новый хост', async () => (await statuses()) > before);
+  log('перезапуск хоста: вид под плашкой без ввода, документ вида жив, мост ходит в новый хост');
 
   assert.equal(await button('flaky', 'Журнал'), true, 'у flaky нет кнопки «Журнал»');
   assert.equal(await text('#plugins-journal-title'), 'Журнал: flaky');

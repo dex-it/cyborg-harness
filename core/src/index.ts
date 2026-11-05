@@ -17,3 +17,4 @@ export * from './os-gateway.ts';
 export type { PtyBackend, PtyProcess } from './pty.ts';
 export type { SystemEvent } from './host-runtime.ts';
 export * from './workspace.ts';
+export * from './ui-shell.ts';

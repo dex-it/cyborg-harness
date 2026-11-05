@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "engines": { "cyborg": "^1" },
   "optional": { "demo.chat": "^1", "demo.echo": "^1" },
+  "ui": { "views": { "main": "./ui/ui.js" } },
   "commands": ["bob.hello", "bob.status"],
   "keybindings": [
     { "key": "CmdOrCtrl+Shift+B", "command": "bob.hello" },

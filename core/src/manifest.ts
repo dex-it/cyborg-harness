@@ -46,6 +46,8 @@ export interface PluginManifest {
   readonly host?: 'own';
   /** `lazy` - не при старте, а по первой команде, сочетанию, показу вида или потребителю своего контракта. */
   readonly activation?: 'lazy';
+  /** Вид -> модуль с `mount` относительно каталога плагина; каждый вид живёт в своём `<iframe>`. */
+  readonly ui?: { readonly views: Readonly<Record<string, string>> };
   readonly permissions: PluginPermissions;
 }
 
@@ -89,6 +91,7 @@ export function parseManifest(raw: unknown): ManifestResult {
   const config = readSchemaVersion('config', raw.config, errors);
   const state = readSchemaVersion('state', raw.state, errors);
   const permissions = readPermissions(raw.permissions, errors);
+  const ui = readUi(raw.ui, errors);
   if (raw.host !== undefined && raw.host !== 'own') errors.push(`host: допустимо только "own", получено ${show(raw.host)}`);
   if (raw.activation !== undefined && raw.activation !== 'lazy') errors.push(`activation: допустимо только "lazy", получено ${show(raw.activation)}`);
 
@@ -110,6 +113,7 @@ export function parseManifest(raw: unknown): ManifestResult {
       ...(state && { state }),
       ...(raw.host === 'own' && { host: 'own' as const }),
       ...(raw.activation === 'lazy' && { activation: 'lazy' as const }),
+      ...(ui && { ui }),
     },
   };
 }
@@ -254,6 +258,27 @@ function readKeybindings(raw: unknown, commands: Readonly<Record<string, Command
     else out.push({ key, command });
   }
   return out;
+}
+
+const VIEW_NAME = /^[a-z][a-z0-9-]*$/;
+// Путь попадает в атрибут страницы-оболочки и в import(): только вниз от каталога плагина, без экранируемых символов.
+const VIEW_ENTRY = /^\.\/(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*\/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\.js$/;
+
+function readUi(raw: unknown, errors: string[]): { views: Record<string, string> } | undefined {
+  if (raw === undefined) return undefined;
+  if (!isRecord(raw) || !isRecord(raw.views)) {
+    errors.push('ui: ожидается { "views": { "<вид>": "./<модуль>.js" } }');
+    return undefined;
+  }
+  for (const key of Object.keys(raw)) if (key !== 'views') errors.push(`ui.${key}: ядро знает только ui.views`);
+  const views: Record<string, string> = {};
+  for (const [name, entry] of Object.entries(raw.views)) {
+    if (!VIEW_NAME.test(name)) errors.push(`ui.views.${name}: имя вида - строчные латинские буквы, цифры и дефис`);
+    else if (typeof entry !== 'string' || !VIEW_ENTRY.test(entry) || entry.split('/').some((s) => s === '..')) errors.push(`ui.views.${name}: ожидается путь "./<модуль>.js" внутри каталога плагина, получено ${show(entry)}`);
+    else views[name] = entry;
+  }
+  if (Object.keys(raw.views).length === 0) errors.push('ui.views: нет ни одного вида');
+  return { views };
 }
 
 function readSchemaVersion(field: string, raw: unknown, errors: string[]): { version: number } | undefined {

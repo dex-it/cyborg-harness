@@ -1,6 +1,7 @@
 // Вид плагина в своём <iframe> с origin cyborg-plugin://<id> (SAD2 §3.8) и мост к главному процессу через preload в подфрейме.
 
-import type { ViewBridge, ViewDrop } from '@cyborg/contracts';
+import type { ViewDrop } from '@cyborg/contracts';
+import type { ViewBridge } from '../../../core/src/ui-shell.ts';
 
 export type { ViewBridge, ViewDrop };
 

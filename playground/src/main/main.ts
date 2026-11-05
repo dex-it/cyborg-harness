@@ -2,7 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, BrowserWindow, ipcMain, nativeImage, Notification, powerMonitor, screen, type IpcMainInvokeEvent, type WebContents } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeImage, nativeTheme, Notification, powerMonitor, screen, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { viewOrigin } from '../shared/views.ts';
 import { electronOs } from './os-env.ts';
 import { utilityHosts } from './plugin-hosts.ts';
@@ -10,7 +10,10 @@ import { PluginsService } from './plugins.ts';
 import { runSpike } from './spike.ts';
 import { runHostsSpike } from './spike-hosts.ts';
 import { resolveDragFile, ViewDrags } from './view-drag.ts';
-import { framesOf, fromWindow, registerViewScheme, senderPlugin, serveViews } from './views.ts';
+import { framesOf, fromWindow, registerViewScheme, senderPlugin, serveViews, viewFrames } from './views.ts';
+import { themeTokens } from './theme.ts';
+import { resolveViewRequest } from './view-files.ts';
+import { isRecord } from '../../../core/src/manifest.ts';
 
 // Своя папка данных: cyborg.json и пользовательские плагины playground не смешиваются с настройками Cyborg.
 app.setName('Cyborg Playground');
@@ -92,9 +95,22 @@ ipcMain.handle('view:logs', (event) => {
   const pluginId = senderPlugin(event);
   return pluginId === undefined ? [] : plugins.logsOf(pluginId);
 });
-ipcMain.handle('view:run', (event, command: unknown) => {
+ipcMain.handle('view:run', (event, command: unknown, args: unknown) => {
   const pluginId = senderPlugin(event);
-  return pluginId === undefined ? { error: 'не вид плагина' } : plugins.runFor(pluginId, command);
+  return pluginId === undefined ? { error: 'не вид плагина' } : plugins.runFor(pluginId, command, args);
+});
+ipcMain.handle('view:contract', (event, contract: unknown, major: unknown) => {
+  const pluginId = senderPlugin(event);
+  return pluginId === undefined ? { error: 'не вид плагина' } : plugins.contractFor(pluginId, contract, major);
+});
+ipcMain.handle('view:call', (event, contract: unknown, major: unknown, method: unknown, args: unknown) => {
+  const pluginId = senderPlugin(event);
+  return pluginId === undefined ? { error: 'не вид плагина' } : plugins.callFor(pluginId, contract, major, method, args);
+});
+ipcMain.handle('view:theme', () => themeTokens(nativeTheme.shouldUseDarkColors));
+windowChannel('views:visibility', (arg) => {
+  if (!isRecord(arg) || typeof arg.id !== 'string' || typeof arg.visible !== 'boolean' || !win) return;
+  for (const frame of framesOf(win.webContents, viewOrigin(arg.id))) frame.send('view:visibility', arg.visible);
 });
 /** Корень файлов, которые виды могут перетаскивать; в Cyborg это проекты, доступные плагину на чтение. */
 let workspace = '';
@@ -174,7 +190,12 @@ void app.whenReady().then(() => {
     void runSpike({ out: spikeOut, preload: path.join(__dirname, 'preload.js'), rendererDir: path.join(__dirname, 'renderer') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
     return;
   }
-  serveViews((id) => plugins.viewDir(id));
+  serveViews((url) => resolveViewRequest(url, (id) => plugins.uiOf(id, true)), path.join(__dirname, 'renderer', 'shell'));
+  nativeTheme.on('updated', () => {
+    if (!win || win.isDestroyed()) return;
+    const tokens = themeTokens(nativeTheme.shouldUseDarkColors);
+    for (const frame of viewFrames(win.webContents)) frame.send('view:theme', tokens);
+  });
   const userData = app.getPath('userData');
   const config = path.join(userData, 'cyborg.json');
   if (!fs.existsSync(config)) {

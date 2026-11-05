@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { ThemeTokens } from '@cyborg/contracts';
 import type { FeedLine, PluginsSnapshot, Reply } from '../shared/plugins.ts';
 import { VIEW_SCHEME, type SpikeBridge, type SpikePing, type SpikeReport, type ViewBridge } from '../shared/views.ts';
 
@@ -10,12 +11,18 @@ const api = {
   hangHost: (id: string): Promise<Reply> => ipcRenderer.invoke('plugins:hang', id),
   runCommand: (command: string): Promise<Reply> => ipcRenderer.invoke('plugins:run', command),
   onPluginsChanged: (listener: () => void): void => void ipcRenderer.on('plugins:changed', () => listener()),
+  setViewVisible: (id: string, visible: boolean): Promise<void> => ipcRenderer.invoke('views:visibility', { id, visible }),
 };
 
 export type PlaygroundApi = typeof api;
 
 const view: ViewBridge = {
-  run: (command) => ipcRenderer.invoke('view:run', command),
+  run: (command, args) => ipcRenderer.invoke('view:run', command, args),
+  contract: (contract, major) => ipcRenderer.invoke('view:contract', contract, major),
+  call: (contract, major, method, args) => ipcRenderer.invoke('view:call', contract, major, method, args),
+  theme: () => ipcRenderer.invoke('view:theme'),
+  onTheme: (listener) => void ipcRenderer.on('view:theme', (_event, tokens: ThemeTokens) => listener(tokens)),
+  onVisibility: (listener) => void ipcRenderer.on('view:visibility', (_event, visible: boolean) => listener(visible)),
   logs: () => ipcRenderer.invoke('view:logs'),
   onLog: (listener) => void ipcRenderer.on('view:log', (_event, line: FeedLine) => listener(line)),
   startDrag: (path) => ipcRenderer.send('view:drag', path),
