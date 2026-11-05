@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { clipboard, Notification, safeStorage } from 'electron';
+import { BrowserWindow, clipboard, dialog, Notification, safeStorage, shell } from 'electron';
 import * as nodePty from 'node-pty';
 import type { OsEnvironment, SecretStore } from '../../../core/src/index.ts';
 
@@ -44,6 +44,21 @@ export function electronOs(options: { userData: string; roots: () => readonly st
     secrets: fileSecrets(path.join(options.userData, 'secrets.json')),
     notify: (title, body) => new Notification({ title, ...(body !== undefined && { body }) }).show(),
     clipboard: { readText: () => clipboard.readText(), writeText: (text) => clipboard.writeText(text) },
+    shell: {
+      openPath: async (p) => {
+        const error = await shell.openPath(p);
+        if (error) throw new Error(error);
+      },
+      openExternal: (url) => shell.openExternal(url),
+    },
+    dialog: {
+      open: async (o) => {
+        const properties: ('openFile' | 'openDirectory' | 'multiSelections')[] = [o.directory ? 'openDirectory' : 'openFile', ...(o.multiple ? (['multiSelections'] as const) : [])];
+        const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+        const result = await (win ? dialog.showOpenDialog(win, { properties, ...(o.title !== undefined && { title: o.title }) }) : dialog.showOpenDialog({ properties, ...(o.title !== undefined && { title: o.title }) }));
+        return result.canceled ? [] : result.filePaths;
+      },
+    },
     pty: { spawn: (file, args, o) => nodePty.spawn(file, args, o) },
   };
 }

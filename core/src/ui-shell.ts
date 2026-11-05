@@ -1,6 +1,6 @@
-// Оболочка вида в его <iframe> (SAD2 §3.8) идёт в браузер: здесь нет node-модулей.
+// Оболочка вида в его <iframe> (SAD §3.8) идёт в браузер: здесь нет node-модулей.
 
-import type { Disposable, FeedLine, PtyExit, PtyInfo, Reply, ThemeTokens, UiContext, UiTerminal, ViewDrop } from '@cyborg/contracts';
+import type { DialogSpec, Disposable, FeedLine, PtyExit, PtyInfo, Reply, ThemeTokens, UiContext, UiTerminal, ViewDrop } from '@cyborg/contracts';
 import { toDisposable } from './disposable.ts';
 
 /** Мост вида к главному процессу, его выдаёт preload приложения; плагин работает с `UiContext`, а не с ним. */
@@ -22,6 +22,13 @@ export interface ViewBridge {
   terminalResize(tid: number, cols: number, rows: number): Promise<Reply>;
   terminalClose(tid: number): void;
   onTerminal(listener: (event: TerminalEvent) => void): void;
+  /** `value` - память вида или undefined. */
+  state(view: string): Promise<Reply>;
+  setState(view: string, value: unknown): Promise<Reply>;
+  /** `value` - id выбранного пункта или undefined. */
+  dialog(view: string, spec: DialogSpec): Promise<Reply>;
+  /** Команды своего плагина -> сочетание; таблица сочетаний не меняется до перезапуска ядра. */
+  keys(): Promise<Readonly<Record<string, string>>>;
 }
 
 /** Ответ на `terminalOpen`: описание pty, хвост и номер терминала в этом документе. */
@@ -157,7 +164,9 @@ class Terminals {
 
 /** Тема ставится до возврата: модуль плагина монтируется уже на своих токенах, без вспышки чужих цветов. */
 export async function connectView(bridge: ViewBridge, target: ViewTarget): Promise<UiContext> {
-  let tokens = await bridge.theme();
+  const keysAsked = bridge.keys();
+  let [tokens, memory] = await Promise.all([bridge.theme(), bridge.state(target.view).then(unwrap)]);
+  const keys = { ...(await keysAsked) };
   target.applyTheme(tokens);
   let visible = true;
   const themes = new Listeners<ThemeTokens>(target.report);
@@ -195,8 +204,44 @@ export async function connectView(bridge: ViewBridge, target: ViewTarget): Promi
     logs: () => bridge.logs(),
     onLog: (listener: (line: FeedLine) => void) => logs.add(listener),
     terminal: Object.freeze({ open: (ticket: string) => terminals.open(ticket) }),
+    state: Object.freeze({
+      get value() {
+        return memory === undefined ? undefined : structuredClone(memory);
+      },
+      set: async (value: unknown) => {
+        unwrap(await bridge.setState(target.view, value));
+        memory = value === undefined ? undefined : structuredClone(value);
+      },
+    }),
+    dialogs: Object.freeze({ show: async (spec: DialogSpec) => unwrap(await bridge.dialog(target.view, spec)) as string | undefined }),
+    keys: Object.freeze({ of: (command: string) => (Object.hasOwn(keys, command) ? keys[command] : undefined) }),
     drag: Object.freeze({ start: (path: string) => bridge.startDrag(path), drop: () => bridge.drop() }),
   });
+}
+
+/** Минимум DOM для `keepFocus`: ядро собирается без lib DOM. */
+export interface FocusWindow {
+  addEventListener(type: 'focus', listener: () => void): void;
+  removeEventListener(type: 'focus', listener: () => void): void;
+  readonly document: { readonly activeElement: unknown; readonly body: unknown };
+}
+
+export interface FocusRoot {
+  querySelector(selectors: string): { focus(): void } | null;
+}
+
+// Не `[href]`: под него попадает <link> стилей вида; cy-* - хосты, их фокус в тени.
+const FOCUSABLE =
+  'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), cy-button:not([disabled]), cy-field:not([disabled]), cy-list, cy-tree, cy-tabs';
+
+/** Фокус пришёл во фрейм снаружи: в первый раз он лёг бы на body, и человек не видел бы, где он. Дальше документ сам помнит свой элемент. */
+export function keepFocus(win: FocusWindow, root: FocusRoot): Disposable {
+  const place = () => {
+    const { activeElement, body } = win.document;
+    if (activeElement === null || activeElement === body) (root.querySelector('[autofocus]') ?? root.querySelector(FOCUSABLE))?.focus();
+  };
+  win.addEventListener('focus', place);
+  return toDisposable(() => win.removeEventListener('focus', place));
 }
 
 /** Вызывает `mount` модуля; не модуль вида - исключение с причиной, которую оболочка покажет вместо вида. */

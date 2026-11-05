@@ -1,10 +1,13 @@
-// Окно playground: плагины с кнопками над ядром, сочетания клавиш, лента сообщений плагинов и журнал ядра (SAD2 §3.2, §3.5).
+// Окно playground: плагины с кнопками над ядром, сочетания клавиш, лента сообщений плагинов и журнал ядра (SAD §3.2, §3.5).
 
 import { keyOfInput } from '../../../core/src/keys.ts';
 import type { FeedLine, KeyRow, PluginRow, PluginsSnapshot, Reply } from '../shared/plugins.ts';
 import type { DisablePreview } from '../../../core/src/loader.ts';
 import { byId, el } from './dom.ts';
 import { ViewsPanel } from './views-panel.ts';
+import { moveFocus } from './focus.ts';
+import { SideTabs } from './side-tabs.ts';
+import { WindowLayerView } from './window-layer.ts';
 import { actionsFor, clock, conflictText, journalFor, keyStatus, mergeFeed, sortedPlugins, STATE_LABEL, summary, type ActionButton } from './plugins-model.ts';
 
 export interface PluginsPort {
@@ -17,6 +20,11 @@ export interface PluginsPort {
   runCommand(command: string): Promise<Reply>;
   onPluginsChanged(listener: () => void): void;
   setViewVisible(id: string, visible: boolean): Promise<void>;
+  answerDialog(id: number, choice: string | undefined): Promise<Reply>;
+  closeDocument(id: string): Promise<Reply>;
+  /** Без файла - системный диалог выбора; смена воркспейса перезапускает приложение. */
+  openWorkspace(file?: string): Promise<Reply>;
+  onWindowCommand(listener: (command: string) => void): void;
 }
 
 const LOCAL_LIMIT = 50;
@@ -26,11 +34,15 @@ export class PluginsPanel {
   private readonly problemsEl = byId('plugins-problems', HTMLElement);
   private readonly listEl = byId('plugins-list', HTMLElement);
   private readonly keysEl = byId('keys-list', HTMLElement);
+  private readonly documentsEl = byId('documents-list', HTMLElement);
+  private readonly workspaceEl = byId('workspace-current', HTMLElement);
+  private readonly recentEl = byId('workspace-recent', HTMLElement);
   private readonly feedEl = byId('feed', HTMLElement);
   private readonly journalTitle = byId('plugins-journal-title', HTMLElement);
   private readonly journalAll = byId('plugins-journal-all', HTMLButtonElement);
   private readonly journalEl = byId('plugins-journal', HTMLElement);
   private readonly views: ViewsPanel;
+  private readonly tabs = new SideTabs(byId('side-tabs', HTMLElement));
   private snapshot: PluginsSnapshot | null = null;
   private focus: string | null = null;
   private readonly errors = new Map<string, string>();
@@ -40,15 +52,22 @@ export class PluginsPanel {
   private loading = false;
   private again = false;
   private readonly port: PluginsPort;
+  private readonly layer: WindowLayerView;
 
   constructor(port: PluginsPort) {
     this.port = port;
+    this.layer = new WindowLayerView(port, byId('playground', HTMLElement), byId('lock-layer', HTMLElement));
     this.views = new ViewsPanel(byId('views', HTMLElement), {
       setViewVisible: (id, visible) => port.setViewVisible(id, visible),
       actions: (row) => actionsFor(row, false).filter((b) => b.action === 'enable' || b.action === 'journal').map((b) => this.button(row.id, b)),
-    });
+    }, { id: 'sessions', root: byId('main-view', HTMLElement) });
     this.journalAll.addEventListener('click', () => this.showJournal(null));
+    byId('workspace-open', HTMLButtonElement).addEventListener('click', () => void port.openWorkspace());
     port.onPluginsChanged(() => void this.refresh());
+    port.onWindowCommand((command) => {
+      if (command === 'cyborg.window.focus-next') moveFocus(1);
+      if (command === 'cyborg.window.focus-prev') moveFocus(-1);
+    });
     window.addEventListener('keydown', (event) => this.reached(event));
   }
 
@@ -89,9 +108,14 @@ export class PluginsPanel {
     this.problemsEl.hidden = snapshot.problems.length === 0;
     this.listEl.replaceChildren(...sortedPlugins(snapshot.plugins).map((row) => this.row(row, snapshot.canHang)));
     this.keysEl.replaceChildren(...(snapshot.keys.length ? snapshot.keys.map((row) => this.keyRow(row)) : [this.emptyKeys()]));
+    const { current, recent } = snapshot.workspace;
+    this.workspaceEl.textContent = current === null ? 'Воркспейс не открыт' : `Воркспейс: ${current}`;
+    this.recentEl.replaceChildren(...recent.map((file) => this.recentRow(file)));
+    this.documentsEl.replaceChildren(...(snapshot.documents.length ? snapshot.documents.map((row) => this.documentRow(row)) : [el('li', 'empty', 'Документов нет')]));
     this.renderFeed();
     this.renderJournal();
     this.views.sync(snapshot.plugins);
+    this.layer.sync(snapshot.window, snapshot.plugins);
   }
 
   private row(row: PluginRow, canHang: boolean): HTMLElement {
@@ -160,7 +184,7 @@ export class PluginsPanel {
     await this.refresh();
   }
 
-  /** SAD2 3.6: выключение не завершает процессы в терминале молча - человек решает, оставить их или завершить. */
+  /** SAD 3.6: выключение не завершает процессы в терминале молча - человек решает, оставить их или завершить. */
   private async disable(id: string): Promise<Reply> {
     const preview = await this.port.disablePreview(id);
     if (preview.error !== undefined) return preview;
@@ -168,6 +192,31 @@ export class PluginsPanel {
     if (ptys.length === 0) return this.port.disablePlugin(id);
     const choice = await askPty(id, plugins, ptys);
     return choice === 'cancel' ? {} : this.port.disablePlugin(id, choice === 'keep');
+  }
+
+  private recentRow(file: string): HTMLElement {
+    const item = el('li');
+    const open = el('button', 'workspace-recent-item', file.split(/[\\/]/).at(-1) ?? file) as HTMLButtonElement;
+    open.type = 'button';
+    open.title = file;
+    open.setAttribute('aria-label', `Открыть воркспейс ${file}`);
+    open.addEventListener('click', () => void this.port.openWorkspace(file));
+    item.append(open);
+    return item;
+  }
+
+  private documentRow(row: PluginsSnapshot['documents'][number]): HTMLElement {
+    const item = el('li', 'document-row');
+    item.dataset.document = row.id;
+    item.dataset.available = String(row.available);
+    item.append(el('span', 'document-title', row.title), el('span', 'document-owner', `${row.pluginId} · ${row.type}`));
+    if (!row.available) item.append(el('span', 'document-off', 'недоступен: владелец не работает'));
+    const close = el('button', '', 'Закрыть') as HTMLButtonElement;
+    close.type = 'button';
+    close.setAttribute('aria-label', `Закрыть ${row.title}`);
+    close.addEventListener('click', () => void this.port.closeDocument(row.id).then(() => this.refresh()));
+    item.append(close);
+    return item;
   }
 
   private keyRow(row: KeyRow): HTMLElement {
@@ -206,7 +255,7 @@ export class PluginsPanel {
   private showJournal(pluginId: string | null): void {
     this.focus = pluginId;
     this.renderJournal();
-    this.journalEl.scrollIntoView({ block: 'nearest' });
+    this.tabs.reveal(this.journalEl);
   }
 
   private renderJournal(): void {

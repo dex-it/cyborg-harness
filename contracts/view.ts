@@ -43,7 +43,17 @@ export interface UiTerminal extends PtyInfo {
   close(): void;
 }
 
-/** Урезанный `ctx` для UI плагина (SAD2 §3.8): права - те же, что у главной части, но `ctx.os` нет. */
+export interface DialogChoice {
+  readonly id: string;
+  readonly label: string;
+}
+
+/** Диалог в слое ядра поверх всех фреймов: `ask` - вопрос с кнопками, `menu` - меню у точки `at` в координатах вида. */
+export type DialogSpec =
+  | { readonly kind: 'ask'; readonly title: string; readonly message?: string; readonly buttons: readonly DialogChoice[] }
+  | { readonly kind: 'menu'; readonly items: readonly DialogChoice[]; readonly at: { readonly x: number; readonly y: number } };
+
+/** Урезанный `ctx` для UI плагина (SAD §3.8): права - те же, что у главной части, но `ctx.os` нет. */
 export interface UiContext {
   readonly pluginId: string;
   /** Имя вида из `ui.views` манифеста. */
@@ -69,6 +79,20 @@ export interface UiContext {
   readonly terminal: {
     /** Билет от `PtyHandle.share()` своей главной части; чужой, просроченный или использованный - исключение. */
     open(ticket: PtyTicket): Promise<UiTerminal>;
+  };
+  readonly state: {
+    /** Память вида в state воркспейса, какой её оставил прошлый документ; не писали - undefined. Схемы и миграций нет: формат - забота плагина. */
+    readonly value: unknown;
+    /** JSON до 64 КБ; undefined - забыть. У каждого воркспейса своя память, поэтому не localStorage origin плагина. */
+    set(value: unknown): Promise<void>;
+  };
+  readonly dialogs: {
+    /** Окно показывает диалоги по одному, под замком чужие ждут; ответ - id выбранного пункта, отмена или выгрузка плагина - undefined. */
+    show(spec: DialogSpec): Promise<string | undefined>;
+  };
+  readonly keys: {
+    /** Сочетание своей команды, как оно сейчас привязано (с правками человека, под платформу): `Ctrl+Shift+F`; не привязана - undefined. Нажатие ловит ядро, вид его не видит. */
+    of(command: string): string | undefined;
   };
   readonly drag: {
     /** Перетаскивание файла ведёт ядро: Chromium не пускает перетаскивание из страницы во фрейм другого процесса. Путь - от корня рабочей папки. */

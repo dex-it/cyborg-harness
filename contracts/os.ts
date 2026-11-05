@@ -3,14 +3,19 @@ import type { Disposable } from './plugin.ts';
 /** Программа или программа с первыми аргументами; `env` - имена переменных, которые плагин может ей передать. */
 export type ProgramRule = string | { readonly program: string; readonly args: readonly string[]; readonly env?: readonly string[] };
 
-/** Права главной части плагина: что ядро пропустит через `ctx.os` (SAD2 §3.7). Нет права - нет члена в `ctx.os`. */
+/** Права главной части плагина: что ядро пропустит через `ctx.os` (SAD §3.7). Нет права - нет члена в `ctx.os`. */
 export interface PluginPermissions {
-  /** Области путей: `workspace`, `plugin-data`, `plugin-temp` или абсолютный путь (каталог с поддеревом, `~` - домашний). */
+  /** Области путей: `workspace`, `plugin-data`, `plugin-temp`, `granted` (выбор человека в `dialog`), абсолютный путь (каталог с поддеревом, `~` - домашний) или маска: `*` - часть имени, `**` - любые каталоги. */
   readonly 'fs.read'?: readonly string[];
+  /** Те же области и `workspace.git` - корни воркспейса вместе с записью в `.git`. */
   readonly 'fs.write'?: readonly string[];
+  /** Открыть в системе: области путей, как у `fs.read`, и схемы URL с двоеточием (`https:`, `mailto:`). */
+  readonly shell?: readonly string[];
   readonly process?: readonly ProgramRule[];
   /** Программы в псевдотерминале; правило той же формы, что у `process`. */
   readonly pty?: readonly ProgramRule[];
+  /** Запуски, которые поставщик описывает потребителю (`cyborg.agent`); члена в `ctx.os` не даёт, pty потребителя с `describedBy` сверяется и с ними. */
+  readonly launch?: readonly ProgramRule[];
   /** Хосты HTTP; `config:<поле>` - хост из своего раздела config. */
   readonly net?: readonly string[];
   readonly env?: readonly string[];
@@ -20,7 +25,10 @@ export interface PluginPermissions {
   readonly 'secrets.ref'?: readonly string[];
   /** Задать корни проектов - область `workspace` для всех плагинов. */
   readonly 'security.roots'?: boolean;
+  /** Закрыть окно своим `ui.overlay`; без него манифест не примут. */
   readonly 'ui.lock'?: boolean;
+  /** Сервер HTTP на 127.0.0.1 (`ctx.os.serve`): так агент зовёт инструменты плагина по MCP. */
+  readonly serve?: boolean;
 }
 
 export interface DirEntry {
@@ -32,6 +40,13 @@ export interface FileStat {
   readonly kind: 'file' | 'dir' | 'other';
   readonly size: number;
   readonly mtimeMs: number;
+}
+
+export interface FileSlice {
+  readonly text: string;
+  /** Сколько байт файла покрывает `text`: незаконченный символ UTF-8 на конце куска не входит - на столько сдвинуть `offset`. */
+  readonly bytes: number;
+  readonly size: number;
 }
 
 export interface ProcessResult {
@@ -61,11 +76,37 @@ export interface HttpResponse {
   readonly body: string;
 }
 
+/** Запрос к серверу плагина: имена заголовков в нижнем регистре, тело - текст до 1 МиБ. */
+export interface ServeRequest {
+  readonly method: string;
+  /** Путь с запросом, как в первой строке HTTP: `/mcp?x=1`. */
+  readonly path: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: string;
+}
+
+/** Ответ обработчика; не ответил за 30 с - клиент получит 504, чужая форма - 502. */
+export interface ServeResponse {
+  readonly status: number;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly body?: string;
+}
+
+export interface HttpServer {
+  /** `http://127.0.0.1:<порт>`; порт выбирает ОС. */
+  readonly url: string;
+  dispose(): void;
+}
+
 /** Файлы: без права - только свои каталоги `paths`; чтение шире - по `fs.read`, запись - по `fs.write`. Путь вне области - `PermissionDenied`, никогда `NotFound`. */
 export interface OsFs {
   readText(path: string): Promise<string>;
   list(dir: string): Promise<DirEntry[]>;
   stat(path: string): Promise<FileStat>;
+  /** Кусок файла с байта `offset`, от 4 байт до 1 МиБ: длинный журнал читается частями, а не целиком. */
+  readSlice(path: string, offset: number, maxBytes: number): Promise<FileSlice>;
+  /** Изменения файла или каталога по праву чтения; у каталога - имена изменённых, события склеиваются за 50 мс. */
+  watch(path: string, listener: (names: readonly string[]) => void): Promise<Disposable>;
   writeText(path: string, text: string): Promise<void>;
   mkdir(path: string): Promise<void>;
   remove(path: string): Promise<void>;
@@ -88,6 +129,8 @@ export interface PtySpawnOptions {
   readonly rows?: number;
   /** Пережить перезапуск хоста: процесс ждёт, пока владелец вернётся через `attach`. */
   readonly persist?: boolean;
+  /** Плагин, описавший запуск: ядро пропустит его, только если описание подходит и под правило `launch` этого плагина. */
+  readonly describedBy?: string;
 }
 
 export interface PtyExit {
@@ -131,7 +174,7 @@ export interface OsPty {
 
 export interface PluginOs {
   /** Свои каталоги: данные и временный; читать и писать в них можно без права. */
-  readonly paths: { readonly data: string; readonly temp: string };
+  readonly paths: { readonly data: string; readonly temp: string; readonly home: string };
   readonly fs: OsFs;
   readonly pty?: OsPty;
   readonly process?: { run(program: string, args: readonly string[], options?: ProcessOptions): Promise<ProcessResult> };
@@ -141,6 +184,35 @@ export interface PluginOs {
   readonly clipboard?: { readText?(): Promise<string>; writeText?(text: string): Promise<void> };
   readonly secrets: OsSecrets;
   readonly security?: { setRoots(paths: readonly string[]): Promise<void> };
+  readonly ui?: OsUi;
+  /** Слушает только 127.0.0.1; запрос с чужим Host или с Origin (страница в браузере) до обработчика не доходит. Выгрузка плагина закрывает его серверы. */
+  readonly serve?: { http(handler: (request: ServeRequest) => ServeResponse | Promise<ServeResponse>): Promise<HttpServer> };
+  /** Открыть путь или URL программой ОС; исполняемый файл не открывается - это был бы запуск в обход `process`. */
+  readonly shell?: { openPath?(path: string): Promise<void>; openExternal?(url: string): Promise<void> };
+  /** Права не нужно: выбор человека сам становится областью `granted` и хранится в state воркспейса. */
+  readonly dialog: OsDialog;
+}
+
+export interface OpenDialogOptions {
+  readonly title?: string;
+  readonly directory?: boolean;
+  readonly multiple?: boolean;
+}
+
+export interface OsDialog {
+  /** Отмена - пустой список; окно закрыто чужим замком - `Unavailable`. */
+  open(options?: OpenDialogOptions): Promise<string[]>;
+}
+
+/** Замок окна: чужие виды скрыты и `inert`, виден только `ui.overlay` владельца, работают только его сочетания и диалоги. Главные части работают дальше. */
+export interface OsUi {
+  /** Повторный вызов владельца меняет только `hideNotifications`. Хост владельца упал - окно остаётся закрытым до его возвращения. */
+  lock(options?: { readonly hideNotifications?: boolean }): Promise<UiLock>;
+}
+
+export interface UiLock {
+  /** Снимает только свой замок; два замка - окно откроется, когда сняты оба. */
+  release(): Promise<void>;
 }
 
 export interface SecretValue {

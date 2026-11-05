@@ -1,31 +1,23 @@
 # Cyborg Harness
 
-Проект перестройки Cyborg в **ядро и плагины**: ядро - хост плагинов без предметной области, все функции приложения (агент, сессии, файлы, проекты, трекеры) - равные плагины на контрактах; затем сторонние плагины и другие агенты помимо Claude Code. Всё, что работает сегодня, сохраняется.
+Документация разработки Cyborg Harness - ядра плагинов (`core/`), пакета объявлений `@cyborg/contracts` (`contracts/`) и стенда `playground/`. Ядро не знает предметной области: агент, сессии, файлы, проекты и трекеры - равные плагины, а поставка приложения - список встроенных плагинов. Коротко о харнесе - [OVERVIEW](OVERVIEW.md).
 
-> Документы перенесены из `docs/cyborg-harness/` репозитория [ai-cyborg](https://github.com/dex-it/ai-cyborg) вместе с кодом ядра. Статус - проектирование, `review`: решения составителя ждут приёмки владельцем; ADR без апрува владельца - `proposed`. Код - `core/` (ядро) и `playground/` (приложение для проверки ядра вживую) в корне этого репозитория. Пути вида `src/main/...` в документах - файлы Cyborg. Целевая архитектура - [SAD2](03-architecture/design/sad2.md); BRD, фичи, SRS, сценарии, план паритета и дорожная карта приведены к ней; сама она проверена [ресёрчем-2](research/sad2-validation.md).
-
-## Идея
-
-Сегодня каждая возможность правит `main.ts`, `preload.ts`, `app.ts` и копится в одном целом (14 тыс. строк, 58 каналов IPC); Claude Code зашит в ядро; расширить приложение снаружи нельзя. Два проекта решили похожую задачу: [bb](research/bb.md) (агентная IDE с плагинами и провайдерами агентов) и [DeepSeek Harness](research/deepseek-harness.md) (харнес «everything is a plugin»). Мы берём из них манифест с совместимостью, паритет по записанным сессиям и откат регистраций через `Disposable`; шину событий, реестр сервисов, `inject`, waterfall и guard не берём - плагины связаны только контрактами в манифесте. Ядро - хост плагинов: оно загружает, связывает и изолирует плагины, держит процессы дольше плагина (pty), контролирует доступ к ОС и даёт экран, клавиши и хранение; критерий компактности не пускает в него предметную область. Агент - обычный плагин с контрактом `cyborg.agent`; контракт для интерактивного `claude` в pty проектируем сами: образцы такое не встраивают. Подробнее - [OVERVIEW](OVERVIEW.md).
+> Документы перенесены из `docs/cyborg-harness/` репозитория [ai-cyborg](https://github.com/dex-it/ai-cyborg) вместе с кодом ядра. Статус - `review`: решения составителя ждут приёмки владельцем. Пути вида `src/main/...` в документах - файлы Cyborg.
 
 ## Где что
 
 | Что | Документ |
 |---|---|
-| Общее описание, ресёрч, архитектура, план, риски, открытые решения | [OVERVIEW.md](OVERVIEW.md) |
-| Ресёрч-1: метод, [bb](research/bb.md), [dsh](research/deepseek-harness.md), [сравнение](research/comparison.md), [Cyborg сегодня](research/cyborg-today.md) | [research/](research/README.md) |
-| Ресёрч-2: проверка SAD2 замерами в Electron, разбором аналогов и сверкой с кодом; что не проверено; скрипты замеров | [research/sad2-validation.md](research/sad2-validation.md), [spikes/sad2/](research/spikes/sad2/README.md) |
-| Идея и обоснование на одной странице, canvas | [00-strategy/one-pager.md](00-strategy/one-pager.md) |
-| BRD и три фичи (ядро и загрузчик, точки расширения и провайдеры, миграция и паритет) | [01-product/](01-product/brd.md) |
-| Сценарии: пользователь, сбой плагина, автор, мейнтейнер, второй агент, установка | [02-use-cases/](02-use-cases/README.md) |
-| SAD2 - целевая архитектура: десять целей ядра, критерий компактности, взаимодействие плагинов, базовая часть как пример, этапы, риски | [03-architecture/design/sad2.md](03-architecture/design/sad2.md) |
-| Вопросы к автору SAD2 и спорные моменты: позиции, итог проверки, предложения, кто решает | [03-architecture/design/sad2-disputed-points.md](03-architecture/design/sad2-disputed-points.md) |
-| SAD - детали устройства; частично заменён SAD2 (где расходятся, действует SAD2) | [03-architecture/design/sad.md](03-architecture/design/sad.md) |
-| 14 ADR: 0001-0008 первоначальные (часть заменена или уточнена), 0009-0014 по SAD2 и ресёрчу-2 (граница ядра, контракты, этапы изоляции, хосты и pty-хост, UI плагина, секреты, config и state) | [adr/](03-architecture/adr/) |
-| Как проверяем, что ничего не потеряно | [04-verification/parity-plan.md](04-verification/parity-plan.md) |
+| Обзор: что это, состав репозитория, архитектура коротко | [OVERVIEW.md](OVERVIEW.md) |
+| Ресёрч: метод, [bb](research/bb.md), [DeepSeek Harness](research/deepseek-harness.md), [сравнение](research/comparison.md), [Cyborg сегодня](research/cyborg-today.md) | [research/](research/README.md) |
+| Стратегия на одной странице: зачем ядро и плагины, для кого, меры успеха | [00-strategy/one-pager.md](00-strategy/one-pager.md) |
+| BRD и фичи: ядро и загрузчик, контракты расширения | [01-product/](01-product/brd.md) |
+| Сценарии: обновление, сбой плагина, автор плагина, автор встроенного плагина, второй агент, установка стороннего плагина | [02-use-cases/](02-use-cases/README.md) |
+| SAD - архитектура: цели ядра, взаимодействие плагинов, базовая часть как пример, этапы, открытые вопросы, риски | [03-architecture/design/sad.md](03-architecture/design/sad.md) |
+| Решения ADR-CH; где они расходятся с SAD, действует SAD ([раздел 7](03-architecture/design/sad.md#7-расхождения-с-первой-редакцией-пакета)) | [03-architecture/adr/](03-architecture/adr/) |
 | Спайк UI во фреймах: память, задержка, мост, клавиши, перетаскивание | [04-verification/spike-iframe-ui.md](04-verification/spike-iframe-ui.md) |
 | Спайк хостов плагинов: память на хост, цена вызова, пороги сторожа | [04-verification/spike-hosts.md](04-verification/spike-hosts.md) |
-| Дорожная карта по фазам P0-P5 | [05-plans/roadmap.md](05-plans/roadmap.md) |
+| Дорожная карта: этапы SAD, что сделано и что осталось | [05-plans/roadmap.md](05-plans/roadmap.md) |
 | Термины | [glossary.md](glossary.md) |
 
 ## Структура по плану корпуса

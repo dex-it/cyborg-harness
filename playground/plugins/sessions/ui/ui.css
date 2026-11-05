@@ -21,20 +21,40 @@ header {
   flex: 1;
   min-height: 6em;
   margin: 0;
-  padding: 6px 8px;
-  overflow: auto;
-  white-space: pre-wrap;
-  font-family: var(--cy-font-mono);
+  padding: 4px 6px;
+  overflow: hidden;
   background: var(--cy-surface);
   border: 1px solid var(--cy-border);
   border-radius: var(--cy-radius);
 }
 
-#line {
+.screen .xterm {
+  height: 100%;
+}
+
+#line::part(input) {
   font-family: var(--cy-font-mono);
+}
+
+#no-session {
+  height: 100%;
+  font-family: var(--cy-font);
 }
 
 .agents {
   display: flex;
   gap: var(--cy-gap);
+}
+
+#actions {
+  flex-wrap: wrap;
+}
+
+#actions[hidden] {
+  display: none;
+}
+
+.screen:focus-within {
+  outline: 2px solid var(--cy-accent);
+  outline-offset: -1px;
 }

@@ -2,7 +2,9 @@ import { CoreError } from './errors.ts';
 import { isValidRange, parseVersion } from './semver.ts';
 import { normalizeKey } from './keys.ts';
 import { readPermissions, type PluginPermissions } from './permissions.ts';
+import { readGuard, type MemberGuards } from './via-contract.ts';
 import { isRecord, isWireKind, matchesKind, type WireKind } from './wire.ts';
+import { reservedId, WINDOW_COMMANDS } from './window-layer.ts';
 
 export { isRecord };
 
@@ -30,6 +32,8 @@ export interface PluginManifest {
   readonly engines: { readonly cyborg: string };
   /** Контракт -> версия или несколько мажорных версий одновременно. */
   readonly provides: Readonly<Record<string, readonly string[]>>;
+  /** Контракт -> член -> право вызывающего на аргумент: ядро проверит его до передачи вызова (`via-contract`). */
+  readonly guards?: Readonly<Record<string, MemberGuards>>;
   /** Кратность one, без поставщика плагин не активируется. */
   readonly requires: Readonly<Record<string, string>>;
   /** Кратность one, без поставщика плагин работает. */
@@ -40,14 +44,23 @@ export interface PluginManifest {
   readonly commands: Readonly<Record<string, CommandSpec>>;
   /** Читаются до запуска кода: конфликт сочетаний виден при загрузке, а не при нажатии. */
   readonly keybindings: readonly KeybindingSpec[];
-  readonly config?: { readonly version: number };
-  readonly state?: { readonly version: number };
+  /** `schema` - путь `./<файл>.json` внутри каталога плагина; раздел проверяется по нему до активации и после правки извне. */
+  readonly config?: SectionDecl;
+  readonly state?: SectionDecl;
   /** `own` - просьба о своём хосте; пользователь вправе переопределить группой в `plugins.hosts`. */
   readonly host?: 'own';
   /** `lazy` - не при старте, а по первой команде, сочетанию, показу вида или потребителю своего контракта. */
   readonly activation?: 'lazy';
   /** Вид -> модуль с `mount` относительно каталога плагина; каждый вид живёт в своём `<iframe>`. */
-  readonly ui?: { readonly views: Readonly<Record<string, string>> };
+  readonly ui?: {
+    readonly views: Readonly<Record<string, string>>;
+    /** Модуль замка окна, вид с именем `overlay`: только при праве `ui.lock`. */
+    readonly overlay?: string;
+  };
+  /** `onStart` - окно закрыто с первого кадра, плагин активируется сразу, даже `lazy`. */
+  readonly lock?: { readonly onStart: true };
+  /** Типы документов плагина; `restorable` - документ переживает перезапуск окна. */
+  readonly documents?: Readonly<Record<string, { readonly restorable: boolean }>>;
   readonly permissions: PluginPermissions;
 }
 
@@ -67,6 +80,7 @@ export function parseManifest(raw: unknown): ManifestResult {
 
   const id = typeof raw.id === 'string' ? raw.id : undefined;
   if (id === undefined || !isValidId(id)) errors.push(`id: ожидается имя вида "pin-lock" или "cyborg.files", получено ${show(raw.id)}`);
+  else if (reservedId(id)) errors.push(`id: "${id}" занято командами окна ядра (${Object.keys(WINDOW_COMMANDS).join(', ')})`);
 
   const version = raw.version;
   if (typeof version !== 'string' || !parseVersion(version)) errors.push(`version: ожидается версия x.y.z, получено ${show(version)}`);
@@ -74,7 +88,7 @@ export function parseManifest(raw: unknown): ManifestResult {
   const engines = isRecord(raw.engines) ? raw.engines.cyborg : undefined;
   if (typeof engines !== 'string' || !isValidRange(engines)) errors.push(`engines.cyborg: ожидается диапазон, получено ${show(engines)}`);
 
-  const provides = readProvides(raw.provides, errors);
+  const { provides, guards } = readProvides(raw.provides, errors);
   const requires = readRanges('requires', raw.requires, errors);
   const optional = readRanges('optional', raw.optional, errors);
   const consumes = readRanges('consumes', raw.consumes, errors);
@@ -92,8 +106,15 @@ export function parseManifest(raw: unknown): ManifestResult {
   const state = readSchemaVersion('state', raw.state, errors);
   const permissions = readPermissions(raw.permissions, errors);
   const ui = readUi(raw.ui, errors);
+  const documents = readDocuments(raw.documents, errors);
   if (raw.host !== undefined && raw.host !== 'own') errors.push(`host: допустимо только "own", получено ${show(raw.host)}`);
   if (raw.activation !== undefined && raw.activation !== 'lazy') errors.push(`activation: допустимо только "lazy", получено ${show(raw.activation)}`);
+  const lock = isRecord(raw.lock) && raw.lock.onStart === true && Object.keys(raw.lock).length === 1;
+  if (raw.lock !== undefined && !lock) errors.push(`lock: допустимо только { "onStart": true }, получено ${show(raw.lock)}`);
+  // Замок без своего экрана запер бы человека без способа открыть окно, экран без права замка не нужен.
+  if (permissions['ui.lock'] === true && ui?.overlay === undefined) errors.push('permissions.ui.lock: нужен ui.overlay - экран, которым человек откроет окно');
+  if (ui?.overlay !== undefined && permissions['ui.lock'] !== true) errors.push('ui.overlay: только с правом permissions.ui.lock');
+  if (lock && permissions['ui.lock'] !== true) errors.push('lock.onStart: только с правом permissions.ui.lock');
 
   if (errors.length > 0 || id === undefined || typeof version !== 'string' || typeof engines !== 'string') return { ok: false, id, errors };
   return {
@@ -103,6 +124,7 @@ export function parseManifest(raw: unknown): ManifestResult {
       version,
       engines: { cyborg: engines },
       provides,
+      ...(guards && { guards }),
       requires,
       optional,
       consumes,
@@ -114,19 +136,33 @@ export function parseManifest(raw: unknown): ManifestResult {
       ...(raw.host === 'own' && { host: 'own' as const }),
       ...(raw.activation === 'lazy' && { activation: 'lazy' as const }),
       ...(ui && { ui }),
+      ...(lock && { lock: { onStart: true as const } }),
+      ...(documents && { documents }),
     },
   };
 }
 
-function readProvides(raw: unknown, errors: string[]): Record<string, string[]> {
+interface Provides {
+  readonly provides: Record<string, string[]>;
+  readonly guards?: Record<string, MemberGuards>;
+}
+
+/** Значение - версия, список версий или `{ version, guard? }`. */
+function readProvides(raw: unknown, errors: string[]): Provides {
   const out: Record<string, string[]> = {};
-  if (raw === undefined) return out;
+  const guards: Record<string, MemberGuards> = {};
+  if (raw === undefined) return { provides: out };
   if (!isRecord(raw)) {
     errors.push('provides: ожидается объект');
-    return out;
+    return { provides: out };
   }
-  for (const [name, value] of Object.entries(raw)) {
+  for (const [name, entry] of Object.entries(raw)) {
     if (!isValidId(name)) errors.push(`provides.${name}: недопустимое имя контракта`);
+    const full = isRecord(entry) ? entry : undefined;
+    for (const key of Object.keys(full ?? {})) if (!['version', 'guard'].includes(key)) errors.push(`provides.${name}.${key}: неизвестное поле`);
+    const guard = readGuard(`provides.${name}.guard`, full?.guard, errors);
+    if (guard) guards[name] = guard;
+    const value = full ? full.version : entry;
     const list: unknown = typeof value === 'string' ? [value] : value;
     const versions = Array.isArray(list) ? list.filter((v): v is string => typeof v === 'string' && parseVersion(v) !== null) : [];
     if (!Array.isArray(list) || versions.length === 0 || versions.length !== list.length) {
@@ -137,7 +173,7 @@ function readProvides(raw: unknown, errors: string[]): Record<string, string[]> 
     if (new Set(majors).size !== majors.length) errors.push(`provides.${name}: две версии одной мажорной`);
     out[name] = versions;
   }
-  return out;
+  return { provides: out, ...(Object.keys(guards).length > 0 && { guards }) };
 }
 
 function readRanges(field: string, raw: unknown, errors: string[]): Record<string, string> {
@@ -264,31 +300,80 @@ const VIEW_NAME = /^[a-z][a-z0-9-]*$/;
 // Путь попадает в атрибут страницы-оболочки и в import(): только вниз от каталога плагина, без экранируемых символов.
 const VIEW_ENTRY = /^\.\/(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*\/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\.js$/;
 
-function readUi(raw: unknown, errors: string[]): { views: Record<string, string> } | undefined {
+const isEntry = (entry: unknown): entry is string => typeof entry === 'string' && VIEW_ENTRY.test(entry) && !entry.split('/').includes('..');
+
+function readUi(raw: unknown, errors: string[]): { views: Record<string, string>; overlay?: string } | undefined {
   if (raw === undefined) return undefined;
-  if (!isRecord(raw) || !isRecord(raw.views)) {
-    errors.push('ui: ожидается { "views": { "<вид>": "./<модуль>.js" } }');
+  if (!isRecord(raw) || (raw.views !== undefined && !isRecord(raw.views)) || (raw.views === undefined && raw.overlay === undefined)) {
+    errors.push('ui: ожидается { "views": { "<вид>": "./<модуль>.js" } } и/или { "overlay": "./<модуль>.js" }');
     return undefined;
   }
-  for (const key of Object.keys(raw)) if (key !== 'views') errors.push(`ui.${key}: ядро знает только ui.views`);
+  for (const key of Object.keys(raw)) if (key !== 'views' && key !== 'overlay') errors.push(`ui.${key}: ядро знает только ui.views и ui.overlay`);
   const views: Record<string, string> = {};
-  for (const [name, entry] of Object.entries(raw.views)) {
+  const rawViews = isRecord(raw.views) ? raw.views : {};
+  for (const [name, entry] of Object.entries(rawViews)) {
     if (!VIEW_NAME.test(name)) errors.push(`ui.views.${name}: имя вида - строчные латинские буквы, цифры и дефис`);
-    else if (typeof entry !== 'string' || !VIEW_ENTRY.test(entry) || entry.split('/').some((s) => s === '..')) errors.push(`ui.views.${name}: ожидается путь "./<модуль>.js" внутри каталога плагина, получено ${show(entry)}`);
+    else if (name === 'overlay') errors.push('ui.views.overlay: имя занято экраном замка, его объявляют как ui.overlay');
+    else if (!isEntry(entry)) errors.push(`ui.views.${name}: ожидается путь "./<модуль>.js" внутри каталога плагина, получено ${show(entry)}`);
     else views[name] = entry;
   }
-  if (Object.keys(raw.views).length === 0) errors.push('ui.views: нет ни одного вида');
-  return { views };
+  if (raw.views !== undefined && Object.keys(rawViews).length === 0) errors.push('ui.views: нет ни одного вида');
+  if (raw.overlay === undefined) return { views };
+  if (!isEntry(raw.overlay)) {
+    errors.push(`ui.overlay: ожидается путь "./<модуль>.js" внутри каталога плагина, получено ${show(raw.overlay)}`);
+    return { views };
+  }
+  return { views, overlay: raw.overlay };
 }
 
-function readSchemaVersion(field: string, raw: unknown, errors: string[]): { version: number } | undefined {
+const MAX_DOCUMENT_TYPES = 16;
+
+function readDocuments(raw: unknown, errors: string[]): Record<string, { restorable: boolean }> | undefined {
+  if (raw === undefined) return undefined;
+  const form = 'documents: ожидается { "<тип>": { "restorable": true } }';
+  if (!isRecord(raw) || Object.keys(raw).length === 0) {
+    errors.push(form);
+    return undefined;
+  }
+  if (Object.keys(raw).length > MAX_DOCUMENT_TYPES) errors.push(`documents: не больше ${String(MAX_DOCUMENT_TYPES)} типов`);
+  const out: Record<string, { restorable: boolean }> = {};
+  for (const [type, spec] of Object.entries(raw)) {
+    if (!VIEW_NAME.test(type)) errors.push(`documents.${type}: имя типа - строчные латинские буквы, цифры и дефис`);
+    else if (!isRecord(spec) || Object.keys(spec).some((k) => k !== 'restorable') || (spec.restorable !== undefined && typeof spec.restorable !== 'boolean')) errors.push(`documents.${type}: ${form.slice('documents: '.length)}`);
+    else out[type] = { restorable: spec.restorable === true };
+  }
+  return out;
+}
+
+/** Модуль вида по имени: `overlay` - экран замка из `ui.overlay`. */
+export function viewEntry(m: PluginManifest, view: string): string | undefined {
+  if (typeof view !== 'string') return undefined;
+  if (view === 'overlay') return m.ui?.overlay;
+  const views = m.ui?.views;
+  return views && Object.hasOwn(views, view) ? views[view] : undefined;
+}
+
+export interface SectionDecl {
+  readonly version: number;
+  readonly schema?: string;
+}
+
+const SCHEMA_FILE = /^\.\/(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*\/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\.json$/;
+
+function readSchemaVersion(field: string, raw: unknown, errors: string[]): SectionDecl | undefined {
   if (raw === undefined) return undefined;
   const version = isRecord(raw) ? raw.version : undefined;
   if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) {
     errors.push(`${field}.version: ожидается целое >= 1, получено ${show(version)}`);
     return undefined;
   }
-  return { version };
+  const schema = isRecord(raw) ? raw.schema : undefined;
+  if (schema === undefined) return { version };
+  if (typeof schema !== 'string' || !SCHEMA_FILE.test(schema) || schema.split('/').includes('..')) {
+    errors.push(`${field}.schema: ожидается путь "./<файл>.json" внутри каталога плагина, получено ${show(schema)}`);
+    return undefined;
+  }
+  return { version, schema };
 }
 
 function show(value: unknown): string {

@@ -94,7 +94,7 @@ export interface Migrated {
   readonly state: Record<string, Record<string, unknown>>;
 }
 
-/** Единственное место, где ядро знает чужие поля (SAD2 §3.10); удаляется через пару версий. */
+/** Единственное место, где ядро знает чужие поля (SAD §3.10); удаляется через пару версий. */
 export function migrateLegacy(doc: Record<string, unknown>): Migrated | undefined {
   if ('cyborg' in doc || !Array.isArray(doc.projects)) return undefined;
   const items: Record<string, unknown>[] = [];
@@ -167,14 +167,14 @@ export interface Workspace {
   readonly migrated: readonly string[];
   /** Файлы, которые не разобрались: их разделы пусты, а запись в них отменяется, чтобы не затереть правку человека. */
   readonly problems: readonly string[];
-  /** Правка файла воркспейса или пользователя извне: id разделов config, которые поменялись. */
-  watch(listener: (changed: readonly string[]) => void, onProblem?: (message: string) => void): Disposable;
+  /** Правка файла воркспейса или пользователя извне: id разделов config, которые поменялись; `onEnabled` - новый итоговый `plugins.enabled`. */
+  watch(listener: (changed: readonly string[]) => void, onProblem?: (message: string) => void, onEnabled?: (enabled: readonly string[]) => void): Disposable;
   close(): void;
 }
 
 export type OpenResult = { readonly ok: true; readonly workspace: Workspace } | { readonly ok: false; readonly owner: number };
 
-/** Воркспейс до загрузки любого плагина (SAD2 §3.1): замок, перенос старого формата, слои config и state. */
+/** Воркспейс до загрузки любого плагина (SAD §3.1): замок, перенос старого формата, слои config и state. */
 export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResult> {
   const file = path.resolve(options.file);
   const lock = lockWorkspace(file, options.pid);
@@ -251,6 +251,7 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
     const user = pluginsOf(tolerant(options.userFile));
     const own = pluginsOf(legacy ? legacy.config : doc);
     const plugins = { enabled: own.enabled ?? user.enabled ?? [], hosts: { ...user.hosts, ...own.hosts }, keybindings: [...user.keybindings, ...own.keybindings] };
+    let enabledNow = plugins.enabled;
     remember(file);
     remember(options.userFile);
 
@@ -268,7 +269,7 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
         state,
         migrated,
         problems,
-        watch(listener, onProblem) {
+        watch(listener, onProblem, onEnabled) {
           let timer: ReturnType<typeof setTimeout> | undefined;
           const check = () => {
             timer = undefined;
@@ -291,6 +292,11 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
             if (bad) {
               onProblem?.(`${bad}: не разобран, разделы прежние`);
               return;
+            }
+            const next = pluginsOf(readJson(file)).enabled ?? pluginsOf(readJson(options.userFile)).enabled ?? [];
+            if (JSON.stringify(next) !== JSON.stringify(enabledNow)) {
+              enabledNow = next;
+              onEnabled?.(next);
             }
             // Файл на середине правки не разбирается: разделы остаются прежними до следующей записи.
             config.reload().then(

@@ -21,7 +21,11 @@ for (const page of ['app', 'spike', 'probe/probe']) await build({ ...browser, en
 for (const file of ['index.html', 'styles.css', 'spike.html', 'spike.css', 'probe/index.html', 'probe/probe.css', 'shell/shell.css']) cpSync(join(src, 'renderer', file), join(dist, 'renderer', file));
 await build({ ...browser, entryPoints: [join(src, 'renderer/shell/shell.ts')], outfile: join(dist, 'renderer/shell/shell.js') });
 // Модуль вида грузит браузер через import(): его TypeScript собирается в ESM, а код главной части хост грузит как есть.
-const views = readdirSync(join(root, 'plugins'), { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync(join(root, 'plugins', d.name, 'ui', 'ui.ts')));
+const views = readdirSync(join(root, 'plugins'), { withFileTypes: true })
+  .filter((d) => d.isDirectory() && existsSync(join(root, 'plugins', d.name, 'ui')))
+  .flatMap((d) => readdirSync(join(root, 'plugins', d.name, 'ui')).filter((f) => f.endsWith('.ts')).map((f) => join(d.name, 'ui', f)));
 cpSync(join(root, 'plugins'), join(dist, 'plugins'), { recursive: true, filter: (from) => !/[/\\]ui[/\\][^/\\]+\.ts$/.test(from) });
 cpSync(join(root, 'bench'), join(dist, 'bench'), { recursive: true });
-for (const { name } of views) await build({ ...browser, format: 'esm', entryPoints: [join(root, 'plugins', name, 'ui', 'ui.ts')], outfile: join(dist, 'plugins', name, 'ui', 'ui.js') });
+for (const file of views) await build({ ...browser, format: 'esm', entryPoints: [join(root, 'plugins', file)], outfile: join(dist, 'plugins', file.replace(/\.ts$/, '.js')) });
+// Вид грузит стили только со своего origin: таблица xterm кладётся рядом с модулем вида sessions.
+cpSync(join(root, '..', 'node_modules', '@xterm', 'xterm', 'css', 'xterm.css'), join(dist, 'plugins', 'sessions', 'ui', 'xterm.css'));

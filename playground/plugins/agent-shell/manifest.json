@@ -6,5 +6,10 @@
   },
   "provides": {
     "cyborg.agent": "1.0"
+  },
+  "permissions": {
+    "launch": [
+      "/bin/sh"
+    ]
   }
 }

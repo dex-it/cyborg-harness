@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, PluginOs } from '@cyborg/contracts';
-import { SectionStore } from '../src/config.ts';
+import { SectionStore, type LayerStore } from '../src/config.ts';
 import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
 import { describePermissions } from '../src/permissions.ts';
@@ -190,6 +190,89 @@ test('секреты: ключи своего плагина, $secret, без ш
   await locked.k.unload();
 });
 
+test('fs.readSlice: кусок по байтам, символ UTF-8 не рвётся, пределы и права', async () => {
+  await using box = await sandbox();
+  const file = path.join(box.work, 'log.jsonl');
+  await writeFile(file, 'ab' + 'я'.repeat(3) + 'z');
+  const { k, os } = await kernel({ reader: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  const fs = os('reader').fs;
+  const size = Buffer.byteLength('ab' + 'я'.repeat(3) + 'z');
+  assert.deepEqual(await fs.readSlice(file, 0, 5), { text: 'abя', bytes: 4, size }, 'полсимвола на конце не входит');
+  let text = '';
+  for (let offset = 0; offset < size; ) {
+    const slice = await fs.readSlice(file, offset, 5);
+    text += slice.text;
+    offset += slice.bytes;
+  }
+  assert.equal(text, 'ab' + 'я'.repeat(3) + 'z');
+  assert.deepEqual(await fs.readSlice(file, size + 10, 64), { text: '', bytes: 0, size });
+  await assert.rejects(fs.readSlice(file, -1, 64), { code: 'Invalid' });
+  await assert.rejects(fs.readSlice(file, 0, 3), { code: 'Invalid' });
+  await assert.rejects(fs.readSlice(file, 0, 2 * 1024 * 1024), { code: 'Invalid' });
+  await writeFile(path.join(box.outside, 'secret'), 'x');
+  await assert.rejects(fs.readSlice(path.join(box.outside, 'secret'), 0, 64), { code: 'PermissionDenied' });
+  await k.unload();
+});
+
+test('fs.watch: имена изменённых в каталоге склеены, снятие и выгрузка закрывают наблюдение, вне области - отказ', async () => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ reader: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  const fs = os('reader').fs;
+  const batches: (readonly string[])[] = [];
+  const sub = await fs.watch(box.work, (names) => batches.push(names));
+  await writeFile(path.join(box.work, 'a.jsonl'), '1\n');
+  await appendFile(path.join(box.work, 'a.jsonl'), '2\n');
+  await writeFile(path.join(box.work, 'b.jsonl'), '1\n');
+  for (let i = 0; i < 100 && !batches.flat().includes('b.jsonl'); i++) await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual([...new Set(batches.flat())].toSorted(), ['a.jsonl', 'b.jsonl']);
+  assert.ok(batches.length < 4, `события не склеены: ${JSON.stringify(batches)}`);
+  sub.dispose();
+  await new Promise((r) => setTimeout(r, 100));
+  const seen = batches.length;
+  await writeFile(path.join(box.work, 'c.jsonl'), '1\n');
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(batches.length, seen, 'после dispose событий нет');
+
+  const fileEvents: (readonly string[])[] = [];
+  await fs.watch(path.join(box.work, 'a.jsonl'), (names) => fileEvents.push(names));
+  await appendFile(path.join(box.work, 'a.jsonl'), '3\n');
+  for (let i = 0; i < 100 && fileEvents.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.ok(fileEvents.length > 0, 'дописанный файл не замечен');
+
+  await assert.rejects(fs.watch(box.outside, () => undefined), { code: 'PermissionDenied' });
+  await assert.rejects(fs.watch(path.join(box.work, 'нет'), () => undefined));
+  await k.unload();
+  await appendFile(path.join(box.work, 'a.jsonl'), '4\n');
+  await new Promise((r) => setTimeout(r, 100));
+});
+
+test('fs.watch: лимит не обходится параллельными вызовами; сузились корни - наблюдение закрыто', async () => {
+  await using box = await sandbox();
+  const { k, os } = await kernel(
+    { projects: { 'security.roots': true }, tool: { 'fs.read': ['workspace'] } },
+    { dataDir: box.data, tempDir: box.temp },
+  );
+  const fs = os('tool').fs;
+  const results = await Promise.allSettled(Array.from({ length: 70 }, () => fs.watch(os('tool').paths.data, () => undefined)));
+  assert.equal(results.filter((r) => r.status === 'fulfilled').length, 64);
+  for (const r of results) if (r.status === 'fulfilled') r.value.dispose();
+  await new Promise((r) => setTimeout(r, 50));
+
+  await os('projects').security!.setRoots([box.outside]);
+  const seen: (readonly string[])[] = [];
+  await fs.watch(box.outside, (names) => seen.push(names));
+  await writeFile(path.join(box.outside, 'a'), '1');
+  for (let i = 0; i < 100 && seen.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(seen.flat(), ['a']);
+  await os('projects').security!.setRoots([]);
+  await writeFile(path.join(box.outside, 'b'), '1');
+  await new Promise((r) => setTimeout(r, 200));
+  await writeFile(path.join(box.outside, 'c'), '1');
+  await new Promise((r) => setTimeout(r, 200));
+  assert.deepEqual(seen.flat(), ['a'], 'после сужения корней событий нет');
+  await k.unload();
+});
+
 test('$SHELL: оболочка входа из окружения приложения, только с закреплённым скриптом', async () => {
   assert.equal(parseManifest(manifest('p', { process: ['$SHELL'] })).ok, false, 'голая оболочка запустила бы что угодно');
   assert.equal(parseManifest(manifest('p', { process: [{ program: '$SHELL', args: ['-lc'] }] })).ok, false);
@@ -309,4 +392,128 @@ test('fs.remove: каталог с .git внутри и корень облас�
   await fs.remove(path.join(box.work, 'plain'));
   assert.deepEqual((await fs.list(box.work)).map((e) => e.name).sort(), ['cyborg.json', 'repo']);
   await k.unload();
+});
+
+test('права: маски путей, workspace.git, выбор в dialog как granted, shell - без исполняемых и только свои схемы', async () => {
+  await using box = await sandbox();
+  const logs = path.join(box.work, 'proj', 'logs');
+  const deep = path.join(box.work, 'a', 'b', 'notes');
+  for (const d of [logs, deep, path.join(box.work, 'proj', '.git')]) await mkdir(d, { recursive: true });
+  await writeFile(path.join(logs, 'x.log'), 'лог');
+  await writeFile(path.join(box.work, 'proj', 'secret.txt'), 'нет');
+  const picked = path.join(box.outside, 'picked.txt');
+  const tool = path.join(box.outside, 'tool');
+  for (const [f, text] of [[picked, 'выбран'], [path.join(box.outside, 'run.sh'), '#!/bin/sh'], [path.join(box.outside, 'doc.txt'), 'd'], [tool, '#!/bin/sh']]) await writeFile(f!, text!);
+  await chmod(tool, 0o755);
+  const opened: string[] = [];
+  let pick: string[] = [];
+  const { k, os, denied } = await kernel(
+    {
+      masks: { 'fs.read': [`${box.work}/*/logs`, `${box.work}/**/notes`], 'fs.write': [`${box.work}/*/logs`, `${box.work}/proj/*`] },
+      git: { 'fs.write': ['workspace.git'] },
+      plain: { 'fs.write': ['workspace'] },
+      picker: { 'fs.read': ['granted'], shell: ['granted', 'https:'] },
+    },
+    {
+      dataDir: box.data,
+      tempDir: box.temp,
+      roots: () => [box.work],
+      dialog: { open: async () => pick },
+      shell: { openPath: async (p) => void opened.push(p), openExternal: async (u) => void opened.push(u) },
+    },
+  );
+  assert.equal(await os('masks').fs.readText(path.join(logs, 'x.log')), 'лог');
+  await assert.rejects(os('masks').fs.writeText(path.join(box.work, 'proj', '.git', 'config'), 'x'), { code: 'PermissionDenied' }, 'маска * совпала с .git');
+  assert.deepEqual(await os('masks').fs.list(deep), []);
+  await assert.rejects(os('masks').fs.readText(path.join(box.work, 'proj', 'secret.txt')), { code: 'PermissionDenied' });
+  await assert.rejects(os('masks').fs.remove(logs), { code: 'PermissionDenied' }, 'каталог под маской - корень области');
+
+  await os('git').fs.writeText(path.join(box.work, 'proj', '.git', 'HEAD'), 'ref');
+  await assert.rejects(os('plain').fs.writeText(path.join(box.work, 'proj', '.git', 'HEAD'), 'x'), { code: 'PermissionDenied' });
+
+  await assert.rejects(os('picker').fs.readText(picked), { code: 'PermissionDenied' });
+  pick = [picked];
+  assert.deepEqual(await os('picker').dialog.open({ title: 'Файл' }), [picked]);
+  assert.equal(await os('picker').fs.readText(picked), 'выбран');
+  await assert.rejects(os('masks').fs.readText(picked), { code: 'PermissionDenied' }, 'выбор одного плагина - не право другого');
+  await assert.rejects(os('picker').dialog.open({ extra: 1 } as never), { code: 'Invalid' });
+
+  const shell = os('picker').shell;
+  if (typeof shell?.openPath !== 'function' || typeof shell.openExternal !== 'function') throw new Error('у picker нет shell.openPath и openExternal');
+  assert.equal(os('masks').shell, undefined);
+  await shell.openPath(picked);
+  await shell.openExternal('https://example.com/a');
+  await assert.rejects(shell.openExternal('mailto:a@b.c'), { code: 'PermissionDenied' });
+  await assert.rejects(shell.openPath(path.join(box.outside, 'doc.txt')), { code: 'PermissionDenied' }, 'не выбран');
+  pick = [path.join(box.outside, 'run.sh'), tool];
+  await os('picker').dialog.open({ multiple: true });
+  await assert.rejects(shell.openPath(path.join(box.outside, 'run.sh')), { code: 'PermissionDenied' }, 'исполняемый по расширению');
+  const risky = ['a.webloc', 'a.terminal', 'a.REG', 'a.py'].map((name) => path.join(box.outside, name));
+  for (const file of risky) await writeFile(file, '');
+  pick = risky;
+  await os('picker').dialog.open({ multiple: true });
+  for (const file of risky) await assert.rejects(shell.openPath(file), { code: 'PermissionDenied' }, `ярлык или скрипт: ${file}`);
+  if (process.platform !== 'win32') await assert.rejects(shell.openPath(tool), { code: 'PermissionDenied' }, 'исполняемый по биту');
+  assert.deepEqual(opened, [picked, 'https://example.com/a']);
+  assert.ok(denied().includes('picker:shell.openExternal'));
+  await k.unload();
+});
+
+test('granted: выбор в dialog лежит в state воркспейса и действует после перезапуска; кривые записи и сбой записи не мешают', async () => {
+  await using box = await sandbox();
+  const [picked, kept, late] = ['picked.txt', 'kept.txt', 'late.txt'].map((name) => path.join(box.outside, name));
+  for (const f of [picked!, kept!, late!]) await writeFile(f, 'текст');
+  const [realPicked, realKept] = await Promise.all([picked!, kept!].map((f) => realpath(f)));
+  let doc: Record<string, unknown> = { $granted: { $version: 1, byPlugin: { other: [realKept, 'relative/x', 42, '/a\0b'], ghost: 'не список' } } };
+  let failSave = false;
+  const store: LayerStore = {
+    load: async () => structuredClone(doc),
+    save: async (_layer, next) => {
+      if (failSave) throw new Error('диск полон');
+      doc = structuredClone(next);
+    },
+  };
+  let pick: string[] = [];
+  const start = async () => {
+    const contexts = new Map<string, PluginContext>();
+    const k = await load({
+      apiVersion: '1.0.0',
+      spawnHost: inlineHosts(async (entry) => ({ activate: (ctx: PluginContext) => void contexts.set(entry, ctx) })),
+      enabled: ['picker', 'other'],
+      manifests: [manifest('picker', { 'fs.read': ['granted'] }), manifest('other', { 'fs.read': ['granted'] })],
+      os: { dataDir: box.data, tempDir: box.temp, dialog: { open: async () => pick } },
+      state: await SectionStore.open(store, ['workspace']),
+    });
+    return { k, os: (id: string) => contexts.get(id)!.os };
+  };
+
+  const first = await start();
+  assert.equal(await first.os('other').fs.readText(kept!), 'текст', 'сохранённое прочитано при старте');
+  await assert.rejects(first.os('picker').fs.readText(picked!), { code: 'PermissionDenied' });
+  pick = [picked!];
+  await first.os('picker').dialog.open({});
+  await first.k.unload();
+  assert.deepEqual(doc.$granted, { $version: 1, byPlugin: { other: [realKept], picker: [realPicked] } }, 'кривые записи при сохранении отсеяны');
+
+  const second = await start();
+  assert.equal(await second.os('picker').fs.readText(picked!), 'текст');
+  await assert.rejects(second.os('other').fs.readText(picked!), { code: 'PermissionDenied' }, 'выбор одного плагина - не право другого');
+  failSave = true;
+  pick = [late!];
+  assert.deepEqual(await second.os('picker').dialog.open({}), [late], 'сбой записи не отменяет выбор человека');
+  assert.equal(await second.os('picker').fs.readText(late!), 'текст');
+  assert.deepEqual((doc.$granted as { byPlugin: Record<string, string[]> }).byPlugin.picker, [realPicked]);
+  await second.k.unload();
+});
+
+test('права в манифесте: маска под названным каталогом, workspace.git только у записи, shell без file:', () => {
+  const errors = (permissions: unknown) => {
+    const r = parseManifest(manifest('x', permissions));
+    return r.ok ? [] : r.errors;
+  };
+  assert.deepEqual(errors({ 'fs.read': ['/a/*/b', '~/x/**', 'granted'], 'fs.write': ['workspace.git'], shell: ['https:', 'mailto:', 'workspace'] }), []);
+  for (const bad of [{ 'fs.read': ['/*'] }, { 'fs.read': ['~/*/x'] }, { 'fs.read': ['/a/../b'] }, { 'fs.read': ['/a/x**'] }, { 'fs.read': ['workspace.git'] }, { shell: ['file:'] }, { shell: ['javascript:'] }, { shell: ['https'] }]) {
+    assert.notDeepEqual(errors(bad), [], JSON.stringify(bad));
+  }
+  assert.ok(describePermissions({ shell: ['granted', 'https:'], 'fs.write': ['workspace.git'] }).includes('открывает в системе: выбранное человеком в диалоге, https:'));
 });

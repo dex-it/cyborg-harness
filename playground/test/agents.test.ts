@@ -1,14 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { AgentEvent, PluginContext } from '@cyborg/contracts';
+import { SectionStore, type LayerStore } from '../../core/src/config.ts';
 import { load } from '../../core/src/loader.ts';
 import { inlineHosts } from '../../core/src/transports.ts';
 import { fakePty } from '../../core/test/fake-pty.ts';
-import { claudeArgs, LAUNCH_SCRIPT } from '../plugins/agent-claude-code/index.ts';
+import { claudeArgs, LAUNCH_SCRIPT, waitAfterStop } from '../plugins/agent-claude-code/index.ts';
+import { NEXT_ACTIONS_PROMPT } from '../plugins/next-actions/index.ts';
+import { collectTools } from '../plugins/sessions/mcp.ts';
+import { projectDirName } from '../plugins/agent-claude-code/history.ts';
+import { ISOLATION_PROMPT } from '../plugins/session-isolation/index.ts';
 
 const PLUGINS = path.join(import.meta.dirname, '..', 'plugins');
 const PROVIDERS = ['agent-claude-code', 'agent-shell'];
@@ -24,7 +29,7 @@ async function waitFor<T>(what: string, probe: () => T | undefined | false | Pro
 }
 
 /** Настоящие модули плагинов в ядре; probe - потребитель, через которого тест зовёт контракт; claude - скрипт в PATH. */
-async function setup() {
+async function setup(store?: LayerStore, extra: readonly string[] = []) {
   const root = await mkdtemp(path.join(tmpdir(), 'cyborg-agents-'));
   const bin = path.join(root, 'bin');
   await mkdir(bin);
@@ -38,13 +43,14 @@ async function setup() {
   let probe: PluginContext | undefined;
   const k = await load({
     apiVersion: '1.0.0',
-    enabled: [...PROVIDERS, 'sessions', 'probe'],
-    manifests: [...PROVIDERS, 'sessions'].map(manifestOf).concat({ id: 'probe', version: '1.0.0', engines: { cyborg: '^1' }, consumes: { 'cyborg.agent': '^1' } }),
+    enabled: [...PROVIDERS, ...extra, 'session-isolation', 'sessions', 'probe'],
+    manifests: [...PROVIDERS, ...extra, 'session-isolation', 'sessions'].map(manifestOf).concat({ id: 'probe', version: '1.0.0', engines: { cyborg: '^1' }, consumes: { 'cyborg.agent': '^1' } }),
     entry: (m) => (m.id === 'probe' ? 'probe' : path.join(PLUGINS, m.id, 'index.ts')),
     spawnHost: inlineHosts(async (entry) => (entry === 'probe' ? { activate: (ctx: PluginContext) => void (probe = ctx) } : ((await import(entry)) as { default: never }).default)),
-    os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), env: { PATH: `${bin}:/usr/bin:/bin`, HOME: root, SHELL: shell }, pty: backend },
+    ...(store && { state: await SectionStore.open(store, ['workspace']) }),
+    os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), home: root, env: { PATH: `${bin}:/usr/bin:/bin`, HOME: root, SHELL: shell }, pty: backend },
   });
-  assert.deepEqual(k.active.toSorted(), [...PROVIDERS, 'probe', 'sessions'].toSorted(), JSON.stringify(k.journal.filter((e) => e.kind === 'failed')));
+  assert.deepEqual(k.active.toSorted(), [...PROVIDERS, ...extra, 'probe', 'session-isolation', 'sessions'].toSorted(), JSON.stringify(k.journal.filter((e) => e.kind === 'failed')));
   assert.ok(probe);
   const ctx = probe;
   const agent = (id: string) => {
@@ -84,12 +90,16 @@ test('cyborg.agent, общий набор: факты, запуск через �
   }
   const shell = s.backend.procs.find((p) => p.file === '/bin/sh');
   assert.deepEqual(shell?.args, []);
+  const claude = s.backend.procs.find((p) => p.file === s.shell);
+  const append = claude?.args.indexOf('--append-system-prompt') ?? -1;
+  assert.equal(claude?.args[append + 1], ISOLATION_PROMPT, 'фрагмент изоляции от session-isolation не дошёл до claude');
+  assert.equal(s.k.journal.filter((e) => e.kind === 'denied').length, 0, 'поставщики описали запуск в пределах своего launch');
 });
 
 test('agent-claude-code: запуск как в Cyborg - оболочка входа, --settings с хуками, порядок аргументов', async () => {
   await using s = await setup();
   const agent = s.agent('agent-claude-code');
-  assert.deepEqual(await agent.facts(), { id: 'claude-code', title: 'Claude Code', found: true, version: '2.1.7', capabilities: { resume: true, history: false, events: true } });
+  assert.deepEqual(await agent.facts(), { id: 'claude-code', title: 'Claude Code', found: true, version: '2.1.7', capabilities: { resume: true, history: true, events: true } });
   const spec = await agent.launch({ sessionId: 'a1', cwd: '/w', resumeId: 'r-1', promptFragments: ['изоляция', 'кнопки'], prompt: 'привет', extraDirs: ['/x', '/y'] });
   const data = s.data('agent-claude-code');
   assert.deepEqual(spec, {
@@ -99,16 +109,28 @@ test('agent-claude-code: запуск как в Cyborg - оболочка вхо
     env: { CYBORG_EVENTS: path.join(data, 'sessions', 'a1.jsonl'), CYBORG_SETTINGS: path.join(data, 'claude-hooks.json') },
   });
   assert.deepEqual(claudeArgs({ sessionId: 'b', cwd: '/w' }), [], 'без фрагментов --append-system-prompt не нужен');
-  const settings = JSON.parse(await readFile(spec.env.CYBORG_SETTINGS, 'utf8')) as { hooks: Record<string, { matcher?: string; hooks: { command: string }[] }[]> };
+  assert.deepEqual(claudeArgs({ sessionId: 'b', cwd: '/w', prompt: 'p', extraDirs: ['/x'] }, '/m.json'), ['--mcp-config=/m.json', 'p', '--add-dir', '/x'], 'конфиг одним словом: вариадический флаг не забирает промпт');
+  const withTools = await agent.launch({ sessionId: 'a2', cwd: '/w', tools: { url: 'http://127.0.0.1:9/mcp', token: 'секрет' } });
+  const mcpFile = path.join(data, 'sessions', 'a2.mcp.json');
+  assert.deepEqual(withTools.args.slice(3), [`--mcp-config=${mcpFile}`]);
+  assert.equal(withTools.env.CYBORG_MCP_TOKEN, 'секрет', 'токен - в окружении процесса');
+  const written = await readFile(mcpFile, 'utf8');
+  assert.ok(!written.includes('секрет') && !withTools.args.join(' ').includes('секрет'), 'токена нет ни в файле, ни в командной строке');
+  assert.deepEqual(JSON.parse(written), { mcpServers: { cyborg: { type: 'http', url: 'http://127.0.0.1:9/mcp', headers: { Authorization: 'Bearer ${CYBORG_MCP_TOKEN}' } } } });
+  await agent.ended('a2', { code: 0 });
+  await assert.rejects(stat(mcpFile), 'ended убрал конфиг с токеном');
+  assert.throws(() => claudeArgs({ sessionId: 'b', cwd: '/w', resumeId: '--dangerously-skip-permissions' }), /--resume/, 'id из данных документа стал бы флагом');
+  const settings = JSON.parse(await readFile(spec.env.CYBORG_SETTINGS, 'utf8')) as { hooks: Record<string, { matcher?: string; hooks: { command: string }[] }[]>; permissions: unknown };
   assert.deepEqual(Object.keys(settings.hooks), ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'Stop', 'Notification']);
   assert.equal(settings.hooks.PostToolUse?.[0]?.matcher, '*');
   assert.equal(settings.hooks.Stop?.[0]?.hooks[0]?.command, '{ cat; echo; } >> "$CYBORG_EVENTS"');
+  assert.deepEqual(settings.permissions, { allow: ['mcp__cyborg'] }, 'инструменты включённых плагинов без вопроса на каждый вызов');
   await assert.rejects(agent.launch({ sessionId: '../x', cwd: '/w' }), /id сессии/);
 
   await s.k.run('sessions.new', 'agent-claude-code');
   const proc = s.backend.procs.at(-1)!;
-  assert.deepEqual([proc.file, proc.args], [s.shell, ['-lc', LAUNCH_SCRIPT, 'cyborg']], '$SHELL не заменён оболочкой входа');
-  assert.deepEqual(Object.keys(proc.options.env).filter((k) => k.startsWith('CYBORG_')).toSorted(), ['CYBORG_EVENTS', 'CYBORG_SETTINGS']);
+  assert.deepEqual([proc.file, proc.args], [s.shell, ['-lc', LAUNCH_SCRIPT, 'cyborg', '--append-system-prompt', ISOLATION_PROMPT]], '$SHELL не заменён оболочкой входа');
+  assert.deepEqual(Object.keys(proc.options.env).filter((k) => k.startsWith('CYBORG_')).toSorted(), ['CYBORG_EVENTS', 'CYBORG_SETTINGS'], 'без поставщиков инструментов токена нет');
   const events = proc.options.env.CYBORG_EVENTS!;
   proc.exit(0);
   await waitFor('ended убрал файл событий', () => stat(events).then(() => false, () => true));
@@ -127,6 +149,8 @@ test('agent-claude-code: хуки в события контракта; прош
   await appendFile(
     file,
     [
+      line({ hook_event_name: 'SessionStart', cwd: '/w', session_id: 'c-1' }),
+      line({ hook_event_name: 'SessionStart', cwd: '/w', session_id: '--help me' }),
       line({ hook_event_name: 'PostToolUse', cwd: '/w', tool_name: 'Bash' }),
       line({ hook_event_name: 'UserPromptSubmit', cwd: '/w' }),
       line({ hook_event_name: 'Stop', cwd: '/w/sub', last_assistant_message: 'готово', background_tasks: [] }),
@@ -137,9 +161,11 @@ test('agent-claude-code: хуки в события контракта; прош
       '{"hook_event_name":"Stop"',
     ].join(''),
   );
-  await waitFor('события хуков', () => seen.length >= 8);
+  await waitFor('события хуков', () => seen.length >= 10);
   assert.deepEqual(seen, [
     { type: 'cwd', cwd: '/w' },
+    { type: 'session', resumeId: 'c-1' },
+    { type: 'activity' },
     { type: 'activity', tool: 'Bash' },
     { type: 'prompt' },
     { type: 'cwd', cwd: '/w/sub' },
@@ -149,7 +175,175 @@ test('agent-claude-code: хуки в события контракта; прош
     { type: 'activity' },
   ]);
   await appendFile(file, '}\n');
-  await waitFor('дописанная строка', () => seen.length === 9);
+  await waitFor('дописанная строка', () => seen.length === 11);
   assert.deepEqual(seen.at(-1), { type: 'turnEnd', background: false });
   sub.dispose();
 });
+
+test('agent-claude-code: «ждёт» после Stop - только если сессия молчит, без фоновой работы и до dispose', async () => {
+  const seen: AgentEvent[] = [];
+  const quiet = waitAfterStop((e) => seen.push(e), 30);
+  const pause = () => new Promise((r) => setTimeout(r, 80));
+  quiet.listener({ type: 'turnEnd', background: false });
+  await pause();
+  quiet.listener({ type: 'turnEnd', background: false });
+  quiet.listener({ type: 'activity', tool: 'Bash' });
+  quiet.listener({ type: 'turnEnd', background: true });
+  await pause();
+  quiet.listener({ type: 'turnEnd', background: false });
+  quiet.dispose();
+  await pause();
+  assert.deepEqual(seen, [
+    { type: 'turnEnd', background: false },
+    { type: 'waiting', reason: 'Ход завершён, ждёт ответа' },
+    { type: 'turnEnd', background: false },
+    { type: 'activity', tool: 'Bash' },
+    { type: 'turnEnd', background: true },
+    { type: 'turnEnd', background: false },
+  ]);
+});
+
+test('agent-claude-code: история - интерактивные сессии каталога и его worktree, заголовок с краёв длинного журнала', async () => {
+  await using s = await setup();
+  const agent = s.agent('agent-claude-code');
+  const cwd = '/home/u/repo';
+  const projects = path.join(s.root, '.claude', 'projects');
+  const line = (o: object) => `${JSON.stringify(o)}\n`;
+  const journal = async (dir: string, id: string, lines: string, mtime: number) => {
+    await mkdir(path.join(projects, dir), { recursive: true });
+    const file = path.join(projects, dir, `${id}.jsonl`);
+    await writeFile(file, lines);
+    await utimes(file, mtime, mtime);
+  };
+  const id = (n: number) => `0000000${String(n)}-0000-4000-8000-000000000000`;
+  const own = projectDirName(cwd);
+  await journal(own, id(1), line({ entrypoint: 'cli' }) + line({ type: 'user', message: { content: '<local-command-caveat>' } }) + line({ type: 'user', message: { content: [{ type: 'text', text: 'почини   тесты' }] } }), 1000);
+  await journal(own, id(2), line({ entrypoint: 'sdk-cli' }) + line({ type: 'user', message: { content: 'из claude -p' } }), 3000);
+  const long = line({ entrypoint: 'cli' }) + line({ type: 'user', message: { content: 'первый запрос' } }) + 'x'.repeat(200 * 1024) + '\n' + line({ type: 'ai-title', aiTitle: 'Длинная сессия' });
+  await journal(`${own}--claude-worktrees-feat`, id(3), long, 2000);
+  await journal(projectDirName('/home/u/other'), id(4), line({ entrypoint: 'cli' }) + line({ type: 'user', message: { content: 'чужой' } }), 4000);
+  await journal(own, 'не-сессия', line({ entrypoint: 'cli' }), 5000);
+  assert.deepEqual(await agent.history(cwd), [
+    { id: id(3), cwd, title: 'Длинная сессия', updated: 2_000_000 },
+    { id: id(1), cwd, title: 'почини тесты', updated: 1_000_000 },
+  ]);
+  assert.deepEqual(await agent.history('/nowhere'), []);
+});
+
+test('sessions: вкладка сессии переживает перезапуск окна, человек поднимает её заново или закрывает', async () => {
+  let saved: Record<string, unknown> = {};
+  const store: LayerStore = { load: async () => structuredClone(saved), save: async (_layer, next) => void (saved = structuredClone(next)) };
+  {
+    await using s = await setup(store);
+    await s.k.run('sessions.new', 'agent-shell');
+    assert.deepEqual(await s.k.run('sessions.previous'), [], 'живая сессия - не прошлого запуска');
+    assert.deepEqual(s.k.documents.map((d) => [d.pluginId, d.type, d.available]), [['sessions', 'session', true]]);
+  }
+  await using s = await setup(store);
+  const [prev, ...rest] = (await s.k.run('sessions.previous')) as { id: string; title: string; agent: string }[];
+  assert.ok(prev);
+  assert.deepEqual([rest.length, prev.agent], [0, 'agent-shell']);
+  const before = s.backend.procs.length;
+  assert.equal(typeof (await s.k.run('sessions.restore', prev.id)), 'string');
+  assert.deepEqual(await s.k.run('sessions.previous'), [], 'поднятая сессия снова живая');
+  assert.deepEqual(s.k.documents.map((d) => d.id), [prev.id], 'та же вкладка, не новая');
+  await assert.rejects(s.k.run('sessions.restore', prev.id), /уже идёт/);
+  const proc = s.backend.procs[before];
+  assert.ok(proc);
+  await s.k.closeDocument(prev.id);
+  await waitFor('закрытая вкладка завершила сессию', () => proc.killed);
+  assert.deepEqual(s.k.documents, []);
+});
+
+test('sessions: восстановленная сессия claude продолжается через resume поставщика', async () => {
+  let saved: Record<string, unknown> = {};
+  const store: LayerStore = { load: async () => structuredClone(saved), save: async (_layer, next) => void (saved = structuredClone(next)) };
+  {
+    await using s = await setup(store);
+    await s.k.run('sessions.new', 'agent-claude-code');
+    const events = s.backend.procs.at(-1)!.options.env.CYBORG_EVENTS!;
+    // watch читает только новое, а sessions.new не ждёт, пока он встанет.
+    await new Promise((r) => setTimeout(r, 300));
+    await appendFile(events, `${JSON.stringify({ hook_event_name: 'SessionStart', session_id: 'claude-77' })}\n`);
+    await waitFor('resumeId в данных документа', async () => JSON.stringify(saved).includes('claude-77'));
+  }
+  await using s = await setup(store);
+  const [prev] = (await s.k.run('sessions.previous')) as { id: string; resumable: boolean }[];
+  assert.ok(prev?.resumable);
+  await s.k.run('sessions.restore', prev.id);
+  assert.deepEqual(s.backend.procs.at(-1)!.args.slice(3), ['--resume', 'claude-77', '--append-system-prompt', ISOLATION_PROMPT]);
+});
+
+interface Rpc {
+  status: number;
+  body: { result?: Record<string, unknown>; error?: { code: number } } | undefined;
+}
+
+test('sessions + next-actions: агент зовёт инструмент по MCP, вид получает кнопки долгим опросом', async () => {
+  await using s = await setup(undefined, ['next-actions']);
+  const ticket = (await s.k.run('sessions.new', 'agent-claude-code')) as string;
+  const proc = s.backend.procs.at(-1)!;
+  const append = proc.args.indexOf('--append-system-prompt');
+  assert.equal(proc.args[append + 1], `${NEXT_ACTIONS_PROMPT}\n\n${ISOLATION_PROMPT}`, 'фрагменты по id поставщика');
+  const configFile = proc.args.find((a) => a.startsWith('--mcp-config='))?.slice('--mcp-config='.length);
+  assert.ok(configFile);
+  const config = JSON.parse(await readFile(configFile, 'utf8')) as { mcpServers: { cyborg: { url: string } } };
+  const { url } = config.mcpServers.cyborg;
+  // Так заголовок раскрывает claude: ${CYBORG_MCP_TOKEN} из окружения процесса.
+  const headers = { Authorization: `Bearer ${proc.options.env.CYBORG_MCP_TOKEN ?? ''}` };
+  assert.match(url, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
+  let id = 0;
+  const rpc = async (method: string, params: unknown, auth = headers.Authorization): Promise<Rpc> => {
+    const res = await fetch(url, { method: 'POST', headers: { authorization: auth, 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params }) });
+    const text = await res.text();
+    return { status: res.status, body: text ? (JSON.parse(text) as Rpc['body']) : undefined };
+  };
+
+  assert.equal((await rpc('ping', {}, 'Bearer other')).status, 401, 'токен называет сессию');
+  assert.equal((await fetch(url, { headers: { authorization: headers.Authorization } })).status, 405, 'потока SSE нет');
+  const init = await rpc('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '1' } });
+  assert.deepEqual([init.status, init.body?.result?.protocolVersion], [200, '2025-03-26']);
+  const note = await fetch(url, { method: 'POST', headers: { authorization: headers.Authorization }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) });
+  assert.equal(note.status, 202);
+  assert.equal((await rpc('resources/list', {})).body?.error?.code, -32601);
+  const listed = (await rpc('tools/list', {})).body?.result?.tools as { name: string }[];
+  assert.deepEqual(listed.map((t) => t.name), ['suggest_actions']);
+
+  assert.deepEqual(await s.k.run('sessions.actions', ticket, -1), { version: 0, actions: [] });
+  const waiting = s.k.run('sessions.actions', ticket, 0);
+  const call = await rpc('tools/call', {
+    name: 'suggest_actions',
+    arguments: { actions: [{ label: 'Слей', text: 'слей\u001b[2J', submit: true }, { label: 'x'.repeat(60), text: 'поправь тест' }, { label: '', text: 'без подписи' }] },
+  });
+  assert.equal(call.body?.result?.isError, false);
+  assert.deepEqual(await waiting, { version: 1, actions: [{ label: 'Слей', text: 'слей [2J', submit: true }, { label: 'x'.repeat(40), text: 'поправь тест' }] }, 'ожидание проснулось; управляющие символы и длина срезаны');
+  assert.equal((await rpc('tools/call', { name: 'nope', arguments: {} })).body?.error?.code, -32602);
+  const bad = await rpc('tools/call', { name: 'suggest_actions', arguments: {} });
+  assert.equal(bad.body?.result?.isError, true, 'ошибка инструмента - ответ агенту, кнопки прежние');
+  assert.equal(((await s.k.run('sessions.actions', ticket, -1)) as { version: number }).version, 1);
+
+  // Человек ответил сам: хук UserPromptSubmit снимает прежние предложения.
+  await new Promise((r) => setTimeout(r, 300));
+  await appendFile(proc.options.env.CYBORG_EVENTS!, `${JSON.stringify({ hook_event_name: 'UserPromptSubmit' })}\n`);
+  await waitFor('кнопки сняты новым запросом', async () => ((await s.k.run('sessions.actions', ticket, -1)) as { actions: unknown[] }).actions.length === 0);
+
+  const last = s.k.run('sessions.actions', ticket, 2);
+  proc.exit(0);
+  assert.equal(await last, null, 'выход сессии будит ожидание, и опрос кончается');
+  assert.equal(await s.k.run('sessions.actions', ticket, 2), null);
+  assert.equal((await rpc('ping', {})).status, 401, 'токен вышедшей сессии не действует');
+  await waitFor('ended убрал конфиг с токеном', () => stat(configFile).then(() => false, () => true));
+});
+
+test('sessions: инструменты поставщиков - по id плагина, повтор имени и чужое имя отброшены, упавший не мешает', async () => {
+  const spec = (name: string) => ({ name, description: '', inputSchema: { type: 'object' } });
+  const source = (pluginId: string, names: string[] | Error) => ({
+    pluginId,
+    impl: { tools: () => (names instanceof Error ? Promise.reject(names) : names.map(spec)), call: () => Promise.resolve({ text: '' }) },
+  });
+  const log: string[] = [];
+  const tools = await collectTools([source('zed', ['dup', 'z']), source('alpha', ['dup', 'bad name']), source('mid', new Error('упал'))], (m) => log.push(m));
+  assert.deepEqual([...tools].map(([name, t]) => `${name}:${t.source.pluginId}`), ['dup:alpha', 'z:zed']);
+  assert.equal(log.length, 3, log.join('; '));
+});
+

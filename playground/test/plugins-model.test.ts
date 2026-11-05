@@ -4,7 +4,7 @@ import type { PluginJournalLine, PluginRow, PluginsSnapshot } from '../src/share
 import { actionsFor, conflictText, journalFor, keyStatus, mergeFeed, sortedPlugins, summary } from '../src/renderer/plugins-model.ts';
 
 const row = (id: string, state: PluginRow['state'], over: Partial<PluginRow> = {}): PluginRow => ({ id, state, revivable: state === 'stopped', unloaded: false, commands: [], permissions: [], ...over });
-const snapshot = (plugins: PluginRow[], over: Partial<PluginsSnapshot> = {}): PluginsSnapshot => ({ phase: 'ready', problems: [], plugins, keys: [], feed: [], journal: [], canHang: true, ...over });
+const snapshot = (plugins: PluginRow[], over: Partial<PluginsSnapshot> = {}): PluginsSnapshot => ({ phase: 'ready', problems: [], plugins, keys: [], feed: [], journal: [], canHang: true, window: { queued: 0, locks: [] }, documents: [], workspace: { current: '/w.cyborg.json', recent: [] }, ...over });
 
 describe('окно «Плагины Cyborg»: модель', () => {
   it('выключенные сверху, затем ждущие перезапуска, работающие и невключённые; внутри - по имени', () => {

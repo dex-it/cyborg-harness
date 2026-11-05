@@ -39,6 +39,48 @@ export interface LaunchRequest {
   readonly resumeId?: string;
   /** Дополнения потребителя к системному промпту: изоляция, кнопки. */
   readonly promptFragments?: readonly string[];
+  /** Инструменты плагинов для этой сессии; агент без MCP их пропускает. */
+  readonly tools?: AgentToolsEndpoint;
+}
+
+/** Сервер MCP (Streamable HTTP) потребителя: токен называет сессию, поэтому он у каждой свой и в argv не идёт. */
+export interface AgentToolsEndpoint {
+  readonly url: string;
+  readonly token: string;
+}
+
+/** `cyborg.agent-tool` 1, кратность many: инструменты, которые агент зовёт по MCP; сервер держит потребитель `cyborg.agent`. */
+export interface AgentTool {
+  tools(): readonly AgentToolSpec[] | Promise<readonly AgentToolSpec[]>;
+  call(name: string, input: unknown, session: AgentToolSession): Promise<AgentToolResult>;
+}
+
+export interface AgentToolSpec {
+  /** `[A-Za-z0-9_-]`, до 64 знаков; повтор у другого поставщика отброшен - первым идёт меньший id плагина. */
+  readonly name: string;
+  readonly description: string;
+  /** JSON Schema аргумента, `type: "object"`; проверяет его поставщик. */
+  readonly inputSchema: Readonly<Record<string, unknown>>;
+}
+
+export interface AgentToolSession {
+  /** `LaunchRequest.sessionId` сессии, чей агент позвал. */
+  readonly sessionId: string;
+}
+
+export interface AgentToolResult {
+  /** Ответ агенту. */
+  readonly text: string;
+  readonly isError?: boolean;
+  /** Действия, которые инструмент предлагает человеку в этой сессии; следующий запрос человека их снимает. */
+  readonly actions?: readonly SessionAction[];
+}
+
+/** Кнопка: `text` уходит в сессию, `submit` - сразу с Enter. */
+export interface SessionAction {
+  readonly label: string;
+  readonly text: string;
+  readonly submit?: boolean;
 }
 
 /** Готовый вход `ctx.os.pty.spawn`; `program` бывает `$SHELL` - оболочка входа, путь подставит ядро. */
@@ -51,6 +93,8 @@ export interface LaunchSpec {
 
 export type AgentEvent =
   | { readonly type: 'cwd'; readonly cwd: string }
+  /** Сессия агента началась или сменилась; `launch({ resumeId })` её продолжит. */
+  | { readonly type: 'session'; readonly resumeId: string }
   /** Агент работает; `tool` - инструмент, если известен. */
   | { readonly type: 'activity'; readonly tool?: string }
   /** Человек отправил запрос: прошлые предложения агента больше не к месту. */

@@ -1,4 +1,4 @@
-// Замер видов во фреймах (SAD2, открытый вопрос 11) на собранном playground; нужен дисплей (на Linux - xvfb-run ... --no-sandbox).
+// Замер видов во фреймах (SAD, открытый вопрос 11) на собранном playground; нужен дисплей (на Linux - xvfb-run ... --no-sandbox).
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

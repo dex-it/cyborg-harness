@@ -1,6 +1,7 @@
 // Оболочка вида: страницу и этот скрипт отдаёт приложение под origin плагина, модуль плагина получает готовый UiContext.
 
-import { connectView, mountModule } from '../../../../core/src/ui-shell.ts';
+import { defineElements } from '../../../../core/elements/elements.ts';
+import { connectView, keepFocus, mountModule } from '../../../../core/src/ui-shell.ts';
 import type { ViewBridge } from '../../shared/views.ts';
 
 const script = document.currentScript as HTMLScriptElement;
@@ -17,6 +18,7 @@ function fail(error: unknown): void {
 }
 
 async function start(): Promise<void> {
+  defineElements();
   const ctx = await connectView(bridge, {
     pluginId: plugin,
     view,
@@ -29,7 +31,15 @@ async function start(): Promise<void> {
   // Классический скрипт разрешает import() от своего адреса /.cyborg/, а путь манифеста - от каталога плагина.
   const module: unknown = await import(new URL(entry, `${location.origin}/`).href);
   const mounted = mountModule(module, root, ctx);
-  addEventListener('pagehide', () => mounted.dispose(), { once: true });
+  const focus = keepFocus(window, root);
+  addEventListener(
+    'pagehide',
+    () => {
+      focus.dispose();
+      mounted.dispose();
+    },
+    { once: true },
+  );
 }
 
 start().catch(fail);

@@ -8,6 +8,7 @@ declare module '@cyborg/contracts' {
     'test.tab': { 1: { readonly kind: string } };
     'test.flaky': { 1: object };
     'test.ticker': { 1: Ticker };
+    'test.guarded': { 1: Guarded };
   }
 }
 
@@ -24,4 +25,11 @@ export interface TestFiles {
   leak?(): Promise<{ cb: () => number }>;
   hang?(): never;
   crash?(): never;
+}
+
+/** Поставщик с `guard` в манифесте: путь аргумента проверяется у вызывающего (`via-contract`). */
+export interface Guarded {
+  read(path: string): Promise<string>;
+  open(spec: { path: string }): Promise<string>;
+  size(path: string): Promise<number>;
 }

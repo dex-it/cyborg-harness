@@ -1,0 +1,12 @@
+{
+  "id": "pin-lock",
+  "version": "1.0.0",
+  "engines": { "cyborg": "^1" },
+  "permissions": { "ui.lock": true },
+  "ui": { "views": { "main": "./ui/ui.js" }, "overlay": "./ui/lock.js" },
+  "commands": {
+    "pin-lock.lock": {},
+    "pin-lock.unlock": { "args": ["string"] }
+  },
+  "keybindings": [{ "key": "CmdOrCtrl+Shift+L", "command": "pin-lock.lock" }]
+}

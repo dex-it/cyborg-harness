@@ -65,6 +65,7 @@ export function journalFor(lines: readonly PluginJournalLine[], pluginId: string
 
 /** Строка под заголовком: что с ядром и сколько плагинов не работает. */
 export function summary(snapshot: PluginsSnapshot): string {
+  if (snapshot.phase === 'no-workspace') return 'Воркспейс не открыт: выберите его в «Недавних» или кнопкой «Открыть…».';
   if (snapshot.phase === 'starting') return 'Ядро плагинов запускается…';
   if (snapshot.phase === 'failed') return `Ядро плагинов не запустилось: ${snapshot.error ?? 'причина неизвестна'}`;
   const enabled = snapshot.plugins.filter((p) => p.state !== 'disabled');

@@ -1,4 +1,4 @@
-// Спайк UI во фреймах (SAD2, открытый вопрос 11); итог - JSON в `--spike=<файл>`, печатает его scripts/spike-iframe.mjs.
+// Спайк UI во фреймах (SAD, открытый вопрос 11); итог - JSON в `--spike=<файл>`, печатает его scripts/spike-iframe.mjs.
 
 import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';

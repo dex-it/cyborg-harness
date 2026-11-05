@@ -1,6 +1,7 @@
 import { resolveSection, VERSION_KEY, type SectionResult } from './config.ts';
 import { DisposableStore, toDisposable, type Disposable } from './disposable.ts';
-import type { ContractName, ContractType, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue } from '@cyborg/contracts';
+import { compileSchema } from './json-schema.ts';
+import type { ContractName, ContractType, DocumentChange, DocumentInfo, DocumentInit, HttpServer, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue, ServeRequest, ServeResponse } from '@cyborg/contracts';
 import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';
@@ -21,6 +22,8 @@ export interface ContractDescriptor {
 export interface SectionInput {
   readonly version: number;
   readonly layers: readonly (readonly [string, unknown])[];
+  /** Схема из файла манифеста; ядро уже проверило, что она разбирается. */
+  readonly schema?: unknown;
 }
 
 export type ActivateResult =
@@ -53,6 +56,7 @@ export const handleKey = (pluginId: string, contract: string, version: string): 
 export interface OsPaths {
   readonly data: string;
   readonly temp: string;
+  readonly home: string;
 }
 
 /** `ctx.os` по правам манифеста: нет права - нет члена; проверяет всё равно шлюз ядра, здесь только форма. */
@@ -110,9 +114,81 @@ class HostPtys {
   }
 }
 
+/** Слушатели `fs.watch` в хосте: id даёт хост, чтобы событие, пришедшее раньше ответа ядра, нашло слушателя. */
+class HostWatches {
+  readonly #items = new Map<string, (names: readonly string[]) => void>();
+  #seq = 0;
+
+  async watch(endpoint: Endpoint, pluginId: string, target: unknown, listener: (names: readonly string[]) => void): Promise<Disposable> {
+    if (typeof listener !== 'function') throw new CoreError('Invalid', `${pluginId}: fs.watch ждёт слушателя`);
+    const id = `w${String(++this.#seq)}`;
+    const key = `${pluginId}\0${id}`;
+    this.#items.set(key, listener);
+    try {
+      await endpoint.request('os', { pluginId, method: 'fs.watch', args: [target, id] });
+    } catch (error) {
+      this.#items.delete(key);
+      throw error;
+    }
+    return toDisposable(() => {
+      if (this.#items.delete(key)) void endpoint.request('os', { pluginId, method: 'fs.unwatch', args: [id] }).catch(() => undefined);
+    });
+  }
+
+  change(endpoint: Endpoint, p: { pluginId: string; id: string; names: string[] }): void {
+    const listener = this.#items.get(`${p.pluginId}\0${p.id}`);
+    if (!listener) return;
+    try {
+      listener(p.names);
+    } catch (error) {
+      endpoint.notify('log', { pluginId: p.pluginId, message: `слушатель fs.watch упал: ${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+
+  forget(pluginId: string): void {
+    for (const key of [...this.#items.keys()]) if (key.startsWith(`${pluginId}\0`)) this.#items.delete(key);
+  }
+}
+
+/** Обработчики `serve.http` в хосте: запрос от ядра находит свой по id сервера. */
+class HostServes {
+  readonly #items = new Map<string, (request: ServeRequest) => ServeResponse | Promise<ServeResponse>>();
+  #seq = 0;
+
+  async open(endpoint: Endpoint, pluginId: string, handler: (request: ServeRequest) => ServeResponse | Promise<ServeResponse>): Promise<HttpServer> {
+    if (typeof handler !== 'function') throw new CoreError('Invalid', `${pluginId}: serve.http ждёт обработчика`);
+    const id = `h${String(++this.#seq)}`;
+    const key = `${pluginId}\0${id}`;
+    this.#items.set(key, handler);
+    let url: string;
+    try {
+      url = await endpoint.request<string>('os', { pluginId, method: 'serve.http', args: [id] });
+    } catch (error) {
+      this.#items.delete(key);
+      throw error;
+    }
+    return Object.freeze({
+      url,
+      dispose: () => {
+        if (this.#items.delete(key)) void endpoint.request('os', { pluginId, method: 'serve.close', args: [id] }).catch(() => undefined);
+      },
+    });
+  }
+
+  request(p: { pluginId: string; id: string; request: ServeRequest }): ServeResponse | Promise<ServeResponse> {
+    const handler = this.#items.get(`${p.pluginId}\0${p.id}`);
+    if (!handler) throw new CoreError('NotFound', `${p.pluginId}: сервера ${p.id} нет`);
+    return handler(p.request);
+  }
+
+  forget(pluginId: string): void {
+    for (const key of [...this.#items.keys()]) if (key.startsWith(`${pluginId}\0`)) this.#items.delete(key);
+  }
+}
+
 export type SystemEvent = { readonly kind: 'focus'; readonly focused: boolean } | { readonly kind: 'suspend' | 'resume' | 'screen-lock' };
 
-type Listener = (focused?: boolean) => unknown;
+type Listener = (value?: boolean | string) => unknown;
 
 /** Слушатели событий окна и ОС всех плагинов хоста; ядро шлёт событие хосту один раз. */
 class HostSystem {
@@ -164,6 +240,11 @@ class HostSystem {
     }));
   }
 
+  /** Документ закрыл человек: событие только его владельцу. */
+  documentClosed(p: { readonly pluginId: string; readonly id: string }): void {
+    for (const l of [...this.#listeners]) if (l.kind === 'document-closed' && l.pluginId === p.pluginId) this.#safely(l.pluginId, 'documents.onClose', () => l.fn(p.id));
+  }
+
   forget(pluginId: string): void {
     for (const l of [...this.#listeners]) if (l.pluginId === pluginId) this.#listeners.delete(l);
     for (const id of [...this.#idle.keys()]) if (id.startsWith(`${pluginId}#`)) this.#idle.delete(id);
@@ -183,11 +264,17 @@ class HostSystem {
   }
 }
 
-function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths: OsPaths, ptys: HostPtys): PluginOs {
+function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths: OsPaths, ptys: HostPtys, watches: HostWatches, serves: HostServes): PluginOs {
   const call =
     <R>(method: string) =>
     (...args: unknown[]): Promise<R> =>
       endpoint.request<R>('os', { pluginId, method, args });
+  const opens = p.shell ?? [];
+  const schemes = opens.filter((v) => v.endsWith(':') && !v.startsWith('/') && !v.startsWith('~'));
+  const shell = opens.length > 0 && {
+    ...(opens.length > schemes.length && { openPath: call<undefined>('shell.openPath') }),
+    ...(schemes.length > 0 && { openExternal: call<undefined>('shell.openExternal') }),
+  };
   const clipboard = p.clipboard && {
     ...(p.clipboard.includes('read') && { readText: call<string>('clipboard.readText') }),
     ...(p.clipboard.includes('write') && { writeText: call<undefined>('clipboard.writeText') }),
@@ -198,6 +285,8 @@ function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths:
       readText: call('fs.readText'),
       list: call('fs.list'),
       stat: call('fs.stat'),
+      readSlice: call('fs.readSlice'),
+      watch: (target: string, listener: (names: readonly string[]) => void) => watches.watch(endpoint, pluginId, target, listener),
       writeText: call('fs.writeText'),
       mkdir: call('fs.mkdir'),
       remove: call('fs.remove'),
@@ -212,10 +301,21 @@ function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths:
       }),
     }),
     ...(p.net && { net: Object.freeze({ fetch: call('net.fetch') }) }),
+    ...(p.serve && { serve: Object.freeze({ http: (handler: (request: ServeRequest) => ServeResponse | Promise<ServeResponse>) => serves.open(endpoint, pluginId, handler) }) }),
     ...(p.env && { env: Object.freeze({ get: call('env.get') }) }),
     ...(p.notify && { notify: Object.freeze({ show: call('notify.show') }) }),
     ...(clipboard && { clipboard: Object.freeze(clipboard) }),
     ...(p['security.roots'] && { security: Object.freeze({ setRoots: call('security.setRoots') }) }),
+    ...(shell && { shell: Object.freeze(shell) }),
+    dialog: Object.freeze({ open: call<string[]>('dialog.open') }),
+    ...(p['ui.lock'] && {
+      ui: Object.freeze({
+        lock: async (options?: { hideNotifications?: boolean }) => {
+          await call('ui.lock')({ hideNotifications: options?.hideNotifications === true });
+          return Object.freeze({ release: () => call<undefined>('ui.unlock')() });
+        },
+      }),
+    }),
   }) as PluginOs;
 }
 
@@ -230,9 +330,14 @@ export function runHost(port: Port, importer: Importer): Endpoint {
   const ptys = new HostPtys();
   endpoint.handle('pty.data', (p: { pluginId: string; id: string; data: string }) => ptys.data(p));
   endpoint.handle('pty.exit', (p: { pluginId: string; id: string; exit: PtyExit }) => ptys.exit(p));
+  const watches = new HostWatches();
+  endpoint.handle('fs.change', (p: { pluginId: string; id: string; names: string[] }) => watches.change(endpoint, p));
+  const serves = new HostServes();
+  endpoint.handle('serve.request', (p: { pluginId: string; id: string; request: ServeRequest }) => serves.request(p));
   const system = new HostSystem(endpoint);
   endpoint.handle('system', (event: SystemEvent | { kind: 'idle'; id: string }) => system.dispatch(event));
   endpoint.handle('system.beforeQuit', () => system.beforeQuit());
+  endpoint.handle('document.closed', (p: { pluginId: string; id: string }) => system.documentClosed(p));
 
   endpoint.handle('ping', () => true);
 
@@ -266,7 +371,7 @@ export function runHost(port: Port, importer: Importer): Endpoint {
       loaded.store.add(toDisposable(() => reloaders.delete(`${p.pluginId}/${kind}`)));
     }
     try {
-      const result = await module.activate(context(endpoint, proxies, manifest, mirror, loaded, p.paths, config?.handle, state?.handle, ptys, system));
+      const result = await module.activate(context(endpoint, proxies, manifest, mirror, loaded, p.paths, config?.handle, state?.handle, ptys, system, watches, serves));
       if (result) loaded.store.add(result);
       return { ok: true } satisfies ActivateResult;
     } catch (error) {
@@ -286,6 +391,8 @@ export function runHost(port: Port, importer: Importer): Endpoint {
     const loaded = plugins.get(p.pluginId);
     plugins.delete(p.pluginId);
     ptys.forget(p.pluginId);
+    watches.forget(p.pluginId);
+    serves.forget(p.pluginId);
     loaded?.store.dispose();
     system.forget(p.pluginId);
   });
@@ -425,6 +532,8 @@ function context(
   state: PluginSection | undefined,
   ptys: HostPtys,
   system: HostSystem,
+  watches: HostWatches,
+  serves: HostServes,
 ): PluginContext {
   const pluginId = manifest.id;
   const track = (d: Disposable) => {
@@ -435,9 +544,16 @@ function context(
     pluginId,
     subscriptions: loaded.store,
     log: (message) => endpoint.notify('log', { pluginId, message }),
-    os: osOf(endpoint, pluginId, manifest.permissions, paths, ptys),
+    os: osOf(endpoint, pluginId, manifest.permissions, paths, ptys, watches, serves),
     secrets: { resolve: (ref) => endpoint.request<SecretValue>('os', { pluginId, method: 'secrets.resolve', args: [ref] }) },
     window: Object.freeze({ onFocusChange: (listener: (focused: boolean) => void) => track(system.on(pluginId, 'focus', (focused) => listener(focused === true))) }),
+    documents: Object.freeze({
+      list: () => endpoint.request<DocumentInfo[]>('documents', { pluginId, method: 'list', args: [] }),
+      open: (type: string, init: DocumentInit) => endpoint.request<string>('documents', { pluginId, method: 'open', args: [type, init] }),
+      save: (id: string, change: DocumentChange) => endpoint.request<undefined>('documents', { pluginId, method: 'save', args: [id, change] }),
+      close: (id: string) => endpoint.request<undefined>('documents', { pluginId, method: 'close', args: [id] }),
+      onClose: (listener: (id: string) => void) => track(system.on(pluginId, 'document-closed', (id) => listener(String(id)))),
+    }),
     system: Object.freeze({
       onSuspend: (listener: () => void) => track(system.on(pluginId, 'suspend', listener)),
       onResume: (listener: () => void) => track(system.on(pluginId, 'resume', listener)),
@@ -512,7 +628,11 @@ async function section(
   input: SectionInput | undefined,
 ): Promise<{ handle: PluginSection; reload: (layers: SectionInput['layers']) => Promise<SectionResult> } | { failed: SectionResult } | undefined> {
   if (!input) return undefined;
-  const spec = { ...module[kind], version: input.version };
+  const own = module[kind];
+  const compiled = input.schema === undefined ? undefined : compileSchema(input.schema);
+  if (compiled && !compiled.ok) return { failed: { status: 'invalid', errors: compiled.errors } };
+  const check = compiled?.check;
+  const spec = { ...own, version: input.version, ...(check && { validate: (v: Readonly<Record<string, unknown>>) => [...check(v), ...(own?.validate?.(v) ?? [])] }) };
   let raw = new Map(input.layers.map(([layer, value]) => [layer, value]));
   const order = input.layers.map(([layer]) => layer);
   const resolve = () => resolveSection(spec, order.map((l) => [l, raw.get(l)] as const));

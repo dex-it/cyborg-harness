@@ -9,8 +9,8 @@ const TYPES: Record<string, string> = {
   '.png': 'image/png',
 };
 
-/** Вид видит только свой origin: ни сети, ни чужих видов, ни inline-скриптов. */
-export const VIEW_CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:";
+/** Вид видит только свой origin: ни сети, ни чужих видов, ни inline-скриптов; инлайн-стили разрешены - xterm и Monaco вставляют <style>, а скрипту вида они не дают ничего сверх CSSOM. */
+export const VIEW_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:";
 
 /** Файлы оболочки вида: их отдаёт приложение под origin плагина, чтобы CSP `'self'` их пропустил. */
 export const SHELL_PATH = '/.cyborg/';
@@ -21,6 +21,8 @@ export interface PluginUi {
   readonly dir: string;
   /** Вид -> модуль с `mount`, уже проверенный разбором манифеста. */
   readonly views: Readonly<Record<string, string>>;
+  /** Экран замка `ui.overlay`: отдаётся как вид `overlay`. */
+  readonly overlay?: string;
 }
 
 export type ViewRequest =
@@ -88,7 +90,7 @@ export function resolveViewRequest(url: string, uiOf: (pluginId: string) => Plug
   const { url: parsed, id } = found;
   if (parsed.pathname === '/' || parsed.pathname === '') {
     const view = parsed.searchParams.get('view') ?? Object.keys(ui.views)[0];
-    const entry = view !== undefined && Object.hasOwn(ui.views, view) ? ui.views[view] : undefined;
+    const entry = view === 'overlay' ? ui.overlay : view !== undefined && Object.hasOwn(ui.views, view) ? ui.views[view] : undefined;
     return view === undefined || entry === undefined ? undefined : { kind: 'shell', html: shellHtml(id, view, entry) };
   }
   if (parsed.pathname.startsWith(SHELL_PATH)) {

@@ -16,6 +16,24 @@
           "claude --version"
         ]
       }
+    ],
+    "fs.read": [
+      "~/.claude/projects"
+    ],
+    "launch": [
+      {
+        "program": "$SHELL",
+        "args": [
+          "-lc",
+          "exec claude --settings \"$CYBORG_SETTINGS\" \"$@\"",
+          "cyborg"
+        ],
+        "env": [
+          "CYBORG_EVENTS",
+          "CYBORG_SETTINGS",
+          "CYBORG_MCP_TOKEN"
+        ]
+      }
     ]
   }
 }

@@ -7,6 +7,7 @@ import { parseManifest } from '../src/manifest.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { pluginStatuses } from '../src/status.ts';
 import { inlineHosts } from '../src/transports.ts';
+import { WINDOW_OWNER } from '../src/window-layer.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 
@@ -177,10 +178,10 @@ test('plugins.keybindings: выбор пользователя перекрыв�
   );
   const k = await start();
   assert.deepEqual(
-    k.keybindings.map((b) => [b.key, b.command, b.user ?? false, b.shadowed.map((x) => x.command)]),
+    k.keybindings.filter((b) => b.pluginId !== WINDOW_OWNER).map((b) => [b.key, b.command, b.user ?? false, b.shadowed.map((x) => x.command)]),
     [
+      ['F6', 'alpha.alt', true, ['cyborg.window.focus-next']],
       ['Ctrl+K', 'zeta.go', true, ['alpha.go']],
-      ['F6', 'alpha.alt', true, []],
     ],
   );
   assert.equal(k.keybinding('F5'), undefined, 'освобождённое сочетание осталось у плагина');
@@ -206,7 +207,7 @@ test('конфликт сочетаний: встроенный побеждае
   const k = await start();
   const conflicts = k.journal.flatMap((e) => (e.kind === 'key-conflict' ? [`${e.pluginId}->${e.winner}`] : []));
   assert.deepEqual(conflicts, ['zeta->alpha', 'mallory->alpha']);
-  assert.deepEqual(k.keybindings, [{ key: 'Ctrl+K', command: 'alpha.go', pluginId: 'alpha', shadowed: [{ pluginId: 'zeta', command: 'zeta.go' }, { pluginId: 'mallory', command: 'mallory.go' }] }]);
+  assert.deepEqual(k.keybindings.filter((b) => b.pluginId !== WINDOW_OWNER), [{ key: 'Ctrl+K', command: 'alpha.go', pluginId: 'alpha', shadowed: [{ pluginId: 'zeta', command: 'zeta.go' }, { pluginId: 'mallory', command: 'mallory.go' }] }]);
   assert.equal(k.keybinding('Ctrl+K')?.command, 'alpha.go');
   assert.deepEqual(
     pluginStatuses(k.journal).map((s) => s.state),

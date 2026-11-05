@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, PluginModule } from '@cyborg/contracts';
 import { load } from '../src/loader.ts';
+import { RecentWorkspaces } from '../src/recent.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { lockWorkspace, migrateLegacy, openWorkspace, workspaceKey, type Workspace } from '../src/workspace.ts';
 
@@ -172,4 +173,26 @@ test('битый файл пользователя не роняет откры�
   await assert.rejects(ws.config.write('user', 'x', 1, { a: 1 }));
   assert.equal(await readFile(box.userFile, 'utf8'), '{ "plugins": ');
   ws.close();
+});
+
+test('«Недавние»: последний открытый первым, без повторов по realpath, пропавший файл не показывается, битый список не мешает', async () => {
+  await using box = await sandbox();
+  const list = path.join(box.root, 'recent.json');
+  const recent = new RecentWorkspaces(list, 3);
+  const files = ['a', 'b', 'c', 'd'].map((n) => path.join(box.root, `${n}.cyborg.json`));
+  for (const f of files) await writeFile(f, '{}');
+  await symlink(files[0]!, path.join(box.root, 'link.cyborg.json'));
+  for (const f of files.slice(0, 3)) recent.add(f);
+  recent.add(path.join(box.root, 'link.cyborg.json'));
+  assert.deepEqual(recent.list(), [files[0], files[2], files[1]]);
+  recent.add(files[3]!);
+  assert.deepEqual(recent.list(), [files[3], files[0], files[2]], 'лимит');
+  await rm(files[0]!);
+  assert.deepEqual(recent.list(), [files[3], files[2]]);
+  recent.remove(files[3]!);
+  assert.deepEqual(recent.list(), [files[2]]);
+  await writeFile(list, '{');
+  assert.deepEqual(recent.list(), []);
+  recent.add(files[1]!);
+  assert.deepEqual(recent.list(), [files[1]]);
 });
