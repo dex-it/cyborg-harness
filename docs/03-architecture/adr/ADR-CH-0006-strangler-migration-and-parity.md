@@ -1,8 +1,8 @@
 ---
 id: ADR-CH-0006
-status: review
-date: 2026-11-02
-relates_to: product, cyborg-harness, 03-migration
+status: proposed
+date: 2026-11-05
+relates_to: product, cyborg-harness, 03-migration, ADR-CH-0011, ADR-CH-0012, ADR-CH-0014
 origin: derived
 quality-checks: входных записей нет
 ---
@@ -11,15 +11,17 @@ quality-checks: входных записей нет
 
 > Решение составителя по запросу владельца (2026-11-02), не согласовано; ждёт приёмки. Основано на [ресёрче](../../research/README.md): [bb](../../research/bb.md), [DeepSeek Harness](../../research/deepseek-harness.md), [сравнение](../../research/comparison.md). Устройство целиком - [SAD](../design/sad.md).
 
+> Согласовано с [SAD2, 6.1](../design/sad2.md#61-этап-1-ядро-без-изоляции-доступа), решение не меняется. Уточнения: (1) шаг 0 на текущем коде - `ProjectStore` сохраняет неизвестные поля файла воркспейса, id сессии устойчивый; затем pty-хост с `persist` и `attach` тоже на текущем коде ([ADR-CH-0012](ADR-CH-0012-hosts-watchdog-pty-host.md)); (2) пилот - `session-notifications`, а не `path-drop`: `path-drop` в SAD2 - часть `sessions`; (3) формат данных меняется один раз при переносе в `config` и `state` по [ADR-CH-0014](ADR-CH-0014-secrets-config-state.md), поэтому пункт 7 действует с этой оговоркой; (4) прокладка совместимости каналов остаётся, владельцы каналов по плагинам - в [плане паритета](../../04-verification/parity-plan.md); (5) бюджет «не хуже 10%» требует базовой линии старта и памяти, которой в `scripts/measure.mjs` нет; (6) в порядок переноса добавляются плагины `git`, `projects`, `viewer`, `sessions`; (7) этапы изоляции - [ADR-CH-0011](ADR-CH-0011-isolation-stages.md).
+
 ## Decision Drivers
 
 - Условие владельца: всё, что есть сейчас, должно сохраниться.
-- Приложение живое: 153 требования, 893 теста, дымовой тест, пользователи с данными.
+- Приложение живое: 153 требования, 925 тестов, дымовой тест, пользователи с данными.
 - bb держит паритет записанными сессиями; dsh - снапшотами и реальным загрузчиком в тестах ([bb 5.6, 5.8](../../research/bb.md), [dsh 10](../../research/deepseek-harness.md)).
 
 ## Context
 
-Исходное состояние: связность в `main.ts` (58 каналов), `preload.ts` (65 методов), `app.ts` (1360 строк) и `index.html` ([cyborg-today, раздел 8](../../research/cyborg-today.md#8-что-мешает-разделению-связность)). Большой рефакторинг одним шагом исключён.
+Исходное состояние: связность в `main.ts` (58 каналов), `preload.ts` (61 член), `app.ts` (1360 строк) и `index.html` ([cyborg-today, раздел 8](../../research/cyborg-today.md#8-что-мешает-разделению-связность)). Большой рефакторинг одним шагом исключён.
 
 ## Decision
 

@@ -1,13 +1,16 @@
 ---
 id: ADR-CH-0007
-status: review
-date: 2026-11-02
+status: proposed
+proposed_superseded_by: ADR-CH-0013
+date: 2026-11-05
 relates_to: product, cyborg-harness, ADR-CH-0005, 10-ui-preferences, 12-command-buttons
 origin: derived
 quality-checks: входных записей нет
 ---
 
 # ADR-CH-0007 Интерфейс плагинов: слоты на обычном DOM, граница ошибок на слот, единый реестр команд и сочетаний
+
+> Предложена замена на ADR-CH-0013 (не принята): слоты в общем DOM заменены своим `<iframe>` на плагин; единый реестр команд и сочетаний с проверкой конфликтов при загрузке сохранён ([SAD2, 3.9](../design/sad2.md#39-системные-клавиши-и-события)).
 
 > Решение составителя по запросу владельца (2026-11-02), не согласовано; ждёт приёмки. Основано на [ресёрче](../../research/README.md): [bb](../../research/bb.md), [DeepSeek Harness](../../research/deepseek-harness.md), [сравнение](../../research/comparison.md). Устройство целиком - [SAD](../design/sad.md).
 

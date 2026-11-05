@@ -1,13 +1,16 @@
 ---
 id: ADR-CH-0003
-status: review
-date: 2026-11-02
+status: proposed
+proposed_superseded_by: ADR-CH-0011
+date: 2026-11-05
 relates_to: product, cyborg-harness, ADR-0002, ADR-CH-0001
 origin: derived
 quality-checks: входных записей нет
 ---
 
 # ADR-CH-0003 Три уровня доверия: ядро, встроенные плагины, сторонние в отдельном процессе с правами из манифеста
+
+> Предложена замена на ADR-CH-0011 (не принята): уровни доверия L0-L2 заменены изоляцией трёх видов (сбоев и рендера сразу, доступа по поводу), а `utilityProcess` не применяет `--permission`.
 
 > Решение составителя по запросу владельца (2026-11-02), не согласовано; ждёт приёмки. Основано на [ресёрче](../../research/README.md): [bb](../../research/bb.md), [DeepSeek Harness](../../research/deepseek-harness.md), [сравнение](../../research/comparison.md). Устройство целиком - [SAD](../design/sad.md).
 

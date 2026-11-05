@@ -1,8 +1,8 @@
 ---
 id: ADR-CH-0002
-status: review
-date: 2026-11-02
-relates_to: product, cyborg-harness, ADR-CH-0001
+status: proposed
+date: 2026-11-05
+relates_to: product, cyborg-harness, ADR-CH-0001, ADR-CH-0010, ADR-CH-0014
 origin: derived
 quality-checks: входных записей нет
 ---
@@ -10,6 +10,8 @@ quality-checks: входных записей нет
 # ADR-CH-0002 Манифест плагина в package.json, строгая схема, два диапазона совместимости, префикс experimental_
 
 > Решение составителя по запросу владельца (2026-11-02), не согласовано; ждёт приёмки. Основано на [ресёрче](../../research/README.md): [bb](../../research/bb.md), [DeepSeek Harness](../../research/deepseek-harness.md), [сравнение](../../research/comparison.md). Устройство целиком - [SAD](../design/sad.md).
+
+> Уточнён по [SAD2, 3.3-3.4](../design/sad2.md#33-версии-и-миграции), [ADR-CH-0010](ADR-CH-0010-contracts-instead-of-services.md) и [ADR-CH-0014](ADR-CH-0014-secrets-config-state.md). Решение «манифест известен ядру до запуска кода, строгая схема» в силе. Манифест получает поля `engines`, `provides` / `requires` / `optional` / `consumes`, `permissions` (вместо `capabilities`), `ui`, `config` и `state` (схема и версия), `lock`. Целое число `engines.api` заменено семантической версией API плагинов в `engines.cyborg` (`^1`) и семантическими версиями контрактов (две мажорные одновременно, `@deprecated` с журналом); версии данных - `migrate` до активации вместо «миграции рядом». Судьба префикса `experimental_` в SAD2 не описана и остаётся открытой до P1.
 
 ## Decision Drivers
 

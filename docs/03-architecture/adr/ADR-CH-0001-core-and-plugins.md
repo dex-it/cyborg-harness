@@ -1,8 +1,8 @@
 ---
 id: ADR-CH-0001
-status: review
-date: 2026-11-02
-relates_to: product, cyborg-harness, ADR-0001, ADR-0002
+status: proposed
+date: 2026-11-05
+relates_to: product, cyborg-harness, ADR-0001, ADR-0002, ADR-CH-0009, ADR-CH-0010
 origin: derived
 quality-checks: входных записей нет
 ---
@@ -10,6 +10,14 @@ quality-checks: входных записей нет
 # ADR-CH-0001 Ядро и плагины: своё минимальное ядро с реестром сервисов, без Cordis и без форка
 
 > Решение составителя по запросу владельца (2026-11-02), не согласовано; ждёт приёмки. Основано на [ресёрче](../../research/README.md): [bb](../../research/bb.md), [DeepSeek Harness](../../research/deepseek-harness.md), [сравнение](../../research/comparison.md). Устройство целиком - [SAD](../design/sad.md).
+
+> Уточнён [ADR-CH-0009](ADR-CH-0009-core-boundary-and-compactness.md) и [ADR-CH-0010](ADR-CH-0010-contracts-instead-of-services.md) по [SAD2](../design/sad2.md). Решение «своё небольшое ядро, без Cordis и без форка, плагины - папки одного пакета» в силе. Меняется содержание:
+>
+> - пункт 1: состав ядра определяет критерий компактности и десять целей, а не перечень; рантайма сессий, шины событий, уведомлений и реестра сервисов в ядре нет;
+> - пункты 2-3 и 6: вместо реестра сервисов, `inject` и каскада - реестр контрактов (`provides` / `requires` / `optional` / `consumes`), граф проверяется до запуска кода;
+> - пункт 4: роли Definition, Provider, Consumer заменены поставщиком и потребителем контракта;
+> - пункт 5: публичная поверхность плагина - пакет `@cyborg/contracts` и `ctx`; «нулевая привилегия» сохраняется;
+> - `Disposable` и откат регистраций остаются.
 
 ## Decision Drivers
 

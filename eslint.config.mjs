@@ -3,7 +3,8 @@ import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig(
-  { ignores: ['node_modules/', 'playground/dist/', '.claude/'] },
+  // Спайки ресёрча - архив замеров к документам, не код харнесса; запускаются один раз и не поддерживаются.
+  { ignores: ['node_modules/', 'playground/dist/', '.claude/', 'docs/research/spikes/'] },
   { linterOptions: { reportUnusedDisableDirectives: 'error' } },
   js.configs.recommended,
   {

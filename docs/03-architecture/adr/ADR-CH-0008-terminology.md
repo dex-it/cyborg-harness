@@ -1,8 +1,8 @@
 ---
 id: ADR-CH-0008
-status: review
-date: 2026-11-02
-relates_to: product, cyborg-harness, 14-extensions
+status: proposed
+date: 2026-11-05
+relates_to: product, cyborg-harness, 14-extensions, ADR-CH-0010, ADR-CH-0011
 origin: derived
 quality-checks: входных записей нет
 ---
@@ -10,6 +10,8 @@ quality-checks: входных записей нет
 # ADR-CH-0008 Терминология: плагин Cyborg и плагин Claude Code - разные вещи
 
 > Решение составителя по запросу владельца (2026-11-02), не согласовано; ждёт приёмки. Основано на [ресёрче](../../research/README.md): [bb](../../research/bb.md), [DeepSeek Harness](../../research/deepseek-harness.md), [сравнение](../../research/comparison.md). Устройство целиком - [SAD](../design/sad.md).
+
+> Уточнён по [SAD2](../design/sad2.md): в пункте 4 термины «провайдер» и уровни L1/L2 устарели. Говорим «плагин-поставщик контракта» (например, `cyborg.agent`, [ADR-CH-0010](ADR-CH-0010-contracts-instead-of-services.md)), «встроенный плагин» (в хосте `builtin`, общий origin) и «сторонний плагин» (свой хост и свой origin, [ADR-CH-0011](ADR-CH-0011-isolation-stages.md)). Основное решение (плагин Cyborg и плагин Claude Code - разные вещи, окно «Расширения Claude Code») в силе.
 
 ## Decision Drivers
 
