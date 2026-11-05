@@ -1,0 +1,189 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { setTimeout as sleep } from 'node:timers/promises';
+import type { PluginContext } from '@cyborg/contracts';
+import { load, type LoadOptions } from '../src/loader.ts';
+import { parseManifest } from '../src/manifest.ts';
+import type { PluginModule } from '../src/plugin.ts';
+import { pluginStatuses } from '../src/status.ts';
+import { inlineHosts } from '../src/transports.ts';
+
+const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
+const settle = () => sleep(20);
+
+function start(table: Record<string, PluginModule>, options: Omit<LoadOptions, 'apiVersion' | 'spawnHost' | 'enabled'> & { enabled?: string[] }) {
+  const logs: string[] = [];
+  return load({
+    apiVersion: '1.0.0',
+    enabled: options.enabled ?? Object.keys(table),
+    spawnHost: inlineHosts(async (entry) => {
+      const mod = table[entry];
+      if (!mod) throw new Error(`нет модуля ${entry}`);
+      return mod;
+    }),
+    onLog: (id, m) => logs.push(`${id}: ${m}`),
+    ...options,
+  }).then((k) => Object.assign(k, { logs }));
+}
+
+test('события окна и ОС: доходят до плагинов всех хостов, упавший слушатель не мешает соседу, снятый плагин их не получает', async () => {
+  const seen: string[] = [];
+  const listen = (id: string, fail = false): PluginModule => ({
+    activate(ctx) {
+      ctx.window.onFocusChange((f) => seen.push(`${id}:focus:${String(f)}`));
+      ctx.system.onSuspend(() => {
+        if (fail) throw new Error('сломан');
+        seen.push(`${id}:suspend`);
+      });
+      ctx.system.onResume(() => seen.push(`${id}:resume`));
+      ctx.system.onScreenLock(() => seen.push(`${id}:lock`));
+      return undefined;
+    },
+  });
+  const k = await start({ a: listen('a', true), b: listen('b') }, { manifests: [manifest('a'), manifest('b')] });
+  assert.notEqual(k.hostOf('a'), k.hostOf('b'));
+  k.emit({ kind: 'focus', focused: false });
+  k.emit({ kind: 'suspend' });
+  k.emit({ kind: 'resume' });
+  k.emit({ kind: 'screen-lock' });
+  await settle();
+  assert.deepEqual(seen.sort(), ['a:focus:false', 'a:lock', 'a:resume', 'b:focus:false', 'b:lock', 'b:resume', 'b:suspend']);
+  assert.ok(k.logs.some((l) => l.startsWith('a: слушатель suspend упал: сломан')), k.logs.join('\n'));
+  assert.throws(() => k.emit({ kind: 'reboot' } as never), { code: 'Invalid' });
+
+  await k.disable('a');
+  seen.length = 0;
+  k.emit({ kind: 'focus', focused: true });
+  await settle();
+  assert.deepEqual(seen, ['b:focus:true']);
+  await k.unload();
+});
+
+test('onIdle: один раз на простой, снова - после активности; отписка останавливает опрос ОС', async () => {
+  let idle = 0;
+  let asked = 0;
+  const fired: number[] = [];
+  let ctx: PluginContext | undefined;
+  const k = await start(
+    {
+      lock: {
+        activate(c) {
+          ctx = c;
+          return undefined;
+        },
+      },
+    },
+    { manifests: [manifest('lock')], idlePoll: 5, idleSeconds: () => (asked++, idle) },
+  );
+  await settle();
+  assert.equal(asked, 0, 'ядро спрашивает ОС о простое без подписчиков');
+  const sub = ctx!.system.onIdle(60, () => fired.push(idle));
+  assert.throws(() => ctx!.system.onIdle(0, () => undefined), { code: 'Invalid' });
+  idle = 30;
+  await settle();
+  idle = 61;
+  await settle();
+  idle = 90;
+  await settle();
+  assert.deepEqual(fired, [61], 'второй раз за тот же простой');
+  idle = 0;
+  await settle();
+  idle = 70;
+  await settle();
+  assert.deepEqual(fired, [61, 70]);
+  sub.dispose();
+  await settle();
+  const after = asked;
+  await settle();
+  assert.equal(asked, after, 'опрос идёт без подписчиков');
+  await k.unload();
+});
+
+test('beforeQuit: ждёт асинхронных слушателей всех хостов, зависший обрезается бюджетом', async () => {
+  const done: string[] = [];
+  const k = await start(
+    {
+      saver: {
+        activate(ctx) {
+          ctx.system.onBeforeQuit(async () => {
+            await sleep(30);
+            done.push('saver');
+          });
+          return undefined;
+        },
+      },
+      stuck: {
+        activate(ctx) {
+          ctx.system.onBeforeQuit(() => new Promise(() => undefined));
+          return undefined;
+        },
+      },
+    },
+    { manifests: [manifest('saver'), manifest('stuck')] },
+  );
+  const t = performance.now();
+  await k.beforeQuit(200);
+  const ms = performance.now() - t;
+  assert.deepEqual(done, ['saver']);
+  assert.ok(ms >= 150 && ms < 1000, `бюджет не соблюдён: ${String(ms)} мс`);
+  await k.unload();
+});
+
+test('activation lazy: ждёт; будит команда, сочетание, wake и потребитель контракта; встречные consumes не виснут', async () => {
+  const activated: string[] = [];
+  const mod = (id: string, body?: (ctx: PluginContext) => void): PluginModule => ({
+    activate(ctx) {
+      activated.push(id);
+      body?.(ctx);
+      return undefined;
+    },
+  });
+  const k = await start(
+    {
+      pad: mod('pad', (ctx) => void ctx.commands.register('pad.open', () => 'открыт')),
+      files: mod('files', (ctx) => void ctx.contracts.provide('test.files', '1.0', { read: (p: string) => p })),
+      editor: mod('editor'),
+      view: mod('view'),
+      ping: mod('ping', (ctx) => void ctx.contracts.provide('test.tab', '1.0', { kind: 'ping' })),
+      pong: mod('pong', (ctx) => void ctx.contracts.provide('test.flaky', '1.0', {})),
+      off: mod('off', (ctx) => void ctx.commands.register('off.go', () => 1)),
+    },
+    {
+      manifests: [
+        manifest('pad', { activation: 'lazy', commands: ['pad.open'], keybindings: [{ key: 'F2', command: 'pad.open' }] }),
+        manifest('files', { activation: 'lazy', provides: { 'test.files': ['1.0'] } }),
+        manifest('editor', { requires: { 'test.files': '^1' } }),
+        manifest('view', { activation: 'lazy' }),
+        manifest('ping', { activation: 'lazy', provides: { 'test.tab': ['1.0'] }, consumes: { 'test.flaky': '^1' } }),
+        manifest('pong', { activation: 'lazy', provides: { 'test.flaky': ['1.0'] }, consumes: { 'test.tab': '^1' } }),
+        manifest('off', { activation: 'lazy', commands: ['off.go'] }),
+      ],
+    },
+  );
+  assert.deepEqual(activated, ['files', 'editor'], 'ленивый поднят при старте или поставщик не поднят ради requires');
+  assert.deepEqual(
+    pluginStatuses(k.journal).filter((s) => s.state === 'waiting').map((s) => s.id).sort(),
+    ['off', 'pad', 'ping', 'pong', 'view'],
+  );
+
+  assert.equal(k.keybinding('F2')?.command, 'pad.open', 'сочетание спящего ушло бы в окно');
+  assert.equal(await k.run('pad.open'), 'открыт');
+  assert.ok(k.active.includes('pad'));
+
+  await k.wake('view');
+  await k.wake('view');
+  assert.equal(activated.filter((id) => id === 'view').length, 1);
+
+  await k.wake('ping');
+  await k.idle();
+  assert.ok(k.active.includes('ping') && k.active.includes('pong'), 'встречные consumes');
+
+  await k.disable('off');
+  await assert.rejects(k.run('off.go'), { code: 'CommandNotFound' });
+  assert.equal(k.keybinding('F2')?.pluginId, 'pad');
+  assert.ok(!activated.includes('off'), 'выключенный человеком ленивый поднят командой');
+
+  const bad = parseManifest(manifest('x', { activation: 'eager' }));
+  assert.ok(!bad.ok && bad.errors.some((e) => e.startsWith('activation:')));
+  await k.unload();
+});

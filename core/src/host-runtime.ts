@@ -109,6 +109,79 @@ class HostPtys {
   }
 }
 
+export type SystemEvent = { readonly kind: 'focus'; readonly focused: boolean } | { readonly kind: 'suspend' | 'resume' | 'screen-lock' };
+
+type Listener = (focused?: boolean) => unknown;
+
+/** Слушатели событий окна и ОС всех плагинов хоста; ядро шлёт событие хосту один раз. */
+class HostSystem {
+  readonly #listeners = new Set<{ pluginId: string; kind: string; fn: Listener }>();
+  readonly #idle = new Map<string, () => void>();
+  readonly endpoint: Endpoint;
+  #seq = 0;
+
+  constructor(endpoint: Endpoint) {
+    this.endpoint = endpoint;
+  }
+
+  on(pluginId: string, kind: string, fn: Listener): Disposable {
+    const item = { pluginId, kind, fn };
+    this.#listeners.add(item);
+    return toDisposable(() => this.#listeners.delete(item));
+  }
+
+  onIdle(pluginId: string, seconds: number, fn: () => void): Disposable {
+    if (!Number.isFinite(seconds) || seconds <= 0) throw new CoreError('Invalid', `${pluginId}: onIdle ждёт секунды больше нуля, получено ${String(seconds)}`);
+    const id = `${pluginId}#${++this.#seq}`;
+    this.#idle.set(id, fn);
+    this.endpoint.notify('idle.watch', { pluginId, id, seconds });
+    return toDisposable(() => {
+      if (this.#idle.delete(id)) this.endpoint.notify('idle.unwatch', { pluginId, id });
+    });
+  }
+
+  dispatch(event: SystemEvent | { readonly kind: 'idle'; readonly id: string }): void {
+    if (event.kind === 'idle') {
+      const fn = this.#idle.get(event.id);
+      if (fn) this.#safely(event.id.slice(0, event.id.lastIndexOf('#')), 'onIdle', fn);
+      return;
+    }
+    for (const l of [...this.#listeners]) {
+      if (l.kind !== event.kind) continue;
+      this.#safely(l.pluginId, event.kind, () => l.fn(event.kind === 'focus' ? event.focused : undefined));
+    }
+  }
+
+  async beforeQuit(): Promise<void> {
+    const quitting = [...this.#listeners].filter((l) => l.kind === 'quit');
+    await Promise.allSettled(quitting.map(async (l) => {
+      try {
+        await l.fn();
+      } catch (error) {
+        this.#log(l.pluginId, 'onBeforeQuit', error);
+      }
+    }));
+  }
+
+  forget(pluginId: string): void {
+    for (const l of [...this.#listeners]) if (l.pluginId === pluginId) this.#listeners.delete(l);
+    for (const id of [...this.#idle.keys()]) if (id.startsWith(`${pluginId}#`)) this.#idle.delete(id);
+  }
+
+  #safely(pluginId: string, what: string, fn: () => unknown): void {
+    try {
+      const r = fn();
+      if (r instanceof Promise) r.catch((error: unknown) => this.#log(pluginId, what, error));
+    } catch (error) {
+      this.#log(pluginId, what, error);
+    }
+  }
+
+  #log(pluginId: string, what: string, error: unknown): void {
+    this.endpoint.notify('log', { pluginId, message: `слушатель ${what} упал: ${error instanceof Error ? error.message : String(error)}` });
+  }
+}
+
 function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths: OsPaths, ptys: HostPtys): PluginOs {
   const call =
     <R>(method: string) =>
@@ -156,6 +229,9 @@ export function runHost(port: Port, importer: Importer): Endpoint {
   const ptys = new HostPtys();
   endpoint.handle('pty.data', (p: { pluginId: string; id: string; data: string }) => ptys.data(p));
   endpoint.handle('pty.exit', (p: { pluginId: string; id: string; exit: PtyExit }) => ptys.exit(p));
+  const system = new HostSystem(endpoint);
+  endpoint.handle('system', (event: SystemEvent | { kind: 'idle'; id: string }) => system.dispatch(event));
+  endpoint.handle('system.beforeQuit', () => system.beforeQuit());
 
   endpoint.handle('ping', () => true);
 
@@ -189,7 +265,7 @@ export function runHost(port: Port, importer: Importer): Endpoint {
       loaded.store.add(toDisposable(() => reloaders.delete(`${p.pluginId}/${kind}`)));
     }
     try {
-      const result = await module.activate(context(endpoint, proxies, manifest, mirror, loaded, p.paths, config?.handle, state?.handle, ptys));
+      const result = await module.activate(context(endpoint, proxies, manifest, mirror, loaded, p.paths, config?.handle, state?.handle, ptys, system));
       if (result) loaded.store.add(result);
       return { ok: true } satisfies ActivateResult;
     } catch (error) {
@@ -210,6 +286,7 @@ export function runHost(port: Port, importer: Importer): Endpoint {
     plugins.delete(p.pluginId);
     ptys.forget(p.pluginId);
     loaded?.store.dispose();
+    system.forget(p.pluginId);
   });
 
   endpoint.handle('call', async (p: { pluginId: string; contract: string; version: string; member: string; args: unknown[]; subscription?: number }) => {
@@ -346,6 +423,7 @@ function context(
   config: PluginSection | undefined,
   state: PluginSection | undefined,
   ptys: HostPtys,
+  system: HostSystem,
 ): PluginContext {
   const pluginId = manifest.id;
   const track = (d: Disposable) => {
@@ -358,6 +436,14 @@ function context(
     log: (message) => endpoint.notify('log', { pluginId, message }),
     os: osOf(endpoint, pluginId, manifest.permissions, paths, ptys),
     secrets: { resolve: (ref) => endpoint.request<SecretValue>('os', { pluginId, method: 'secrets.resolve', args: [ref] }) },
+    window: Object.freeze({ onFocusChange: (listener: (focused: boolean) => void) => track(system.on(pluginId, 'focus', (focused) => listener(focused === true))) }),
+    system: Object.freeze({
+      onSuspend: (listener: () => void) => track(system.on(pluginId, 'suspend', listener)),
+      onResume: (listener: () => void) => track(system.on(pluginId, 'resume', listener)),
+      onScreenLock: (listener: () => void) => track(system.on(pluginId, 'screen-lock', listener)),
+      onIdle: (seconds: number, listener: () => void) => track(system.onIdle(pluginId, seconds, listener)),
+      onBeforeQuit: (listener: () => void | Promise<void>) => track(system.on(pluginId, 'quit', listener)),
+    }),
     contracts: {
       provide(contract: string, version: string, impl: unknown) {
         if (typeof impl !== 'object' || impl === null) throw new CoreError('Invalid', `${pluginId}: реализация ${contract}@${version} не объект`);

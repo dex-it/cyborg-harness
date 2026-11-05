@@ -30,8 +30,8 @@ describe('окно «Плагины Cyborg»: модель', () => {
     assert.equal(summary(snapshot([], { phase: 'failed', error: 'нет хоста' })), 'Ядро плагинов не запустилось: нет хоста');
     assert.match(summary(snapshot([row('off', 'disabled')])), /^Включённых плагинов нет/);
     assert.equal(
-      summary(snapshot([row('a', 'active'), row('b', 'stopped'), row('c', 'restarting'), row('d', 'disabled')])),
-      'работает: 1 из 3, ждут перезапуска: 1, выключено: 1',
+      summary(snapshot([row('a', 'active'), row('b', 'stopped'), row('c', 'restarting'), row('d', 'disabled'), row('e', 'waiting')])),
+      'работает: 1 из 4, ждут вызова: 1, ждут перезапуска: 1, выключено: 1',
     );
   });
 
@@ -44,6 +44,7 @@ describe('окно «Плагины Cyborg»: модель', () => {
     assert.deepEqual(labels(row('bob', 'stopped')), ['Включить снова', 'Журнал']);
     assert.deepEqual(labels(row('bob', 'stopped', { revivable: false })), ['Журнал']);
     assert.deepEqual(labels(row('bob', 'restarting')), ['Журнал']);
+    assert.deepEqual(labels(row('later', 'waiting', { commands: ['later.hello'] })), ['later.hello', 'Выгрузить', 'Журнал']);
   });
 
   it('клавиши: перехват у работающего владельца, конфликт называет проигравших, лента - по времени', () => {

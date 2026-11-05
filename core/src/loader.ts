@@ -1,11 +1,12 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import type { SectionResult, SectionStore } from './config.ts';
 import type { Disposable } from './disposable.ts';
 import { CoreError, errorMessage, ignore } from './errors.ts';
 import { providesMatching, resolveGraph, type ContractGraph, type Rejection } from './graph.ts';
-import { CALLBACK, handleKey, marker, SUBSCRIPTION, type ActivateResult, type ContractDescriptor, type SectionInput } from './host-runtime.ts';
+import { CALLBACK, handleKey, marker, SUBSCRIPTION, type ActivateResult, type ContractDescriptor, type SectionInput, type SystemEvent } from './host-runtime.ts';
 import { normalizeKey, resolveKey } from './keys.ts';
 import { checkArgs, parseManifest, type PluginManifest } from './manifest.ts';
 import { ContractRegistry } from './registry.ts';
@@ -27,6 +28,8 @@ export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'activated'; readonly hostId: string; readonly ms: number }
   | { readonly pluginId: string; readonly kind: 'deactivated'; readonly error?: string }
   | { readonly pluginId: string; readonly kind: 'revived' }
+  /** `activation: "lazy"`: ждёт первой команды, сочетания, показа вида или потребителя своего контракта. */
+  | { readonly pluginId: string; readonly kind: 'waiting' }
   /** Шлюз `ctx.os` отказал: вызов вне прав манифеста. */
   | { readonly pluginId: string; readonly kind: 'denied'; readonly method: string; readonly detail: string }
   /** Снят по disable: сам (`by` - он же) или вместе с поставщиком, которого требовал. */
@@ -98,6 +101,10 @@ export interface LoadOptions {
   /** Граф решён, код плагинов ещё не запускался. */
   /** Под какую ОС раскрыть `CmdOrCtrl`; по умолчанию текущая. */
   readonly platform?: string | undefined;
+  /** Секунды простоя пользователя по ОС; без него `onIdle` не срабатывает. */
+  readonly idleSeconds?: (() => number) | undefined;
+  /** Как часто спрашивать `idleSeconds`, пока есть подписчики, мс. */
+  readonly idlePoll?: number | undefined;
   readonly onGraph?: ((graph: ContractGraph) => Promise<void> | undefined) | undefined;
   readonly onJournal?: ((entry: JournalEntry) => void) | undefined;
   readonly onLog?: ((pluginId: string, message: string) => void) | undefined;
@@ -123,8 +130,14 @@ export interface Kernel {
   run(command: string, ...args: unknown[]): Promise<unknown>;
   /** Раздел поменялся извне (файл воркспейса правили руками): активные владельцы получают `onChange`, не прошедший проверку - запись в журнал. */
   reloadSections(kind: 'config' | 'state', ids: readonly string[]): Promise<void>;
-  /** Дожидается перезапусков хостов, начатых сторожем. */
+  /** Дожидается перезапусков хостов, начатых сторожем, и ленивых активаций. */
   idle(): Promise<void>;
+  /** Плагин с `activation: "lazy"` нужен сейчас - например, показан его вид; активному или не ленивому ничего не делает. */
+  wake(pluginId: string): Promise<void>;
+  /** Событие окна или ОС от приложения: ядро раздаёт его активным плагинам. */
+  emit(event: SystemEvent): void;
+  /** Слушатели `onBeforeQuit` всех хостов, не дольше `budget` мс; после него приложение зовёт `unload`. */
+  beforeQuit(budget?: number): Promise<void>;
   /** Снимает плагины в обратном порядке активации и гасит хосты. */
   unload(): Promise<void>;
 }
@@ -305,6 +318,10 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   let subscriptionSeq = 0;
   let chain: Promise<void> = Promise.resolve();
   let unloading = false;
+  const waiting = new Set<string>();
+  const waking = new Map<string, Promise<void>>();
+  const idleWatchers = new Map<string, { host: Host; pluginId: string; seconds: number; fired: boolean }>();
+  let idleTimer: ReturnType<typeof setInterval> | undefined;
 
   const manifestOf = (pluginId: string): PluginManifest => {
     const m = byId.get(pluginId);
@@ -372,7 +389,32 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     s.consumerHost.endpoint.notify('forget', { ids: s.callbacks.filter((id) => id !== undefined) });
   }
 
+  function pollIdle(): void {
+    const idle = options.idleSeconds?.();
+    if (idle === undefined) return;
+    for (const [id, w] of idleWatchers) {
+      if (w.host.down) continue;
+      if (!w.fired && idle >= w.seconds) {
+        w.fired = true;
+        w.host.endpoint.notify('system', { kind: 'idle', id });
+      } else if (w.fired && idle < w.seconds) w.fired = false;
+    }
+  }
+
+  // Опрос ОС идёт, только пока кто-то ждёт простоя.
+  function syncIdleTimer(): void {
+    if (idleWatchers.size > 0 && idleTimer === undefined && options.idleSeconds && !unloading) {
+      idleTimer = setInterval(pollIdle, options.idlePoll ?? 1000);
+      idleTimer.unref();
+    } else if ((idleWatchers.size === 0 || unloading) && idleTimer !== undefined) {
+      clearInterval(idleTimer);
+      idleTimer = undefined;
+    }
+  }
+
   function dropPlugin(pluginId: string, hostDown = false): void {
+    for (const [id, w] of [...idleWatchers]) if (w.pluginId === pluginId) idleWatchers.delete(id);
+    syncIdleTimer();
     for (const [n, s] of [...subscriptions]) if (s.consumer === pluginId || s.provider === pluginId) release(n);
     const given = [...descriptors.values()].flat().filter((d) => d.pluginId === pluginId);
     for (const d of given) dropProvided(d.pluginId, d.contract, d.version);
@@ -487,12 +529,25 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       release(p.subscription);
     });
     onRequest('run', { name: 'string', args: 'array' }, (p) => run(p.name, ...p.args));
+    onNote('idle.watch', { pluginId: 'string', id: 'string', seconds: 'number' }, (p) => {
+      mine(p.pluginId);
+      if (!p.id.startsWith(`${p.pluginId}#`)) throw new CoreError('Invalid', `idle.watch: ${p.id} не у ${p.pluginId}`);
+      if (!(p.seconds > 0)) throw new CoreError('Invalid', `idle.watch: ${String(p.seconds)} секунд`);
+      idleWatchers.set(p.id, { host, pluginId: p.pluginId, seconds: p.seconds, fired: false });
+      syncIdleTimer();
+    });
+    onNote('idle.unwatch', { pluginId: 'string', id: 'string' }, (p) => {
+      mine(p.pluginId);
+      if (idleWatchers.get(p.id)?.pluginId === p.pluginId) idleWatchers.delete(p.id);
+      syncIdleTimer();
+    });
     onRequest('section.write', { pluginId: 'string', kind: ['config', 'state'], layer: 'string', version: 'number', data: 'record' }, async (p) => {
       const declared = mine(p.pluginId)[p.kind];
       if (!declared) throw new CoreError('NotDeclared', `${p.pluginId}: раздел ${p.kind} не объявлен в манифесте`);
       if (p.version !== declared.version) {
         throw new CoreError('Invalid', `${p.pluginId}: раздел ${p.kind} версии ${p.version}, а в манифесте ${declared.version}`);
       }
+      if (p.kind === 'config') guardNetFields(mine(p.pluginId), p.data);
       await options[p.kind]?.write(p.layer, p.pluginId, p.version, p.data);
     });
     onRequest('os', { pluginId: 'string', method: 'string', args: 'array' }, (p) => gateway.call(mine(p.pluginId), p.method, p.args));
@@ -567,14 +622,43 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     });
   }
 
+  // Поле из net "config:<поле>" задаёт человек: запись плагина в него расширила бы его сеть после перезапуска.
+  function guardNetFields(m: PluginManifest, data: Record<string, unknown>): void {
+    const layers = (options.config?.raw(m.id) ?? []).map(([, d]) => (isRecord(d) ? d : {}));
+    const fields = (m.permissions.net ?? []).filter((h) => h.startsWith('config:')).map((h) => h.slice('config:'.length));
+    // Удалить поле или повторить значение, заданное человеком в любом слое, можно: новых хостов это не даёт.
+    const touched = fields.filter((f) => data[f] !== undefined && !layers.some((d) => isDeepStrictEqual(d[f], data[f])));
+    if (touched.length === 0) return;
+    const detail = `поля ${touched.join(', ')} задают хосты net - их меняет только человек`;
+    record({ pluginId: m.id, kind: 'denied', method: 'config.set', detail });
+    throw new CoreError('PermissionDenied', `${m.id}: ${detail}`);
+  }
+
   function sectionInput(kind: 'config' | 'state', m: PluginManifest): SectionInput | undefined {
     const declared = m[kind];
     const store = options[kind];
     return declared && store ? { version: declared.version, layers: store.raw(m.id) } : undefined;
   }
 
+  /** Поставщики по графу (requires, optional) - их ждём; поставщики consumes будятся без ожидания: у many бывают встречные пары. */
+  async function wakeProviders(m: PluginManifest): Promise<void> {
+    for (const p of graph.bindings.get(m.id)?.values() ?? []) await wake(p);
+    for (const id of waiting) if (Object.entries(m.consumes).some(([c, r]) => providesMatching(manifestOf(id), c, r))) void wake(id);
+  }
+
+  function wake(pluginId: string): Promise<void> {
+    const pending = waking.get(pluginId);
+    if (pending) return pending;
+    if (!waiting.has(pluginId) || unloading) return Promise.resolve();
+    waiting.delete(pluginId);
+    const started = activate(pluginId).finally(() => waking.delete(pluginId));
+    waking.set(pluginId, started);
+    return started;
+  }
+
   async function activate(pluginId: string): Promise<void> {
     const m = manifestOf(pluginId);
+    await wakeProviders(m);
     const down = [...(graph.bindings.get(pluginId) ?? [])].find(([c, p]) => c in m.requires && !active.includes(p));
     if (down) {
       record({ pluginId, kind: 'skipped', reason: `поставщик ${down[0]} (${down[1]}) не активен` });
@@ -602,6 +686,8 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   }
 
   async function run(command: string, ...args: unknown[]): Promise<unknown> {
+    const sleeper = [...waiting, ...waking.keys()].find((id) => Object.hasOwn(manifestOf(id).commands, command));
+    if (sleeper !== undefined && !commandOwners.has(command)) await wake(sleeper);
     const owner = commandOwners.get(command);
     if (!owner) throw new CoreError('CommandNotFound', `команды ${command} нет`);
     const spec = manifestOf(owner).commands[command];
@@ -619,6 +705,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   async function enable(pluginId: string): Promise<void> {
     guard(pluginId);
     userOff.delete(pluginId);
+    waiting.delete(pluginId);
     if (active.includes(pluginId)) return;
     strikes.delete(pluginId);
     switchedOff.delete(pluginId);
@@ -670,6 +757,8 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   async function disable(pluginId: string): Promise<void> {
     guard(pluginId);
     userOff.add(pluginId);
+    waiting.delete(pluginId);
+    await waking.get(pluginId);
     chain = chain.then(async () => {
       if (unloading) return;
       if (!active.includes(pluginId)) {
@@ -686,13 +775,19 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     for (;;) {
       const current = chain;
       await current;
-      if (current === chain) return;
+      await Promise.allSettled([...waking.values()]);
+      if (current === chain && waking.size === 0) return;
     }
   }
 
   for (const pluginId of graph.order) {
     if (options.safeMode) {
       record({ pluginId, kind: 'safe-mode' });
+      continue;
+    }
+    if (manifestOf(pluginId).activation === 'lazy') {
+      waiting.add(pluginId);
+      record({ pluginId, kind: 'waiting' });
       continue;
     }
     await idle();
@@ -709,7 +804,19 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     keybindings: [...keys.values()],
     keybinding(key) {
       const k = keys.get(key);
-      return k && active.includes(k.pluginId) ? k : undefined;
+      return k && (active.includes(k.pluginId) || waiting.has(k.pluginId) || waking.has(k.pluginId)) ? k : undefined;
+    },
+    wake,
+    emit(event) {
+      if (!['focus', 'suspend', 'resume', 'screen-lock'].includes(event.kind)) throw new CoreError('Invalid', `событие ${event.kind as string} ядру не известно`);
+      for (const host of hosts.values()) if (!host.down) host.endpoint.notify('system', event);
+    },
+    async beforeQuit(budget = 3000) {
+      await idle();
+      const late = new Promise<void>((resolve) => setTimeout(resolve, budget).unref());
+      // Без callHost: зависший слушатель - не сбой плагина, хост всё равно уходит вместе с приложением.
+      const asks = [...hosts.values()].filter((h) => !h.down).map((h) => h.endpoint.request('system.beforeQuit', null).catch(ignore));
+      await Promise.race([Promise.all(asks), late]);
     },
     disable,
     enable,
@@ -733,6 +840,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     async unload() {
       await idle();
       unloading = true;
+      syncIdleTimer();
       for (const pluginId of [...active].reverse()) {
         try {
           await callHost(liveHost(pluginId), pluginId, 'deactivate', { pluginId }, activationTimeout);

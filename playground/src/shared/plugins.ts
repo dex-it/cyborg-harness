@@ -3,7 +3,7 @@ import type { FeedLine, Reply } from '@cyborg/contracts';
 export type { FeedLine, Reply };
 // Окно playground: снимок, который главный процесс отдаёт интерфейсу (SAD2 §3.2, §3.5).
 
-export type PluginState = 'active' | 'restarting' | 'stopped' | 'disabled';
+export type PluginState = 'active' | 'waiting' | 'restarting' | 'stopped' | 'disabled';
 
 export interface PluginRow {
   readonly id: string;

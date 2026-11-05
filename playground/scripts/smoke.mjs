@@ -156,6 +156,13 @@ async function main() {
   await waitFor('pty: /bin/sh в псевдотерминале ядра ответил своим tty и размером', () => lines().some((l) => /echo: pty \d+ вышел с 0: .*\/dev\/(pts\/|tty).* 10 100/.test(l)));
   log('ctx.os.pty: процесс в главном процессе, вывод в хост плагина, размер дошёл до терминала');
 
+  assert.equal(await state('later'), 'waiting', 'ленивый later поднят при старте');
+  assert.ok(await button('later', 'later.hello'), 'нет кнопки later.hello у спящего плагина');
+  await waitFor('later проснулся по команде', async () => (await state('later')) === 'active' && lines().includes('[plugins] later: привет по команде'));
+  await main("process.mainModule.require('electron').powerMonitor.emit('lock-screen')");
+  await waitFor('событие ОС дошло до плагина', () => lines().includes('[plugins] later: экран заблокирован'));
+  log('ленивая активация по команде; блокировка экрана из powerMonitor дошла до ctx.system');
+
   assert.equal(await button('chat', 'Выгрузить'), true, 'у chat нет «Выгрузить»');
   await waitFor('chat выгружен, alice снята с ним, bob живёт без чата', async () =>
     (await states({ chat: 'stopped', alice: 'stopped', bob: 'active' })) && lines().includes('[plugins] bob: чат пропал'),

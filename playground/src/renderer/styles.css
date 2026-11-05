@@ -205,6 +205,10 @@ button:focus-visible {
   border-color: var(--modified);
 }
 
+.plugin-row[data-state='waiting'] {
+  border-style: dashed;
+}
+
 .plugin-row[data-state='disabled'] {
   color: var(--fg-dim);
 }

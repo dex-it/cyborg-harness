@@ -15,4 +15,5 @@ export * from './keys.ts';
 export * from './permissions.ts';
 export * from './os-gateway.ts';
 export type { PtyBackend, PtyProcess } from './pty.ts';
+export type { SystemEvent } from './host-runtime.ts';
 export * from './workspace.ts';

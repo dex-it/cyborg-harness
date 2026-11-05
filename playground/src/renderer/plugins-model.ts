@@ -2,13 +2,14 @@ import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, P
 
 export const STATE_LABEL: Record<PluginState, string> = {
   active: 'Работает',
+  waiting: 'Ждёт вызова',
   restarting: 'Перезапуск',
   stopped: 'Выключен',
   disabled: 'Не включён',
 };
 
 // Выключенные сверху: ради них окно и открывают.
-const ORDER: Record<PluginState, number> = { stopped: 0, restarting: 1, active: 2, disabled: 3 };
+const ORDER: Record<PluginState, number> = { stopped: 0, restarting: 1, active: 2, waiting: 3, disabled: 4 };
 
 export function sortedPlugins(rows: readonly PluginRow[]): PluginRow[] {
   return [...rows].sort((a, b) => ORDER[a.state] - ORDER[b.state] || a.id.localeCompare(b.id));
@@ -37,6 +38,8 @@ export function actionsFor(row: PluginRow, canHang: boolean): ActionButton[] {
       journal,
     ];
   }
+  // Команда будит ленивый плагин: ядро активирует его перед вызовом.
+  if (row.state === 'waiting') return [...row.commands.map((command): ActionButton => ({ action: 'run', label: command, command })), { action: 'disable', label: 'Выгрузить' }, journal];
   if (row.state === 'stopped' && row.revivable) return [{ action: 'enable', label: row.unloaded ? 'Загрузить' : 'Включить снова', primary: true }, journal];
   return [journal];
 }
@@ -68,6 +71,7 @@ export function summary(snapshot: PluginsSnapshot): string {
   if (enabled.length === 0) return 'Включённых плагинов нет: список включённых - plugins.enabled в cyborg.json в папке настроек Cyborg.';
   const count = (state: PluginState) => enabled.filter((p) => p.state === state).length;
   const parts = [`работает: ${count('active')} из ${enabled.length}`];
+  if (count('waiting')) parts.push(`ждут вызова: ${count('waiting')}`);
   if (count('restarting')) parts.push(`ждут перезапуска: ${count('restarting')}`);
   if (count('stopped')) parts.push(`выключено: ${count('stopped')}`);
   return parts.join(', ');

@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, PluginOs } from '@cyborg/contracts';
+import { SectionStore } from '../src/config.ts';
 import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
 import { describePermissions } from '../src/permissions.ts';
@@ -222,6 +223,28 @@ test('net config:<поле>: хост берётся из принятого con
   await k.reloadSections('config', ['web']);
   await os('web').net!.fetch('https://attacker.example/');
   assert.deepEqual(calls, ['jira.corp.local', 'attacker.example']);
+  await k.unload();
+});
+
+test('net config:<поле>: плагин не пишет в поле хоста значение, которого не задал человек', async () => {
+  await using box = await sandbox();
+  const docs = new Map<string, Record<string, unknown>>([['user', { web: { $version: 1, baseUrl: 'https://jira.corp.local' } }], ['workspace', { web: { $version: 1, baseUrl: 'https://jira2.corp.local' } }]]);
+  const store = await SectionStore.open({ load: async (l) => structuredClone(docs.get(l)), save: async (l, d) => void docs.set(l, structuredClone(d)) }, ['user', 'workspace']);
+  const contexts = new Map<string, PluginContext>();
+  const k = await load({
+    apiVersion: '1.0.0',
+    spawnHost: inlineHosts(async (entry) => ({ activate: (ctx: PluginContext) => void contexts.set(entry, ctx) })),
+    enabled: ['web'],
+    manifests: [{ ...manifest('web', { net: ['config:baseUrl'] }), config: { version: 1 } }],
+    os: { dataDir: box.data, tempDir: box.temp },
+    config: store,
+  });
+  const config = contexts.get('web')!.config!;
+  await assert.rejects(config.set('user', { baseUrl: 'https://attacker.example', theme: 'dark' }), { code: 'PermissionDenied' });
+  assert.ok(k.journal.some((e) => e.kind === 'denied' && e.method === 'config.set'));
+  await config.set('user', { ...config.get(), theme: 'dark' });
+  await config.set('workspace', { theme: 'light' });
+  assert.deepEqual(store.raw('web').map(([, d]) => (d as { baseUrl?: string }).baseUrl), ['https://jira2.corp.local', undefined]);
   await k.unload();
 });
 

@@ -3,7 +3,7 @@ import type { Rejection } from './graph.ts';
 import type { JournalEntry } from './loader.ts';
 
 /** Что показать на месте плагина: работает, ждёт перезапуска хоста, выключен (сбоем или человеком) или не включён в настройках. */
-export type PluginState = 'active' | 'restarting' | 'stopped' | 'disabled';
+export type PluginState = 'active' | 'waiting' | 'restarting' | 'stopped' | 'disabled';
 
 export interface PluginStatus {
   readonly id: string;
@@ -33,6 +33,9 @@ export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[]
       switch (entry.kind) {
         case 'activated':
           set(id, 'active', entry);
+          break;
+        case 'waiting':
+          set(id, 'waiting', entry);
           break;
         case 'disabled':
           set(id, 'disabled', entry);
@@ -113,6 +116,8 @@ export function describeEntry(e: JournalEntry): string {
       return `работает в хосте ${e.hostId}, запуск ${Math.round(e.ms)} мс`;
     case 'deactivated':
       return e.error ? `снят с ошибкой: ${e.error}` : 'снят';
+    case 'waiting':
+      return 'ждёт первой команды, показа вида или потребителя';
     case 'revived':
       return 'включён снова';
     case 'denied':
@@ -145,6 +150,7 @@ export function describeEntry(e: JournalEntry): string {
 export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
   switch (e.kind) {
     case 'activated':
+    case 'waiting':
     case 'disabled':
     case 'revived':
     case 'host-restart':

@@ -16,6 +16,7 @@ import {
   type KeyInput,
   type OsEnvironment,
   type SpawnHost,
+  type SystemEvent,
   type WatchdogOptions,
 } from '../../../core/src/index.ts';
 import { isRecord } from '../../../core/src/manifest.ts';
@@ -82,6 +83,8 @@ export interface StartOptions {
   readonly os?: OsEnvironment;
   /** Под какую платформу читать CmdOrCtrl; по умолчанию - текущая. */
   readonly platform?: string;
+  /** Секунды простоя пользователя по ОС - для `ctx.system.onIdle`. */
+  readonly idleSeconds?: () => number;
   readonly onJournal?: (entry: JournalEntry) => void;
   readonly onLog?: (pluginId: string, message: string) => void;
   /** Что не дошло до ядра; по умолчанию - в log. */
@@ -123,6 +126,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     watchdog: options.watchdog,
     os: options.os,
     platform: options.platform,
+    idleSeconds: options.idleSeconds,
     onLog: (id, message) => {
       options.log(`[plugins] ${id}: ${message}`);
       options.onLog?.(id, message);
@@ -172,6 +176,7 @@ export class PluginsService {
   private readonly problems: string[] = [];
   private readonly feed: FeedLine[] = [];
   private views = new Map<string, string>();
+  private quitting: Promise<void> | undefined;
 
   private readonly events: PluginsEvents;
   private readonly now: () => number;
@@ -223,7 +228,23 @@ export class PluginsService {
 
   /** Каталог вида: по нему протокол cyborg-plugin отдаёт файлы. */
   viewDir(pluginId: string): string | undefined {
-    return this.views.get(pluginId);
+    const dir = this.views.get(pluginId);
+    // Показ вида - вызов ленивого плагина: мосту вида нужна его главная часть.
+    if (dir !== undefined) void this.kernel?.wake(pluginId).catch(() => undefined);
+    return dir;
+  }
+
+  emit(event: SystemEvent): void {
+    this.kernel?.emit(event);
+  }
+
+  /** Слушатели onBeforeQuit плагинов, потом выгрузка; повторный вызов ждёт первый. */
+  quit(budget: number): Promise<void> {
+    this.quitting ??= (async () => {
+      await this.kernel?.beforeQuit(budget);
+      await this.kernel?.unload();
+    })();
+    return this.quitting;
   }
 
   /** Лента одного плагина: её вид показывает при открытии. */
@@ -257,7 +278,7 @@ export class PluginsService {
         commands,
         permissions: manifest ? describePermissions(manifest.permissions) : [],
         ...(manifest && { version: manifest.version }),
-        ...(s.state === 'active' && this.views.has(s.id) && { view: `${viewOrigin(s.id)}/` }),
+        ...((s.state === 'active' || s.state === 'waiting') && this.views.has(s.id) && { view: `${viewOrigin(s.id)}/` }),
         ...(host !== undefined && { host }),
         ...(pid !== undefined && { pid }),
         ...(s.cause && s.state !== 'active' && { reason: describeEntry(s.cause) }),

@@ -81,7 +81,24 @@ export interface PluginContext {
   /** Доступ к ОС через шлюз ядра по правам из манифеста. */
   readonly os: PluginOs;
   readonly secrets: PluginSecrets;
+  readonly window: PluginWindow;
+  readonly system: PluginSystem;
   log(message: string): void;
+}
+
+export interface PluginWindow {
+  onFocusChange(listener: (focused: boolean) => void): Disposable;
+}
+
+/** События ОС; слушатель, бросивший исключение, пишет в журнал плагина и не мешает соседям. */
+export interface PluginSystem {
+  onSuspend(listener: () => void): Disposable;
+  onResume(listener: () => void): Disposable;
+  onScreenLock(listener: () => void): Disposable;
+  /** Один раз на каждый простой пользователя от `seconds` секунд; после активности срабатывает снова. */
+  onIdle(seconds: number, listener: () => void): Disposable;
+  /** Ядро ждёт слушателей не дольше бюджета приложения, потом хост завершается. */
+  onBeforeQuit(listener: () => void | Promise<void>): Disposable;
 }
 
 /** Модуль главной части плагина: его `default` грузит хост. */

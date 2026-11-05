@@ -2,7 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, BrowserWindow, ipcMain, nativeImage, Notification, screen, type IpcMainInvokeEvent, type WebContents } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeImage, Notification, powerMonitor, screen, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { viewOrigin } from '../shared/views.ts';
 import { electronOs } from './os-env.ts';
 import { utilityHosts } from './plugin-hosts.ts';
@@ -30,7 +30,7 @@ if (!spiking && !app.requestSingleInstanceLock({ workspace: workspaceFile })) ap
 /** Первый запуск: alice и bob делят хост c - видно, как падение одного процесса снимает обоих, а чат в хосте b живёт. */
 const DEFAULT_CONFIG = {
   plugins: {
-    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky'],
+    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later'],
     hosts: { a: ['echo'], b: ['chat'], c: ['alice', 'bob'], d: ['flaky'] },
   },
 };
@@ -141,10 +141,21 @@ function createWindow(): void {
   win.webContents.on('before-input-event', (event, input) => {
     if (input.type === 'keyDown' && !input.isAutoRepeat && plugins.press(input)) event.preventDefault();
   });
+  win.on('focus', () => plugins.emit({ kind: 'focus', focused: true }));
+  win.on('blur', () => plugins.emit({ kind: 'focus', focused: false }));
   win.on('closed', () => (win = undefined));
 }
 
-app.on('before-quit', () => void plugins.unload());
+// Выход ждёт onBeforeQuit плагинов не дольше бюджета: второй before-quit уже не откладывается.
+let quitReady = false;
+app.on('before-quit', (event) => {
+  if (quitReady) return;
+  event.preventDefault();
+  void plugins.quit(3000).finally(() => {
+    quitReady = true;
+    app.quit();
+  });
+});
 // Замер сам открывает и закрывает окна по сценариям и сам завершает приложение.
 app.on('window-all-closed', () => {
   if (!spiking) app.quit();
@@ -171,6 +182,9 @@ void app.whenReady().then(() => {
     fs.writeFileSync(config, JSON.stringify(DEFAULT_CONFIG, null, 2));
   }
   createWindow();
+  powerMonitor.on('suspend', () => plugins.emit({ kind: 'suspend' }));
+  powerMonitor.on('resume', () => plugins.emit({ kind: 'resume' }));
+  powerMonitor.on('lock-screen', () => plugins.emit({ kind: 'screen-lock' }));
   const hosts = utilityHosts(path.join(__dirname, 'plugin-host.mjs'));
   void plugins.start({
     userData,
@@ -178,7 +192,8 @@ void app.whenReady().then(() => {
     builtinDir: path.join(__dirname, 'plugins'),
     spawnHost: hosts.spawn,
     pidOf: hosts.pidOf,
-    os: electronOs({ userData, roots: () => [workspace], protectedPaths: [] }),
+    idleSeconds: () => powerMonitor.getSystemIdleTime(),
+    os: electronOs({ userData, roots: () => [workspace], protectedPaths: [workspaceFile, `${workspaceFile}.lock`] }),
     // Короче, чем в Cyborg: зависание по кнопке «Повесить хост» видно через пару секунд.
     watchdog: { interval: 500, timeout: 2500 },
     // eslint-disable-next-line no-console -- журнал ядра в главном процессе - это stderr приложения

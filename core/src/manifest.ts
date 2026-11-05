@@ -44,6 +44,8 @@ export interface PluginManifest {
   readonly state?: { readonly version: number };
   /** `own` - просьба о своём хосте; пользователь вправе переопределить группой в `plugins.hosts`. */
   readonly host?: 'own';
+  /** `lazy` - не при старте, а по первой команде, сочетанию, показу вида или потребителю своего контракта. */
+  readonly activation?: 'lazy';
   readonly permissions: PluginPermissions;
 }
 
@@ -88,6 +90,7 @@ export function parseManifest(raw: unknown): ManifestResult {
   const state = readSchemaVersion('state', raw.state, errors);
   const permissions = readPermissions(raw.permissions, errors);
   if (raw.host !== undefined && raw.host !== 'own') errors.push(`host: допустимо только "own", получено ${show(raw.host)}`);
+  if (raw.activation !== undefined && raw.activation !== 'lazy') errors.push(`activation: допустимо только "lazy", получено ${show(raw.activation)}`);
 
   if (errors.length > 0 || id === undefined || typeof version !== 'string' || typeof engines !== 'string') return { ok: false, id, errors };
   return {
@@ -106,6 +109,7 @@ export function parseManifest(raw: unknown): ManifestResult {
       ...(config && { config }),
       ...(state && { state }),
       ...(raw.host === 'own' && { host: 'own' as const }),
+      ...(raw.activation === 'lazy' && { activation: 'lazy' as const }),
     },
   };
 }

@@ -86,6 +86,8 @@ function journalLine(e: JournalEntry): string {
       return `${yellow('◌')} ${id} безопасный режим: код не запускается`;
     case 'skipped':
       return `${yellow('◌')} ${id} пропущен: ${e.reason}`;
+    case 'waiting':
+      return `${dim('◌')} ${id} ждёт первой команды`;
     case 'config':
     case 'state': {
       const r = e.result;
