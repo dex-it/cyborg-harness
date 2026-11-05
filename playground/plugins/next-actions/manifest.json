@@ -1,0 +1,11 @@
+{
+  "id": "next-actions",
+  "version": "1.0.0",
+  "engines": {
+    "cyborg": "^1"
+  },
+  "provides": {
+    "cyborg.agent-tool": "1.0",
+    "cyborg.session-prompt": "1.0"
+  }
+}

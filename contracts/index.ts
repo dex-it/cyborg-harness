@@ -1,8 +1,9 @@
-import type { Agent } from './agent.ts';
+import type { Agent, AgentTool } from './agent.ts';
 
 /** Карта контрактов: имя -> мажорная версия -> тип; правила дополнения - README.md рядом. */
 export interface Contracts {
   'cyborg.agent': { 1: Agent };
+  'cyborg.agent-tool': { 1: AgentTool };
   'cyborg.files': { 1: FilesV1; 2: FilesV2 };
   'cyborg.lock': { 1: Lock };
   'cyborg.projects': { 1: Projects };

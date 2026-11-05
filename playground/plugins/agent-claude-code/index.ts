@@ -32,7 +32,7 @@ interface HookEvent {
 }
 
 /** Аргументы claude после --settings; промпт до --add-dir: тот вариадический и забрал бы промпт, стоящий после каталогов. */
-export function claudeArgs(request: LaunchRequest): string[] {
+export function claudeArgs(request: LaunchRequest, mcpFile?: string): string[] {
   // resumeId приходит из данных документа, а их правит не только плагин: чужая форма стала бы флагом claude.
   if (request.resumeId !== undefined && !SESSION_ID.test(request.resumeId)) throw new Error(`id сессии для --resume не годится: ${request.resumeId}`);
   const fragments = request.promptFragments ?? [];
@@ -40,9 +40,18 @@ export function claudeArgs(request: LaunchRequest): string[] {
   return [
     ...(request.resumeId ? ['--resume', request.resumeId] : []),
     ...(fragments.length > 0 ? ['--append-system-prompt', fragments.join('\n\n')] : []),
+    // Через «=»: --mcp-config вариадический и иначе забрал бы промпт.
+    ...(mcpFile !== undefined ? [`--mcp-config=${mcpFile}`] : []),
     ...(request.prompt ? [request.prompt] : []),
     ...(dirs.length > 0 ? ['--add-dir', ...dirs] : []),
   ];
+}
+
+export const MCP_SERVER = 'cyborg';
+
+// Токен - в окружении процесса claude: его видит только владелец, а файл и argv - другие пользователи машины.
+export function mcpConfig(url: string): unknown {
+  return { mcpServers: { [MCP_SERVER]: { type: 'http', url, headers: { Authorization: 'Bearer ${CYBORG_MCP_TOKEN}' } } } };
 }
 
 /** Одно событие хука - одно событие контракта; смена cwd идёт перед ним. */
@@ -98,11 +107,13 @@ const plugin: PluginModule = {
     const sessions = `${paths.data}/sessions`;
     await fs.mkdir(sessions);
     const hooks = Object.fromEntries(HOOK_EVENTS.map((event) => [event, [{ ...(event === 'PostToolUse' ? { matcher: '*' } : {}), hooks: [{ type: 'command', command: HOOK_COMMAND }] }]]));
-    await fs.writeText(settings, JSON.stringify({ hooks }, null, 2));
+    // Инструменты сервера cyborg дали плагины, которые человек включил: вопрос о разрешении на каждый вызов был бы лишним.
+    await fs.writeText(settings, JSON.stringify({ hooks, permissions: { allow: [`mcp__${MCP_SERVER}`] } }, null, 2));
     const eventsFile = (sessionId: string) => {
       if (!SESSION_ID.test(sessionId)) throw new Error(`id сессии не годится для имени файла: ${sessionId}`);
       return `${sessions}/${sessionId}.jsonl`;
     };
+    const mcpFile = (sessionId: string) => `${eventsFile(sessionId).slice(0, -'.jsonl'.length)}.mcp.json`;
 
     const agent: Agent = {
       async facts() {
@@ -120,7 +131,14 @@ const plugin: PluginModule = {
       async launch(request) {
         const file = eventsFile(request.sessionId);
         await fs.writeText(file, '');
-        return { program: '$SHELL', args: ['-lc', LAUNCH_SCRIPT, 'cyborg', ...claudeArgs(request)], cwd: request.cwd, env: { CYBORG_EVENTS: file, CYBORG_SETTINGS: settings } };
+        const mcp = request.tools ? mcpFile(request.sessionId) : undefined;
+        if (request.tools && mcp !== undefined) await fs.writeText(mcp, JSON.stringify(mcpConfig(request.tools.url)));
+        return {
+          program: '$SHELL',
+          args: ['-lc', LAUNCH_SCRIPT, 'cyborg', ...claudeArgs(request, mcp)],
+          cwd: request.cwd,
+          env: { CYBORG_EVENTS: file, CYBORG_SETTINGS: settings, ...(request.tools && { CYBORG_MCP_TOKEN: request.tools.token }) },
+        };
       },
       watch(sessionId, onEvent) {
         const quiet = waitAfterStop(onEvent, STOP_QUIET_MS);
@@ -190,6 +208,7 @@ const plugin: PluginModule = {
       },
       async ended(sessionId, exit) {
         await fs.remove(eventsFile(sessionId)).catch(() => undefined);
+        await fs.remove(mcpFile(sessionId)).catch(() => undefined);
         // 127 - оболочка входа не нашла claude в своём PATH.
         return exit.code === 127 ? { kind: 'notFound', message: 'claude не найден в PATH оболочки входа' } : null;
       },

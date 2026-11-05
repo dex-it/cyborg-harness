@@ -27,6 +27,8 @@ export interface PluginPermissions {
   readonly 'security.roots'?: boolean;
   /** Закрыть окно своим `ui.overlay`; без него манифест не примут. */
   readonly 'ui.lock'?: boolean;
+  /** Сервер HTTP на 127.0.0.1 (`ctx.os.serve`): так агент зовёт инструменты плагина по MCP. */
+  readonly serve?: boolean;
 }
 
 export interface DirEntry {
@@ -72,6 +74,28 @@ export interface HttpResponse {
   readonly status: number;
   readonly headers: Readonly<Record<string, string>>;
   readonly body: string;
+}
+
+/** Запрос к серверу плагина: имена заголовков в нижнем регистре, тело - текст до 1 МиБ. */
+export interface ServeRequest {
+  readonly method: string;
+  /** Путь с запросом, как в первой строке HTTP: `/mcp?x=1`. */
+  readonly path: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: string;
+}
+
+/** Ответ обработчика; не ответил за 30 с - клиент получит 504, чужая форма - 502. */
+export interface ServeResponse {
+  readonly status: number;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly body?: string;
+}
+
+export interface HttpServer {
+  /** `http://127.0.0.1:<порт>`; порт выбирает ОС. */
+  readonly url: string;
+  dispose(): void;
 }
 
 /** Файлы: без права - только свои каталоги `paths`; чтение шире - по `fs.read`, запись - по `fs.write`. Путь вне области - `PermissionDenied`, никогда `NotFound`. */
@@ -161,9 +185,11 @@ export interface PluginOs {
   readonly secrets: OsSecrets;
   readonly security?: { setRoots(paths: readonly string[]): Promise<void> };
   readonly ui?: OsUi;
+  /** Слушает только 127.0.0.1; запрос с чужим Host или с Origin (страница в браузере) до обработчика не доходит. Выгрузка плагина закрывает его серверы. */
+  readonly serve?: { http(handler: (request: ServeRequest) => ServeResponse | Promise<ServeResponse>): Promise<HttpServer> };
   /** Открыть путь или URL программой ОС; исполняемый файл не открывается - это был бы запуск в обход `process`. */
   readonly shell?: { openPath?(path: string): Promise<void>; openExternal?(url: string): Promise<void> };
-  /** Права не нужно: выбор человека сам становится областью `granted` до конца работы приложения. */
+  /** Права не нужно: выбор человека сам становится областью `granted` и хранится в state воркспейса. */
   readonly dialog: OsDialog;
 }
 

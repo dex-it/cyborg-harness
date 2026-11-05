@@ -404,11 +404,7 @@ export class PluginsService {
     if (typeof contract !== 'string' || typeof major !== 'number' || typeof method !== 'string' || !Array.isArray(args)) return { error: 'вызов контракта: ожидаются имя, мажорная версия, метод и аргументы' };
     if (!this.kernel) return { error: 'ядро плагинов не запущено' };
     try {
-      const impl = this.kernel.contracts.get(pluginId, contract, major) as Record<string, unknown> | undefined;
-      if (impl === undefined) return { error: `${contract}: поставщика сейчас нет` };
-      const member = Object.hasOwn(impl, method) ? impl[method] : undefined;
-      if (typeof member !== 'function') return { error: `${contract}.${method}: не метод контракта` };
-      const value: unknown = await member.apply(impl, args);
+      const value = await this.kernel.callAs(pluginId, contract, major, method, args);
       return value === undefined ? {} : { value };
     } catch (error) {
       return { error: errorMessage(error) };

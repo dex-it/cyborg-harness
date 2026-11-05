@@ -1,4 +1,14 @@
-import type { AgentEvent, PluginContext, PluginModule, PtyHandle } from '@cyborg/contracts';
+import type { AgentEvent, AgentToolsEndpoint, PluginContext, PluginModule, PtyHandle, SessionAction } from '@cyborg/contracts';
+import { MCP_PATH, mcpHandler } from './mcp.ts';
+
+// Вид спрашивает снова сразу после ответа: ожидание короче, чем человек замечает задержку закрытого вида.
+export const ACTIONS_WAIT_MS = 20_000;
+
+interface Actions {
+  version: number;
+  list: readonly SessionAction[];
+  readonly waiters: Set<() => void>;
+}
 
 const describe = (e: AgentEvent): string => {
   switch (e.type) {
@@ -47,6 +57,39 @@ const plugin: PluginModule = {
       return texts.filter((t) => t.trim() !== '');
     };
 
+    // Билет вида называет сессию: по нему вид спрашивает кнопки, которые предложил её агент.
+    const byTicket = new Map<string, string>();
+    const actions = new Map<string, Actions>();
+    const tokens = new Map<string, string>();
+    const setActions = (sessionId: string, list: readonly SessionAction[]) => {
+      const a = actions.get(sessionId);
+      if (!a || (a.list.length === 0 && list.length === 0)) return;
+      a.version++;
+      a.list = list;
+      for (const wake of a.waiters) wake();
+      a.waiters.clear();
+    };
+    const toolSources = () => ctx.contracts.all('cyborg.agent-tool', 1);
+    let server: Promise<string> | undefined;
+    // Сервер один на плагин и поднимается с первой сессией, которой есть что предложить агенту.
+    const mcpUrl = (): Promise<string> | undefined => {
+      const serve = ctx.os.serve;
+      if (!serve || toolSources().length === 0) return undefined;
+      server ??= serve.http(mcpHandler({ sessionOf: (t) => tokens.get(t), sources: toolSources, onActions: setActions, log: (m) => ctx.log(m) })).then((s) => `${s.url}${MCP_PATH}`);
+      server.catch(() => (server = undefined));
+      return server;
+    };
+    const endpoint = async (sessionId: string): Promise<AgentToolsEndpoint | undefined> => {
+      const url = await mcpUrl()?.catch((e: unknown) => {
+        ctx.log(`сервер инструментов агента не поднялся: ${String(e)}`);
+        return undefined;
+      });
+      if (url === undefined) return undefined;
+      const token = crypto.randomUUID();
+      tokens.set(token, sessionId);
+      return { url, token };
+    };
+
     const launch = async (pluginId: unknown, documentId?: string, resumeId?: string): Promise<string> => {
       const provider = agents().find((p) => p.pluginId === pluginId);
       if (!provider) throw new Error(`агента ${String(pluginId)} нет`);
@@ -55,8 +98,22 @@ const plugin: PluginModule = {
       const sessionId = `s${Date.now().toString(36)}-${String(next++)}`;
       const resume = facts.capabilities.resume ? resumeId : undefined;
       const promptFragments = await fragments();
-      const spec = await provider.impl.launch({ sessionId, cwd: ctx.os.paths.data, ...(resume !== undefined && { resumeId: resume }), ...(promptFragments.length > 0 && { promptFragments }) });
-      const handle = await pty.spawn({ ...spec, cols: 100, rows: 16, persist: true, describedBy: provider.pluginId });
+      const tools = await endpoint(sessionId);
+      const forget = () => {
+        if (tools) tokens.delete(tools.token);
+        const a = actions.get(sessionId);
+        actions.delete(sessionId);
+        for (const wake of a?.waiters ?? []) wake();
+      };
+      actions.set(sessionId, { version: 0, list: [], waiters: new Set() });
+      let handle: PtyHandle;
+      try {
+        const spec = await provider.impl.launch({ sessionId, cwd: ctx.os.paths.data, ...(resume !== undefined && { resumeId: resume }), ...(promptFragments.length > 0 && { promptFragments }), ...(tools && { tools }) });
+        handle = await pty.spawn({ ...spec, cols: 100, rows: 16, persist: true, describedBy: provider.pluginId });
+      } catch (error) {
+        forget();
+        throw error;
+      }
       const title = `${facts.title} ${sessionId}`;
       const agent = provider.pluginId;
       const doc = documentId ?? (await ctx.documents.open('session', { title, data: { agent } }));
@@ -65,12 +122,16 @@ const plugin: PluginModule = {
       const watch = facts.capabilities.events
         ? provider.impl.watch(sessionId, (e) => {
             ctx.log(`${facts.id} ${sessionId}: ${describe(e)}`);
+            // Человек написал сам или нажал кнопку: прежние предложения к новому ходу не относятся.
+            if (e.type === 'prompt') setActions(sessionId, []);
             // Документ закрыт человеком - сохранять некуда.
             if (e.type === 'session' && live.has(doc)) void ctx.documents.save(doc, { data: { agent, resumeId: e.resumeId } }).catch(() => undefined);
           })
         : undefined;
       handle.onExit((exit) => {
         if (live.get(doc) === handle) live.delete(doc);
+        for (const [t, id] of byTicket) if (id === sessionId) byTicket.delete(t);
+        forget();
         void watch?.then((s) => s.dispose());
         void provider.impl.ended(sessionId, exit).then(
           (hint) => ctx.log(`${facts.id} ${sessionId}: вышла с ${String(exit.code)}${hint ? ` - ${hint.message}` : ''}`),
@@ -78,7 +139,10 @@ const plugin: PluginModule = {
         );
       });
       ctx.log(`${facts.title}: сессия ${sessionId}, pid ${String(handle.pid)}`);
-      return handle.share();
+      const ticket = await handle.share();
+      // Сессия могла выйти, пока выдавался билет: тогда спрашивать по нему нечего.
+      if (actions.has(sessionId)) byTicket.set(ticket, sessionId);
+      return ticket;
     };
 
     ctx.commands.register('sessions.agents', () => Promise.all(agents().map(async (p) => ({ pluginId: p.pluginId, ...(await p.impl.facts()) }))));
@@ -89,6 +153,27 @@ const plugin: PluginModule = {
       if (!doc) throw new Error(`документа ${String(id)} нет`);
       if (live.has(doc.id)) throw new Error(`${doc.title}: сессия уже идёт`);
       return launch(field(doc.data, 'agent'), doc.id, field(doc.data, 'resumeId'));
+    });
+    // Долгий опрос: вид не получает толчков от плагина и ждёт здесь смены версии или срока.
+    ctx.commands.register('sessions.actions', async (ticket, since) => {
+      const sessionId = byTicket.get(String(ticket)) ?? '';
+      const a = actions.get(sessionId);
+      // null - сессии нет: вид прекращает опрос, а не крутит его вхолостую.
+      if (!a) return null;
+      if (a.version === since) {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(() => {
+            a.waiters.delete(wake);
+            resolve();
+          }, ACTIONS_WAIT_MS);
+          const wake = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+          a.waiters.add(wake);
+        });
+      }
+      return actions.get(sessionId) === a ? { version: a.version, actions: a.list } : null;
     });
     // Человек закрыл вкладку в окне: сессии за ней больше не на что показываться.
     ctx.documents.onClose((id) => {

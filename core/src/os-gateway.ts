@@ -8,6 +8,8 @@ import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import { LOGIN_SHELL } from './permissions.ts';
 import { PTY_SIGNALS, PtyTable, type PtyBackend, type TerminalSink, type TerminalView } from './pty.ts';
+import { HttpServes, type AskHost } from './serve.ts';
+import type { GuardRight } from './via-contract.ts';
 import { isRecord } from './wire.ts';
 
 /** Хранилище секретов ядра: ключи `<pluginId>/<key>`; без шифрования ОС `available()` - false, и ядро отказывает, а не пишет открытым текстом. */
@@ -46,6 +48,13 @@ export interface OsEnvironment {
   readonly dialog?: { open(options: OpenDialogOptions): Promise<readonly string[]> };
 }
 
+/** Где живёт область `granted`: state воркспейса, чтобы выбор человека пережил перезапуск. */
+export interface GrantStore {
+  /** `{ <pluginId>: [путь, ...] }` из прошлых запусков; чужая форма - как пустая. */
+  read(): unknown;
+  write(byPlugin: Readonly<Record<string, readonly string[]>>): Promise<void>;
+}
+
 /** Область пути: каталог после realpath и хвост маски; `git` - запись в `.git` разрешена (`workspace.git`). */
 interface Area {
   readonly root: string;
@@ -63,6 +72,8 @@ export interface Denial {
   readonly method: string;
   /** Что именно не пропущено; значения секретов и тела запросов сюда не попадают. */
   readonly detail: string;
+  /** Право проверено у вызывающего чужого контракта, а не у того, кто выполняет. */
+  readonly reason?: 'via-contract';
 }
 
 const MAX_OUTPUT = 16 * 1024 * 1024;
@@ -173,7 +184,6 @@ const str = (method: string, v: unknown, name: string): string => {
   return v;
 };
 
-/** Шлюз ОС в главном процессе: вызывающего знает ядро по каналу хоста, права - из его манифеста. */
 /** Причина отказа правила `process`, `pty` или `launch`; undefined - запуск подходит. */
 function ruleRefusal(m: PluginManifest, key: 'process' | 'pty' | 'launch', program: string, argv: readonly string[], envNames: readonly string[]): string | undefined {
   const rule = (m.permissions[key] ?? []).find((r) => {
@@ -187,6 +197,7 @@ function ruleRefusal(m: PluginManifest, key: 'process' | 'pty' | 'launch', progr
   return foreign.length > 0 ? `переменные не в правиле ${key}: ${foreign.join(', ')}` : undefined;
 }
 
+/** Шлюз ОС в главном процессе: вызывающего знает ядро по каналу хоста, права - из его манифеста. */
 export class OsGateway {
   readonly #env: OsEnvironment;
   readonly #deny: (denial: Denial) => void;
@@ -199,8 +210,11 @@ export class OsGateway {
   readonly #pty: PtyTable | undefined;
   readonly #push: (pluginId: string, method: PushMethod, params: unknown) => void;
   readonly #watches = new Map<string, () => void>();
-  /** Выбор человека в `dialog`: область `granted` плагина до конца работы приложения. */
+  /** Выбор человека в `dialog`: область `granted` плагина, с `GrantStore` - и после перезапуска. */
   readonly #granted = new Map<string, Set<string>>();
+  readonly #grants: GrantStore | undefined;
+  #grantWrites: Promise<unknown> = Promise.resolve();
+  readonly #serves: HttpServes;
 
   constructor(
     env: OsEnvironment,
@@ -208,8 +222,21 @@ export class OsGateway {
     configOf: (pluginId: string) => Readonly<Record<string, unknown>> = () => ({}),
     push: (pluginId: string, method: PushMethod, params: unknown) => void = () => undefined,
     manifestOf: (pluginId: string) => PluginManifest | undefined = () => undefined,
+    grants?: GrantStore,
+    ask: AskHost = () => Promise.reject(new CoreError('Unavailable', 'хоста нет')),
   ) {
     this.#env = env;
+    this.#serves = new HttpServes(ask);
+    this.#grants = grants;
+    const saved = grants?.read();
+    if (isRecord(saved)) {
+      for (const [pluginId, list] of Object.entries(saved)) {
+        if (!Array.isArray(list)) continue;
+        // Файл воркспейса правят руками: относительный путь сделал бы область зависимой от cwd приложения.
+        const paths = list.filter((p): p is string => typeof p === 'string' && path.isAbsolute(p) && !p.includes('\0'));
+        if (paths.length > 0) this.#granted.set(pluginId, new Set(paths));
+      }
+    }
     this.#manifestOf = manifestOf;
     this.#push = push;
     this.#deny = deny;
@@ -230,6 +257,7 @@ export class OsGateway {
     this.#roots.delete(pluginId);
     this.#approved.delete(pluginId);
     for (const [key, close] of this.#watches) if (key.startsWith(`${pluginId}\0`)) close();
+    this.#serves.forget(pluginId);
     if (pty === 'park') return this.#pty?.park(pluginId) ?? 0;
     if (pty === 'detach') this.#pty?.detach(pluginId);
     else this.#pty?.release(pluginId);
@@ -255,8 +283,8 @@ export class OsGateway {
     this.#approved.set(pluginId, structuredClone(this.#configOf(pluginId)));
   }
 
-  #denied(m: PluginManifest, method: string, detail: string): CoreError {
-    this.#deny({ pluginId: m.id, method, detail });
+  #denied(m: PluginManifest, method: string, detail: string, reason?: 'via-contract'): CoreError {
+    this.#deny({ pluginId: m.id, method, detail, ...(reason && { reason }) });
     return new CoreError('PermissionDenied', `${m.id}: ${method} - ${detail}`);
   }
 
@@ -283,34 +311,56 @@ export class OsGateway {
     return { root: await real(parts.slice(0, at).join(path.sep) || path.sep), segs: parts.slice(at).filter(Boolean), git: false };
   }
 
-  async #checkPath(m: PluginManifest, method: string, raw: unknown, write: boolean, right: 'fs.read' | 'fs.write' | 'shell' = write ? 'fs.write' : 'fs.read'): Promise<string> {
+  async #checkPath(m: PluginManifest, method: string, raw: unknown, write: boolean, right: 'fs.read' | 'fs.write' | 'shell' = write ? 'fs.write' : 'fs.read', reason?: 'via-contract'): Promise<string> {
     const given = str(method, raw, 'путь');
-    if (!path.isAbsolute(given) || given.includes('\0')) throw this.#denied(m, method, `путь не абсолютный: ${given}`);
+    if (!path.isAbsolute(given) || given.includes('\0')) throw this.#denied(m, method, `путь не абсолютный: ${given}`, reason);
     const target = await realOrParent(given);
     const matched = (await this.#areas(m, right)).flatMap((a) => {
       const dir = areaDir(a, target);
       return dir === undefined ? [] : [{ dir, root: a.root, git: a.git }];
     });
     const area = matched[0]?.dir;
-    if (area === undefined) throw this.#denied(m, method, `вне области ${right}: ${given}`);
+    if (area === undefined) throw this.#denied(m, method, `вне области ${right}: ${given}`, reason);
     const own = this.pathsOf(m.id);
     const isOwn = inside(await real(own.data), target) || inside(await real(own.temp), target);
     if (isOwn) return target;
-    for (const dir of [this.#env.dataDir, this.#env.tempDir]) if (inside(await real(dir), target)) throw this.#denied(m, method, `каталог другого плагина: ${given}`);
+    for (const dir of [this.#env.dataDir, this.#env.tempDir]) if (inside(await real(dir), target)) throw this.#denied(m, method, `каталог другого плагина: ${given}`, reason);
     if (this.#env.appDir !== undefined && inside(await real(this.#env.appDir), target)) {
       const appRoots = await Promise.all((this.#env.roots?.() ?? []).map(real));
-      if (!appRoots.some((r) => inside(r, target))) throw this.#denied(m, method, `данные приложения: ${given}`);
+      if (!appRoots.some((r) => inside(r, target))) throw this.#denied(m, method, `данные приложения: ${given}`, reason);
     }
     for (const p of this.#env.protectedPaths ?? []) {
       const protectedPath = await real(p);
       // Предок защищённого пути закрыт только для записи: удаление или перезапись каталога унесли бы и его.
-      if (inside(protectedPath, target) || (write && inside(target, protectedPath))) throw this.#denied(m, method, `защищённый путь: ${given}`);
+      if (inside(protectedPath, target) || (write && inside(target, protectedPath))) throw this.#denied(m, method, `защищённый путь: ${given}`, reason);
     }
     const gitOk = matched.some((a) => a.git);
     // От корня области, а не от каталога под маску: `*` совпадает и с самим `.git`, и путь внутри него был бы без сегмента `.git`.
     const inGit = matched.some((a) => path.relative(a.root, target).split(path.sep).includes('.git'));
-    if (write && !gitOk && inGit) throw this.#denied(m, method, `запись в .git: ${given}`);
+    if (write && !gitOk && inGit) throw this.#denied(m, method, `запись в .git: ${given}`, reason);
     return target;
+  }
+
+  /** `via-contract`: право вызывающего на аргумент чужого члена контракта; поставщик потом выполнит вызов по своим правам. */
+  async checkFor(m: PluginManifest, method: string, right: GuardRight, value: string): Promise<void> {
+    if (right !== 'secrets.ref') {
+      await this.#checkPath(m, method, value, right === 'fs.write', right, 'via-contract');
+      return;
+    }
+    if (!this.refAllowed(m, value)) throw this.#denied(m, method, `ссылка вне secrets.ref: ${value}`, 'via-contract');
+  }
+
+  refAllowed(m: PluginManifest, ref: string): boolean {
+    return m.permissions['secrets.ref']?.some((mask) => wildcard(mask, ref)) === true;
+  }
+
+  // Записи по очереди: два диалога подряд не затрут друг друга снимком, снятым до чужой записи.
+  #saveGrants(): Promise<void> {
+    const store = this.#grants;
+    if (!store) return Promise.resolve();
+    const write = this.#grantWrites.then(() => store.write(Object.fromEntries([...this.#granted].map(([id, set]) => [id, [...set]]))));
+    this.#grantWrites = write.catch(() => undefined);
+    return write;
   }
 
   async #ownDirs(pluginId: string): Promise<void> {
@@ -479,6 +529,12 @@ export class OsGateway {
       }
       case 'net.fetch':
         return this.#fetch(m, args);
+      case 'serve.http':
+        if (!p.serve) throw this.#denied(m, method, 'нет права serve');
+        return this.#serves.open(m.id, str(method, args[0], 'id'));
+      case 'serve.close':
+        this.#serves.close(m.id, str(method, args[0], 'id'));
+        return undefined;
       case 'env.get': {
         const name = str(method, args[0], 'имя');
         if (!p.env?.includes(name)) throw this.#denied(m, method, `переменная ${name} не в env`);
@@ -537,8 +593,11 @@ export class OsGateway {
         if (!this.#env.dialog) throw new CoreError('Unavailable', 'диалога выбора нет в этой среде');
         const chosen = (await this.#env.dialog.open(options)).filter((c) => path.isAbsolute(c));
         const grants = this.#granted.get(m.id) ?? new Set<string>();
+        const before = grants.size;
         for (const c of chosen) grants.add(await real(c));
         this.#granted.set(m.id, grants);
+        // Выбор человека уже сделан и действует в этом запуске; несохранённый - его забота при следующем, а не отказ плагину сейчас.
+        if (grants.size > before) await this.#saveGrants().catch(() => undefined);
         return chosen;
       }
       case 'security.setRoots': {
@@ -578,7 +637,7 @@ export class OsGateway {
       if (value === undefined) throw new CoreError('Unavailable', `секрета ${ref} нет`);
       return { value };
     }
-    if (!m.permissions['secrets.ref']?.some((mask) => wildcard(mask, ref))) throw this.#denied(m, 'secrets.resolve', `ссылка вне secrets.ref: ${ref}`);
+    if (!this.refAllowed(m, ref)) throw this.#denied(m, 'secrets.resolve', `ссылка вне secrets.ref: ${ref}`);
     throw new CoreError('Unavailable', `источника секретов со схемой ${scheme} нет`);
   }
 

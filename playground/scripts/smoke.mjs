@@ -121,7 +121,7 @@ async function main() {
   };
 
   await waitFor('демо-плагины работают, flaky выключен с причиной', async () =>
-    (await states({ echo: 'active', chat: 'active', alice: 'active', bob: 'active', flaky: 'stopped', 'agent-claude-code': 'active', 'agent-shell': 'active', 'session-isolation': 'active', sessions: 'active' })) &&
+    (await states({ echo: 'active', chat: 'active', alice: 'active', bob: 'active', flaky: 'stopped', 'agent-claude-code': 'active', 'agent-shell': 'active', 'session-isolation': 'active', 'next-actions': 'active', sessions: 'active' })) &&
     /всегда падает/.test(await text('#plugins-list [data-plugin="flaky"] .plugin-reason')),
   );
   await waitFor('alice и bob подписаны на чат', () => lines().includes('[plugins] chat: подписчиков: 2'));
@@ -370,8 +370,14 @@ async function main() {
     await waitFor('живой claude: вопрос о доверии к каталогу или начало сессии', async () => /trust\s*this\s*folder/.test(await screen()) || lines().some((l) => /claude-code s\S+: сессия агента/.test(l)), 60_000);
     let reached = 'хук SessionStart дошёл событием session';
     if (/trust\s*this\s*folder/.test(await screen())) {
-      await inView('sessions', "(() => { const l = document.getElementById('line'); l.value = ''; l.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' })); })()");
-      await waitFor('стрелка из пустого поля дошла до диалога claude', async () => /❯\s*Yes,\s*I\s*trust/.test((await screen()).slice(-400)));
+      // По умолчанию выбрано «No, exit» (Enter - выход claude с 1), а Enter на «Yes» записал бы временный каталог в доверенные ~/.claude.json.
+      const chosen = async () => /❯\s*Yes,\s*I\s*trust/.test((await screen()).slice(-400));
+      // Ink выводит диалог раньше, чем принимает клавиши.
+      for (let i = 0; i < 5 && !(await chosen()); i++) {
+        await inView('sessions', "(() => { const l = document.getElementById('line'); l.value = ''; l.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' })); })()");
+        await waitFor('выбор в диалоге claude', chosen, 2000).catch(() => undefined);
+      }
+      assert.ok(await chosen(), 'стрелка из пустого поля не дошла до диалога claude');
       reached = 'вопрос о доверии к каталогу, стрелка из вида меняет выбор';
     }
     await waitFor('вкладка сессии claude в панели «Документы»', async () => (await docRows()) === 'sessions · session:true');

@@ -16,6 +16,7 @@ import { Endpoint } from './rpc.ts';
 import { satisfies } from './semver.ts';
 import { OsGateway, type OsEnvironment } from './os-gateway.ts';
 import { DocumentTable, type DocumentRow } from './documents.ts';
+import { guardedValue, guardsOf } from './via-contract.ts';
 import { isRecord, parseWire, type Parsed, type WireSpec } from './wire.ts';
 import type { HostHandle, SpawnHost } from './transports.ts';
 import type { TerminalSink, TerminalView } from './pty.ts';
@@ -36,7 +37,7 @@ export type JournalEntry =
   /** `activation: "lazy"`: ждёт первой команды, сочетания, показа вида или потребителя своего контракта. */
   | { readonly pluginId: string; readonly kind: 'waiting' }
   /** Шлюз `ctx.os` отказал: вызов вне прав манифеста. */
-  | { readonly pluginId: string; readonly kind: 'denied'; readonly method: string; readonly detail: string }
+  | { readonly pluginId: string; readonly kind: 'denied'; readonly method: string; readonly detail: string; readonly reason?: 'via-contract' }
   /** Снят по disable: сам (`by` - он же) или вместе с поставщиком, которого требовал. */
   | { readonly pluginId: string; readonly kind: 'unloaded'; readonly by: string; readonly error?: string; readonly keptPty?: number }
   /** Сочетание объявлено и другим плагином; нажатие получает `winner`. */
@@ -142,13 +143,16 @@ export interface DisablePreview {
 const VIEW_STATE = '$views';
 const VIEW_STATE_MAX = 64 * 1024;
 const DOCUMENTS_STATE = '$documents';
+const GRANTED_STATE = '$granted';
 
 export interface Kernel {
   readonly journal: readonly JournalEntry[];
   /** Активные сейчас, в порядке активации. */
   readonly active: readonly string[];
-  /** Вид реестра из главного процесса: методы контрактов идут в хост поставщика. */
+  /** Вид реестра из главного процесса: методы контрактов идут в хост поставщика. Звать метод от имени плагина - через `callAs`, иначе ядро не проверит права вызывающего. */
   readonly contracts: ContractRegistry;
+  /** Метод контракта от имени плагина (его вида): те же проверки, что у вызова из главной части, включая `via-contract`. */
+  callAs(caller: string, contract: string, major: number, member: string, args: readonly unknown[]): Promise<unknown>;
   /** Разобранные манифесты, включённые и нет. */
   readonly manifests: readonly PluginManifest[];
   hostOf(pluginId: string): string | undefined;
@@ -337,13 +341,25 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   const gateway = new OsGateway(
     // Под замком с hideNotifications текст уведомления виден на заблокированном экране ОС - уходит без него.
     notify ? { ...osEnv, notify: (title, body) => (layer.hideNotifications ? notify('Cyborg', 'новое событие') : notify(title, body)) } : osEnv,
-    (d) => record({ pluginId: d.pluginId, kind: 'denied', method: d.method, detail: d.detail }),
+    (d) => record({ pluginId: d.pluginId, kind: 'denied', method: d.method, detail: d.detail, ...(d.reason && { reason: d.reason }) }),
     (id) => Object.assign({}, ...(options.config?.raw(id) ?? []).map(([, data]) => (isRecord(data) ? data : {}))) as Record<string, unknown>,
     (id, method, params) => {
       const host = hosts.get(hostOf(id) ?? id);
       if (host && !host.down) host.endpoint.notify(method, params);
     },
     (id) => known.find((k) => k.id === id),
+    options.state && {
+      read: () => {
+        const raw = options.state?.raw(GRANTED_STATE).find(([layer]) => layer === 'workspace')?.[1];
+        return isRecord(raw) ? raw.byPlugin : undefined;
+      },
+      write: async (byPlugin) => options.state?.write('workspace', GRANTED_STATE, 1, { byPlugin }),
+    },
+    async (id, params) => {
+      const host = hosts.get(hostOf(id) ?? id);
+      if (!host || host.down) throw new CoreError('Unavailable', `${id}: хост не работает`);
+      return host.endpoint.request('serve.request', params);
+    },
   );
 
   const manifests: PluginManifest[] = [];
@@ -454,6 +470,12 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     if (one !== undefined) return graph.bindings.get(caller)?.get(contract) === provider && satisfies(version, one);
     const many = m.consumes[contract];
     return many !== undefined && satisfies(version, many);
+  }
+
+  /** `via-contract`: право вызывающего на аргументы члена, как их объявил поставщик; выполнит вызов поставщик по своим правам. */
+  async function checkCall(caller: string, provider: string, contract: string, member: string, args: readonly unknown[]): Promise<void> {
+    const method = `${contract}.${member}`;
+    for (const g of guardsOf(manifestOf(provider).guards, contract, member)) await gateway.checkFor(manifestOf(caller), method, g.right, guardedValue(args, g, method));
   }
 
   function liveHost(pluginId: string): Host {
@@ -577,7 +599,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       mine(p.pluginId);
       if (commandOwners.get(p.name) === p.pluginId) commandOwners.delete(p.name);
     });
-    onRequest('invoke', { ...KEY, caller: 'string', member: 'string', args: 'array' }, (p) => {
+    onRequest('invoke', { ...KEY, caller: 'string', member: 'string', args: 'array' }, async (p) => {
       mine(p.caller);
       const d = descriptors.get(p.contract)?.find((x) => x.pluginId === p.pluginId && x.version === p.version);
       if (!d?.methods.includes(p.member)) throw new CoreError('Unavailable', `${p.contract}@${p.version}.${p.member} у ${p.pluginId} нет`);
@@ -585,6 +607,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
         throw new CoreError('NotDeclared', `${p.caller}: ${p.contract}@${p.version} от ${p.pluginId} не объявлен потребляемым`);
       }
       const { pluginId, contract, version, member } = p;
+      await checkCall(p.caller, pluginId, contract, member, p.args);
       const target = liveHost(pluginId);
       const callbacks = p.args.map((arg) => marker(arg, CALLBACK));
       if (!callbacks.some((id) => id !== undefined)) return callHost(target, pluginId, 'call', { pluginId, contract, version, member, args: p.args });
@@ -953,6 +976,16 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     journal,
     active,
     contracts: registry,
+    async callAs(caller, contract, major, member, args) {
+      const impl = registry.get(caller, contract, major);
+      if (impl === undefined) throw new CoreError('Unavailable', `${contract}: поставщика сейчас нет`);
+      const fn = Object.hasOwn(impl, member) ? impl[member] : undefined;
+      if (typeof fn !== 'function') throw new CoreError('Invalid', `${contract}.${member}: не метод контракта`);
+      const provider = graph.bindings.get(caller)?.get(contract);
+      if (provider === undefined) throw new CoreError('Unavailable', `${contract}: поставщика сейчас нет`);
+      await checkCall(caller, provider, contract, member, args);
+      return (fn as (...xs: unknown[]) => unknown).apply(impl, [...args]);
+    },
     manifests: known,
     hostOf,
     keybindings: [...keys.values()],

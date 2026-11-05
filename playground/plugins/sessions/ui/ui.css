@@ -44,3 +44,11 @@ header {
   display: flex;
   gap: var(--cy-gap);
 }
+
+#actions {
+  flex-wrap: wrap;
+}
+
+#actions[hidden] {
+  display: none;
+}

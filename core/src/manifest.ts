@@ -2,6 +2,7 @@ import { CoreError } from './errors.ts';
 import { isValidRange, parseVersion } from './semver.ts';
 import { normalizeKey } from './keys.ts';
 import { readPermissions, type PluginPermissions } from './permissions.ts';
+import { readGuard, type MemberGuards } from './via-contract.ts';
 import { isRecord, isWireKind, matchesKind, type WireKind } from './wire.ts';
 import { reservedId, WINDOW_COMMANDS } from './window-layer.ts';
 
@@ -31,6 +32,8 @@ export interface PluginManifest {
   readonly engines: { readonly cyborg: string };
   /** Контракт -> версия или несколько мажорных версий одновременно. */
   readonly provides: Readonly<Record<string, readonly string[]>>;
+  /** Контракт -> член -> право вызывающего на аргумент: ядро проверит его до передачи вызова (`via-contract`). */
+  readonly guards?: Readonly<Record<string, MemberGuards>>;
   /** Кратность one, без поставщика плагин не активируется. */
   readonly requires: Readonly<Record<string, string>>;
   /** Кратность one, без поставщика плагин работает. */
@@ -85,7 +88,7 @@ export function parseManifest(raw: unknown): ManifestResult {
   const engines = isRecord(raw.engines) ? raw.engines.cyborg : undefined;
   if (typeof engines !== 'string' || !isValidRange(engines)) errors.push(`engines.cyborg: ожидается диапазон, получено ${show(engines)}`);
 
-  const provides = readProvides(raw.provides, errors);
+  const { provides, guards } = readProvides(raw.provides, errors);
   const requires = readRanges('requires', raw.requires, errors);
   const optional = readRanges('optional', raw.optional, errors);
   const consumes = readRanges('consumes', raw.consumes, errors);
@@ -121,6 +124,7 @@ export function parseManifest(raw: unknown): ManifestResult {
       version,
       engines: { cyborg: engines },
       provides,
+      ...(guards && { guards }),
       requires,
       optional,
       consumes,
@@ -138,15 +142,27 @@ export function parseManifest(raw: unknown): ManifestResult {
   };
 }
 
-function readProvides(raw: unknown, errors: string[]): Record<string, string[]> {
+interface Provides {
+  readonly provides: Record<string, string[]>;
+  readonly guards?: Record<string, MemberGuards>;
+}
+
+/** Значение - версия, список версий или `{ version, guard? }`. */
+function readProvides(raw: unknown, errors: string[]): Provides {
   const out: Record<string, string[]> = {};
-  if (raw === undefined) return out;
+  const guards: Record<string, MemberGuards> = {};
+  if (raw === undefined) return { provides: out };
   if (!isRecord(raw)) {
     errors.push('provides: ожидается объект');
-    return out;
+    return { provides: out };
   }
-  for (const [name, value] of Object.entries(raw)) {
+  for (const [name, entry] of Object.entries(raw)) {
     if (!isValidId(name)) errors.push(`provides.${name}: недопустимое имя контракта`);
+    const full = isRecord(entry) ? entry : undefined;
+    for (const key of Object.keys(full ?? {})) if (!['version', 'guard'].includes(key)) errors.push(`provides.${name}.${key}: неизвестное поле`);
+    const guard = readGuard(`provides.${name}.guard`, full?.guard, errors);
+    if (guard) guards[name] = guard;
+    const value = full ? full.version : entry;
     const list: unknown = typeof value === 'string' ? [value] : value;
     const versions = Array.isArray(list) ? list.filter((v): v is string => typeof v === 'string' && parseVersion(v) !== null) : [];
     if (!Array.isArray(list) || versions.length === 0 || versions.length !== list.length) {
@@ -157,7 +173,7 @@ function readProvides(raw: unknown, errors: string[]): Record<string, string[]> 
     if (new Set(majors).size !== majors.length) errors.push(`provides.${name}: две версии одной мажорной`);
     out[name] = versions;
   }
-  return out;
+  return { provides: out, ...(Object.keys(guards).length > 0 && { guards }) };
 }
 
 function readRanges(field: string, raw: unknown, errors: string[]): Record<string, string> {

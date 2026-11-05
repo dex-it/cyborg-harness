@@ -6,7 +6,8 @@
   },
   "consumes": {
     "cyborg.agent": "^1",
-    "cyborg.session-prompt": "^1"
+    "cyborg.session-prompt": "^1",
+    "cyborg.agent-tool": "^1"
   },
   "commands": {
     "sessions.agents": {},
@@ -20,9 +21,16 @@
       "args": [
         "string"
       ]
+    },
+    "sessions.actions": {
+      "args": [
+        "string",
+        "number"
+      ]
     }
   },
   "permissions": {
+    "serve": true,
     "pty": [
       "/bin/sh",
       {
@@ -34,7 +42,8 @@
         ],
         "env": [
           "CYBORG_EVENTS",
-          "CYBORG_SETTINGS"
+          "CYBORG_SETTINGS",
+          "CYBORG_MCP_TOKEN"
         ]
       }
     ]

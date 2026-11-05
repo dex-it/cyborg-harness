@@ -1,6 +1,6 @@
 // Вид sessions: кнопка на каждого поставщика cyborg.agent и терминал последней сессии по билету главной части.
 
-import type { AgentFacts, Disposable, ItemEventDetail, UiContext, UiTerminal } from '@cyborg/contracts';
+import type { AgentFacts, Disposable, ItemEventDetail, SessionAction, UiContext, UiTerminal } from '@cyborg/contracts';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}): HTMLElementTagNameMap[K] {
   return Object.assign(document.createElement(tag), props);
@@ -34,7 +34,9 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
   // Документы прошлого запуска: ядро их сохранило, поднимает сессию человек - агент мог за это время пропасть.
   const previous = el('cy-list', { id: 'previous', hidden: true });
   previous.setAttribute('aria-label', 'Сессии прошлого запуска');
-  root.append(el('link', { rel: 'stylesheet', href: new URL('./ui.css', import.meta.url).href }), header, previous, screen, line);
+  // Кнопки предлагает агент вызовом инструмента suggest_actions; человек нажимает - реплика уходит в сессию.
+  const suggested = el('div', { id: 'actions', className: 'agents', hidden: true });
+  root.append(el('link', { rel: 'stylesheet', href: new URL('./ui.css', import.meta.url).href }), header, previous, screen, suggested, line);
 
   const state = (text: string) => (status.textContent = text);
   const print = (chunk: string) => {
@@ -43,12 +45,46 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
   };
   const failed = (error: unknown) => state(`отказ: ${error instanceof Error ? error.message : String(error)}`);
   let term: UiTerminal | undefined;
+  let polling = 0;
+  const showActions = (list: readonly SessionAction[]) => {
+    suggested.replaceChildren(
+      ...list.map((a) => {
+        const b = el('cy-button', { textContent: a.label, title: a.text });
+        b.addEventListener('click', () => {
+          if (!term) return;
+          if (a.submit) {
+            void term.write(`${a.text}\r`).catch(failed);
+            return;
+          }
+          line.value = a.text;
+          line.focus();
+        });
+        return b;
+      }),
+    );
+    suggested.hidden = list.length === 0;
+  };
+  const poll = async (ticket: string, generation: number) => {
+    let since = -1;
+    while (generation === polling) {
+      const answer = (await ctx.commands.run('sessions.actions', ticket, since)) as { version: number; actions: SessionAction[] } | null;
+      if (generation !== polling) return;
+      if (!answer) break;
+      since = answer.version;
+      showActions(answer.actions);
+    }
+    showActions([]);
+  };
   const open = async (title: string, command: string, arg: string) => {
     const ticket = await ctx.commands.run(command, arg);
     if (typeof ticket !== 'string') throw new Error(`${command} не вернул билет`);
     term?.close();
     const opened = await ctx.terminal.open(ticket);
     term = opened;
+    const generation = ++polling;
+    void poll(ticket, generation).catch(() => {
+      if (generation === polling) showActions([]);
+    });
     screen.textContent = '';
     print(opened.backlog);
     opened.onData(print);
@@ -96,5 +132,10 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
   });
   void list().catch(failed);
   void listPrevious().catch(failed);
-  return { dispose: () => term?.close() };
+  return {
+    dispose: () => {
+      polling++;
+      term?.close();
+    },
+  };
 }

@@ -1,7 +1,7 @@
 import { resolveSection, VERSION_KEY, type SectionResult } from './config.ts';
 import { DisposableStore, toDisposable, type Disposable } from './disposable.ts';
 import { compileSchema } from './json-schema.ts';
-import type { ContractName, ContractType, DocumentChange, DocumentInfo, DocumentInit, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue } from '@cyborg/contracts';
+import type { ContractName, ContractType, DocumentChange, DocumentInfo, DocumentInit, HttpServer, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue, ServeRequest, ServeResponse } from '@cyborg/contracts';
 import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';
@@ -150,6 +150,42 @@ class HostWatches {
   }
 }
 
+/** Обработчики `serve.http` в хосте: запрос от ядра находит свой по id сервера. */
+class HostServes {
+  readonly #items = new Map<string, (request: ServeRequest) => ServeResponse | Promise<ServeResponse>>();
+  #seq = 0;
+
+  async open(endpoint: Endpoint, pluginId: string, handler: (request: ServeRequest) => ServeResponse | Promise<ServeResponse>): Promise<HttpServer> {
+    if (typeof handler !== 'function') throw new CoreError('Invalid', `${pluginId}: serve.http ждёт обработчика`);
+    const id = `h${String(++this.#seq)}`;
+    const key = `${pluginId}\0${id}`;
+    this.#items.set(key, handler);
+    let url: string;
+    try {
+      url = await endpoint.request<string>('os', { pluginId, method: 'serve.http', args: [id] });
+    } catch (error) {
+      this.#items.delete(key);
+      throw error;
+    }
+    return Object.freeze({
+      url,
+      dispose: () => {
+        if (this.#items.delete(key)) void endpoint.request('os', { pluginId, method: 'serve.close', args: [id] }).catch(() => undefined);
+      },
+    });
+  }
+
+  request(p: { pluginId: string; id: string; request: ServeRequest }): ServeResponse | Promise<ServeResponse> {
+    const handler = this.#items.get(`${p.pluginId}\0${p.id}`);
+    if (!handler) throw new CoreError('NotFound', `${p.pluginId}: сервера ${p.id} нет`);
+    return handler(p.request);
+  }
+
+  forget(pluginId: string): void {
+    for (const key of [...this.#items.keys()]) if (key.startsWith(`${pluginId}\0`)) this.#items.delete(key);
+  }
+}
+
 export type SystemEvent = { readonly kind: 'focus'; readonly focused: boolean } | { readonly kind: 'suspend' | 'resume' | 'screen-lock' };
 
 type Listener = (value?: boolean | string) => unknown;
@@ -228,7 +264,7 @@ class HostSystem {
   }
 }
 
-function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths: OsPaths, ptys: HostPtys, watches: HostWatches): PluginOs {
+function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths: OsPaths, ptys: HostPtys, watches: HostWatches, serves: HostServes): PluginOs {
   const call =
     <R>(method: string) =>
     (...args: unknown[]): Promise<R> =>
@@ -265,6 +301,7 @@ function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths:
       }),
     }),
     ...(p.net && { net: Object.freeze({ fetch: call('net.fetch') }) }),
+    ...(p.serve && { serve: Object.freeze({ http: (handler: (request: ServeRequest) => ServeResponse | Promise<ServeResponse>) => serves.open(endpoint, pluginId, handler) }) }),
     ...(p.env && { env: Object.freeze({ get: call('env.get') }) }),
     ...(p.notify && { notify: Object.freeze({ show: call('notify.show') }) }),
     ...(clipboard && { clipboard: Object.freeze(clipboard) }),
@@ -295,6 +332,8 @@ export function runHost(port: Port, importer: Importer): Endpoint {
   endpoint.handle('pty.exit', (p: { pluginId: string; id: string; exit: PtyExit }) => ptys.exit(p));
   const watches = new HostWatches();
   endpoint.handle('fs.change', (p: { pluginId: string; id: string; names: string[] }) => watches.change(endpoint, p));
+  const serves = new HostServes();
+  endpoint.handle('serve.request', (p: { pluginId: string; id: string; request: ServeRequest }) => serves.request(p));
   const system = new HostSystem(endpoint);
   endpoint.handle('system', (event: SystemEvent | { kind: 'idle'; id: string }) => system.dispatch(event));
   endpoint.handle('system.beforeQuit', () => system.beforeQuit());
@@ -332,7 +371,7 @@ export function runHost(port: Port, importer: Importer): Endpoint {
       loaded.store.add(toDisposable(() => reloaders.delete(`${p.pluginId}/${kind}`)));
     }
     try {
-      const result = await module.activate(context(endpoint, proxies, manifest, mirror, loaded, p.paths, config?.handle, state?.handle, ptys, system, watches));
+      const result = await module.activate(context(endpoint, proxies, manifest, mirror, loaded, p.paths, config?.handle, state?.handle, ptys, system, watches, serves));
       if (result) loaded.store.add(result);
       return { ok: true } satisfies ActivateResult;
     } catch (error) {
@@ -353,6 +392,7 @@ export function runHost(port: Port, importer: Importer): Endpoint {
     plugins.delete(p.pluginId);
     ptys.forget(p.pluginId);
     watches.forget(p.pluginId);
+    serves.forget(p.pluginId);
     loaded?.store.dispose();
     system.forget(p.pluginId);
   });
@@ -493,6 +533,7 @@ function context(
   ptys: HostPtys,
   system: HostSystem,
   watches: HostWatches,
+  serves: HostServes,
 ): PluginContext {
   const pluginId = manifest.id;
   const track = (d: Disposable) => {
@@ -503,7 +544,7 @@ function context(
     pluginId,
     subscriptions: loaded.store,
     log: (message) => endpoint.notify('log', { pluginId, message }),
-    os: osOf(endpoint, pluginId, manifest.permissions, paths, ptys, watches),
+    os: osOf(endpoint, pluginId, manifest.permissions, paths, ptys, watches, serves),
     secrets: { resolve: (ref) => endpoint.request<SecretValue>('os', { pluginId, method: 'secrets.resolve', args: [ref] }) },
     window: Object.freeze({ onFocusChange: (listener: (focused: boolean) => void) => track(system.on(pluginId, 'focus', (focused) => listener(focused === true))) }),
     documents: Object.freeze({

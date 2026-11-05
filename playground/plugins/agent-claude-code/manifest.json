@@ -30,7 +30,8 @@
         ],
         "env": [
           "CYBORG_EVENTS",
-          "CYBORG_SETTINGS"
+          "CYBORG_SETTINGS",
+          "CYBORG_MCP_TOKEN"
         ]
       }
     ]

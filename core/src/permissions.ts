@@ -5,7 +5,7 @@ export type { PluginPermissions };
 
 export const AREAS = ['workspace', 'plugin-data', 'plugin-temp', 'granted'] as const;
 
-const KEYS = ['fs.read', 'fs.write', 'shell', 'process', 'pty', 'launch', 'net', 'env', 'notify', 'clipboard', 'secrets.ref', 'security.roots', 'ui.lock'] as const;
+const KEYS = ['fs.read', 'fs.write', 'shell', 'process', 'pty', 'launch', 'net', 'env', 'notify', 'clipboard', 'secrets.ref', 'security.roots', 'ui.lock', 'serve'] as const;
 
 const isPath = (v: string) => {
   if (!(v.startsWith('/') || v === '~' || v.startsWith('~/'))) return false;
@@ -53,7 +53,7 @@ export function readPermissions(raw: unknown, errors: string[]): PluginPermissio
   set('env', strings('env', raw.env, errors, (v) => ENV_NAME.test(v), 'имена переменных'));
   set('secrets.ref', strings('secrets.ref', raw['secrets.ref'], errors, (v) => /^[a-z][a-z0-9+.-]*:\/\/./.test(v), 'маски ссылок со схемой'));
   set('clipboard', strings('clipboard', raw.clipboard, errors, (v) => v === 'read' || v === 'write', 'read, write'));
-  for (const flag of ['notify', 'security.roots', 'ui.lock'] as const) {
+  for (const flag of ['notify', 'security.roots', 'ui.lock', 'serve'] as const) {
     if (raw[flag] === undefined) continue;
     if (typeof raw[flag] !== 'boolean') errors.push(`permissions.${flag}: ожидается true или false`);
     else if (raw[flag]) set(flag, true);
@@ -106,5 +106,6 @@ export function describePermissions(p: PluginPermissions): string[] {
   if (p['secrets.ref']) out.push(`читает секреты ${p['secrets.ref'].join(', ')}`);
   if (p['security.roots']) out.push('задаёт корни проектов, доступные другим плагинам');
   if (p['ui.lock']) out.push('может закрыть окно Cyborg');
+  if (p.serve) out.push('принимает запросы HTTP на 127.0.0.1 - от программ этого компьютера');
   return out;
 }

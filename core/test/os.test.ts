@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFile, chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, PluginOs } from '@cyborg/contracts';
-import { SectionStore } from '../src/config.ts';
+import { SectionStore, type LayerStore } from '../src/config.ts';
 import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
 import { describePermissions } from '../src/permissions.ts';
@@ -457,6 +457,53 @@ test('права: маски путей, workspace.git, выбор в dialog к�
   assert.deepEqual(opened, [picked, 'https://example.com/a']);
   assert.ok(denied().includes('picker:shell.openExternal'));
   await k.unload();
+});
+
+test('granted: выбор в dialog лежит в state воркспейса и действует после перезапуска; кривые записи и сбой записи не мешают', async () => {
+  await using box = await sandbox();
+  const [picked, kept, late] = ['picked.txt', 'kept.txt', 'late.txt'].map((name) => path.join(box.outside, name));
+  for (const f of [picked!, kept!, late!]) await writeFile(f, 'текст');
+  const [realPicked, realKept] = await Promise.all([picked!, kept!].map((f) => realpath(f)));
+  let doc: Record<string, unknown> = { $granted: { $version: 1, byPlugin: { other: [realKept, 'relative/x', 42, '/a\0b'], ghost: 'не список' } } };
+  let failSave = false;
+  const store: LayerStore = {
+    load: async () => structuredClone(doc),
+    save: async (_layer, next) => {
+      if (failSave) throw new Error('диск полон');
+      doc = structuredClone(next);
+    },
+  };
+  let pick: string[] = [];
+  const start = async () => {
+    const contexts = new Map<string, PluginContext>();
+    const k = await load({
+      apiVersion: '1.0.0',
+      spawnHost: inlineHosts(async (entry) => ({ activate: (ctx: PluginContext) => void contexts.set(entry, ctx) })),
+      enabled: ['picker', 'other'],
+      manifests: [manifest('picker', { 'fs.read': ['granted'] }), manifest('other', { 'fs.read': ['granted'] })],
+      os: { dataDir: box.data, tempDir: box.temp, dialog: { open: async () => pick } },
+      state: await SectionStore.open(store, ['workspace']),
+    });
+    return { k, os: (id: string) => contexts.get(id)!.os };
+  };
+
+  const first = await start();
+  assert.equal(await first.os('other').fs.readText(kept!), 'текст', 'сохранённое прочитано при старте');
+  await assert.rejects(first.os('picker').fs.readText(picked!), { code: 'PermissionDenied' });
+  pick = [picked!];
+  await first.os('picker').dialog.open({});
+  await first.k.unload();
+  assert.deepEqual(doc.$granted, { $version: 1, byPlugin: { other: [realKept], picker: [realPicked] } }, 'кривые записи при сохранении отсеяны');
+
+  const second = await start();
+  assert.equal(await second.os('picker').fs.readText(picked!), 'текст');
+  await assert.rejects(second.os('other').fs.readText(picked!), { code: 'PermissionDenied' }, 'выбор одного плагина - не право другого');
+  failSave = true;
+  pick = [late!];
+  assert.deepEqual(await second.os('picker').dialog.open({}), [late], 'сбой записи не отменяет выбор человека');
+  assert.equal(await second.os('picker').fs.readText(late!), 'текст');
+  assert.deepEqual((doc.$granted as { byPlugin: Record<string, string[]> }).byPlugin.picker, [realPicked]);
+  await second.k.unload();
 });
 
 test('права в манифесте: маска под названным каталогом, workspace.git только у записи, shell без file:', () => {
