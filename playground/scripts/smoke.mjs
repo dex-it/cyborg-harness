@@ -109,6 +109,13 @@ async function main() {
   const feed = () => ev(`[...document.querySelectorAll('#feed .log-line')].map((l) => l.textContent)`);
   const feedHas = async (pattern) => (await feed()).some((l) => pattern.test(l));
   const pid = (id) => ev(`/pid (\\d+)/.exec(document.querySelector('#plugins-list [data-plugin=${JSON.stringify(id)}] .plugin-host')?.textContent ?? '')?.[1] ?? ''`);
+  // Состояние и pid - одним чтением одной строки: между двумя запросами список перерисуется, и active старой строки сложится с пустым pid новой.
+  const restartedFrom = (id, oldPid) =>
+    ev(`(() => {
+      const r = document.querySelector('#plugins-list [data-plugin=${JSON.stringify(id)}]');
+      const p = /pid (\\d+)/.exec(r?.querySelector('.plugin-host')?.textContent ?? '')?.[1];
+      return r?.dataset.state === 'active' && p !== undefined && p !== ${JSON.stringify(oldPid)};
+    })()`);
   const keyRow = (keys) => ev(`(() => { const r = document.querySelector('#keys-list [data-key=${JSON.stringify(keys)}]'); return r ? { live: r.dataset.live, text: r.textContent } : null; })()`);
   // Запись ядра: модификаторы в порядке Ctrl, Alt, Shift, Meta - на macOS это Shift+Meta+A.
   const combo = (key) => (process.platform === 'darwin' ? `Shift+Meta+${key}` : `Ctrl+Shift+${key}`);
@@ -231,7 +238,7 @@ async function main() {
 
   const chatPid2 = await pid('chat');
   assert.equal(await button('chat', 'Уронить хост'), true);
-  await waitFor('хост b упал и поднялся', async () => /хост b упал/.test(await text('#plugins-journal')) && (await state('chat')) === 'active' && (await pid('chat')) !== chatPid2);
+  await waitFor('хост b упал и поднялся', async () => /хост b упал/.test(await text('#plugins-journal')) && (await restartedFrom('chat', chatPid2)));
   const screen = () => inView('echo', "document.getElementById('screen').textContent");
   const type = (command) => inView('echo', `(() => { const l = document.getElementById('line'); l.value = ${JSON.stringify(command)}; l.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); })()`);
   await waitFor('вид echo открыл pty по билету главной части', async () => /^pty \d+$/.test(await inView('echo', "document.getElementById('term-state').textContent")));
@@ -243,7 +250,7 @@ async function main() {
     await waitFor('хост echo остановлен SIGSTOP', async () => /^T/.test(await main(`process.mainModule.require('child_process').execSync('ps -o stat= -p ${hung}').toString().trim()`)));
     await type('echo завис-$((7*8))');
     await waitFor('хост echo стоит, а терминал вида работает', async () => /завис-56/.test(await screen()));
-    await waitFor('сторож признал хост a зависшим и перезапустил', async () => /хост a завис/.test(await text('#plugins-journal')) && (await state('echo')) === 'active' && (await pid('echo')) !== echoPid);
+    await waitFor('сторож признал хост a зависшим и перезапустил', async () => /хост a завис/.test(await text('#plugins-journal')) && (await restartedFrom('echo', echoPid)));
     await type('echo после-$((8*9))');
     await waitFor('после перезапуска хоста терминал вида тот же', async () => /после-72/.test(await screen()));
     log('терминал вида: билет share(), вывод и ввод мимо хоста - работают при зависшем хосте и после его перезапуска');
@@ -283,7 +290,7 @@ async function main() {
   })()`);
   const bobPid2 = await pid('bob');
   assert.equal(await button('bob', 'Уронить хост'), true);
-  await waitFor('хост c поднялся, bob снова работает', async () => (await state('bob')) === 'active' && (await pid('bob')) !== bobPid2);
+  await waitFor('хост c поднялся, bob снова работает', () => restartedFrom('bob', bobPid2));
   assert.equal(await ev('window.plaqueSeen'), true, 'на время перезапуска вид не закрыт плашкой');
   assert.equal(await inView('bob', 'window.beforeCrash'), 'документ до сбоя', 'перезапуск хоста пересоздал документ вида');
   const statuses = async () => (await viewLog('bob')).split('\n').filter((l) => /чат есть/.test(l)).length;
