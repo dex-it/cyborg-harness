@@ -21,11 +21,11 @@ import { RecentWorkspaces } from '../../../core/src/recent.ts';
 app.setName('Cyborg Playground');
 registerViewScheme();
 
-/** `--spike=<файл>`: замеры видов во фреймах (SAD2, открытый вопрос 11) вместо окна плагинов. */
+/** `--spike=<файл>`: замеры видов во фреймах (SAD, открытый вопрос 11) вместо окна плагинов. */
 const spikeOut = process.argv.find((a) => a.startsWith('--spike='))?.slice('--spike='.length);
 const hostsSpikeOut = process.argv.find((a) => a.startsWith('--spike-hosts='))?.slice('--spike-hosts='.length);
 const recent = new RecentWorkspaces(path.join(app.getPath('userData'), 'recent.json'));
-/** `--workspace=<файл>` по SAD2 §3.1; без флага - последний из «Недавних», без них - `<userData>/workspace.cyborg.json`; `--no-workspace` - окно без воркспейса. */
+/** `--workspace=<файл>` по SAD §3.1; без флага - последний из «Недавних», без них - `<userData>/workspace.cyborg.json`; `--no-workspace` - окно без воркспейса. */
 const workspaceArg = process.argv.find((a) => a.startsWith('--workspace='))?.slice('--workspace='.length);
 const workspaceFile = process.argv.includes('--no-workspace')
   ? undefined

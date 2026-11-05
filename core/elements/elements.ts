@@ -1,4 +1,4 @@
-// Элементы ядра (SAD2 §3.8): оболочка вида определяет их до mount, так что плагин не подменит cy-* своим классом.
+// Элементы ядра (SAD §3.8): оболочка вида определяет их до mount, так что плагин не подменит cy-* своим классом.
 
 import type { ItemEventDetail, ListItem, TabItem, ToggleEventDetail, TreeItem } from '@cyborg/contracts';
 import { checkItems, checkTree, stepIndex, stepTab, treeKey, visibleRows, type TreeRow } from '../src/elements-model.ts';

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import ts from 'typescript';
 
-// SAD2 §6.1, дисциплина: плагин импортирует только @cyborg/contracts и свои модули. Без Compartment хост не мешает обойти шлюз, поэтому правило держит статика.
+// SAD §6.1, дисциплина: плагин импортирует только @cyborg/contracts и свои модули. Без Compartment хост не мешает обойти шлюз, поэтому правило держит статика.
 const repo = path.resolve(import.meta.dirname, '..', '..');
 /** Каталог плагинов -> пакет объявлений рядом с ним, как `@acme/contracts` у стороннего автора: только типы и дополнение карты Contracts. */
 const PLUGIN_ROOTS: Readonly<Record<string, string>> = {
@@ -56,7 +56,7 @@ const inside = (dir: string, target: string) => target === dir || target.startsW
 /** Нарушения в файле плагина `file` из каталога `home`. */
 export function violations(file: string, text: string, home: string, declarations: string): string[] {
   const found: string[] = [];
-  // Вид - браузерный бандл во фрейме без Node (SAD2 §3.8): пакеты вроде xterm шлюз не обходят, а встроенные модули и electron - да.
+  // Вид - браузерный бандл во фрейме без Node (SAD §3.8): пакеты вроде xterm шлюз не обходят, а встроенные модули и electron - да.
   const view = inside(path.join(home, 'ui'), file);
   for (const use of usesOf(file, text)) {
     const where = `${path.relative(repo, file)}:${use.line} '${use.spec}'`;

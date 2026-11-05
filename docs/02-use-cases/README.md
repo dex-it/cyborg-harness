@@ -1,12 +1,12 @@
 # Сценарии
 
-Файл на сценарий (по плану корпуса: `02-use-cases/<слаг>/`). Сценарии привязаны к требованиям [BRD](../01-product/brd.md) и фич.
+Файл на сценарий (по плану корпуса: `02-use-cases/<слаг>/`). Сценарии привязаны к требованиям [BRD](../01-product/brd.md); устройство, на которое они опираются, - [SAD](../03-architecture/design/sad.md). Этап - по [SAD, раздел 6](../03-architecture/design/sad.md#6-этапы).
 
-| Сценарий | Актор | Требования |
-|---|---|---|
-| [user-after-upgrade](user-after-upgrade/scenario.md) | Пользователь | BR-CH-002 |
-| [plugin-failure-isolated](plugin-failure-isolated/scenario.md) | Пользователь, мейнтейнер | BR-CH-006 |
-| [author-writes-plugin](author-writes-plugin/scenario.md) | Автор плагина | BR-CH-004 |
-| [maintainer-adds-feature](maintainer-adds-feature/scenario.md) | Мейнтейнер | BR-CH-001 |
-| [second-agent](second-agent/scenario.md) | Автор провайдера, пользователь | BR-CH-003 |
-| [third-party-install-permissions](third-party-install-permissions/scenario.md) | Пользователь | BR-CH-004, BR-CH-005 |
+| Сценарий | Актор | Требования | Этап |
+|---|---|---|---|
+| [Пользователь после обновления](user-after-upgrade/scenario.md) | Пользователь | BR-CH-002 | 1 |
+| [Плагин падает, приложение работает](plugin-failure-isolated/scenario.md) | Пользователь, автор плагина | BR-CH-006 | 1 |
+| [Автор создаёт плагин вне поставки](author-writes-plugin/scenario.md) | Автор плагина вне поставки | BR-CH-004 | 1 |
+| [Автор встроенного плагина добавляет функцию](maintainer-adds-feature/scenario.md) | Разработчик поставки | BR-CH-001 | 1 |
+| [Подключение второго агента](second-agent/scenario.md) | Автор поставщика агента, пользователь | BR-CH-003 | 1 |
+| [Установка стороннего плагина с проверкой прав](third-party-install-permissions/scenario.md) | Пользователь | BR-CH-004, BR-CH-005 | 2 |

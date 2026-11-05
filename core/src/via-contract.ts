@@ -1,7 +1,7 @@
 import { CoreError } from './errors.ts';
 import { isRecord } from './wire.ts';
 
-/** Право, которое член контракта требует у вызывающего на свой аргумент (SAD2 §3.7, `via-contract`). */
+/** Право, которое член контракта требует у вызывающего на свой аргумент (SAD §3.7, `via-contract`). */
 export const GUARD_RIGHTS = ['fs.read', 'fs.write', 'shell', 'secrets.ref'] as const;
 export type GuardRight = (typeof GUARD_RIGHTS)[number];
 

@@ -53,7 +53,7 @@ export type DialogSpec =
   | { readonly kind: 'ask'; readonly title: string; readonly message?: string; readonly buttons: readonly DialogChoice[] }
   | { readonly kind: 'menu'; readonly items: readonly DialogChoice[]; readonly at: { readonly x: number; readonly y: number } };
 
-/** Урезанный `ctx` для UI плагина (SAD2 §3.8): права - те же, что у главной части, но `ctx.os` нет. */
+/** Урезанный `ctx` для UI плагина (SAD §3.8): права - те же, что у главной части, но `ctx.os` нет. */
 export interface UiContext {
   readonly pluginId: string;
   /** Имя вида из `ui.views` манифеста. */

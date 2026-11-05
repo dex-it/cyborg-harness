@@ -1,4 +1,4 @@
-// Замер хостов плагинов (SAD2, открытый вопрос 7) на собранном playground; на Linux - xvfb-run ... --no-sandbox.
+// Замер хостов плагинов (SAD, открытый вопрос 7) на собранном playground; на Linux - xvfb-run ... --no-sandbox.
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

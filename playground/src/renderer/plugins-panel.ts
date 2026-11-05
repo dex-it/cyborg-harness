@@ -1,4 +1,4 @@
-// Окно playground: плагины с кнопками над ядром, сочетания клавиш, лента сообщений плагинов и журнал ядра (SAD2 §3.2, §3.5).
+// Окно playground: плагины с кнопками над ядром, сочетания клавиш, лента сообщений плагинов и журнал ядра (SAD §3.2, §3.5).
 
 import { keyOfInput } from '../../../core/src/keys.ts';
 import type { FeedLine, KeyRow, PluginRow, PluginsSnapshot, Reply } from '../shared/plugins.ts';
@@ -184,7 +184,7 @@ export class PluginsPanel {
     await this.refresh();
   }
 
-  /** SAD2 3.6: выключение не завершает процессы в терминале молча - человек решает, оставить их или завершить. */
+  /** SAD 3.6: выключение не завершает процессы в терминале молча - человек решает, оставить их или завершить. */
   private async disable(id: string): Promise<Reply> {
     const preview = await this.port.disablePreview(id);
     if (preview.error !== undefined) return preview;

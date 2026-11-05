@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readJson, writeJsonAtomic } from './workspace.ts';
 
-/** «Недавние» (SAD2 §3.1) - в ядре: воркспейс выбирается до загрузки любого плагина. */
+/** «Недавние» (SAD §3.1) - в ядре: воркспейс выбирается до загрузки любого плагина. */
 export class RecentWorkspaces {
   readonly #file: string;
   readonly #limit: number;

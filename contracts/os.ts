@@ -3,7 +3,7 @@ import type { Disposable } from './plugin.ts';
 /** Программа или программа с первыми аргументами; `env` - имена переменных, которые плагин может ей передать. */
 export type ProgramRule = string | { readonly program: string; readonly args: readonly string[]; readonly env?: readonly string[] };
 
-/** Права главной части плагина: что ядро пропустит через `ctx.os` (SAD2 §3.7). Нет права - нет члена в `ctx.os`. */
+/** Права главной части плагина: что ядро пропустит через `ctx.os` (SAD §3.7). Нет права - нет члена в `ctx.os`. */
 export interface PluginPermissions {
   /** Области путей: `workspace`, `plugin-data`, `plugin-temp`, `granted` (выбор человека в `dialog`), абсолютный путь (каталог с поддеревом, `~` - домашний) или маска: `*` - часть имени, `**` - любые каталоги. */
   readonly 'fs.read'?: readonly string[];

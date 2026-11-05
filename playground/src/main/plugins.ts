@@ -194,7 +194,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
 export interface PluginsEvents {
   /** Снимок поменялся: открытое окно перечитывает его. */
   changed(): void;
-  /** Плагин выключился во время работы: видов у плагинов пока нет, поэтому одно уведомление ядра (SAD2 §3.5). */
+  /** Плагин выключился во время работы: видов у плагинов пока нет, поэтому одно уведомление ядра (SAD §3.5). */
   alert(title: string, body: string): void;
   /** Сообщение плагина: его вид получает строку сразу, без снимка. */
   log?(pluginId: string, line: FeedLine): void;

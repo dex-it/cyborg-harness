@@ -3,7 +3,7 @@ import type { WindowSnapshot } from '../../../core/src/window-layer.ts';
 import type { DocumentRow } from '../../../core/src/documents.ts';
 
 export type { FeedLine, Reply };
-// Окно playground: снимок, который главный процесс отдаёт интерфейсу (SAD2 §3.2, §3.5).
+// Окно playground: снимок, который главный процесс отдаёт интерфейсу (SAD §3.2, §3.5).
 
 export type PluginState = 'active' | 'waiting' | 'restarting' | 'stopped' | 'disabled';
 

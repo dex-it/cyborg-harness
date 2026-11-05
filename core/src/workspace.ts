@@ -94,7 +94,7 @@ export interface Migrated {
   readonly state: Record<string, Record<string, unknown>>;
 }
 
-/** Единственное место, где ядро знает чужие поля (SAD2 §3.10); удаляется через пару версий. */
+/** Единственное место, где ядро знает чужие поля (SAD §3.10); удаляется через пару версий. */
 export function migrateLegacy(doc: Record<string, unknown>): Migrated | undefined {
   if ('cyborg' in doc || !Array.isArray(doc.projects)) return undefined;
   const items: Record<string, unknown>[] = [];
@@ -174,7 +174,7 @@ export interface Workspace {
 
 export type OpenResult = { readonly ok: true; readonly workspace: Workspace } | { readonly ok: false; readonly owner: number };
 
-/** Воркспейс до загрузки любого плагина (SAD2 §3.1): замок, перенос старого формата, слои config и state. */
+/** Воркспейс до загрузки любого плагина (SAD §3.1): замок, перенос старого формата, слои config и state. */
 export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResult> {
   const file = path.resolve(options.file);
   const lock = lockWorkspace(file, options.pid);
