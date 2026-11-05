@@ -1,5 +1,5 @@
 import { CoreError } from './errors.ts';
-import { isRecord } from './wire.ts';
+import { isRecord, own } from './wire.ts';
 
 /** Право, которое член контракта требует у вызывающего на свой аргумент (SAD §3.7, `via-contract`). */
 export const GUARD_RIGHTS = ['fs.read', 'fs.write', 'shell', 'secrets.ref'] as const;
@@ -17,7 +17,7 @@ export type MemberGuards = Readonly<Record<string, readonly Guard[]>>;
 
 /** Права члена из манифеста поставщика; член без записи ядро не проверяет. */
 export function guardsOf(declared: Readonly<Record<string, MemberGuards>> | undefined, contract: string, member: string): readonly Guard[] {
-  const forContract = declared?.[contract];
+  const forContract = own(declared, contract);
   return forContract !== undefined && Object.hasOwn(forContract, member) ? (forContract[member] ?? []) : [];
 }
 

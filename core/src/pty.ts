@@ -43,7 +43,7 @@ interface Entry {
   readonly persist: boolean;
   cols: number;
   rows: number;
-  backlog: string;
+  readonly tail: Tail;
   attached: boolean;
   readonly viewers: Set<TerminalSink>;
   exit?: PtyExit;
@@ -52,6 +52,47 @@ interface Entry {
 export const PTY_SIGNALS = ['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGHUP'] as const;
 
 /** pty всех плагинов: живут в главном процессе, переживают хост, если просили `persist`. */
+/** Хвост вывода: куски склеиваются при чтении и изредка при сжатии, а не копией всего хвоста на каждый кусок. */
+export class Tail {
+  readonly #limit: number;
+  #chunks: string[] = [];
+  #size = 0;
+
+  constructor(limit: number) {
+    this.#limit = limit;
+  }
+
+  push(data: string): void {
+    this.#chunks.push(data);
+    this.#size += data.length;
+    let first = this.#chunks[0];
+    while (first !== undefined && this.#chunks.length > 1 && this.#size - first.length >= this.#limit) {
+      this.#chunks.shift();
+      this.#size -= first.length;
+      first = this.#chunks[0];
+    }
+    if (this.#chunks.length > 1024) {
+      const text = this.text();
+      this.#chunks = [text];
+      this.#size = text.length;
+    }
+  }
+
+  text(): string {
+    const all = this.#chunks.join('');
+    return all.length > this.#limit ? all.slice(-this.#limit) : all;
+  }
+
+  take(): string {
+    const text = this.text();
+    this.#chunks = [];
+    this.#size = 0;
+    return text;
+  }
+}
+
+export const BACKLOG_LIMIT = 256 * 1024;
+
 export class PtyTable {
   readonly #backend: PtyBackend;
   readonly #push: (pluginId: string, method: 'pty.data' | 'pty.exit', params: unknown) => void;
@@ -61,7 +102,7 @@ export class PtyTable {
   readonly #tickets = new Map<string, { pluginId: string; id: string; expires: number }>();
   #next = 0;
 
-  constructor(backend: PtyBackend, push: (pluginId: string, method: 'pty.data' | 'pty.exit', params: unknown) => void, backlogLimit = 256 * 1024, ticketTtl = 30_000) {
+  constructor(backend: PtyBackend, push: (pluginId: string, method: 'pty.data' | 'pty.exit', params: unknown) => void, backlogLimit = BACKLOG_LIMIT, ticketTtl = 30_000) {
     this.#backend = backend;
     this.#push = push;
     this.#limit = backlogLimit;
@@ -70,11 +111,11 @@ export class PtyTable {
 
   spawn(pluginId: string, o: { program: string; args: string[]; cwd?: string; env: Record<string, string>; cols: number; rows: number; persist: boolean }): PtyWire {
     const proc = this.#backend.spawn(o.program, o.args, { name: 'xterm-256color', ...(o.cwd !== undefined && { cwd: o.cwd }), env: o.env, cols: o.cols, rows: o.rows });
-    const e: Entry = { id: `pty-${String(++this.#next)}`, pluginId, proc, program: o.program, args: o.args, persist: o.persist, cols: o.cols, rows: o.rows, backlog: '', attached: true, viewers: new Set() };
+    const e: Entry = { id: `pty-${String(++this.#next)}`, pluginId, proc, program: o.program, args: o.args, persist: o.persist, cols: o.cols, rows: o.rows, tail: new Tail(this.#limit), attached: true, viewers: new Set() };
     this.#entries.set(e.id, e);
     proc.onData((data) => {
       // Хвост держится и при живом владельце: после перезапуска хоста им восстанавливается экран, где TUI не перерисует себя сам.
-      e.backlog = (e.backlog + data).slice(-this.#limit);
+      e.tail.push(data);
       if (e.attached) this.#push(pluginId, 'pty.data', { pluginId, id: e.id, data });
       for (const v of e.viewers) v.data(data);
     });
@@ -96,7 +137,7 @@ export class PtyTable {
 
   attach(pluginId: string, id: string): PtyWire {
     const e = this.#own(pluginId, id);
-    const wire = { ...info(e), backlog: e.backlog };
+    const wire = { ...info(e), backlog: e.tail.text() };
     if (e.exit) {
       this.#entries.delete(id);
       return wire;
@@ -130,7 +171,7 @@ export class PtyTable {
     };
     return {
       ...info(e),
-      backlog: e.backlog,
+      backlog: e.tail.text(),
       write: (data) => {
         own();
         e.proc.write(data);
@@ -216,4 +257,33 @@ export class PtyTable {
 
 function info(e: Entry): PtyInfo {
   return { id: e.id, pid: e.proc.pid, program: e.program, args: e.args, persist: e.persist, ...(e.exit && { exit: e.exit }) };
+}
+
+const send = (target: number, signal: NodeJS.Signals): boolean => {
+  try {
+    process.kill(target, signal);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** Сигнал группе, лидер которой `pid`: потомки (сборка, MCP-серверы агента) уходят вместе с ним. Группы нет - только самому процессу. */
+export function killGroup(pid: number, signal: NodeJS.Signals): void {
+  if (process.platform === 'win32' || !send(-pid, signal)) send(pid, signal);
+}
+
+/** node-pty делает процесс лидером группы, но `kill` шлёт сигнал только ему. */
+export function groupKilled(proc: PtyProcess): PtyProcess {
+  if (process.platform === 'win32') return proc;
+  return {
+    get pid() {
+      return proc.pid;
+    },
+    onData: (listener) => proc.onData(listener),
+    onExit: (listener) => proc.onExit(listener),
+    write: (data) => proc.write(data),
+    resize: (cols, rows) => proc.resize(cols, rows),
+    kill: (signal) => killGroup(proc.pid, (signal ?? 'SIGHUP') as NodeJS.Signals),
+  };
 }

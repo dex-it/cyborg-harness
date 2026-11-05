@@ -7,6 +7,7 @@ import {
   entryLevel,
   errorMessage,
   entryPlugins,
+  appendBounded,
   keyOfInput,
   load,
   pluginStatuses,
@@ -276,7 +277,7 @@ export class PluginsService {
   }
 
   private record(entry: JournalEntry): void {
-    this.entries.push({ at: this.now(), entry });
+    appendBounded(this.entries, { at: this.now(), entry }, (e) => e.entry);
     // Под замком с hideNotifications уведомление ядра тоже уходит без текста: его видно на заблокированном экране ОС.
     const alert = (title: string, body: string) => (this.kernel?.window.locks.some((l) => l.hideNotifications) ? this.events.alert('Cyborg', 'новое событие') : this.events.alert(title, body));
     if (this.phase === 'ready' && entry.kind === 'switched-off') alert(`Плагин ${entry.pluginId} выключен`, describeEntry(entry));

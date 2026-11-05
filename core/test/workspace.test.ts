@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, PluginModule } from '@cyborg/contracts';
@@ -11,7 +11,8 @@ import { inlineHosts } from '../src/transports.ts';
 import { lockWorkspace, migrateLegacy, openWorkspace, workspaceKey, type Workspace } from '../src/workspace.ts';
 
 async function sandbox() {
-  const root = await mkdtemp(path.join(tmpdir(), 'cyborg-ws-'));
+  // На macOS tmpdir - симлинк /var -> /private/var, а «Недавние» хранят путь после realpath.
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-ws-')));
   return {
     root,
     file: path.join(root, 'team.cyborg.json'),

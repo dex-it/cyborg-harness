@@ -1,5 +1,6 @@
 import type { PluginManifest } from './manifest.ts';
 import { satisfies } from './semver.ts';
+import { own } from './wire.ts';
 
 export type Rejection =
   | { readonly kind: 'duplicate' }
@@ -77,7 +78,7 @@ function* dependencies(m: PluginManifest): Generator<[string, string, boolean]> 
 }
 
 export function providesMatching(m: PluginManifest, contract: string, range: string): boolean {
-  return (m.provides[contract] ?? []).some((v) => satisfies(v, range));
+  return (own(m.provides, contract) ?? []).some((v) => satisfies(v, range));
 }
 
 /** Компоненты сильной связности размером больше одного (Тарьян). */

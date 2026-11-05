@@ -1,5 +1,6 @@
 import type { Layer, SectionResult, SectionSpec } from '@cyborg/contracts';
 import { toDisposable, type Disposable } from './disposable.ts';
+import { errorMessage } from './errors.ts';
 import { isRecord } from './manifest.ts';
 
 export type { Layer, SectionResult, SectionSpec };
@@ -32,7 +33,7 @@ export function resolveSection(spec: SectionSpec, layers: readonly (readonly [La
       current.set(layer, next);
       migrated.push(layer);
     } catch (error) {
-      return fail({ status: 'migrate-error', layer, from, error: (error as Error).message });
+      return fail({ status: 'migrate-error', layer, from, error: errorMessage(error) });
     }
   }
 
@@ -79,6 +80,8 @@ export class SectionStore {
   readonly #store: LayerStore;
   readonly #layers: readonly Layer[];
   readonly #documents = new Map<Layer, Record<string, unknown>>();
+  // Запись слоя - снимок всего документа: параллельные записи разных разделов затёрли бы друг друга.
+  #queue: Promise<unknown> = Promise.resolve();
 
   private constructor(store: LayerStore, layers: readonly Layer[]) {
     this.#store = store;
@@ -129,7 +132,11 @@ export class SectionStore {
   }
 
   /** Перечитывает слои после правки извне; возвращает id разделов, которые поменялись. Ошибка чтения - документы прежние. */
-  async reload(): Promise<string[]> {
+  reload(): Promise<string[]> {
+    return this.#serial(() => this.#reload());
+  }
+
+  async #reload(): Promise<string[]> {
     const next = new Map<Layer, Record<string, unknown>>();
     for (const layer of this.#layers) {
       const doc = await this.#store.load(layer);
@@ -147,8 +154,19 @@ export class SectionStore {
   /** Пишет раздел в слой как есть; миграцию и проверку уже сделал хост плагина. */
   async write(layer: Layer, id: string, version: number, data: Record<string, unknown>): Promise<void> {
     if (!this.#layers.includes(layer)) throw new Error(`слоя ${layer} нет`);
-    const doc = { ...this.#documents.get(layer), [id]: { [VERSION_KEY]: version, ...structuredClone(data) } };
-    await this.#store.save(layer, doc);
-    this.#documents.set(layer, doc);
+    const section = { [VERSION_KEY]: version, ...structuredClone(data) };
+    await this.#serial(async () => {
+      // Основа - файл, а не память: правка извне, которую слежение ещё не подхватило, не стирается чужим разделом.
+      const fresh = await this.#store.load(layer);
+      await this.#store.save(layer, { ...(isRecord(fresh) ? fresh : this.#documents.get(layer)), [id]: section });
+      // В памяти - только свой раздел: правку извне разделам сообщит reload по слежению.
+      this.#documents.set(layer, { ...this.#documents.get(layer), [id]: section });
+    });
+  }
+
+  #serial<T>(run: () => Promise<T>): Promise<T> {
+    const next = this.#queue.then(run);
+    this.#queue = next.catch(() => undefined);
+    return next;
   }
 }

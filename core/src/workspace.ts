@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { SectionStore, type Layer, type LayerStore } from './config.ts';
@@ -57,9 +57,20 @@ const alive = (pid: number) => {
 /** Замок `<файл>.lock` с pid владельца; замок умершего процесса забирается. */
 export function lockWorkspace(file: string, pid = process.pid): LockResult {
   const lock = `${file}.lock`;
+  // Замок появляется сразу с pid: файл, созданный пустым и дописанный потом, сосед успел бы счесть протухшим и снять.
+  const draft = `${lock}.${randomBytes(8).toString('hex')}`;
+  fs.writeFileSync(draft, JSON.stringify({ pid }));
+  try {
+    return takeLock(lock, draft, pid);
+  } finally {
+    fs.rmSync(draft, { force: true });
+  }
+}
+
+function takeLock(lock: string, draft: string, pid: number): LockResult {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      fs.writeFileSync(lock, JSON.stringify({ pid }), { flag: 'wx' });
+      fs.linkSync(draft, lock);
       let held = true;
       return {
         ok: true,
@@ -237,13 +248,25 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
       save: async (layer, settings) => {
         const target = layers[layer];
         if (!target) throw new Error(`слоя ${layer} нет`);
+        const f = layer === 'user' ? options.userFile : file;
+        let before: string | undefined;
+        try {
+          before = fs.readFileSync(f, 'utf8');
+        } catch {
+          before = undefined;
+        }
         target.save(settings);
-        remember(layer === 'user' ? options.userFile : file);
+        // Неподхваченная правка извне вошла в запись: файл не помечается своим, и слежение сообщит о ней разделам.
+        if (before === written.get(f)) remember(f);
       },
     };
     const stateStore: LayerStore = {
-      load: async () => tolerant(stateFile),
-      save: async (_layer, document) => writeJsonAtomic(stateFile, document),
+      load: async () => (opening ? tolerant(stateFile) : readJson(stateFile)),
+      save: async (_layer, document) => {
+        // Битый файл - правка человека: запись его не затирает.
+        if (broken(stateFile)) throw new Error(`${stateFile}: не разобран, запись отменена`);
+        writeJsonAtomic(stateFile, document);
+      },
     };
     const config = await SectionStore.open(configStore, ['user', 'workspace']);
     const state = await SectionStore.open(stateStore, ['workspace']);

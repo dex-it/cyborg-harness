@@ -7,8 +7,8 @@ import type { PluginManifest } from './manifest.ts';
 import type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';
 import { ContractRegistry, type ContractImpl } from './registry.ts';
 import { Endpoint, type Port } from './rpc.ts';
-import type { PtyWire } from './pty.ts';
-import { isRecord } from './wire.ts';
+import { BACKLOG_LIMIT, Tail, type PtyWire } from './pty.ts';
+import { isRecord, own } from './wire.ts';
 
 /** Описание отданного контракта на проводе: данные как есть, методы - только именами. */
 export interface ContractDescriptor {
@@ -62,12 +62,13 @@ export interface OsPaths {
 /** `ctx.os` по правам манифеста: нет права - нет члена; проверяет всё равно шлюз ядра, здесь только форма. */
 /** Слушатели pty в хосте; вывод, пришедший до первого onData, копится - иначе первые байты ушли бы мимо подписки. */
 class HostPtys {
-  readonly #items = new Map<string, { data: Set<(c: string) => void>; exit: Set<(e: PtyExit) => void>; early: string[]; exited?: PtyExit }>();
+  readonly #items = new Map<string, { data: Set<(c: string) => void>; exit: Set<(e: PtyExit) => void>; early: Tail; exited?: PtyExit }>();
 
   #key = (pluginId: string, id: string) => `${pluginId}\0${id}`;
 
   open(endpoint: Endpoint, pluginId: string, wire: PtyWire): PtyHandle {
-    const item = { data: new Set<(c: string) => void>(), exit: new Set<(e: PtyExit) => void>(), early: [] as string[], ...(wire.exit && { exited: wire.exit }) };
+    // Вывод до подписки копится тем же хвостом, что держит ядро: без предела `yes` в pty съел бы память хоста.
+    const item = { data: new Set<(c: string) => void>(), exit: new Set<(e: PtyExit) => void>(), early: new Tail(BACKLOG_LIMIT), ...(wire.exit && { exited: wire.exit }) };
     if (!wire.exit) this.#items.set(this.#key(pluginId, wire.id), item);
     const call =
       (method: string) =>
@@ -77,7 +78,8 @@ class HostPtys {
       ...wire,
       onData: (listener: (c: string) => void) => {
         item.data.add(listener);
-        for (const chunk of item.early.splice(0)) listener(chunk);
+        const early = item.early.take();
+        if (early) listener(early);
         return toDisposable(() => item.data.delete(listener));
       },
       onExit: (listener: (e: PtyExit) => void) => {
@@ -116,14 +118,14 @@ class HostPtys {
 
 /** Слушатели `fs.watch` в хосте: id даёт хост, чтобы событие, пришедшее раньше ответа ядра, нашло слушателя. */
 class HostWatches {
-  readonly #items = new Map<string, (names: readonly string[]) => void>();
+  readonly #items = new Map<string, { readonly listener: (names: readonly string[]) => void; readonly onClose: ((reason: string) => void) | undefined }>();
   #seq = 0;
 
-  async watch(endpoint: Endpoint, pluginId: string, target: unknown, listener: (names: readonly string[]) => void): Promise<Disposable> {
+  async watch(endpoint: Endpoint, pluginId: string, target: unknown, listener: (names: readonly string[]) => void, onClose?: (reason: string) => void): Promise<Disposable> {
     if (typeof listener !== 'function') throw new CoreError('Invalid', `${pluginId}: fs.watch ждёт слушателя`);
     const id = `w${String(++this.#seq)}`;
     const key = `${pluginId}\0${id}`;
-    this.#items.set(key, listener);
+    this.#items.set(key, { listener, onClose: typeof onClose === 'function' ? onClose : undefined });
     try {
       await endpoint.request('os', { pluginId, method: 'fs.watch', args: [target, id] });
     } catch (error) {
@@ -135,11 +137,16 @@ class HostWatches {
     });
   }
 
-  change(endpoint: Endpoint, p: { pluginId: string; id: string; names: string[] }): void {
-    const listener = this.#items.get(`${p.pluginId}\0${p.id}`);
-    if (!listener) return;
+  change(endpoint: Endpoint, p: { pluginId: string; id: string; names: string[]; closed?: unknown }): void {
+    const key = `${p.pluginId}\0${p.id}`;
+    const item = this.#items.get(key);
+    if (!item) return;
     try {
-      listener(p.names);
+      if (typeof p.closed !== 'string') item.listener(p.names);
+      else {
+        this.#items.delete(key);
+        item.onClose?.(p.closed);
+      }
     } catch (error) {
       endpoint.notify('log', { pluginId: p.pluginId, message: `слушатель fs.watch упал: ${error instanceof Error ? error.message : String(error)}` });
     }
@@ -286,7 +293,7 @@ function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths:
       list: call('fs.list'),
       stat: call('fs.stat'),
       readSlice: call('fs.readSlice'),
-      watch: (target: string, listener: (names: readonly string[]) => void) => watches.watch(endpoint, pluginId, target, listener),
+      watch: (target: string, listener: (names: readonly string[]) => void, onClose?: (reason: string) => void) => watches.watch(endpoint, pluginId, target, listener, onClose),
       writeText: call('fs.writeText'),
       mkdir: call('fs.mkdir'),
       remove: call('fs.remove'),
@@ -331,7 +338,7 @@ export function runHost(port: Port, importer: Importer): Endpoint {
   endpoint.handle('pty.data', (p: { pluginId: string; id: string; data: string }) => ptys.data(p));
   endpoint.handle('pty.exit', (p: { pluginId: string; id: string; exit: PtyExit }) => ptys.exit(p));
   const watches = new HostWatches();
-  endpoint.handle('fs.change', (p: { pluginId: string; id: string; names: string[] }) => watches.change(endpoint, p));
+  endpoint.handle('fs.change', (p: { pluginId: string; id: string; names: string[]; closed?: unknown }) => watches.change(endpoint, p));
   const serves = new HostServes();
   endpoint.handle('serve.request', (p: { pluginId: string; id: string; request: ServeRequest }) => serves.request(p));
   const system = new HostSystem(endpoint);
@@ -565,7 +572,7 @@ function context(
       provide(contract: string, version: string, impl: unknown) {
         if (typeof impl !== 'object' || impl === null) throw new CoreError('Invalid', `${pluginId}: реализация ${contract}@${version} не объект`);
         const key = handleKey(pluginId, contract, version);
-        if (!manifest.provides[contract]?.includes(version)) {
+        if (!own(manifest.provides, contract)?.includes(version)) {
           throw new CoreError('NotDeclared', `${pluginId}: контракт ${contract}@${version} не объявлен в provides`);
         }
         if (loaded.provided.has(key)) throw new CoreError('AlreadyProvided', `${pluginId}: ${contract}@${version} уже отдан`);
@@ -676,8 +683,10 @@ async function section(
         const checked = resolveSection(spec, order.map((l) => [l, next.get(l)] as const)).result;
         if (checked.status !== 'ok') throw new Error(`раздел ${kind} ${pluginId}: ${JSON.stringify(checked)}`);
         await write(layer, data);
-        raw = next;
-        value = checked.value;
+        // Пока шла запись, другой set мог сменить соседний слой: свой слой ложится поверх текущих, а не снимка до await.
+        raw = new Map(raw).set(layer, { ...data, [VERSION_KEY]: spec.version });
+        const merged = resolve().result;
+        value = merged.status === 'ok' ? merged.value : checked.value;
         for (const listener of [...listeners]) listener(structuredClone(value));
         return structuredClone(value);
       },

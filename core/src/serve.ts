@@ -84,14 +84,20 @@ export class HttpServes {
     }
     const chunks: Buffer[] = [];
     let size = 0;
-    for await (const chunk of req as AsyncIterable<Buffer>) {
-      size += chunk.length;
-      if (size > MAX_REQUEST_BODY) {
-        reply(413, { connection: 'close' });
-        req.destroy();
-        return;
+    try {
+      for await (const chunk of req as AsyncIterable<Buffer>) {
+        size += chunk.length;
+        if (size > MAX_REQUEST_BODY) {
+          reply(413, { connection: 'close' });
+          req.destroy();
+          return;
+        }
+        chunks.push(chunk);
       }
-      chunks.push(chunk);
+    } catch {
+      // Клиент оборвал тело: отвечать некому, а отказ ушёл бы необработанным в главный процесс.
+      req.destroy();
+      return;
     }
     const headers = Object.fromEntries(Object.entries(req.headers).flatMap(([k, v]) => (typeof v === 'string' ? [[k, v]] : Array.isArray(v) ? [[k, v.join(', ')]] : [])));
     const request: ServeRequest = { method: req.method ?? 'GET', path: req.url ?? '/', headers, body: Buffer.concat(chunks).toString('utf8') };

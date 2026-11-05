@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -30,7 +30,8 @@ async function waitFor<T>(what: string, probe: () => T | undefined | false | Pro
 
 /** Настоящие модули плагинов в ядре; probe - потребитель, через которого тест зовёт контракт; claude - скрипт в PATH. */
 async function setup(store?: LayerStore, extra: readonly string[] = []) {
-  const root = await mkdtemp(path.join(tmpdir(), 'cyborg-agents-'));
+  // На macOS tmpdir - симлинк /var -> /private/var, а шлюз отдаёт пути после realpath.
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-agents-')));
   const bin = path.join(root, 'bin');
   await mkdir(bin);
   await writeFile(path.join(bin, 'claude'), '#!/bin/sh\necho "2.1.7 (Claude Code)"\n');

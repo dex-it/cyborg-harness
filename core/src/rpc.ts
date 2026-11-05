@@ -1,4 +1,5 @@
-import { CoreError, errorMessage, fromWire, toWire, type WireError } from './errors.ts';
+import { CoreError, errorMessage, fromWire, ignore, toWire, type WireError } from './errors.ts';
+import { isRecord } from './wire.ts';
 
 /** Канал сообщений между ядром и хостом; post бросает, если сообщение не переживает structuredClone. */
 export interface Port {
@@ -11,6 +12,15 @@ type Message =
   | { readonly t: 'res'; readonly id: number; readonly ok: true; readonly v: unknown }
   | { readonly t: 'res'; readonly id: number; readonly ok: false; readonly e: WireError }
   | { readonly t: 'note'; readonly m: string; readonly p: unknown };
+
+function readMessage(raw: unknown): Message | undefined {
+  if (!isRecord(raw)) return undefined;
+  if (raw.t === 'note') return typeof raw.m === 'string' ? (raw as Message) : undefined;
+  if (typeof raw.id !== 'number') return undefined;
+  if (raw.t === 'req') return typeof raw.m === 'string' ? (raw as Message) : undefined;
+  if (raw.t === 'res') return typeof raw.ok === 'boolean' ? (raw as Message) : undefined;
+  return undefined;
+}
 
 // Форму параметров проверяет сам обработчик: ядро пропускает сообщения хоста через parseWire.
 type Handler = (params: never) => unknown;
@@ -25,7 +35,11 @@ export class Endpoint {
 
   constructor(port: Port) {
     this.#port = port;
-    port.onMessage((message) => void this.#receive(message as Message));
+    port.onMessage((raw) => {
+      const message = readMessage(raw);
+      // Исключение здесь ушло бы необработанным отказом в процесс ядра: сообщение не по форме отбрасывается.
+      if (message) this.#receive(message).catch(ignore);
+    });
   }
 
   get closed(): boolean {

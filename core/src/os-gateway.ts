@@ -7,7 +7,7 @@ import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, Pr
 import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import { LOGIN_SHELL } from './permissions.ts';
-import { PTY_SIGNALS, PtyTable, type PtyBackend, type TerminalSink, type TerminalView } from './pty.ts';
+import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type TerminalSink, type TerminalView } from './pty.ts';
 import { HttpServes, type AskHost } from './serve.ts';
 import type { GuardRight } from './via-contract.ts';
 import { isRecord } from './wire.ts';
@@ -38,6 +38,7 @@ export interface OsEnvironment {
   readonly clipboard?: { readText(): string | Promise<string>; writeText(text: string): void | Promise<void> };
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly fetch?: typeof fetch;
+  readonly watch?: typeof watchFs;
   /** Псевдотерминал; нет - `ctx.os.pty` отвечает `Unavailable`. */
   readonly pty?: PtyBackend;
   /** Хвост вывода pty, символов; по умолчанию 256 К. */
@@ -77,6 +78,8 @@ export interface Denial {
 }
 
 const MAX_OUTPUT = 16 * 1024 * 1024;
+const MAX_BODY = 16 * 1024 * 1024;
+const FETCH_TIMEOUT_MS = 30_000;
 const MAX_SLICE = 1024 * 1024;
 const MAX_WATCHES = 64;
 const WATCH_COALESCE_MS = 50;
@@ -163,6 +166,23 @@ function areaDir(area: Area, target: string): string | undefined {
   return undefined;
 }
 
+/** Сегмент `.` или `..`, в том числе закодированный: источник секретов нормализует путь сам и выйдет из-под маски. */
+function dotSegment(ref: string): boolean {
+  let current = ref;
+  for (let i = 0; i < 4; i++) {
+    if (current.split(/[/\\?#]/).some((s) => s === '.' || s === '..')) return true;
+    let next: string;
+    try {
+      next = decodeURIComponent(current);
+    } catch {
+      return true;
+    }
+    if (next === current) return false;
+    current = next;
+  }
+  return true;
+}
+
 function wildcard(mask: string, value: string): boolean {
   const re = new RegExp(`^${mask.split('*').map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`);
   return re.test(value);
@@ -190,7 +210,8 @@ function ruleRefusal(m: PluginManifest, key: 'process' | 'pty' | 'launch', progr
     if (typeof r === 'string') return r === program;
     return r.program === program && r.args.every((a, i) => argv[i] === a);
   });
-  if (rule === undefined) return `программа не в ${key}: ${[program, ...argv.slice(0, 2)].join(' ')}`;
+  // Аргументы в журнал не идут: в них бывают токены (`--header 'Authorization: …'`).
+  if (rule === undefined) return (m.permissions[key] ?? []).some((r) => (typeof r === 'string' ? r : r.program) === program) ? `аргументы не по правилу ${key}: ${program}` : `программа не в ${key}: ${program}`;
   // Окружение - тоже ввод программы (GIT_CONFIG_*, NODE_OPTIONS, LD_PRELOAD): только имена из правила.
   const allowedEnv = typeof rule === 'string' ? [] : (rule.env ?? []);
   const foreign = envNames.filter((k) => !allowedEnv.includes(k));
@@ -210,6 +231,8 @@ export class OsGateway {
   readonly #pty: PtyTable | undefined;
   readonly #push: (pluginId: string, method: PushMethod, params: unknown) => void;
   readonly #watches = new Map<string, () => void>();
+  /** Что гасит незавершённые `process.run` и `net.fetch` плагина: его результат больше некому принять. */
+  readonly #pending = new Map<string, Set<() => void>>();
   /** Выбор человека в `dialog`: область `granted` плагина, с `GrantStore` - и после перезапуска. */
   readonly #granted = new Map<string, Set<string>>();
   readonly #grants: GrantStore | undefined;
@@ -257,6 +280,8 @@ export class OsGateway {
     this.#roots.delete(pluginId);
     this.#approved.delete(pluginId);
     for (const [key, close] of this.#watches) if (key.startsWith(`${pluginId}\0`)) close();
+    for (const cancel of this.#pending.get(pluginId) ?? []) cancel();
+    this.#pending.delete(pluginId);
     this.#serves.forget(pluginId);
     if (pty === 'park') return this.#pty?.park(pluginId) ?? 0;
     if (pty === 'detach') this.#pty?.detach(pluginId);
@@ -351,7 +376,7 @@ export class OsGateway {
   }
 
   refAllowed(m: PluginManifest, ref: string): boolean {
-    return m.permissions['secrets.ref']?.some((mask) => wildcard(mask, ref)) === true;
+    return !dotSegment(ref) && m.permissions['secrets.ref']?.some((mask) => wildcard(mask, ref)) === true;
   }
 
   // Записи по очереди: два диалога подряд не затрут друг друга снимком, снятым до чужой записи.
@@ -419,25 +444,27 @@ export class OsGateway {
         if (this.#watches.get(key) !== reserved) throw new CoreError('Unavailable', `${method}: плагин выгружен`);
         const names = new Set<string>();
         let timer: NodeJS.Timeout | undefined;
-        const close = () => {
+        const close = (reason?: string) => {
           clearTimeout(timer);
           watcher.close();
+          if (this.#watches.get(key) !== close) return;
           this.#watches.delete(key);
+          if (reason !== undefined) this.#push(m.id, 'fs.change', { pluginId: m.id, id, names: [], closed: reason });
         };
         // Право проверяется на каждой пачке: корни воркспейса могли сузиться после подписки.
         const send = async () => {
           timer = undefined;
           const list = [...names];
           names.clear();
-          if ((await this.#checkPath(m, method, args[0], false).catch(() => undefined)) !== target) close();
+          if ((await this.#checkPath(m, method, args[0], false).catch(() => undefined)) !== target) close('путь больше не в правах плагина');
           else if (this.#watches.get(key) === close) this.#push(m.id, 'fs.change', { pluginId: m.id, id, names: list });
         };
-        const watcher = watchFs(target, (_event, name) => {
+        const watcher = (this.#env.watch ?? watchFs)(target, (_event, name) => {
           if (name) names.add(name);
           timer ??= setTimeout(() => void send(), WATCH_COALESCE_MS);
         });
         // Без слушателя ошибка наблюдателя (удалён каталог, кончились inotify) уронила бы главный процесс.
-        watcher.on('error', close);
+        watcher.on('error', (error) => close(`наблюдение прервано: ${error.message}`));
         this.#watches.set(key, close);
         return undefined;
       }
@@ -667,16 +694,40 @@ export class OsGateway {
     const { file, argv, cwd, env } = await this.#program(m, 'process', method, program, args[1], options);
     const timeout = typeof options.timeoutMs === 'number' ? options.timeoutMs : 0;
     return new Promise((resolve, reject) => {
-      const child = spawn(file, argv, { cwd, env, shell: false, timeout, stdio: ['pipe', 'pipe', 'pipe'] });
+      // Своя группа процессов: тайм-аут и выгрузка плагина гасят и то, что программа запустила сама.
+      const child = spawn(file, argv, { cwd, env, shell: false, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
+      const stop = (signal: NodeJS.Signals) => {
+        // До close, а не до выхода лидера: потомки, держащие его вывод, ещё живы в группе.
+        if (child.pid !== undefined) killGroup(child.pid, signal);
+      };
+      const timer = timeout > 0 ? setTimeout(() => stop('SIGTERM'), timeout) : undefined;
+      const untrack = this.#track(m.id, () => stop('SIGKILL'));
+      const done = () => {
+        clearTimeout(timer);
+        untrack();
+      };
       let stdout = '';
       let stderr = '';
       const cap = (s: string, chunk: Buffer) => (s.length < MAX_OUTPUT ? s + chunk.toString('utf8') : s);
       child.stdout.on('data', (c: Buffer) => (stdout = cap(stdout, c)));
       child.stderr.on('data', (c: Buffer) => (stderr = cap(stderr, c)));
-      child.once('error', (error) => reject(new CoreError('Remote', `${program}: ${error.message}`)));
-      child.once('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
+      child.once('error', (error) => {
+        done();
+        reject(new CoreError('Remote', `${program}: ${error.message}`));
+      });
+      child.once('close', (code, signal) => {
+        done();
+        resolve({ code, signal, stdout, stderr });
+      });
       child.stdin.end(typeof options.input === 'string' ? options.input : undefined);
     });
+  }
+
+  #track(pluginId: string, cancel: () => void): () => void {
+    const set = this.#pending.get(pluginId) ?? new Set();
+    this.#pending.set(pluginId, set);
+    set.add(cancel);
+    return () => void set.delete(cancel);
   }
 
   async #fetch(m: PluginManifest, args: readonly unknown[]): Promise<HttpResponse> {
@@ -703,13 +754,44 @@ export class OsGateway {
     if (!hosts.includes(url.host.toLowerCase())) throw this.#denied(m, method, `хост не в net: ${url.host}`);
     const request = isRecord(args[1]) ? args[1] : {};
     const headers = isRecord(request.headers) ? Object.fromEntries(Object.entries(request.headers).filter((e): e is [string, string] => typeof e[1] === 'string')) : {};
-    // Переадресация не идёт сама: иначе ответ пришёл бы с хоста, которого нет в праве.
-    const response = await (this.#env.fetch ?? fetch)(url, {
-      method: typeof request.method === 'string' ? request.method : 'GET',
-      headers,
-      redirect: 'manual',
-      ...(typeof request.body === 'string' && { body: request.body }),
-    });
-    return { status: response.status, headers: Object.fromEntries(response.headers), body: await response.text() };
+    const timeout = typeof request.timeoutMs === 'number' && request.timeoutMs > 0 ? request.timeoutMs : FETCH_TIMEOUT_MS;
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(new CoreError('Timeout', `${method}: ${url.host} не ответил за ${String(timeout)} мс`)), timeout);
+    const untrack = this.#track(m.id, () => abort.abort(new CoreError('Unavailable', `${method}: плагин выгружен`)));
+    try {
+      // Переадресация не идёт сама: иначе ответ пришёл бы с хоста, которого нет в праве.
+      const response = await (this.#env.fetch ?? fetch)(url, {
+        method: typeof request.method === 'string' ? request.method : 'GET',
+        headers,
+        redirect: 'manual',
+        signal: abort.signal,
+        ...(typeof request.body === 'string' && { body: request.body }),
+      });
+      return { status: response.status, headers: Object.fromEntries(response.headers), body: await readBody(response, MAX_BODY) };
+    } catch (error) {
+      throw abort.signal.aborted && abort.signal.reason instanceof CoreError ? abort.signal.reason : error;
+    } finally {
+      clearTimeout(timer);
+      untrack();
+    }
   }
+}
+
+/** Тело читается в главном процессе: без предела ответ сервера съел бы память всего приложения. */
+async function readBody(response: Response, limit: number): Promise<string> {
+  if (!response.body) return '';
+  const reader: ReadableStreamDefaultReader<Uint8Array> = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel();
+      throw new CoreError('Remote', `net.fetch: ответ больше ${String(limit / 1024 / 1024)} МиБ`);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
 }

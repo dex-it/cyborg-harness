@@ -1,11 +1,21 @@
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pluginOfOrigin, viewOrigin } from '../shared/views.ts';
 import { themeTokens } from './theme.ts';
 import { resolveStaticFile, resolveViewRequest, type PluginUi } from './view-files.ts';
 
-const root = path.resolve('/plugins/alice');
+// Граница каталога считается по настоящим путям: файлы должны существовать, а tmpdir на macOS - симлинк.
+const base = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-view-files-')));
+after(() => rm(base, { recursive: true, force: true }));
+const root = path.join(base, 'alice');
+const probe = path.join(base, 'probe');
+for (const file of [path.join(root, 'ui', 'ui.js'), path.join(root, 'bob', 'ui', 'ui.js'), path.join(probe, 'index.html')]) {
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, '');
+}
 const uiOf = (id: string): PluginUi | undefined => (id === 'alice' ? { dir: root, views: { main: './ui/ui.js', tree: './ui/tree.js' } } : undefined);
 
 test('вид: origin называет плагин, чужая схема и мусор - не вид', () => {
@@ -37,8 +47,8 @@ test('вид: корень - оболочка с модулем из маниф�
 });
 
 test('статика спайка: корень - index.html каталога, выход за каталог закрыт', () => {
-  const dirOf = (id: string) => (id === 'probe' ? path.resolve('/r/probe') : undefined);
-  assert.deepEqual(resolveStaticFile('cyborg-plugin://probe/', dirOf), { kind: 'file', file: path.resolve('/r/probe/index.html'), type: 'text/html; charset=utf-8' });
+  const dirOf = (id: string) => (id === 'probe' ? probe : undefined);
+  assert.deepEqual(resolveStaticFile('cyborg-plugin://probe/', dirOf), { kind: 'file', file: path.join(probe, 'index.html'), type: 'text/html; charset=utf-8' });
   assert.equal(resolveStaticFile('cyborg-plugin://probe/..%2f..%2fetc%2fpasswd.js', dirOf), undefined);
   assert.equal(resolveStaticFile('cyborg-plugin://alice/', dirOf), undefined);
 });

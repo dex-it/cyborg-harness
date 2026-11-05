@@ -5,6 +5,7 @@ import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { VERSION_KEY, type SectionResult, type SectionStore } from './config.ts';
 import type { Disposable } from './disposable.ts';
+import { appendBounded, DeniedCollapse } from './journal.ts';
 import { CoreError, errorMessage, ignore } from './errors.ts';
 import { compileSchema } from './json-schema.ts';
 import { providesMatching, resolveGraph, type ContractGraph, type Rejection } from './graph.ts';
@@ -17,7 +18,7 @@ import { satisfies } from './semver.ts';
 import { OsGateway, type OsEnvironment } from './os-gateway.ts';
 import { DocumentTable, type DocumentRow } from './documents.ts';
 import { guardedValue, guardsOf } from './via-contract.ts';
-import { isRecord, parseWire, type Parsed, type WireSpec } from './wire.ts';
+import { isRecord, own, parseWire, type Parsed, type WireSpec } from './wire.ts';
 import type { HostHandle, SpawnHost } from './transports.ts';
 import type { TerminalSink, TerminalView } from './pty.ts';
 import { WINDOW_COMMANDS, WINDOW_OWNER, WindowLayer, type WindowSnapshot } from './window-layer.ts';
@@ -37,7 +38,15 @@ export type JournalEntry =
   /** `activation: "lazy"`: ждёт первой команды, сочетания, показа вида или потребителя своего контракта. */
   | { readonly pluginId: string; readonly kind: 'waiting' }
   /** Шлюз `ctx.os` отказал: вызов вне прав манифеста. */
-  | { readonly pluginId: string; readonly kind: 'denied'; readonly method: string; readonly detail: string; readonly reason?: 'via-contract' }
+  | {
+      readonly pluginId: string;
+      readonly kind: 'denied';
+      readonly method: string;
+      readonly detail: string;
+      readonly reason?: 'via-contract';
+      /** Столько таких же отказов склеено за окно после первого. */
+      readonly repeats?: number;
+    }
   /** Снят по disable: сам (`by` - он же) или вместе с поставщиком, которого требовал. */
   | { readonly pluginId: string; readonly kind: 'unloaded'; readonly by: string; readonly error?: string; readonly keptPty?: number }
   /** Сочетание объявлено и другим плагином; нажатие получает `winner`. */
@@ -80,6 +89,8 @@ export interface WatchdogOptions {
   readonly timeout?: number;
   /** Сколько сбоев подряд, после которых плагин выключается. */
   readonly strikes?: number;
+  /** Сбой позже стольких мс после прошлого - уже не «подряд»: счёт начинается заново. */
+  readonly window?: number;
 }
 
 export interface EnabledChange {
@@ -111,6 +122,8 @@ export interface LoadOptions {
   readonly safeMode?: boolean | undefined;
   readonly watchdog?: WatchdogOptions | undefined;
   readonly activationTimeout?: number | undefined;
+  /** Сколько ждать ответа поставщика на метод контракта, мс; по умолчанию 10 минут, дольше - `Timeout` вызывающему. */
+  readonly callTimeout?: number | undefined;
   /** Среда шлюза `ctx.os`; по умолчанию каталоги плагинов во временном каталоге ОС, без секретов, уведомлений и буфера обмена. */
   readonly os?: OsEnvironment | undefined;
   /** Граф решён, код плагинов ещё не запускался. */
@@ -232,6 +245,8 @@ interface Host {
   readonly endpoint: Endpoint;
   readonly inflight: Map<number, string>;
   seq: number;
+  /** Номер последнего вызова до пинга, на который хост ответил: эти вызовы хост уже принял, они его не держат. */
+  answered: number;
   down: boolean;
   pingAt?: number | undefined;
   timer?: ReturnType<typeof setInterval>;
@@ -326,15 +341,22 @@ function defaultOs(): OsEnvironment {
 
 export async function load(options: LoadOptions): Promise<Kernel> {
   const journal: JournalEntry[] = [];
-  const record = (entry: JournalEntry) => {
-    journal.push(entry);
+  const write = (entry: JournalEntry) => {
+    appendBounded(journal, entry, (e) => e);
     options.onJournal?.(entry);
+  };
+  // Плагин в цикле отказов иначе раздул бы журнал ядра и снимок окна без предела.
+  const denials = new DeniedCollapse(write);
+  const record = (entry: JournalEntry) => {
+    if (entry.kind === 'denied') denials.record(entry);
+    else write(entry);
   };
   const enabled = new Set(options.enabled);
   // Последний список из файла: setEnabled применяет разницу с ним, а не с выключенными в окне.
   let listed = new Set(options.enabled);
-  const watchdog = { interval: 1000, timeout: 5000, strikes: 3, ...options.watchdog };
+  const watchdog = { interval: 1000, timeout: 5000, strikes: 3, window: 10 * 60_000, ...options.watchdog };
   const activationTimeout = options.activationTimeout ?? 10_000;
+  const callTimeout = options.callTimeout ?? 10 * 60_000;
   const layer = new WindowLayer((snapshot) => options.onWindow?.(snapshot));
   const osEnv = options.os ?? defaultOs();
   const notify = osEnv.notify;
@@ -415,14 +437,27 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   const commandOwners = new Map<string, string>();
   const active: string[] = [];
   const hosts = new Map<string, Host>();
-  const hostFailures = new Map<string, number>();
-  const strikes = new Map<string, number>();
+  const hostFailures = new Map<string, { n: number; at: number }>();
+  const strikes = new Map<string, { n: number; at: number }>();
+  const bump = (counts: Map<string, { n: number; at: number }>, key: string): number => {
+    const at = performance.now();
+    const prev = counts.get(key);
+    const n = prev && at - prev.at < watchdog.window ? prev.n + 1 : 1;
+    counts.set(key, { n, at });
+    return n;
+  };
   const switchedOff = new Set<string>();
   // Выключенные пользователем: сторож их не перезапускает, enable соседа не поднимает.
   const userOff = new Set<string>();
   const subscriptions = new Map<number, Subscription>();
   let subscriptionSeq = 0;
   let chain: Promise<void> = Promise.resolve();
+  // Отказ одного шага не отравляет очередь: иначе idle, enable, disable и unload отвечали бы им вечно.
+  const enqueue = (step: () => Promise<void>): Promise<void> => {
+    const run = chain.then(step);
+    chain = run.catch(ignore);
+    return run;
+  };
   let unloading = false;
   const waiting = new Set<string>();
   const waking = new Map<string, Promise<void>>();
@@ -466,9 +501,9 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   function mayUse(caller: string, provider: string, contract: string, version: string): boolean {
     const m = byId.get(caller);
     if (!m || caller === provider) return false;
-    const one = m.requires[contract] ?? m.optional[contract];
+    const one = own(m.requires, contract) ?? own(m.optional, contract);
     if (one !== undefined) return graph.bindings.get(caller)?.get(contract) === provider && satisfies(version, one);
-    const many = m.consumes[contract];
+    const many = own(m.consumes, contract);
     return many !== undefined && satisfies(version, many);
   }
 
@@ -548,7 +583,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
 
   function startHost(hostId: string): Host {
     const handle = options.spawnHost(hostId);
-    const host: Host = { id: hostId, handle, endpoint: new Endpoint(handle.port), inflight: new Map(), seq: 0, down: false };
+    const host: Host = { id: hostId, handle, endpoint: new Endpoint(handle.port), inflight: new Map(), seq: 0, answered: 0, down: false };
     hosts.set(hostId, host);
     const { endpoint } = host;
     const mine = (pluginId: string): PluginManifest => {
@@ -579,7 +614,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       const descriptor: ContractDescriptor = { pluginId: d.pluginId, contract: d.contract, version: d.version, data: d.data, methods: d.methods };
       const impl: Record<string, unknown> = { ...descriptor.data };
       for (const member of descriptor.methods) {
-        impl[member] = (...args: unknown[]) => callHost(host, d.pluginId, 'call', { pluginId: d.pluginId, contract: d.contract, version: d.version, member, args });
+        impl[member] = (...args: unknown[]) => callHost(host, d.pluginId, 'call', { pluginId: d.pluginId, contract: d.contract, version: d.version, member, args }, callTimeout);
       }
       provided.set(handleKey(d.pluginId, d.contract, d.version), registry.provide(d.pluginId, d.contract, d.version, impl));
       descriptors.set(d.contract, [...(descriptors.get(d.contract) ?? []), descriptor]);
@@ -610,13 +645,13 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       await checkCall(p.caller, pluginId, contract, member, p.args);
       const target = liveHost(pluginId);
       const callbacks = p.args.map((arg) => marker(arg, CALLBACK));
-      if (!callbacks.some((id) => id !== undefined)) return callHost(target, pluginId, 'call', { pluginId, contract, version, member, args: p.args });
+      if (!callbacks.some((id) => id !== undefined)) return callHost(target, pluginId, 'call', { pluginId, contract, version, member, args: p.args }, callTimeout);
       if (callbacks.some((id) => id !== undefined && typeof id !== 'string')) throw new CoreError('Invalid', 'invoke: номер колбэка не строка');
 
       const subscription = ++subscriptionSeq;
       subscriptions.set(subscription, { consumer: p.caller, consumerHost: host, provider: pluginId, providerHost: target, callbacks: callbacks as (string | undefined)[] });
       const args = p.args.map((arg, i) => (callbacks[i] === undefined ? arg : { [CALLBACK]: i }));
-      return callHost(target, pluginId, 'call', { pluginId, contract, version, member, args, subscription }).then(
+      return callHost(target, pluginId, 'call', { pluginId, contract, version, member, args, subscription }, callTimeout).then(
         (result) => {
           // Потребителя могли снять, пока поставщик отвечал: тогда подписку закрывает ядро.
           if (marker(result, SUBSCRIPTION) === subscription && subscriptions.has(subscription)) return result;
@@ -699,10 +734,11 @@ export async function load(options: LoadOptions): Promise<Kernel> {
         return;
       }
       host.pingAt = performance.now();
-      endpoint.request('ping', null).then(
-        () => (host.pingAt = undefined),
-        ignore,
-      );
+      const mark = host.seq;
+      endpoint.request('ping', null).then(() => {
+        host.pingAt = undefined;
+        host.answered = mark;
+      }, ignore);
     }, watchdog.interval);
     host.timer.unref();
     return host;
@@ -718,24 +754,27 @@ export async function load(options: LoadOptions): Promise<Kernel> {
 
   function hostDown(host: Host, reason: 'hang' | 'crash'): void {
     if (host.down) return;
-    const culprits = [...new Set(host.inflight.values())];
+    const inflight = [...host.inflight].sort(([a], [b]) => a - b);
+    // Вызовы до последнего отвеченного пинга хост уже принял - их владельцы ждут честно (gh, сеть). Держит хост первый принятый после.
+    const blocker = inflight.find(([token]) => token > host.answered)?.[1];
+    const culprits = blocker === undefined ? [] : [blocker];
     const victims = active.filter((id) => hostOf(id) === host.id);
+    // Активация, оборванная падением, успела отдать контракты и команды: без снятия они остались бы заготовками мёртвого хоста.
+    const halfway = [...new Set(inflight.map(([, id]) => id))].filter((id) => !active.includes(id) && hostOf(id) === host.id);
     stopHost(host, new CoreError('HostGone', `хост ${host.id} ${reason === 'hang' ? 'завис' : 'упал'}`));
     if (unloading) return;
     record({ kind: 'host-down', hostId: host.id, reason, culprits, plugins: victims, affects: affected(victims) });
-    for (const id of [...victims].reverse()) dropPlugin(id, 'detach');
+    for (const id of [...victims, ...halfway].reverse()) dropPlugin(id, 'detach');
 
     for (const id of culprits) {
-      const n = (strikes.get(id) ?? 0) + 1;
-      strikes.set(id, n);
+      const n = bump(strikes, id);
       if (n >= watchdog.strikes) {
         switchedOff.add(id);
         record({ pluginId: id, kind: 'switched-off', strikes: n, affects: affected([id]) });
       }
     }
     if (culprits.length === 0) {
-      const failures = (hostFailures.get(host.id) ?? 0) + 1;
-      hostFailures.set(host.id, failures);
+      const failures = bump(hostFailures, host.id);
       if (failures >= watchdog.strikes) {
         record({ kind: 'host-abandoned', hostId: host.id, failures, plugins: victims });
         for (const id of victims) gateway.forget(id);
@@ -743,15 +782,22 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       }
     }
 
-    const again = graph.order.filter((id) => hostOf(id) === host.id && !switchedOff.has(id) && !userOff.has(id) && (victims.includes(id) || culprits.includes(id)));
+    const again = graph.order.filter((id) => hostOf(id) === host.id && !switchedOff.has(id) && !userOff.has(id) && (victims.includes(id) || culprits.includes(id) || halfway.includes(id)));
     // pty с persist ждут только тех, кто вернётся; выключенному сторожем их некому забрать.
     for (const id of victims) if (!again.includes(id)) gateway.forget(id);
     if (again.length === 0) return;
-    chain = chain.then(async () => {
+    enqueue(async () => {
       if (unloading) return;
       record({ kind: 'host-restart', hostId: host.id, plugins: again });
-      for (const id of again) await activate(id);
-    });
+      for (const id of again) {
+        // Человек мог выключить плагин, пока перезапуск ждал очереди: сторож его не поднимает.
+        if (userOff.has(id) || switchedOff.has(id)) {
+          gateway.forget(id);
+          continue;
+        }
+        await activate(id);
+      }
+    }).catch((error: unknown) => options.onLog?.(`хост ${host.id}`, `перезапуск не удался: ${errorMessage(error)}`));
   }
 
   // Поле из net "config:<поле>" задаёт человек: запись плагина в него расширила бы его сеть после перезапуска.
@@ -816,7 +862,14 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       return;
     }
     const hostId = hostOf(m.id) ?? m.id;
-    const host = hosts.get(hostId) ?? startHost(hostId);
+    let host: Host;
+    try {
+      host = hosts.get(hostId) ?? startHost(hostId);
+    } catch (error) {
+      gateway.forget(pluginId);
+      record({ pluginId, kind: 'failed', hostId, error: `хост не запустился: ${errorMessage(error)}` });
+      return;
+    }
     const started = performance.now();
     try {
       const config = sectionInput('config', m);
@@ -879,6 +932,8 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     guard(pluginId);
     userOff.delete(pluginId);
     waiting.delete(pluginId);
+    // Идущая активация (wake ленивого) - та же самая: вторая дала бы двойной activate и дубль в active.
+    await waking.get(pluginId);
     if (active.includes(pluginId)) return;
     strikes.delete(pluginId);
     switchedOff.delete(pluginId);
@@ -888,12 +943,14 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       const e = last(id);
       return e?.kind === 'skipped' || (e?.kind === 'unloaded' && e.by === pluginId && id !== pluginId);
     };
-    chain = chain.then(async () => {
+    const run = enqueue(async () => {
+      await activating.get(pluginId);
       if (unloading || active.includes(pluginId)) return;
       record({ pluginId, kind: 'revived' });
       await activate(pluginId);
       for (const id of graph.order) if (!active.includes(id) && !switchedOff.has(id) && !userOff.has(id) && follows(id)) await activate(id);
     });
+    await run;
     await idle();
   }
 
@@ -934,7 +991,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     userOff.add(pluginId);
     waiting.delete(pluginId);
     await waking.get(pluginId);
-    chain = chain.then(async () => {
+    const run = enqueue(async () => {
       if (unloading) return;
       if (!active.includes(pluginId)) {
         record({ pluginId, kind: 'unloaded', by: pluginId });
@@ -943,6 +1000,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       const gone = dependents(pluginId);
       for (const id of [...active].reverse()) if (gone.has(id)) await deactivate(id, pluginId, options.keepPty === true);
     });
+    await run;
     await idle();
   }
 
@@ -1105,6 +1163,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       gateway.releaseAllPty();
       layer.clear();
       for (const host of [...hosts.values()]) stopHost(host, new CoreError('HostGone', 'ядро выгружено'));
+      denials.flush();
     },
   };
 }
