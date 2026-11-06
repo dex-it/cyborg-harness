@@ -22,6 +22,10 @@ npx cyborg-plugin new greeter
 cd greeter
 ```
 
+:::caution[Пакеты ещё не опубликованы]
+Пакеты `@cyborg/*` и команда `cyborg-plugin` публикуются задачами [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9); имя npm-scope решается в [D-00](https://github.com/dex-it/cyborg-harness/issues/21). Не ставьте пакеты с таким именем из npmjs.com до публикации: scope `@cyborg` на npmjs.com занят посторонним владельцем. До выпуска работайте из репозитория (`npm ci`, `npm start`).
+:::
+
 Команда создаёт манифест, главную часть, вид, схему раздела `config`, тест и настройки сборки. Дальше правим их по порядку.
 
 ## 2. Манифест
