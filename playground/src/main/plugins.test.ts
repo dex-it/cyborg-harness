@@ -135,7 +135,7 @@ test('служба окна: снимок с причиной и журнало�
   await service.unload();
 });
 
-test('служба окна: сочетания с конфликтом, перехват нажатия, лента, выгрузка с зависимым и загрузка обратно', async () => {
+test('служба окна: сочетания с конфликтом, перехват нажатия, лента, выгрузка с зависимым и загрузка обратно', async (t) => {
   const userData = tmp();
   const dir = path.join(userData, 'plugins');
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['voice', 'ear'] } }));
@@ -165,6 +165,8 @@ test('служба окна: сочетания с конфликтом, пер�
     platform: 'linux',
     log: () => {},
   });
+  // Упавшая проверка не должна оставлять слежение за файлом воркспейса: с ним процесс теста не завершается и CI висит до лимита задачи.
+  t.after(() => service.unload());
   const ctrlShiftE = { key: 'E', code: 'KeyE', control: true, alt: false, shift: true, meta: false };
 
   const own = (keys: readonly KeyRow[]) => keys.filter((k) => k.pluginId !== WINDOW_OWNER);
@@ -173,7 +175,8 @@ test('служба окна: сочетания с конфликтом, пер�
   ]);
   assert.equal(service.press({ ...ctrlShiftE, shift: false }), false, 'свободное сочетание ядро не забирает');
   assert.equal(service.press(ctrlShiftE), true);
-  await new Promise((r) => setTimeout(r, 20));
+  // Запись ear.hi идёт после асинхронного вызова контракта; под нагрузкой фиксированной паузы в 20 мс не хватало.
+  for (let i = 0; i < 150 && service.snapshot().feed.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
   assert.deepEqual(
     service.snapshot().feed.map((l) => [l.kind, l.subject, l.text]),
     [
@@ -204,7 +207,6 @@ test('служба окна: сочетания с конфликтом, пер�
       ['ear', 'active'],
     ],
   );
-  await service.unload();
 });
 
 test('виды: адрес у плагина с ui в манифесте и у снятого, лента вида - только свои строки, команда и контракт из вида - только свои', async () => {
