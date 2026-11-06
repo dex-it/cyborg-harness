@@ -2,7 +2,7 @@ name: Docs site
 
 # Сайт документации (site/, страницы docs/guide/) на GitHub Pages: https://dex-it.github.io/cyborg-harness/
 #   pull_request     - собрать сайт и проверить ссылки, ничего не публикуя;
-#   push в master    - собрать и опубликовать;
+#   push в master    - собрать и опубликовать (в приватном репозитории - только собрать и приложить артефакт);
 #   workflow_dispatch - то же вручную.
 # Деплой принимает только ветка, разрешённая в окружении github-pages
 # (Settings - Environments - github-pages - Deployment branches): master.
@@ -65,8 +65,11 @@ jobs:
         working-directory: site
         run: npm run verify
 
+      # На приватном репозитории тарифа Free GitHub Pages недоступны (API отвечает 422):
+      # сайт всё равно собирается, а готовая сборка прикладывается к запуску как артефакт github-pages,
+      # его можно скачать со страницы запуска. Публикация включается сама, когда репозиторий публичный.
       - name: Configure Pages
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && !github.event.repository.private
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Upload Pages artifact
@@ -77,7 +80,7 @@ jobs:
 
   deploy:
     name: Deploy to GitHub Pages
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && !github.event.repository.private
     needs: build
     runs-on: ubuntu-latest
     environment:
