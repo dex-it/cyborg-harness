@@ -348,6 +348,10 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
             });
             watchers.add(w);
           }
+          // Правка между чтением файла и готовностью слежения (на macOS поток FSEvents поднимается позже fs.watch) событий не даёт:
+          // первая сверка с последним прочитанным её подберёт, а без правки ничего не сделает.
+          timer = setTimeout(check, 50);
+          timers.add(timer);
           return toDisposable(() => {
             for (const w of watchers) w.close();
             watchers.clear();

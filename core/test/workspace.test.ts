@@ -163,6 +163,36 @@ test('правка файла извне доходит до ctx.config.onChange
 
 });
 
+test('слежение: правка между открытием воркспейса и запуском слежения не теряется (на macOS события до готовности FSEvents не приходят)', async (t) => {
+  await using box = await sandbox();
+  await writeFile(box.file, JSON.stringify({ cyborg: 2, plugins: { enabled: ['lock'] }, settings: { lock: { $version: 1, minutes: 5 } } }));
+  const ws = await open(box);
+  const seen: unknown[] = [];
+  const lock: PluginModule = {
+    config: { defaults: { minutes: 10 } },
+    activate(c) {
+      c.config?.onChange((v) => seen.push(v.minutes));
+    },
+  };
+  const k = await load({
+    apiVersion: '1.0.0',
+    spawnHost: inlineHosts(async () => lock),
+    enabled: ws.plugins.enabled,
+    manifests: [{ id: 'lock', version: '1.0.0', engines: { cyborg: '^1' }, config: { version: 1 } }],
+    config: ws.config,
+    state: ws.state,
+  });
+  t.after(async () => {
+    await k.unload();
+    ws.close();
+  });
+  await writeFile(box.file, JSON.stringify({ cyborg: 2, plugins: { enabled: ['lock'] }, settings: { lock: { $version: 1, minutes: 7 } } }));
+  await new Promise((r) => setTimeout(r, 300));
+  const watching = ws.watch((ids) => void k.reloadSections('config', ids));
+  t.after(() => watching.dispose());
+  await until('onChange с 7', () => seen.includes(7));
+});
+
 test('битый файл пользователя не роняет открытие: причина в problems, файл не перезаписан', async () => {
   await using box = await sandbox();
   await mkdir(path.dirname(box.userFile), { recursive: true });
