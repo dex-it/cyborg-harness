@@ -8,4 +8,5 @@ runHost(
     onMessage: (listener) => void port.on('message', (event) => listener(event.data)),
   },
   async (entry) => ((await import(entry)) as { default: PluginModule }).default,
+  { ownsProcess: true },
 );

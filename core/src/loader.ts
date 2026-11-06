@@ -247,6 +247,10 @@ interface Host {
   seq: number;
   /** Номер последнего вызова до пинга, на который хост ответил: эти вызовы хост уже принял, они его не держат. */
   answered: number;
+  /** Плагин, чей код хост назвал после последнего отвеченного пинга: он и выполняется, если хост встал. */
+  running?: string | undefined;
+  /** Плагин, чей код завершил процесс хоста: хост называет его из обработчика exit. */
+  exiting?: string | undefined;
   down: boolean;
   pingAt?: number | undefined;
   timer?: ReturnType<typeof setInterval>;
@@ -718,6 +722,12 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       if (p.method === 'dialog.open' && !layer.allows(m.id)) throw new CoreError('Unavailable', `${m.id}: окно закрыто замком`);
       return gateway.call(m, p.method, p.args);
     });
+    onNote('running', { pluginId: 'string' }, (p) => {
+      host.running = mine(p.pluginId).id;
+    });
+    onNote('exiting', { pluginId: 'string' }, (p) => {
+      host.exiting = mine(p.pluginId).id;
+    });
     onNote('log', { pluginId: 'string', message: 'string' }, (p) => {
       mine(p.pluginId);
       options.onLog?.(p.pluginId, p.message);
@@ -738,6 +748,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       endpoint.request('ping', null).then(() => {
         host.pingAt = undefined;
         host.answered = mark;
+        host.running = undefined;
       }, ignore);
     }, watchdog.interval);
     host.timer.unref();
@@ -755,8 +766,8 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   function hostDown(host: Host, reason: 'hang' | 'crash'): void {
     if (host.down) return;
     const inflight = [...host.inflight].sort(([a], [b]) => a - b);
-    // Вызовы до последнего отвеченного пинга хост уже принял - их владельцы ждут честно (gh, сеть). Держит хост первый принятый после.
-    const blocker = inflight.find(([token]) => token > host.answered)?.[1];
+    // Хост не назвал виновника - вызовы до последнего отвеченного пинга он уже принял, их владельцы ждут честно; держит первый принятый после.
+    const blocker = (reason === 'hang' ? host.running : host.exiting) ?? inflight.find(([token]) => token > host.answered)?.[1];
     const culprits = blocker === undefined ? [] : [blocker];
     const victims = active.filter((id) => hostOf(id) === host.id);
     // Активация, оборванная падением, успела отдать контракты и команды: без снятия они остались бы заготовками мёртвого хоста.

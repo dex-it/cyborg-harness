@@ -10,6 +10,7 @@ runHost(
     onMessage: (listener) => void process.on('message', listener),
   },
   async (entry) => ((await import(entry)) as { default: PluginModule }).default,
+  { ownsProcess: true },
 );
 
 process.on('disconnect', () => process.exit(0));

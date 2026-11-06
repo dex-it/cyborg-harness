@@ -6,7 +6,7 @@ import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';
 import { ContractRegistry, type ContractImpl } from './registry.ts';
-import { Endpoint, type Port } from './rpc.ts';
+import { Endpoint, type Owner, type Port } from './rpc.ts';
 import { BACKLOG_LIMIT, Tail, type PtyWire } from './pty.ts';
 import { isRecord, own } from './wire.ts';
 
@@ -202,10 +202,12 @@ class HostSystem {
   readonly #listeners = new Set<{ pluginId: string; kind: string; fn: Listener }>();
   readonly #idle = new Map<string, () => void>();
   readonly endpoint: Endpoint;
+  readonly #running: Running;
   #seq = 0;
 
-  constructor(endpoint: Endpoint) {
+  constructor(endpoint: Endpoint, running: Running) {
     this.endpoint = endpoint;
+    this.#running = running;
   }
 
   on(pluginId: string, kind: string, fn: Listener): Disposable {
@@ -240,6 +242,7 @@ class HostSystem {
     const quitting = [...this.#listeners].filter((l) => l.kind === 'quit');
     await Promise.allSettled(quitting.map(async (l) => {
       try {
+        this.#running.enter(l.pluginId);
         await l.fn();
       } catch (error) {
         this.#log(l.pluginId, 'onBeforeQuit', error);
@@ -259,6 +262,7 @@ class HostSystem {
 
   #safely(pluginId: string, what: string, fn: () => unknown): void {
     try {
+      this.#running.enter(pluginId);
       const r = fn();
       if (r instanceof Promise) r.catch((error: unknown) => this.#log(pluginId, what, error));
     } catch (error) {
@@ -326,27 +330,99 @@ function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths:
   }) as PluginOs;
 }
 
+/** Чей код выполняет хост: ядро узнаёт о смене до входа в код, поэтому зависший хост успел назвать виновника. */
+class Running implements Owner {
+  #endpoint: Endpoint | undefined;
+  #current: string | undefined;
+  #reported: string | undefined;
+
+  bind(endpoint: Endpoint): void {
+    this.#endpoint = endpoint;
+  }
+
+  current(): string | undefined {
+    return this.#current;
+  }
+
+  enter(pluginId: string | undefined): void {
+    this.#current = pluginId;
+    if (pluginId === undefined || pluginId === this.#reported) return;
+    this.#reported = pluginId;
+    this.#endpoint?.notify('running', { pluginId });
+  }
+
+  as<A extends unknown[], R>(pluginId: string, fn: (...args: A) => R): (...args: A) => R {
+    return (...args) => {
+      this.enter(pluginId);
+      return fn(...args);
+    };
+  }
+
+  // Ответ на пинг стирает отметку в ядре: первый вход после него называет себя заново.
+  answered(): void {
+    this.#reported = undefined;
+  }
+}
+
+/** Таймеры процесса хоста помнят, чей код их завёл: зависший колбэк таймера иначе остался бы без имени. */
+function attributeTimers(running: Running): void {
+  for (const name of ['setTimeout', 'setInterval', 'setImmediate'] as const) {
+    const original = globalThis[name] as (fn: unknown, ...rest: unknown[]) => unknown;
+    const patched = (fn: unknown, ...rest: unknown[]) => {
+      const owner = running.current();
+      return original(owner !== undefined && typeof fn === 'function' ? running.as(owner, fn as (...args: unknown[]) => unknown) : fn, ...rest);
+    };
+    // Свойства оригинала (util.promisify.custom) переносятся: promisify(setTimeout) должен работать как прежде.
+    Object.defineProperties(patched, Object.getOwnPropertyDescriptors(original));
+    Object.assign(globalThis, { [name]: patched });
+  }
+}
+
+export interface HostOptions {
+  /** Процесс принадлежит хосту: подменить его таймеры и назвать ядру плагин, чей код завершает процесс. Не для хоста внутри ядра. */
+  readonly ownsProcess?: boolean;
+}
+
 /** Среда хоста: плагины видят только ctx, всё остальное - сообщения в ядро. */
-export function runHost(port: Port, importer: Importer): Endpoint {
-  const endpoint = new Endpoint(port);
+export function runHost(port: Port, importer: Importer, options: HostOptions = {}): Endpoint {
+  const running = new Running();
+  const endpoint = new Endpoint(port, running);
+  running.bind(endpoint);
+  if (options.ownsProcess) {
+    attributeTimers(running);
+    // exit приходит от process.exit и необработанного исключения, но не от сигнала: убийство снаружи плагину не вменяется.
+    process.on('exit', () => {
+      const pluginId = running.current();
+      if (pluginId !== undefined) endpoint.notify('exiting', { pluginId });
+    });
+  }
   let manifests = new Map<string, PluginManifest>();
   let mirror: ContractRegistry | undefined;
   const plugins = new Map<string, Loaded>();
   const reloaders = new Map<string, (layers: SectionInput['layers']) => Promise<SectionResult>>();
-  const proxies = new Proxies(endpoint, (caller) => plugins.get(caller)?.store);
+  const proxies = new Proxies(endpoint, (caller) => plugins.get(caller)?.store, running);
+  const to =
+    <P extends { pluginId: string }, R>(fn: (p: P) => R) =>
+    (p: P): R => {
+      running.enter(p.pluginId);
+      return fn(p);
+    };
   const ptys = new HostPtys();
-  endpoint.handle('pty.data', (p: { pluginId: string; id: string; data: string }) => ptys.data(p));
-  endpoint.handle('pty.exit', (p: { pluginId: string; id: string; exit: PtyExit }) => ptys.exit(p));
+  endpoint.handle('pty.data', to((p: { pluginId: string; id: string; data: string }) => ptys.data(p)));
+  endpoint.handle('pty.exit', to((p: { pluginId: string; id: string; exit: PtyExit }) => ptys.exit(p)));
   const watches = new HostWatches();
-  endpoint.handle('fs.change', (p: { pluginId: string; id: string; names: string[]; closed?: unknown }) => watches.change(endpoint, p));
+  endpoint.handle('fs.change', to((p: { pluginId: string; id: string; names: string[]; closed?: unknown }) => watches.change(endpoint, p)));
   const serves = new HostServes();
-  endpoint.handle('serve.request', (p: { pluginId: string; id: string; request: ServeRequest }) => serves.request(p));
-  const system = new HostSystem(endpoint);
+  endpoint.handle('serve.request', to((p: { pluginId: string; id: string; request: ServeRequest }) => serves.request(p)));
+  const system = new HostSystem(endpoint, running);
   endpoint.handle('system', (event: SystemEvent | { kind: 'idle'; id: string }) => system.dispatch(event));
   endpoint.handle('system.beforeQuit', () => system.beforeQuit());
   endpoint.handle('document.closed', (p: { pluginId: string; id: string }) => system.documentClosed(p));
 
-  endpoint.handle('ping', () => true);
+  endpoint.handle('ping', () => {
+    running.answered();
+    return true;
+  });
 
   endpoint.handle('init', (p: { manifests: PluginManifest[]; bindings: [string, [string, string][]][] }) => {
     manifests = new Map(p.manifests.map((m) => [m.id, m]));
@@ -363,7 +439,9 @@ export function runHost(port: Port, importer: Importer): Endpoint {
   endpoint.handle('activate', async (p: { pluginId: string; entry: string; paths: OsPaths; config?: SectionInput; state?: SectionInput }) => {
     const manifest = manifests.get(p.pluginId);
     if (!manifest || !mirror) throw new CoreError('Remote', `хост не знает плагин ${p.pluginId}`);
+    running.enter(p.pluginId);
     const module = await importer(p.entry);
+    running.enter(p.pluginId);
     const loaded: Loaded = { store: new DisposableStore(), provided: new Map(), commands: new Map(), served: new Map() };
     loaded.store.add(toDisposable(() => [...loaded.served.values()].forEach((d) => d.dispose())));
     const config = await section(endpoint, p.pluginId, 'config', module, p.config);
@@ -378,7 +456,8 @@ export function runHost(port: Port, importer: Importer): Endpoint {
       loaded.store.add(toDisposable(() => reloaders.delete(`${p.pluginId}/${kind}`)));
     }
     try {
-      const result = await module.activate(context(endpoint, proxies, manifest, mirror, loaded, p.paths, config?.handle, state?.handle, ptys, system, watches, serves));
+      running.enter(p.pluginId);
+      const result = await module.activate(context(endpoint, proxies, running, manifest, mirror, loaded, p.paths, config?.handle, state?.handle, ptys, system, watches, serves));
       if (result) loaded.store.add(result);
       return { ok: true } satisfies ActivateResult;
     } catch (error) {
@@ -388,13 +467,13 @@ export function runHost(port: Port, importer: Importer): Endpoint {
     }
   });
 
-  endpoint.handle('section.reload', (p: { pluginId: string; kind: 'config' | 'state'; layers: SectionInput['layers'] }) => {
+  endpoint.handle('section.reload', to((p: { pluginId: string; kind: 'config' | 'state'; layers: SectionInput['layers'] }) => {
     const reload = reloaders.get(`${p.pluginId}/${p.kind}`);
     if (!reload) throw new CoreError('Unavailable', `${p.pluginId}: раздела ${p.kind} нет`);
     return reload(p.layers);
-  });
+  }));
 
-  endpoint.handle('deactivate', (p: { pluginId: string }) => {
+  endpoint.handle('deactivate', to((p: { pluginId: string }) => {
     const loaded = plugins.get(p.pluginId);
     plugins.delete(p.pluginId);
     ptys.forget(p.pluginId);
@@ -402,15 +481,15 @@ export function runHost(port: Port, importer: Importer): Endpoint {
     serves.forget(p.pluginId);
     loaded?.store.dispose();
     system.forget(p.pluginId);
-  });
+  }));
 
-  endpoint.handle('call', async (p: { pluginId: string; contract: string; version: string; member: string; args: unknown[]; subscription?: number }) => {
+  endpoint.handle('call', to(async (p: { pluginId: string; contract: string; version: string; member: string; args: unknown[]; subscription?: number }) => {
     const loaded = plugins.get(p.pluginId);
     const impl = loaded?.provided.get(handleKey(p.pluginId, p.contract, p.version));
     const member = impl?.[p.member];
     if (!loaded || typeof member !== 'function') throw new CoreError('Unavailable', `${p.contract}@${p.version}.${p.member} у ${p.pluginId} нет`);
     const subscription = p.subscription;
-    if (subscription === undefined) return member.apply(impl, p.args);
+    if (subscription === undefined) return member.apply(impl, p.args) as unknown;
 
     let alive = true;
     const args = p.args.map((arg) => {
@@ -434,20 +513,25 @@ export function runHost(port: Port, importer: Importer): Endpoint {
       }),
     );
     return { [SUBSCRIPTION]: subscription };
-  });
+  }));
 
   endpoint.handle('release', (p: { subscription: number }) => {
-    for (const loaded of plugins.values()) loaded.served.get(p.subscription)?.dispose();
+    for (const [pluginId, loaded] of plugins) {
+      const served = loaded.served.get(p.subscription);
+      if (!served) continue;
+      running.enter(pluginId);
+      served.dispose();
+    }
   });
 
   endpoint.handle('callback', (p: { id: string; args: unknown[] }) => proxies.deliver(p.id, p.args));
   endpoint.handle('forget', (p: { ids: string[] }) => proxies.forget(p.ids));
 
-  endpoint.handle('command', (p: { pluginId: string; name: string; args: unknown[] }) => {
+  endpoint.handle('command', to((p: { pluginId: string; name: string; args: unknown[] }) => {
     const handler = plugins.get(p.pluginId)?.commands.get(p.name);
     if (!handler) throw new CoreError('CommandNotFound', `команды ${p.name} нет`);
     return handler(...p.args);
-  });
+  }));
 
   return endpoint;
 }
@@ -456,15 +540,17 @@ export function runHost(port: Port, importer: Importer): Endpoint {
 class Proxies {
   readonly #endpoint: Endpoint;
   readonly #storeOf: (caller: string) => DisposableStore | undefined;
+  readonly #running: Running;
   readonly #descriptors = new WeakMap<ContractImpl, ContractDescriptor>();
   // Своя копия на потребителя одна: плагин вправе сравнивать полученное из get по ссылке.
   readonly #bound = new WeakMap<ContractImpl, Map<string, ContractImpl>>();
   readonly #listeners = new Map<string, (...args: unknown[]) => unknown>();
   #seq = 0;
 
-  constructor(endpoint: Endpoint, storeOf: (caller: string) => DisposableStore | undefined) {
+  constructor(endpoint: Endpoint, storeOf: (caller: string) => DisposableStore | undefined, running: Running) {
     this.#endpoint = endpoint;
     this.#storeOf = storeOf;
+    this.#running = running;
   }
 
   template(d: ContractDescriptor): ContractImpl {
@@ -490,7 +576,10 @@ class Proxies {
 
   // Ответ слушателя отдаётся Endpoint: тот дождётся его и проглотит отказ, иначе отказ уронил бы процесс хоста.
   deliver(id: string, args: unknown[]): unknown {
-    return this.#listeners.get(id)?.(...args);
+    const listener = this.#listeners.get(id);
+    if (!listener) return undefined;
+    this.#running.enter(id.slice(0, id.lastIndexOf('#')));
+    return listener(...args);
   }
 
   forget(ids: readonly string[]): void {
@@ -531,6 +620,7 @@ class Proxies {
 function context(
   endpoint: Endpoint,
   proxies: Proxies,
+  running: Running,
   manifest: PluginManifest,
   mirror: ContractRegistry,
   loaded: Loaded,
@@ -600,7 +690,7 @@ function context(
       all<K extends ContractName, M extends Major<K>>(contract: K, major: M) {
         return mirror.all(pluginId, contract, major).map((p) => ({ ...p, impl: proxies.forCaller(p.impl, pluginId) as Remote<ContractType<K, M>> }));
       },
-      onChange: (contract, listener) => track(mirror.onChange(pluginId, contract, listener)),
+      onChange: (contract, listener) => track(mirror.onChange(pluginId, contract, running.as(pluginId, listener))),
     },
     commands: {
       register(name, handler) {

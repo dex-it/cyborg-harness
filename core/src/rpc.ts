@@ -25,16 +25,24 @@ function readMessage(raw: unknown): Message | undefined {
 // Форму параметров проверяет сам обработчик: ядро пропускает сообщения хоста через parseWire.
 type Handler = (params: never) => unknown;
 
+/** Чей код ждёт ответа: продолжение после ответа идёт от имени того, кто спросил. */
+export interface Owner {
+  current(): string | undefined;
+  enter(owner: string | undefined): void;
+}
+
 /** Запрос-ответ и уведомления поверх порта; сообщения одного порта приходят в порядке отправки. */
 export class Endpoint {
   readonly #port: Port;
   readonly #handlers = new Map<string, Handler>();
-  readonly #pending = new Map<number, { resolve(v: unknown): void; reject(e: unknown): void }>();
+  readonly #pending = new Map<number, { resolve(v: unknown): void; reject(e: unknown): void; owner: string | undefined }>();
+  readonly #owner: Owner | undefined;
   #next = 1;
   #closed: CoreError | undefined;
 
-  constructor(port: Port) {
+  constructor(port: Port, owner?: Owner) {
     this.#port = port;
+    this.#owner = owner;
     port.onMessage((raw) => {
       const message = readMessage(raw);
       // Исключение здесь ушло бы необработанным отказом в процесс ядра: сообщение не по форме отбрасывается.
@@ -55,7 +63,7 @@ export class Endpoint {
     if (closed) return Promise.reject(closed);
     const id = this.#next++;
     return new Promise<T>((resolve, reject) => {
-      this.#pending.set(id, { resolve: resolve, reject });
+      this.#pending.set(id, { resolve, reject, owner: this.#owner?.current() });
       try {
         this.#send({ t: 'req', id, m: method, p: params }, `${method}: аргументы`);
       } catch (error) {
@@ -94,6 +102,7 @@ export class Endpoint {
       const pending = this.#pending.get(message.id);
       if (!pending) return;
       this.#pending.delete(message.id);
+      this.#owner?.enter(pending.owner);
       if (message.ok) pending.resolve(message.v);
       else pending.reject(fromWire(message.e));
       return;
