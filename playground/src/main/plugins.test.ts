@@ -296,7 +296,7 @@ test('схема раздела: файл из каталога плагина �
   await kernel.unload();
 });
 
-test('plugins.enabled из файла воркспейса без перезапуска: убранный выключается, вернувшийся включается, новый ждёт перезапуска', async () => {
+test('plugins.enabled из файла воркспейса без перезапуска: убранный выключается, вернувшийся включается, новый ждёт перезапуска', async (t) => {
   const userData = tmp();
   const ws = path.join(userData, 'w.cyborg.json');
   const write = (enabled: string[]) => fs.writeFileSync(ws, JSON.stringify({ cyborg: 2, plugins: { enabled }, settings: {} }));
@@ -314,6 +314,8 @@ test('plugins.enabled из файла воркспейса без перезап
     onProblem: (p) => problems.push(p),
     onEnabled: () => applied++,
   });
+  // Без выгрузки упавший тест держит слежение, и процесс файла не выходит.
+  t.after(() => kernel.unload());
   const until = async (what: string, ok: () => boolean) => {
     for (let i = 0; i < 100 && !ok(); i++) await new Promise((r) => setTimeout(r, 20));
     assert.ok(ok(), what);
@@ -326,5 +328,4 @@ test('plugins.enabled из файла воркспейса без перезап
   await until('b включён', () => applied === 2);
   assert.deepEqual(kernel.active, ['a', 'b']);
   assert.deepEqual(problems, ['plugins.enabled: c - включатся после перезапуска']);
-  await kernel.unload();
 });
