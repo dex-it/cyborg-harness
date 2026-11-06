@@ -335,6 +335,7 @@ class Running implements Owner {
   #endpoint: Endpoint | undefined;
   #current: string | undefined;
   #reported: string | undefined;
+  #sent = 0;
 
   bind(endpoint: Endpoint): void {
     this.#endpoint = endpoint;
@@ -348,6 +349,7 @@ class Running implements Owner {
     this.#current = pluginId;
     if (pluginId === undefined || pluginId === this.#reported) return;
     this.#reported = pluginId;
+    this.#sent++;
     this.#endpoint?.notify('running', { pluginId });
   }
 
@@ -359,8 +361,10 @@ class Running implements Owner {
   }
 
   // Ответ на пинг стирает отметку в ядре: первый вход после него называет себя заново.
-  answered(): void {
+  // Число уже посланных `running` ядро сверяет со своим счётом: уведомление, обогнавшее ответ на пинг, отметку не стирает.
+  answered(): number {
     this.#reported = undefined;
+    return this.#sent;
   }
 }
 
@@ -419,10 +423,7 @@ export function runHost(port: Port, importer: Importer, options: HostOptions = {
   endpoint.handle('system.beforeQuit', () => system.beforeQuit());
   endpoint.handle('document.closed', (p: { pluginId: string; id: string }) => system.documentClosed(p));
 
-  endpoint.handle('ping', () => {
-    running.answered();
-    return true;
-  });
+  endpoint.handle('ping', () => running.answered());
 
   endpoint.handle('init', (p: { manifests: PluginManifest[]; bindings: [string, [string, string][]][] }) => {
     manifests = new Map(p.manifests.map((m) => [m.id, m]));

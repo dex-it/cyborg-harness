@@ -249,6 +249,8 @@ interface Host {
   answered: number;
   /** Плагин, чей код хост назвал после последнего отвеченного пинга: он и выполняется, если хост встал. */
   running?: string | undefined;
+  /** Сколько уведомлений `running` пришло от хоста: ответ на пинг называет, сколько хост послал до ответа. */
+  notes: number;
   /** Плагин, чей код завершил процесс хоста: хост называет его из обработчика exit. */
   exiting?: string | undefined;
   down: boolean;
@@ -587,7 +589,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
 
   function startHost(hostId: string): Host {
     const handle = options.spawnHost(hostId);
-    const host: Host = { id: hostId, handle, endpoint: new Endpoint(handle.port), inflight: new Map(), seq: 0, answered: 0, down: false };
+    const host: Host = { id: hostId, handle, endpoint: new Endpoint(handle.port), inflight: new Map(), seq: 0, answered: 0, notes: 0, down: false };
     hosts.set(hostId, host);
     const { endpoint } = host;
     const mine = (pluginId: string): PluginManifest => {
@@ -724,6 +726,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     });
     onNote('running', { pluginId: 'string' }, (p) => {
       host.running = mine(p.pluginId).id;
+      host.notes++;
     });
     onNote('exiting', { pluginId: 'string' }, (p) => {
       host.exiting = mine(p.pluginId).id;
@@ -745,10 +748,11 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       }
       host.pingAt = performance.now();
       const mark = host.seq;
-      endpoint.request('ping', null).then(() => {
+      endpoint.request('ping', null).then((sent) => {
         host.pingAt = undefined;
         host.answered = mark;
-        host.running = undefined;
+        // Ответ пришёл позже уведомления о коде после пинга (оба в одной порции сообщений): это уведомление не стирается.
+        if (typeof sent !== 'number' || host.notes <= sent) host.running = undefined;
       }, ignore);
     }, watchdog.interval);
     host.timer.unref();

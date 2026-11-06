@@ -86,18 +86,18 @@ test('после N сбоев виновник выключается, потр�
 
 // Два плагина из поставки в одном хосте: busy виснет вне вызова ядра, calm - невиновный сосед.
 const shared = [
-  { id: 'busy', version: '1.0.0', engines: { cyborg: '^1' }, commands: { 'busy.timer': {}, 'busy.exit': {}, 'busy.focus': {}, 'busy.after': {} } },
+  { id: 'busy', version: '1.0.0', engines: { cyborg: '^1' }, commands: { 'busy.timer': {}, 'busy.late': {}, 'busy.exit': {}, 'busy.focus': {}, 'busy.after': {} } },
   { id: 'calm', version: '1.0.0', engines: { cyborg: '^1' }, commands: { 'calm.echo': { args: ['any'] }, 'calm.pid': {} } },
 ];
 
-function startShared(strikes = 3): Promise<Kernel> {
+function startShared(strikes = 3, spawnHost: SpawnHost = forkHosts()): Promise<Kernel> {
   return load({
     apiVersion: '1.0.0',
     enabled: ['busy', 'calm'],
     manifests: shared,
     hosts: { shared: ['busy', 'calm'] },
     bundled: ['busy', 'calm'],
-    spawnHost: forkHosts(),
+    spawnHost,
     entry: (m) => new URL(`./fixtures/${m.id}.ts`, import.meta.url).href,
     watchdog: { interval: 50, timeout: 400, strikes },
   });
@@ -195,6 +195,46 @@ test('сторож: хост не назвал, чей код шёл, - вино
     await assert.rejects(k.run('consumer.call', 'hang'), { code: 'HostGone' });
     await k.idle();
     assert.deepEqual(downs(k), [['storage', 'hang', ['files'], ['consumer']]]);
+  } finally {
+    await k.unload();
+  }
+});
+
+test('сторож: ответ на пинг и следующее за ним уведомление о коде пришли одной порцией - отметка не стирается', async () => {
+  const fork = forkHosts();
+  // Ответ на пинг задерживается и выходит вместе с первым уведомлением о коде: так бывает, когда ядро занято и читает сообщения пачкой.
+  const batched: SpawnHost = (id) => {
+    const handle = fork(id);
+    const pings = new Set<unknown>();
+    let held: unknown;
+    return {
+      ...handle,
+      port: {
+        post: (m) => {
+          if (isRecord(m) && m.t === 'req' && m.m === 'ping') pings.add(m.id);
+          handle.port.post(m);
+        },
+        onMessage: (listener) =>
+          handle.port.onMessage((m) => {
+            if (isRecord(m) && m.t === 'res' && pings.has(m.id)) {
+              held = m;
+              return;
+            }
+            if (held !== undefined && isRecord(m) && m.t === 'note' && m.m === 'running') {
+              const pong = held;
+              held = undefined;
+              listener(pong);
+            }
+            listener(m);
+          }),
+      },
+    };
+  };
+  const k = await startShared(3, batched);
+  try {
+    await k.run('busy.late');
+    await hostDown(k);
+    assert.deepEqual(downs(k), [['shared', 'hang', ['busy'], []]]);
   } finally {
     await k.unload();
   }

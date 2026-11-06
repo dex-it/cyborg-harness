@@ -11,6 +11,7 @@ const plugin: PluginModule = {
       if (onFocus) hang();
     });
     ctx.commands.register('busy.timer', () => void setTimeout(hang, 0));
+    ctx.commands.register('busy.late', () => void setTimeout(hang, 200));
     ctx.commands.register('busy.exit', () => void setTimeout(() => process.exit(3), 0));
     ctx.commands.register('busy.focus', () => void (onFocus = true));
     // Ответ чужой команды приходит после того, как хост успел выполнить код соседа.
