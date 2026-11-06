@@ -1,0 +1,30 @@
+{
+  "name": "cyborg-harness-site",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Сайт документации Cyborg Harness (Starlight)",
+  "engines": {
+    "node": ">=22.23.4"
+  },
+  "scripts": {
+    "brand": "node scripts/copy-brand.mjs",
+    "dev": "npm run brand && astro dev",
+    "build": "npm run brand && astro build",
+    "verify": "node scripts/check-dist.mjs",
+    "preview": "astro preview",
+    "check": "npm run brand && astro check",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/markdown-satteri": "0.4.6",
+    "@astrojs/starlight": "0.42.7",
+    "astro": "7.4.4",
+    "mermaid": "12.2.0",
+    "satteri": "0.11.6"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.12",
+    "typescript": "6.0.3"
+  }
+}

@@ -18,6 +18,9 @@
 | Спайк UI во фреймах: память, задержка, мост, клавиши, перетаскивание | [04-verification/spike-iframe-ui.md](04-verification/spike-iframe-ui.md) |
 | Спайк хостов плагинов: память на хост, цена вызова, пороги сторожа | [04-verification/spike-hosts.md](04-verification/spike-hosts.md) |
 | Проверка на macOS: замеры хостов и фреймов, клавиши, терминал | [04-verification/macos-check.md](04-verification/macos-check.md) |
+| Эпик «Микроядро»: цель, карта, итерации, реестр задач | [05-plans/epic-microkernel.md](05-plans/epic-microkernel.md) |
+| Анализ готовности ядра и инвентарь Cyborg | [research/microkernel-readiness.md](research/microkernel-readiness.md), [research/cyborg-migration-inventory.md](research/cyborg-migration-inventory.md) |
+| Сайт документации (источник страниц - `guide/`) | [guide/](guide/index.mdx), сборка - `site/` |
 | Дорожная карта: этапы SAD, что сделано и что осталось | [05-plans/roadmap.md](05-plans/roadmap.md) |
 | Термины | [glossary.md](glossary.md) |
 

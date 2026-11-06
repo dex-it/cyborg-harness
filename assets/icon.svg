@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>Cyborg Harness</title>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2d3850"/>
+      <stop offset="1" stop-color="#121722"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f7fb"/>
+      <stop offset="1" stop-color="#d5deea"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#tile)"/>
+  <!-- Связи ядра с плагинами -->
+  <g stroke="#3794ff" stroke-width="22" stroke-linecap="round" opacity="0.85">
+    <line x1="512" y1="512" x2="512" y2="236"/>
+    <line x1="512" y1="512" x2="788" y2="512"/>
+    <line x1="512" y1="512" x2="512" y2="788"/>
+    <line x1="512" y1="512" x2="236" y2="512"/>
+  </g>
+  <!-- Плагины -->
+  <g fill="#121722" stroke="#3794ff" stroke-width="22">
+    <circle cx="512" cy="236" r="52"/>
+    <circle cx="788" cy="512" r="52"/>
+    <circle cx="512" cy="788" r="52"/>
+    <circle cx="236" cy="512" r="52"/>
+  </g>
+  <!-- Ядро -->
+  <circle cx="512" cy="512" r="116" fill="url(#core)"/>
+  <circle cx="512" cy="512" r="46" fill="#3794ff"/>
+</svg>

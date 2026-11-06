@@ -1,0 +1,71 @@
+---
+import Default from '@astrojs/starlight/components/Head.astro';
+---
+
+<Default {...Astro.props}><slot /></Default>
+
+<script>
+  // Схемы Mermaid: библиотека грузится отдельным куском и только на странице, где есть <pre class="mermaid">.
+  // Исходный текст хранится в data-source, чтобы перерисовать схему при смене темы.
+  const root = document.documentElement;
+  const css = (name: string) => getComputedStyle(root).getPropertyValue(name).trim();
+
+  async function draw(): Promise<void> {
+    const nodes = [...document.querySelectorAll<HTMLElement>('pre.mermaid')];
+    if (!nodes.length) return;
+    const { default: mermaid } = await import('mermaid');
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'strict',
+      theme: 'base',
+      fontFamily: css('--sl-font') || 'sans-serif',
+      flowchart: { wrappingWidth: 300, padding: 12, nodeSpacing: 28, rankSpacing: 44 },
+      sequence: { mirrorActors: false, messageMargin: 34 },
+      themeVariables: {
+        background: css('--sl-color-bg'),
+        primaryColor: css('--sl-color-gray-6'),
+        primaryBorderColor: css('--sl-color-gray-4'),
+        primaryTextColor: css('--sl-color-white'),
+        secondaryColor: css('--sl-color-accent-low'),
+        tertiaryColor: css('--sl-color-bg'),
+        lineColor: css('--sl-color-gray-3'),
+        textColor: css('--sl-color-white'),
+        noteBkgColor: css('--sl-color-accent-low'),
+        noteTextColor: css('--sl-color-white'),
+        actorBkg: css('--sl-color-gray-6'),
+        actorBorder: css('--sl-color-gray-4'),
+        actorTextColor: css('--sl-color-white'),
+        signalColor: css('--sl-color-gray-2'),
+        signalTextColor: css('--sl-color-white'),
+        labelBoxBkgColor: css('--sl-color-gray-6'),
+        labelTextColor: css('--sl-color-white'),
+        clusterBkg: 'transparent',
+        clusterBorder: css('--sl-color-gray-4'),
+        edgeLabelBackground: css('--sl-color-bg'),
+      },
+    });
+    for (const node of nodes) {
+      node.dataset.source ??= node.textContent ?? '';
+      node.removeAttribute('data-processed');
+      node.textContent = node.dataset.source;
+    }
+    await mermaid.run({ nodes });
+  }
+
+  // Отрисовки идут по очереди: Starlight выставляет data-theme уже после загрузки, и две параллельные run() по одним узлам падают.
+  let queue: Promise<void> = Promise.resolve();
+  let drawnTheme = '';
+  const schedule = (): void => {
+    queue = queue
+      .then(async () => {
+        const theme = root.dataset.theme ?? '';
+        if (theme === drawnTheme) return;
+        drawnTheme = theme;
+        await draw();
+      })
+      .catch((error) => console.error('Схема Mermaid не нарисована:', error));
+  };
+
+  schedule();
+  new MutationObserver(schedule).observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+</script>
