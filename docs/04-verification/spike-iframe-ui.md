@@ -7,7 +7,7 @@
 - Код - `playground/`: схема `cyborg-plugin` (`standard`, `secure`) в `src/main/views.ts`, мост вида в `src/main/preload.ts`, замер в `src/main/spike.ts`, запуск - `npm run spike` (на Linux - `xvfb-run --auto-servernum node playground/scripts/spike-iframe.mjs --no-sandbox` после сборки).
 - Пробный вид - минимальная страница: поле ввода, два перетаскиваемых пути (страницей и через ядро), зона сброса (`src/renderer/probe/`). Вид с xterm или Monaco весит больше, но эта цена одинакова при любом мосте и любом origin.
 - Окно - `contextIsolation`, `sandbox`, `nodeIntegrationInSubFrames`. Ядро плагинов в замере не запускается: числа - только UI.
-- Среда: Electron 45.2.2, Chromium 156, Linux x64, Xvfb. macOS не мерили.
+- Среда: Electron 45.2.2, Chromium 156, Linux x64, Xvfb. macOS - [macos-check.md](macos-check.md).
 
 ## Итоги
 

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { app, BrowserWindow, ipcMain, type WebFrameMain } from 'electron';
 import { PATH_MIME, viewOrigin, type SpikePing, type SpikeReport } from '../shared/views.ts';
+import { pssKb as pss } from './proc-memory.ts';
 import { resolveStaticFile } from './view-files.ts';
 import { framesOf, serveViews } from './views.ts';
 
@@ -26,7 +27,7 @@ export interface MemoryRow {
   readonly frameProcesses: number;
   /** Сумма workingSetSize всех процессов приложения; на Linux завышена общими страницами. */
   readonly workingSetMb: number;
-  /** Сумма PSS всех процессов: общие страницы поделены между ними. Только Linux. */
+  /** Сумма PSS всех процессов: общие страницы поделены между ними. На macOS - сумма footprint, другая мера. */
   readonly pssMb?: number;
 }
 
@@ -46,15 +47,6 @@ const PINGS = 300;
 const CHUNK = 'x'.repeat(4096);
 const CHUNKS = 1024;
 const MODIFIERS = new Set(['Control', 'Shift', 'Alt', 'Meta']);
-
-function pss(pid: number): number | undefined {
-  try {
-    const kb = /^Pss:\s+(\d+) kB/m.exec(fs.readFileSync(`/proc/${pid}/smaps_rollup`, 'utf8'))?.[1];
-    return kb === undefined ? undefined : Number(kb);
-  } catch {
-    return undefined;
-  }
-}
 
 function probeUrl(index: number, origins: MemoryRow['origins']): string {
   return origins === 'shared' ? `${viewOrigin('probe')}/?i=${index}` : `${viewOrigin(`probe-${index}`)}/`;

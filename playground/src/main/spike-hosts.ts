@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { load, type JournalEntry, type Kernel, type WatchdogOptions } from '../../../core/src/index.ts';
 import { PLUGIN_API_VERSION } from './plugins.ts';
 import { utilityHosts, type UtilityHosts } from './plugin-hosts.ts';
+import { pssKb, rssKb } from './proc-memory.ts';
 
 export interface HostsSpikeOptions {
   readonly out: string;
@@ -58,24 +59,6 @@ async function start(options: HostsSpikeOptions, manifests: Record<string, unkno
 
 const round = (n: number, digits = 2) => Math.round(n * 10 ** digits) / 10 ** digits;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-function pssKb(pid: number): number | undefined {
-  try {
-    const kb = /^Pss:\s+(\d+) kB/m.exec(fs.readFileSync(`/proc/${pid}/smaps_rollup`, 'utf8'))?.[1];
-    return kb === undefined ? undefined : Number(kb);
-  } catch {
-    return undefined;
-  }
-}
-
-function rssKb(pid: number): number | undefined {
-  try {
-    const kb = /^VmRSS:\s+(\d+) kB/m.exec(fs.readFileSync(`/proc/${pid}/status`, 'utf8'))?.[1];
-    return kb === undefined ? undefined : Number(kb);
-  } catch {
-    return undefined;
-  }
-}
 
 export interface MemoryRow {
   readonly layout: string;
