@@ -1,0 +1,92 @@
+name: Docs site
+
+# Сайт документации (site/, страницы docs/guide/) на GitHub Pages: https://dex-it.github.io/cyborg-harness/
+#   pull_request     - собрать сайт и проверить ссылки, ничего не публикуя;
+#   push в master    - собрать и опубликовать;
+#   workflow_dispatch - то же вручную.
+# Деплой принимает только ветка, разрешённая в окружении github-pages
+# (Settings - Environments - github-pages - Deployment branches): master.
+#
+# Проверка НЕ должна быть required: у pull_request ниже фильтр путей, а required-проверка,
+# которая не запустилась, вешает PR в BLOCKED. Сайт собирается из docs/guide, site и значка
+# приложения (assets/icon.svg).
+on:
+  pull_request:
+    paths:
+      - 'docs/guide/**'
+      - 'site/**'
+      - 'assets/**'
+      - '.github/workflows/docs-site.yml'
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: Build site and check links
+    runs-on: ubuntu-latest
+    # Сборки одного PR не копятся: новая отменяет прежнюю. Деплой имеет свою очередь ниже.
+    concurrency:
+      group: docs-site-build-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: site/.nvmrc
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install dependencies
+        working-directory: site
+        run: npm ci
+
+      # Типы страниц и конфига; заодно копирует значок приложения.
+      - name: Astro check
+        working-directory: site
+        run: npm run check
+
+      - name: Build
+        working-directory: site
+        run: npm run build
+
+      # Ссылки и ассеты под базовым путём, canonical, индекс Pagefind, sitemap.
+      # Внешние ссылки не проверяются: проверка не ходит в сеть.
+      - name: Verify build output
+        working-directory: site
+        run: npm run verify
+
+      - name: Configure Pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

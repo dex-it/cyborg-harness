@@ -1,0 +1,94 @@
+---
+title: "Вид"
+description: "UiModule и UiContext: как устроен вид плагина, какие у него элементы cy-* и что ему нельзя."
+---
+
+Вид - браузерный модуль, который окно загружает в отдельный `<iframe>`. Модуль экспортирует функцию `mount`; ядро зовёт её один раз на документ вида и вызывает `dispose` у возвращённого значения, когда снимает вид.
+
+```ts
+import type { Disposable, UiContext, UiModule } from '@cyborg/contracts';
+
+export function mount(root: HTMLElement, ctx: UiContext): Disposable {
+  const list = document.createElement('cy-list');
+  root.append(list);
+  return { dispose: () => list.remove() };
+}
+
+mount satisfies UiModule<HTMLElement>['mount'];
+```
+
+В манифесте вид объявлен как `"ui": { "views": { "main": "./ui/ui.js" } }`. Путь ведёт только вниз от каталога плагина и заканчивается на `.js`: TypeScript вида собирается в ESM командой `cyborg-plugin build`.
+
+## Где живёт вид
+
+Каждый вид работает в `<iframe>` с origin `cyborg-plugin://<группа>/`. Мост вида узнаёт плагин по origin, а не по словам самого вида, поэтому вид не может выдать себя за чужой плагин. Следствия для автора:
+
+- у вида нет `ctx.os`: файлы, процессы и сеть - дело главной части, вид просит её командой;
+- страница по умолчанию не ходит в сеть сама: политика содержимого разрешает `connect-src 'self'`;
+- скрипты и таблицы стилей загружаются только со своего origin: положите нужный CSS рядом с модулем вида и подключите по `new URL('./ui.css', import.meta.url)`;
+- вид не отмонтируется при сворачивании: DOM, прокрутка и выделение сохраняются.
+
+## Что есть в UiContext
+
+| Член | Что даёт |
+|---|---|
+| `pluginId`, `view` | Кто и какой вид |
+| `commands.run(command, ...args)` | Только команды своего плагина; чужую ядро отклонит |
+| `contracts.get(contract, major)` | Контракт из `requires` или `optional` своего плагина. Возвращает удалённый объект: только методы, ответы - данные. Нет поставщика - `undefined`, нет в манифесте - исключение |
+| `theme.tokens`, `theme.onChange` | CSS-переменные `--cy-*`, уже стоящие на `:root` до `mount` |
+| `visible`, `onVisibilityChange` | Показан ли вид сейчас |
+| `logs()`, `onLog` | Сообщения `ctx.log` своей главной части: накопленные и новые |
+| `terminal.open(ticket)` | Терминал по билету от своей главной части |
+| `state` | Память вида: `value` и `set(value)` |
+| `dialogs.show(spec)` | Вопрос или меню в слое окна поверх всех фреймов |
+| `keys.of(command)` | Сочетание своей команды для подсказки в интерфейсе |
+| `drag` | `start(path)` и `drop()` - перетаскивание файла через ядро |
+
+## Элементы ядра cy-*
+
+Оболочка определяет их до `mount`: пишите `document.createElement('cy-list')` без импорта. Они стилизованы на токенах темы, поэтому цвета вид не задаёт.
+
+| Тег | Свойства | События |
+|---|---|---|
+| `cy-button` | `variant` (`primary`, `danger`), `disabled` | `click` |
+| `cy-field` | `label`, `placeholder`, `value`, `type` (`text`, `search`, `password`), `disabled` | `input`, `change`, `keydown` |
+| `cy-list` | `items`, `selected`, `label`; слот `empty` | `cy-select`, `cy-activate` |
+| `cy-tree` | `items`, `expanded`, `selected`, `label` | `cy-select`, `cy-activate`, `cy-toggle` |
+| `cy-tabs` | `tabs`, `selected`, `label` | `cy-select` |
+| `cy-empty` | `heading`; текст - содержимое | - |
+| `cy-spinner` | `label` | - |
+
+`id` пунктов списка и дерева непустые и уникальные, иначе присваивание бросает `TypeError`. В `detail` событий лежит `{ id }`, у `cy-toggle` ещё `expanded`. Программная смена `selected` событий не шлёт. Клавиши работают по WAI-ARIA. Тег не удаляется и не меняет атрибуты в пределах мажорной версии `engines.cyborg`.
+
+## Терминал в виде
+
+Вид сам процесс не запускает. Главная часть создаёт pty, вызывает `share()` и отдаёт виду билет (например, ответом своей команды). Вид открывает терминал билетом, а поток вывода идёт из ядра прямо в окно, мимо хоста плагина: зависший хост терминал не останавливает.
+
+```mermaid
+sequenceDiagram
+  participant V as Вид
+  participant M as Главная часть
+  participant K as Ядро
+  V->>M: ctx.commands.run("echo.terminal")
+  M->>K: ctx.os.pty.spawn / attach
+  M->>K: handle.share()
+  K-->>M: билет (30 с, одноразовый)
+  M-->>V: билет
+  V->>K: ctx.terminal.open(билет)
+  K-->>V: UiTerminal: backlog, onData, write
+```
+
+Билет живёт 30 секунд, и чужой плагин его не откроет. `close()` у `UiTerminal` только перестаёт смотреть: процесс завершает главная часть.
+
+## Память вида и диалоги
+
+`ctx.state.value` - то, что вид оставил прошлому документу; `set(value)` пишет JSON до 64 КБ в состояние воркспейса, не в `localStorage`: у каждого воркспейса своя память. Схем и миграций нет, формат - забота плагина.
+
+`ctx.dialogs.show({ kind: 'ask', title, buttons })` и `{ kind: 'menu', items, at }` показывает диалог в слое ядра, ответ - `id` выбранного пункта или `undefined` при отмене. Диалоги идут по одному.
+
+## Дальше
+
+- [Главная часть](/authors/main-api/) - команды, которые вызывает вид.
+- [Виды во фреймах](/features/views/) - изоляция рендера и группы.
+- [Рецепты](/authors/recipes/) - типичные задачи автора.
+- [Изоляция](/concepts/isolation/) - что отделяет вид от остального окна.
