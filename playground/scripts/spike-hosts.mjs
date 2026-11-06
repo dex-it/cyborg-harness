@@ -18,7 +18,7 @@ rmSync(dir, { recursive: true, force: true });
 if (json) console.log(JSON.stringify(r, null, 2));
 else {
   console.log(`Electron ${r.electron}, Node ${r.node}, ${r.platform}-${r.arch}, ${r.cpus}\n`);
-  console.log('Память: раскладка | хостов | плагинов | PSS, МБ | RSS, МБ | PSS на хост, МБ');
+  console.log('Память: раскладка | хостов | плагинов | PSS (macOS: footprint), МБ | RSS, МБ | PSS на хост, МБ');
   for (const m of r.memory ?? []) console.log(`  ${m.layout} | ${m.hosts} | ${m.plugins} | ${m.pssMb ?? '-'} | ${m.rssMb ?? '-'} | ${m.pssPerHostMb ?? '-'}`);
   console.log('\nВызов: путь | байт | p50 | p95 | p99, мс');
   for (const c of r.calls ?? []) console.log(`  ${c.path} | ${c.sizeBytes} | ${c.p50} | ${c.p95} | ${c.p99}`);

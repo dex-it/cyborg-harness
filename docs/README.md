@@ -17,6 +17,7 @@
 | Решения ADR-CH; где они расходятся с SAD, действует SAD ([раздел 7](03-architecture/design/sad.md#7-расхождения-с-первой-редакцией-пакета)) | [03-architecture/adr/](03-architecture/adr/) |
 | Спайк UI во фреймах: память, задержка, мост, клавиши, перетаскивание | [04-verification/spike-iframe-ui.md](04-verification/spike-iframe-ui.md) |
 | Спайк хостов плагинов: память на хост, цена вызова, пороги сторожа | [04-verification/spike-hosts.md](04-verification/spike-hosts.md) |
+| Проверка на macOS: замеры хостов и фреймов, клавиши, терминал | [04-verification/macos-check.md](04-verification/macos-check.md) |
 | Дорожная карта: этапы SAD, что сделано и что осталось | [05-plans/roadmap.md](05-plans/roadmap.md) |
 | Термины | [glossary.md](glossary.md) |
 
