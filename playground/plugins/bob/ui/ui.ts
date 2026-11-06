@@ -1,6 +1,6 @@
 // Вид bob: принимает путь файла из чужого фрейма через ядро, зовёт эхо через контракт и показывает отказ на чужую команду.
 
-import type { Disposable, UiContext, UiModule } from '@cyborg/contracts';
+import type { Disposable, UiContext, UiModule } from '@cyborg-harness/contracts';
 import type {} from '../../contracts.ts';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}): HTMLElementTagNameMap[K] {

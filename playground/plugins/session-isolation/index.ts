@@ -1,4 +1,4 @@
-import type { PluginModule } from '@cyborg/contracts';
+import type { PluginModule } from '@cyborg-harness/contracts';
 
 // Текст сегодняшнего Cyborg (src/main/claude-args.ts): EnterWorktree, а не git worktree add - он меняет cwd сессии.
 export const ISOLATION_PROMPT =

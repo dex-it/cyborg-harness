@@ -3,7 +3,7 @@
   "compilerOptions": {
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": [],
-    "paths": { "@cyborg/contracts": ["../../contracts/index.ts"] }
+    "paths": { "@cyborg-harness/contracts": ["../../contracts/index.ts"] }
   },
   "include": ["."]
 }

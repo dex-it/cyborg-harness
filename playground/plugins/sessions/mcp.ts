@@ -1,4 +1,4 @@
-import type { AgentTool, AgentToolSpec, ServeRequest, ServeResponse, SessionAction } from '@cyborg/contracts';
+import type { AgentTool, AgentToolSpec, ServeRequest, ServeResponse, SessionAction } from '@cyborg-harness/contracts';
 
 export const MCP_PATH = '/mcp';
 // Первая - та, что отвечаем клиенту с неизвестной версией: спецификация велит назвать свою последнюю.

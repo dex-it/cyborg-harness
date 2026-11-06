@@ -1,4 +1,4 @@
-import type { PluginModule } from '@cyborg/contracts';
+import type { PluginModule } from '@cyborg-harness/contracts';
 
 /** Пустой плагин: цена хоста без работы плагина. */
 const idle: PluginModule = {

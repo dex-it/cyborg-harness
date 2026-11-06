@@ -51,6 +51,7 @@ SAD и ADR сейчас в статусах `review` и `proposed`. Приёмк
 - Один экземпляр - один воркспейс - одно окно.
 - Рендерер плагина - `<iframe>` с origin по группе рендера.
 - pty держит ядро в отдельном процессе, вывод идёт из него прямо во фрейм.
+- Пакеты выходят в npm-scope `@cyborg-harness`: `@cyborg-harness/contracts`, `@cyborg-harness/core`, `@cyborg-harness/electron`, `@cyborg-harness/testing`; scope `@cyborg` на npmjs.com занят посторонним ([D-00](https://github.com/dex-it/cyborg-harness/issues/21), строка 3).
 
 Объяснение каждого решения - в разделах [Как это устроено](/concepts/).
 

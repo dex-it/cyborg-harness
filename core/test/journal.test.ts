@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { PluginContext } from '@cyborg/contracts';
+import type { PluginContext } from '@cyborg-harness/contracts';
 import { appendBounded, DeniedCollapse } from '../src/journal.ts';
 import { load, type JournalEntry } from '../src/loader.ts';
 import { describeEntry } from '../src/status.ts';

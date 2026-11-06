@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { PluginContext } from '@cyborg/contracts';
+import type { PluginContext } from '@cyborg-harness/contracts';
 import { load, type LoadOptions } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
 import type { PluginModule } from '../src/plugin.ts';

@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { PluginContext, PluginModule } from '@cyborg/contracts';
+import type { PluginContext, PluginModule } from '@cyborg-harness/contracts';
 import { load } from '../src/loader.ts';
 import { RecentWorkspaces } from '../src/recent.ts';
 import { inlineHosts } from '../src/transports.ts';

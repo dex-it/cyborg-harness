@@ -1,4 +1,4 @@
-import type { PluginModule, Project } from '@cyborg/contracts';
+import type { PluginModule, Project } from '@cyborg-harness/contracts';
 
 const plugin: PluginModule = {
   config: {

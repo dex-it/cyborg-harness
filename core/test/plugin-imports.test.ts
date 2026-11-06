@@ -5,14 +5,14 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import ts from 'typescript';
 
-// SAD §6.1, дисциплина: плагин импортирует только @cyborg/contracts и свои модули. Без Compartment хост не мешает обойти шлюз, поэтому правило держит статика.
+// SAD §6.1, дисциплина: плагин импортирует только @cyborg-harness/contracts и свои модули. Без Compartment хост не мешает обойти шлюз, поэтому правило держит статика.
 const repo = path.resolve(import.meta.dirname, '..', '..');
 /** Каталог плагинов -> пакет объявлений рядом с ним, как `@acme/contracts` у стороннего автора: только типы и дополнение карты Contracts. */
 const PLUGIN_ROOTS: Readonly<Record<string, string>> = {
   'core/examples/plugins': 'core/examples/contracts.ts',
   'playground/plugins': 'playground/plugins/contracts.ts',
 };
-const CONTRACTS = '@cyborg/contracts';
+const CONTRACTS = '@cyborg-harness/contracts';
 
 interface Use {
   readonly spec: string;
@@ -126,7 +126,7 @@ describe('импорты плагинов', () => {
       'const o = await import(name);',
       "type T = import('../other/types.ts').T;",
       "import type { Chat } from '../contracts.ts';",
-      "import type { PluginModule as P } from '@cyborg/contracts';",
+      "import type { PluginModule as P } from '@cyborg-harness/contracts';",
       "import { own } from './own.ts';",
       "import { deep } from './view/deep.ts';",
     ].join('\n');

@@ -1,4 +1,4 @@
-import type { Disposable, DisposableStore as Store } from '@cyborg/contracts';
+import type { Disposable, DisposableStore as Store } from '@cyborg-harness/contracts';
 
 export type { Disposable };
 

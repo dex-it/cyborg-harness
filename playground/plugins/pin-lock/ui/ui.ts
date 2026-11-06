@@ -1,6 +1,6 @@
 // Вид pin-lock: кнопка замка с сочетанием из ctx.keys и примеры диалогов слоя окна.
 
-import type { Disposable, UiContext, UiModule } from '@cyborg/contracts';
+import type { Disposable, UiContext, UiModule } from '@cyborg-harness/contracts';
 
 function button(id: string, text: string): HTMLButtonElement {
   return Object.assign(document.createElement('button'), { type: 'button', id, textContent: text });

@@ -8,7 +8,7 @@ description: "Системы, версии Node.js и Electron и зависим
 | Что | Зачем |
 |---|---|
 | macOS или Linux | Проверено на macOS (Apple Silicon) и Linux; каждое изменение проходит CI на обеих системах |
-| Node.js 24 и npm | Сборка и запуск; пакет `@cyborg/core` объявляет `engines.node` под Node 24 |
+| Node.js 24 и npm | Сборка и запуск; пакет `@cyborg-harness/core` объявляет `engines.node` под Node 24 |
 | Electron 45 | Приложение, которое подключает ядро. Electron 45 несёт Node 24, на нём работают хосты плагинов |
 | git | Чтобы взять репозиторий со стендом |
 
@@ -30,9 +30,9 @@ xvfb-run --auto-servernum npm run smoke
 
 | Что | Зачем |
 |---|---|
-| `@cyborg/contracts` | Типы API плагина и карта контрактов |
+| `@cyborg-harness/contracts` | Типы API плагина и карта контрактов |
 | TypeScript | Главную часть и вид удобно писать на нём; Node 24 сам снимает типы с файлов вне `node_modules` |
-| `@cyborg/testing` | Тесты плагина без Electron |
+| `@cyborg-harness/testing` | Тесты плагина без Electron |
 | `cyborg-plugin` | Создать каталог плагина, проверить, собрать, упаковать |
 
 Если главная часть остаётся на TypeScript без сборки, в ней допустим только стираемый синтаксис: без `enum` и параметров-свойств конструктора. Сборка командой `cyborg-plugin build` снимает это ограничение и добавляет зависимости внутрь файла.

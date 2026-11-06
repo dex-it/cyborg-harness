@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { PtyExit } from '@cyborg/contracts';
+import type { PtyExit } from '@cyborg-harness/contracts';
 import type { TerminalSink } from '../../../core/src/index.ts';
 import { ViewTerminals, type TerminalFrame } from './view-terminals.ts';
 

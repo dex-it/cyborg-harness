@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate as tick } from 'node:timers/promises';
-import type { Subscription } from '@cyborg/contracts';
+import type { Subscription } from '@cyborg-harness/contracts';
 import { load, type LoadOptions } from '../src/loader.ts';
 import type { PluginContext, PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';

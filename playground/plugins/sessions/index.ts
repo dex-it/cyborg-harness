@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentToolsEndpoint, PluginContext, PluginModule, PtyHandle, SessionAction } from '@cyborg/contracts';
+import type { AgentEvent, AgentToolsEndpoint, PluginContext, PluginModule, PtyHandle, SessionAction } from '@cyborg-harness/contracts';
 import { MCP_PATH, mcpHandler } from './mcp.ts';
 
 // Вид спрашивает снова сразу после ответа: ожидание короче, чем человек замечает задержку закрытого вида.

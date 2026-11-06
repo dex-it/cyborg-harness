@@ -1,7 +1,7 @@
-import type { Subscription } from '@cyborg/contracts';
+import type { Subscription } from '@cyborg-harness/contracts';
 
-// Пакет объявлений стороннего автора: контракты demo.* дополняют карту, не трогая @cyborg/contracts.
-declare module '@cyborg/contracts' {
+// Пакет объявлений стороннего автора: контракты demo.* дополняют карту, не трогая @cyborg-harness/contracts.
+declare module '@cyborg-harness/contracts' {
   interface Contracts {
     'demo.clock': { 1: Clock };
     'demo.flaky': { 1: Flaky };

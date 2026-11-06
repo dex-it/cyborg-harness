@@ -1,6 +1,6 @@
 // Проверяется компилятором в npm run typecheck: строка под @ts-expect-error обязана не компилироваться.
 import type { PluginModule } from '../src/plugin.ts';
-import type { FilesV1, FilesV2, Remote } from '@cyborg/contracts';
+import type { FilesV1, FilesV2, Remote } from '@cyborg-harness/contracts';
 
 export const provider: PluginModule = {
   activate(ctx) {

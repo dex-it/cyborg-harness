@@ -1,13 +1,17 @@
 ---
 title: "Тестирование плагина"
-description: "Как проверить плагин без Electron: тест-кит @cyborg/testing, поддельные среды и общий набор тестов контракта."
+description: "Как проверить плагин без Electron: тест-кит @cyborg-harness/testing, поддельные среды и общий набор тестов контракта."
 ---
 
-Плагин можно проверить, не открывая окна: ядро не импортирует Electron, а тест-кит поднимает его вместе с хостами в процессе теста. Пакет называется `@cyborg/testing`, ставится как dev-зависимость и опирается на `@cyborg/core`, не копируя его код.
+Плагин можно проверить, не открывая окна: ядро не импортирует Electron, а тест-кит поднимает его вместе с хостами в процессе теста. Пакет называется `@cyborg-harness/testing`, ставится как dev-зависимость и опирается на `@cyborg-harness/core`, не копируя его код.
 
 ```bash
-npm install --save-dev @cyborg/testing
+npm install --save-dev @cyborg-harness/testing
 ```
+
+:::caution[Пакеты ещё не опубликованы]
+Пакеты `@cyborg-harness/*` и команда `cyborg-plugin` публикуются задачами [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9). Пакеты scope `@cyborg` на npmjs.com к проекту не относятся. До выпуска работайте из репозитория (`npm ci`, `npm start`).
+:::
 
 Тесты запускаются встроенным `node --test`: Node 24 снимает типы с `.ts` сам, сборка для теста не нужна.
 
@@ -51,15 +55,11 @@ npm install --save-dev @cyborg/testing
 
 ## Статическая проверка
 
-Дисциплина «главная часть импортирует только `@cyborg/contracts` и свои модули» проверяется не тестом, а командой:
+Дисциплина «главная часть импортирует только `@cyborg-harness/contracts` и свои модули» проверяется не тестом, а командой:
 
 ```bash
 npx cyborg-plugin check .
 ```
-
-:::caution[Пакеты ещё не опубликованы]
-Пакеты `@cyborg/*` и команда `cyborg-plugin` публикуются задачами [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9); имя npm-scope решается в [D-00](https://github.com/dex-it/cyborg-harness/issues/21). Не ставьте пакеты с таким именем из npmjs.com до публикации: scope `@cyborg` на npmjs.com занят посторонним владельцем. До выпуска работайте из репозитория (`npm ci`, `npm start`).
-:::
 
 Она читает манифест, сверяет `engines.cyborg` с версией API, проверяет, что модули видов и файлы схем существуют, прогоняет правило импортов по всем `.ts` и `.js` и печатает права словами. Из кода тот же результат даёт `checkPlugin(dir, options)`, но структурой. Код возврата 0 - нарушений нет, 1 - есть. Подключите `check` и `build` в CI вашего плагина.
 
@@ -74,4 +74,4 @@ npx cyborg-plugin check .
 - [Сборка и упаковка](/authors/packaging/) - следующий шаг после зелёных тестов.
 - [Рецепты](/authors/recipes/) - как проверять права и миграции.
 - [Тесты и CI](/development/tests-ci/) - как устроены тесты самого ядра.
-- [Пакеты](/reference/packages/) - состав `@cyborg/testing`.
+- [Пакеты](/reference/packages/) - состав `@cyborg-harness/testing`.

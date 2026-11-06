@@ -9,9 +9,9 @@ description: "Как устроен репозиторий Cyborg Harness: ка�
 flowchart LR
   accTitle: Состав репозитория
   accDescr: Ядро и адаптер опираются на контракты, стенд собирает их в окно, документы и сайт описывают всё вместе.
-  C["contracts/<br>@cyborg/contracts"]
-  K["core/<br>@cyborg/core"]
-  E["адаптер Electron<br>@cyborg/electron"]
+  C["contracts/<br>@cyborg-harness/contracts"]
+  K["core/<br>@cyborg-harness/core"]
+  E["адаптер Electron<br>@cyborg-harness/electron"]
   P["playground/<br>стенд"]
   D["docs/ и site/<br>документы и сайт"]
   K -. типы .-> C
@@ -29,7 +29,7 @@ flowchart LR
 | `core/elements/` | Браузерная часть элементов ядра `cy-*` |
 | `core/test/` | Тесты ядра на `node:test`; общие подделки и фикстуры |
 | `core/examples/` | Сценарии ядра в консоли (`npm run demo`) и демо-плагины на вымышленных контрактах |
-| `contracts/` | Пакет `@cyborg/contracts`: карта контрактов, API плагина и вида, данные элементов. Типы без кода |
+| `contracts/` | Пакет `@cyborg-harness/contracts`: карта контрактов, API плагина и вида, данные элементов. Типы без кода |
 | `playground/src/main/` | Склейка ядра с Electron: хосты в `utilityProcess`, адаптер ОС, схема `cyborg-plugin://`, мост видов, `PluginsService` |
 | `playground/src/renderer/` | Окно стенда: сессия слева, справа вкладки плагинов, видов, документов, сообщений, журнала и клавиш |
 | `playground/plugins/` | Базовые плагины и демо (см. ниже) |
@@ -40,7 +40,7 @@ flowchart LR
 | `assets/` | Значок приложения |
 | `.github/workflows/` | CI (`ci.yml`) и сайт (`docs-site.yml`) |
 
-Склейка с Electron вынесена в пакет `@cyborg/electron`. Стенд остаётся примером: в нём только раскладка окна по областям и то, что нужно проверять вживую.
+Склейка с Electron вынесена в пакет `@cyborg-harness/electron`. Стенд остаётся примером: в нём только раскладка окна по областям и то, что нужно проверять вживую.
 
 ## Модули ядра
 

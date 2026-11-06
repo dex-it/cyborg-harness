@@ -4,7 +4,7 @@ import { request as httpRequest } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { PluginContext, ServeRequest, ServeResponse } from '@cyborg/contracts';
+import type { PluginContext, ServeRequest, ServeResponse } from '@cyborg-harness/contracts';
 import { load } from '../src/loader.ts';
 import { HttpServes, MAX_REQUEST_BODY, MAX_SERVERS } from '../src/serve.ts';
 import { inlineHosts } from '../src/transports.ts';

@@ -26,7 +26,7 @@ quality-checks: входных записей нет
 1. Цели SAD 3.1-3.10 выполнены, кроме явно вынесенных (источник секретов `cyborg.secret-source`, включение плагина вне графа без перезапуска, этап 2).
 2. В `core/src` нет предметных имён и npm-зависимостей: проверяет тест, а не ревью.
 3. API плагина (`PluginContext`, `UiContext`, манифест, элементы `cy-*`) зафиксирован как 1.0: снимок API под тестом, справочник и руководство опубликованы.
-4. Приложение подключает `@cyborg/core`, `@cyborg/contracts` и `@cyborg/electron` по номеру версии.
+4. Приложение подключает `@cyborg-harness/core`, `@cyborg-harness/contracts` и `@cyborg-harness/electron` по номеру версии.
 5. Автору плагина доступны шаблон, сборка, `checkPlugin` и тест-кит; человек со стороны за один заход собирает плагин с видом, командой, контрактом и разделом `config`.
 6. Бюджеты заданы числами и проверяются в CI; macOS подтверждён замерами и настоящей клавиатурой.
 7. Принята политика загрузки плагинов из каталога пользователя на этапе 1.
@@ -66,8 +66,8 @@ flowchart TB
   end
   subgraph W2["Итерация 2: пакеты и форма API"]
     direction LR
-    P02["P-02 @cyborg/core"] --> P03["P-03 @cyborg/electron"]
-    P01["P-01 @cyborg/contracts"]
+    P02["P-02 @cyborg-harness/core"] --> P03["P-03 @cyborg-harness/electron"]
+    P01["P-01 @cyborg-harness/contracts"]
     P02 --> P08["P-08 тест-кит"]
     P02 --> P09["P-09 checkPlugin"]
     K03["K-03 области, order"]
@@ -114,9 +114,9 @@ flowchart TB
 
 | Слой | Где | Что меняется |
 |---|---|---|
-| Ядро | `core/src` | пакет `@cyborg/core`, остаток этапа 1, реестр сочетаний, меню, отмена запросов, области, группы рендера |
-| Контракты | `contracts/` | пакет `@cyborg/contracts`, версия, снимок API, вынос демо-контрактов |
-| Адаптер Electron | сейчас `playground/src/main`, `playground/src/renderer` | пакет `@cyborg/electron`: хосты, адаптер ОС, схема `cyborg-plugin://`, мост, оболочка вида |
+| Ядро | `core/src` | пакет `@cyborg-harness/core`, остаток этапа 1, реестр сочетаний, меню, отмена запросов, области, группы рендера |
+| Контракты | `contracts/` | пакет `@cyborg-harness/contracts`, версия, снимок API, вынос демо-контрактов |
+| Адаптер Electron | сейчас `playground/src/main`, `playground/src/renderer` | пакет `@cyborg-harness/electron`: хосты, адаптер ОС, схема `cyborg-plugin://`, мост, оболочка вида |
 | Плагины и инструменты | `playground/plugins`, новые каталоги | шаблон, сборка, `checkPlugin`, тест-кит |
 | Документы и CI | `docs/`, `.github/` | руководство автору, релизы пакетов, бюджеты, проверка ссылок |
 
@@ -209,9 +209,9 @@ D-00 -> P-02 -> P-03 -> K-13 -> K-21; параллельно D-00 и T-08 -> K-0
 | [K-10](https://github.com/dex-it/cyborg-harness/issues/47) | Удаление плагина с зачисткой его данных, секретов и прав | M | - |
 | [K-12](https://github.com/dex-it/cyborg-harness/issues/59) | Достаточность ctx.os для базовых плагинов (fs, process, net) | M | [D-00](https://github.com/dex-it/cyborg-harness/issues/21) |
 | [K-17](https://github.com/dex-it/cyborg-harness/issues/55) | Политика загрузки плагинов из каталога пользователя на этапе 1 | S | [D-00](https://github.com/dex-it/cyborg-harness/issues/21) |
-| [P-01](https://github.com/dex-it/cyborg-harness/issues/29) | Версионирование и публикация @cyborg/contracts | M | [D-00](https://github.com/dex-it/cyborg-harness/issues/21), [T-03](https://github.com/dex-it/cyborg-harness/issues/51) |
-| [P-02](https://github.com/dex-it/cyborg-harness/issues/34) | Ядро как пакет @cyborg/core | L | [D-00](https://github.com/dex-it/cyborg-harness/issues/21) |
-| [P-03](https://github.com/dex-it/cyborg-harness/issues/35) | Адаптер Electron как пакет @cyborg/electron | L | [P-02](https://github.com/dex-it/cyborg-harness/issues/34) |
+| [P-01](https://github.com/dex-it/cyborg-harness/issues/29) | Версионирование и публикация @cyborg-harness/contracts | M | [D-00](https://github.com/dex-it/cyborg-harness/issues/21), [T-03](https://github.com/dex-it/cyborg-harness/issues/51) |
+| [P-02](https://github.com/dex-it/cyborg-harness/issues/34) | Ядро как пакет @cyborg-harness/core | L | [D-00](https://github.com/dex-it/cyborg-harness/issues/21) |
+| [P-03](https://github.com/dex-it/cyborg-harness/issues/35) | Адаптер Electron как пакет @cyborg-harness/electron | L | [P-02](https://github.com/dex-it/cyborg-harness/issues/34) |
 | [P-08](https://github.com/dex-it/cyborg-harness/issues/8) | Тест-кит для авторов и общий набор тестов контрактов | M | [P-02](https://github.com/dex-it/cyborg-harness/issues/34) |
 | [P-09](https://github.com/dex-it/cyborg-harness/issues/9) | Проверка плагина вне репозитория: checkPlugin | M | [P-02](https://github.com/dex-it/cyborg-harness/issues/34) |
 | [T-08](https://github.com/dex-it/cyborg-harness/issues/16) | Разбить loader.ts на части без смены поведения | M | - |

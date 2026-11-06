@@ -1,6 +1,6 @@
 // Оболочка вида в его <iframe> (SAD §3.8) идёт в браузер: здесь нет node-модулей.
 
-import type { DialogSpec, Disposable, FeedLine, PtyExit, PtyInfo, Reply, ThemeTokens, UiContext, UiTerminal, ViewDrop } from '@cyborg/contracts';
+import type { DialogSpec, Disposable, FeedLine, PtyExit, PtyInfo, Reply, ThemeTokens, UiContext, UiTerminal, ViewDrop } from '@cyborg-harness/contracts';
 import { toDisposable } from './disposable.ts';
 
 /** Мост вида к главному процессу, его выдаёт preload приложения; плагин работает с `UiContext`, а не с ним. */

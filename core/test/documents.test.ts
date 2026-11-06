@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { PluginContext } from '@cyborg/contracts';
+import type { PluginContext } from '@cyborg-harness/contracts';
 import { SectionStore, type LayerStore } from '../src/config.ts';
 import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';

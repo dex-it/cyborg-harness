@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { TreeItem } from '@cyborg/contracts';
+import type { TreeItem } from '@cyborg-harness/contracts';
 import { checkItems, checkTree, stepIndex, stepTab, treeKey, visibleRows } from '../src/elements-model.ts';
 
 const TREE: TreeItem[] = [

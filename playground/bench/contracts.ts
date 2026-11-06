@@ -1,6 +1,6 @@
-import type { Subscription } from '@cyborg/contracts';
+import type { Subscription } from '@cyborg-harness/contracts';
 
-declare module '@cyborg/contracts' {
+declare module '@cyborg-harness/contracts' {
   interface Contracts {
     'bench.rpc': { 1: BenchRpc };
   }

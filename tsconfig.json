@@ -19,6 +19,6 @@
     "allowImportingTsExtensions": true,
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
-    "paths": { "@cyborg/contracts": ["./contracts/index.ts"] }
+    "paths": { "@cyborg-harness/contracts": ["./contracts/index.ts"] }
   }
 }

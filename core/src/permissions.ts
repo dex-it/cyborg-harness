@@ -1,4 +1,4 @@
-import type { PluginPermissions } from '@cyborg/contracts';
+import type { PluginPermissions } from '@cyborg-harness/contracts';
 import { isRecord } from './wire.ts';
 
 export type { PluginPermissions };

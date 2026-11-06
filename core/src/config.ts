@@ -1,4 +1,4 @@
-import type { Layer, SectionResult, SectionSpec } from '@cyborg/contracts';
+import type { Layer, SectionResult, SectionSpec } from '@cyborg-harness/contracts';
 import { toDisposable, type Disposable } from './disposable.ts';
 import { errorMessage } from './errors.ts';
 import { isRecord } from './manifest.ts';

@@ -1,4 +1,4 @@
-# @cyborg/contracts
+# @cyborg-harness/contracts
 
 Пакет объявлений контрактов без логики. Поставщик и потребитель не знают друг друга: оба импортируют отсюда тип и называют контракт по имени и мажорной версии.
 
@@ -120,7 +120,7 @@ pty держит ядро: `ctx.os.pty.spawn({ program, args, cwd, env, cols, ro
 
 ```ts
 // @acme/contracts/index.ts
-declare module '@cyborg/contracts' {
+declare module '@cyborg-harness/contracts' {
   interface Contracts {
     'acme.clock': { 1: Clock };
   }

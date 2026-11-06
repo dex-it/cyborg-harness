@@ -9,7 +9,7 @@ description: "От пустого каталога до плагина с ком
 flowchart LR
   new["cyborg-plugin new"] --> edit["манифест, главная часть, вид"]
   edit --> check["cyborg-plugin check"]
-  check --> test["тест на @cyborg/testing"]
+  check --> test["тест на @cyborg-harness/testing"]
   test --> build["cyborg-plugin build"]
   build --> run["запуск в окне"]
   run --> pack["cyborg-plugin pack"]
@@ -23,7 +23,7 @@ cd greeter
 ```
 
 :::caution[Пакеты ещё не опубликованы]
-Пакеты `@cyborg/*` и команда `cyborg-plugin` публикуются задачами [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9); имя npm-scope решается в [D-00](https://github.com/dex-it/cyborg-harness/issues/21). Не ставьте пакеты с таким именем из npmjs.com до публикации: scope `@cyborg` на npmjs.com занят посторонним владельцем. До выпуска работайте из репозитория (`npm ci`, `npm start`).
+Пакеты `@cyborg-harness/*` и команда `cyborg-plugin` публикуются задачами [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9). Пакеты scope `@cyborg` на npmjs.com к проекту не относятся. До выпуска работайте из репозитория (`npm ci`, `npm start`).
 :::
 
 Команда создаёт манифест, главную часть, вид, схему раздела `config`, тест и настройки сборки. Дальше правим их по порядку.
@@ -62,9 +62,9 @@ cd greeter
 ## 4. Главная часть
 
 ```ts
-import type { PluginModule } from '@cyborg/contracts';
+import type { PluginModule } from '@cyborg-harness/contracts';
 
-declare module '@cyborg/contracts' {
+declare module '@cyborg-harness/contracts' {
   interface Contracts {
     'my.greeting': { 1: { greet(name: string): Promise<string> } };
   }
@@ -88,14 +88,14 @@ const greeter: PluginModule = {
 export default greeter;
 ```
 
-Три вещи стоит заметить. Плагин импортирует только `@cyborg/contracts`. Контракт `my.greeting` назван по автору, а не `cyborg.*`, поэтому тип добавлен в карту `Contracts` через `declare module`. Всё, что вы регистрируете через `ctx`, ядро снимет само при выгрузке.
+Три вещи стоит заметить. Плагин импортирует только `@cyborg-harness/contracts`. Контракт `my.greeting` назван по автору, а не `cyborg.*`, поэтому тип добавлен в карту `Contracts` через `declare module`. Всё, что вы регистрируете через `ctx`, ядро снимет само при выгрузке.
 
 ## 5. Вид
 
 Вид - модуль с функцией `mount`. Он работает в своём `<iframe>`, а элементы `cy-*` уже определены оболочкой.
 
 ```ts
-import type { Disposable, UiContext } from '@cyborg/contracts';
+import type { Disposable, UiContext } from '@cyborg-harness/contracts';
 
 export function mount(root: HTMLElement, ctx: UiContext): Disposable {
   const button = document.createElement('cy-button');
@@ -115,7 +115,7 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
 
 ```bash
 npx cyborg-plugin check     # манифест, импорты, права словами
-npm test                    # тест на @cyborg/testing
+npm test                    # тест на @cyborg-harness/testing
 npx cyborg-plugin build     # главная часть и вид со своими зависимостями
 ```
 

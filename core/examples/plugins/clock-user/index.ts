@@ -1,4 +1,4 @@
-import type { PluginModule } from '@cyborg/contracts';
+import type { PluginModule } from '@cyborg-harness/contracts';
 
 /** Отказ ядра приходит как Error с полем code; класс CoreError плагину не виден. */
 const codeOf = (error: unknown): string => (error instanceof Error && 'code' in error ? String(error.code) : 'ошибка');

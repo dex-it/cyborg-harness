@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { PluginContext, PtyExit } from '@cyborg/contracts';
+import type { PluginContext, PtyExit } from '@cyborg-harness/contracts';
 import { load } from '../src/loader.ts';
 import { describePermissions } from '../src/permissions.ts';
 import { fakePty, type FakeProc } from './fake-pty.ts';

@@ -1,6 +1,6 @@
 // Вид echo: терминал /bin/sh по билету главной части; вывод и ввод идут через ядро мимо хоста плагина.
 
-import type { Disposable, UiContext, UiModule, UiTerminal } from '@cyborg/contracts';
+import type { Disposable, UiContext, UiModule, UiTerminal } from '@cyborg-harness/contracts';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}): HTMLElementTagNameMap[K] {
   return Object.assign(document.createElement(tag), props);

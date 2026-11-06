@@ -1,4 +1,4 @@
-import type { Agent, AgentEvent, Disposable, LaunchRequest, PluginModule } from '@cyborg/contracts';
+import type { Agent, AgentEvent, Disposable, LaunchRequest, PluginModule } from '@cyborg-harness/contracts';
 import { listHistory } from './history.ts';
 
 // Claude Code не оборачивается: хуки из --settings дописывают JSON события в файл сессии, плагин его читает.

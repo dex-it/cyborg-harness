@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { PtyExit, PtyInfo } from '@cyborg/contracts';
+import type { PtyExit, PtyInfo } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
 
 /** Процесс в псевдотерминале; форма совпадает с IPty из node-pty, так что адаптер Electron отдаёт его как есть. */

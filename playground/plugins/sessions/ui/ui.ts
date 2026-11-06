@@ -1,6 +1,6 @@
 // Вид sessions: кнопка на каждого поставщика cyborg.agent и терминал последней сессии по билету главной части.
 
-import type { AgentFacts, Disposable, ItemEventDetail, SessionAction, ThemeTokens, UiContext, UiTerminal } from '@cyborg/contracts';
+import type { AgentFacts, Disposable, ItemEventDetail, SessionAction, ThemeTokens, UiContext, UiTerminal } from '@cyborg-harness/contracts';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal, type ITheme } from '@xterm/xterm';
 

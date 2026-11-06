@@ -1,4 +1,4 @@
-import type { CoreErrorCode } from '@cyborg/contracts';
+import type { CoreErrorCode } from '@cyborg-harness/contracts';
 
 export type { CoreErrorCode };
 

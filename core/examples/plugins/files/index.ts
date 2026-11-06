@@ -1,4 +1,4 @@
-import type { PluginModule } from '@cyborg/contracts';
+import type { PluginModule } from '@cyborg-harness/contracts';
 
 const disk = new Map([
   ['/work/cyborg/README.md', '# Cyborg'],

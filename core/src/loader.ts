@@ -1,5 +1,5 @@
 import { mkdtempSync } from 'node:fs';
-import type { PtyInfo } from '@cyborg/contracts';
+import type { PtyInfo } from '@cyborg-harness/contracts';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';

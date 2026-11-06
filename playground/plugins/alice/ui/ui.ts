@@ -1,6 +1,6 @@
 // Вид alice: модуль с mount, разметку строит сам; до ядра - только через UiContext.
 
-import type { Disposable, FeedLine, UiContext, UiModule } from '@cyborg/contracts';
+import type { Disposable, FeedLine, UiContext, UiModule } from '@cyborg-harness/contracts';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}): HTMLElementTagNameMap[K] {
   return Object.assign(document.createElement(tag), props);
