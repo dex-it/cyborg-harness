@@ -1,31 +1,95 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <title>Cyborg Harness</title>
   <defs>
+    <!-- Плитка: как у Cyborg, тёмная, с лёгким подъёмом света сверху -->
     <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#2d3850"/>
       <stop offset="1" stop-color="#121722"/>
     </linearGradient>
-    <linearGradient id="core" x1="0" y1="0" x2="0" y2="1">
+    <!-- Человеческая половина -->
+    <linearGradient id="human" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#f4f7fb"/>
       <stop offset="1" stop-color="#d5deea"/>
     </linearGradient>
+    <!-- Машинная половина -->
+    <linearGradient id="machine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7f8fa9"/>
+      <stop offset="1" stop-color="#56637b"/>
+    </linearGradient>
+    <!-- Свечение машинного глаза -->
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffb36b" stop-opacity="0.95"/>
+      <stop offset="0.5" stop-color="#ff8a3d" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#ff8a3d" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="left"><rect x="0" y="0" width="512" height="1024"/></clipPath>
+    <clipPath id="right"><rect x="512" y="0" width="512" height="1024"/></clipPath>
   </defs>
-  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#tile)"/>
-  <!-- Связи ядра с плагинами -->
-  <g stroke="#3794ff" stroke-width="22" stroke-linecap="round" opacity="0.85">
-    <line x1="512" y1="512" x2="512" y2="236"/>
-    <line x1="512" y1="512" x2="788" y2="512"/>
-    <line x1="512" y1="512" x2="512" y2="788"/>
-    <line x1="512" y1="512" x2="236" y2="512"/>
+
+  <!-- Плитка -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#tile)"/>
+  <rect x="104" y="104" width="816" height="816" rx="181" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="8"/>
+
+  <!-- Связи ядра с плагинами: слева человеческие (светлые), справа машинные (синие) -->
+  <g fill="none" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#e9eef5" stroke-opacity="0.6">
+      <path d="M254 512H330"/>
+      <path d="M512 254V330"/>
+      <path d="M318 318L388 388"/>
+      <path d="M318 706L388 636"/>
+    </g>
+    <g stroke="#3794ff">
+      <path d="M770 512H694"/>
+      <path d="M512 770V694"/>
+      <path d="M706 318L636 388"/>
+      <path d="M706 706L636 636"/>
+    </g>
   </g>
-  <!-- Плагины -->
-  <g fill="#121722" stroke="#3794ff" stroke-width="22">
-    <circle cx="512" cy="236" r="52"/>
-    <circle cx="788" cy="512" r="52"/>
-    <circle cx="512" cy="788" r="52"/>
-    <circle cx="236" cy="512" r="52"/>
+
+  <!-- Плагины на концах связей -->
+  <g>
+    <rect x="186" y="476" width="72" height="72" rx="20" fill="#e9eef5" fill-opacity="0.85"/>
+    <rect x="476" y="186" width="72" height="72" rx="20" fill="#e9eef5" fill-opacity="0.85"/>
+    <rect x="766" y="476" width="72" height="72" rx="20" fill="#3794ff" fill-opacity="0.9"/>
+    <rect x="476" y="766" width="72" height="72" rx="20" fill="#3794ff" fill-opacity="0.9"/>
+    <g fill="#121722" fill-opacity="0.55">
+      <circle cx="222" cy="512" r="9"/>
+      <circle cx="512" cy="222" r="9"/>
+      <circle cx="802" cy="512" r="9"/>
+      <circle cx="512" cy="802" r="9"/>
+    </g>
+    <circle cx="306" cy="306" r="17" fill="#e9eef5" fill-opacity="0.85"/>
+    <circle cx="306" cy="718" r="17" fill="#e9eef5" fill-opacity="0.85"/>
+    <circle cx="718" cy="306" r="17" fill="#ff8a3d"/>
+    <circle cx="718" cy="718" r="17" fill="#3794ff" fill-opacity="0.9"/>
   </g>
-  <!-- Ядро -->
-  <circle cx="512" cy="512" r="116" fill="url(#core)"/>
-  <circle cx="512" cy="512" r="46" fill="#3794ff"/>
+
+  <!-- Ядро: глаз киборга. Левая половина - человек, правая - машина -->
+  <g clip-path="url(#left)"><circle cx="512" cy="512" r="182" fill="url(#human)"/></g>
+  <g clip-path="url(#right)"><circle cx="512" cy="512" r="182" fill="url(#machine)"/></g>
+  <g clip-path="url(#right)">
+    <circle cx="512" cy="512" r="174" fill="none" stroke="#3794ff" stroke-width="16"/>
+    <circle cx="512" cy="512" r="116" fill="none" stroke="#3794ff" stroke-width="12"/>
+    <g fill="none" stroke="#3794ff" stroke-width="10" stroke-linecap="round">
+      <path d="M512 372V400"/>
+      <path d="M512 624V652"/>
+      <path d="M624 512H652"/>
+    </g>
+  </g>
+  <g clip-path="url(#left)">
+    <circle cx="512" cy="512" r="116" fill="none" stroke="#121722" stroke-opacity="0.45" stroke-width="12"/>
+    <g fill="none" stroke="#121722" stroke-opacity="0.45" stroke-width="10" stroke-linecap="round">
+      <path d="M512 372V400"/>
+      <path d="M512 624V652"/>
+      <path d="M372 512H400"/>
+    </g>
+  </g>
+
+  <!-- Зрачок: человеческая половина тёмная, машинная светится -->
+  <circle cx="512" cy="512" r="170" fill="url(#glow)" clip-path="url(#right)"/>
+  <g clip-path="url(#left)"><circle cx="512" cy="512" r="56" fill="#121722"/></g>
+  <g clip-path="url(#right)"><circle cx="512" cy="512" r="56" fill="#fff1e3"/></g>
+
+  <!-- Шов между половинами -->
+  <rect x="508" y="330" width="8" height="364" fill="#121722"/>
 </svg>
