@@ -1,4 +1,4 @@
-import type { Agent, PluginModule } from '@cyborg/contracts';
+import type { Agent, PluginModule } from '@cyborg-harness/contracts';
 
 // Второй поставщик cyborg.agent: агент без следов - только запуск и вывод, чтобы контракт не выточился под Claude Code.
 const agent: Agent = {

@@ -1,4 +1,4 @@
-import type { ThemeTokens } from '@cyborg/contracts';
+import type { ThemeTokens } from '@cyborg-harness/contracts';
 
 const COMMON = {
   '--cy-font': 'system-ui, sans-serif',

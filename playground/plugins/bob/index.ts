@@ -1,4 +1,4 @@
-import type { Disposable, PluginModule } from '@cyborg/contracts';
+import type { Disposable, PluginModule } from '@cyborg-harness/contracts';
 
 // Чат и эхо в optional: bob переживает их выгрузку и переподписывается, когда чат возвращается.
 const bob: PluginModule = {

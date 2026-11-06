@@ -9,13 +9,13 @@ description: "Четыре пакета и инструмент cyborg-plugin: �
 
 | Пакет | Для кого | Что внутри |
 |---|---|---|
-| `@cyborg/core` | приложение | ядро без Electron: загрузчик, граф контрактов, хосты со сторожем, журнал, шлюз `ctx.os`, права, разделы `config` и `state`, воркспейс, pty, слой окна, документы |
-| `@cyborg/electron` | приложение | всё, что связывает ядро с Electron: хосты плагинов на `utilityProcess`, адаптер ОС (`safeStorage`, `node-pty`, диалоги, буфер обмена, уведомления), схема `cyborg-plugin://`, мост видов, оболочка вида, перехват клавиш |
-| `@cyborg/contracts` | приложение и автор | типы без кода: карта контрактов `Contracts`, `PluginContext`, `UiContext`, `CoreErrorCode`, данные элементов `cy-*` |
-| `@cyborg/testing` | автор | `startKernel`, поддельные среды (псевдотерминал, секреты, память разделов) и общие наборы тестов контрактов |
+| `@cyborg-harness/core` | приложение | ядро без Electron: загрузчик, граф контрактов, хосты со сторожем, журнал, шлюз `ctx.os`, права, разделы `config` и `state`, воркспейс, pty, слой окна, документы |
+| `@cyborg-harness/electron` | приложение | всё, что связывает ядро с Electron: хосты плагинов на `utilityProcess`, адаптер ОС (`safeStorage`, `node-pty`, диалоги, буфер обмена, уведомления), схема `cyborg-plugin://`, мост видов, оболочка вида, перехват клавиш |
+| `@cyborg-harness/contracts` | приложение и автор | типы без кода: карта контрактов `Contracts`, `PluginContext`, `UiContext`, `CoreErrorCode`, данные элементов `cy-*` |
+| `@cyborg-harness/testing` | автор | `startKernel`, поддельные среды (псевдотерминал, секреты, память разделов) и общие наборы тестов контрактов |
 | `cyborg-plugin` | автор | командная строка: `new`, `check`, `build`, `pack` |
 
-Стенд playground в пакеты не входит: это пример окна поверх `@cyborg/core` и `@cyborg/electron`. Раскладка по областям, меню, уведомления и заголовок окна остаются за приложением.
+Стенд playground в пакеты не входит: это пример окна поверх `@cyborg-harness/core` и `@cyborg-harness/electron`. Раскладка по областям, меню, уведомления и заголовок окна остаются за приложением.
 
 ## Зависимости между пакетами
 
@@ -23,10 +23,10 @@ description: "Четыре пакета и инструмент cyborg-plugin: �
 flowchart LR
   accTitle: Зависимости пакетов
   accDescr: Адаптер и тест-кит строятся на ядре, ядро и адаптер ссылаются на типы контрактов, плагин зависит только от контрактов.
-  C["@cyborg/contracts"]
-  K["@cyborg/core"]
-  E["@cyborg/electron"]
-  T["@cyborg/testing"]
+  C["@cyborg-harness/contracts"]
+  K["@cyborg-harness/core"]
+  E["@cyborg-harness/electron"]
+  T["@cyborg-harness/testing"]
   P["Плагин"]
   K -. типы .-> C
   E --> K
@@ -34,13 +34,13 @@ flowchart LR
   P --> C
 ```
 
-- У `@cyborg/core` нет зависимостей из npm. На `@cyborg/contracts` он ссылается только типами (`import type`), поэтому контракты указаны как peer-зависимость.
+- У `@cyborg-harness/core` нет зависимостей из npm. На `@cyborg-harness/contracts` он ссылается только типами (`import type`), поэтому контракты указаны как peer-зависимость.
 - Ядро не импортирует Electron и ничего из стенда. Эту границу держит тест, а не ревью.
-- Плагин импортирует только `@cyborg/contracts` и свои модули: ни `node:*`, ни `electron`, ни чужих плагинов. Это проверяет `cyborg-plugin check`. Виду npm-пакеты разрешены, `node:*` и `electron` - нет.
+- Плагин импортирует только `@cyborg-harness/contracts` и свои модули: ни `node:*`, ни `electron`, ни чужих плагинов. Это проверяет `cyborg-plugin check`. Виду npm-пакеты разрешены, `node:*` и `electron` - нет.
 
 ## Публичный API
 
-Каждый пакет отдаёт явный перечень имён по точкам входа, а не всё подряд. У `@cyborg/core` точки входа разделены по среде выполнения:
+Каждый пакет отдаёт явный перечень имён по точкам входа, а не всё подряд. У `@cyborg-harness/core` точки входа разделены по среде выполнения:
 
 | Точка входа | Среда | Что в ней |
 |---|---|---|
@@ -74,6 +74,6 @@ flowchart LR
 ## Дальше
 
 - [Установка](/start/install/) - как подключить пакеты к приложению.
-- [Тестирование плагина](/authors/testing/) - `@cyborg/testing` на практике.
+- [Тестирование плагина](/authors/testing/) - `@cyborg-harness/testing` на практике.
 - [Сборка и упаковка](/authors/packaging/) - команды `cyborg-plugin`.
 - [Версии и совместимость](/features/versions/) - как ядро сверяет три версии.

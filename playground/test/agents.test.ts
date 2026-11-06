@@ -4,7 +4,7 @@ import { appendFile, chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, utimes
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { AgentEvent, PluginContext } from '@cyborg/contracts';
+import type { AgentEvent, PluginContext } from '@cyborg-harness/contracts';
 import { SectionStore, type LayerStore } from '../../core/src/config.ts';
 import { load } from '../../core/src/loader.ts';
 import { inlineHosts } from '../../core/src/transports.ts';

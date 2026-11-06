@@ -1,4 +1,4 @@
-import type { FeedLine, Reply } from '@cyborg/contracts';
+import type { FeedLine, Reply } from '@cyborg-harness/contracts';
 import type { WindowSnapshot } from '../../../core/src/window-layer.ts';
 import type { DocumentRow } from '../../../core/src/documents.ts';
 

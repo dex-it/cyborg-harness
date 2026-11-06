@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import { constants, watch as watchFs, type Dirent } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, ProcessResult, PtyInfo, SecretValue } from '@cyborg/contracts';
+import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, ProcessResult, PtyInfo, SecretValue } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import { LOGIN_SHELL } from './permissions.ts';

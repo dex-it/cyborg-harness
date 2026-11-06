@@ -1,1 +1,1 @@
-export type { CommandHandler, PluginContext, PluginModule, PluginSection } from '@cyborg/contracts';
+export type { CommandHandler, PluginContext, PluginModule, PluginSection } from '@cyborg-harness/contracts';

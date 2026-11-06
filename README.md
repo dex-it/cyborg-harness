@@ -76,13 +76,13 @@ Harness переворачивает это. В ядре нет ни агент�
 Подключите пакеты в приложение:
 
 ```bash
-npm install @cyborg/core @cyborg/electron @cyborg/contracts
+npm install @cyborg-harness/core @cyborg-harness/electron @cyborg-harness/contracts
 ```
 
 > [!NOTE]
-> Пакеты `@cyborg/*` и команда `cyborg-plugin` публикуются задачами [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9); имя npm-scope решается в [D-00](https://github.com/dex-it/cyborg-harness/issues/21). Не ставьте пакеты с таким именем из npmjs.com до публикации: scope `@cyborg` занят посторонним владельцем. До выпуска работайте из репозитория (`npm ci`, `npm start`).
+> Пакеты `@cyborg-harness/*` и команда `cyborg-plugin` публикуются задачами [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9). Пакеты scope `@cyborg` на npmjs.com к проекту не относятся. До выпуска работайте из репозитория (`npm ci`, `npm start`).
 
-Пакет `@cyborg/core` - ядро без зависимостей и без Electron, `@cyborg/electron` - готовые хосты, адаптер ОС, схема `cyborg-plugin://`, мост видов и оболочка вида, `@cyborg/contracts` - типы контрактов и API плагина.
+Пакет `@cyborg-harness/core` - ядро без зависимостей и без Electron, `@cyborg-harness/electron` - готовые хосты, адаптер ОС, схема `cyborg-plugin://`, мост видов и оболочка вида, `@cyborg-harness/contracts` - типы контрактов и API плагина.
 
 Чтобы посмотреть ядро вживую, не подключая его к своему приложению, запустите стенд из этого репозитория:
 
@@ -120,9 +120,9 @@ npm test
 Главная часть:
 
 ```ts
-import type { PluginModule } from '@cyborg/contracts';
+import type { PluginModule } from '@cyborg-harness/contracts';
 
-declare module '@cyborg/contracts' {
+declare module '@cyborg-harness/contracts' {
   interface Contracts {
     'my.greeting': { 1: { greet(name: string): Promise<string> } };
   }

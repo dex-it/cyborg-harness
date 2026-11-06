@@ -1,6 +1,6 @@
 // Элементы ядра (SAD §3.8): оболочка вида определяет их до mount, так что плагин не подменит cy-* своим классом.
 
-import type { ItemEventDetail, ListItem, TabItem, ToggleEventDetail, TreeItem } from '@cyborg/contracts';
+import type { ItemEventDetail, ListItem, TabItem, ToggleEventDetail, TreeItem } from '@cyborg-harness/contracts';
 import { checkItems, checkTree, stepIndex, stepTab, treeKey, visibleRows, type TreeRow } from '../src/elements-model.ts';
 
 // Сконструированные таблицы CSSOM не зависят от style-src окна: строгий CSP без 'unsafe-inline' резал бы <style> в тени.

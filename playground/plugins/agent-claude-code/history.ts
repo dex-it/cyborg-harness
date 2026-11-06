@@ -1,4 +1,4 @@
-import type { HistoryEntry, OsFs } from '@cyborg/contracts';
+import type { HistoryEntry, OsFs } from '@cyborg-harness/contracts';
 
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 // Журнал длинной сессии - мегабайты: заголовок и первый запрос ищутся только у краёв файла.

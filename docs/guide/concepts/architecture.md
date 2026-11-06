@@ -63,10 +63,10 @@ flowchart TB
 
 | Пакет | Что содержит |
 |---|---|
-| `@cyborg/core` | Ядро без зависимостей и без Electron: загрузчик, граф, реестр, шлюз, журнал, сторож |
-| `@cyborg/electron` | Адаптер Electron: хосты в `utilityProcess`, адаптер ОС, схема `cyborg-plugin://`, мост видов, оболочка вида |
-| `@cyborg/contracts` | Типы контрактов и API плагина: `PluginContext`, `UiContext`, права, карта `Contracts` |
-| `@cyborg/testing` | Тест-кит автора плагина |
+| `@cyborg-harness/core` | Ядро без зависимостей и без Electron: загрузчик, граф, реестр, шлюз, журнал, сторож |
+| `@cyborg-harness/electron` | Адаптер Electron: хосты в `utilityProcess`, адаптер ОС, схема `cyborg-plugin://`, мост видов, оболочка вида |
+| `@cyborg-harness/contracts` | Типы контрактов и API плагина: `PluginContext`, `UiContext`, права, карта `Contracts` |
+| `@cyborg-harness/testing` | Тест-кит автора плагина |
 
 Ядро не импортирует Electron. Всё, что ему нужно от системы, приложение передаёт как среду, поэтому ядро проверяется тестами на чистом Node. Подробнее - [пакеты и версии](/reference/packages/).
 

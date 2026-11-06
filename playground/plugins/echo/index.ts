@@ -1,4 +1,4 @@
-import type { PluginModule, PtyHandle } from '@cyborg/contracts';
+import type { PluginModule, PtyHandle } from '@cyborg-harness/contracts';
 
 // Плагин на TypeScript без сборки: хост грузит его как есть, типы снимает Node.
 const echo: PluginModule = {

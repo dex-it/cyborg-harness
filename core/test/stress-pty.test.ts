@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { PluginContext, PtyHandle } from '@cyborg/contracts';
+import type { PluginContext, PtyHandle } from '@cyborg-harness/contracts';
 import { load } from '../src/loader.ts';
 import { PtyTable, type TerminalSink } from '../src/pty.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';

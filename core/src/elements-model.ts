@@ -1,6 +1,6 @@
 // Логика элементов ядра без DOM: её проверяют тесты node, а DOM-часть - core/elements - только рисует и ловит события.
 
-import type { ListItem, TreeItem } from '@cyborg/contracts';
+import type { ListItem, TreeItem } from '@cyborg-harness/contracts';
 
 /** Строка развёрнутого дерева в порядке показа. */
 export interface TreeRow {

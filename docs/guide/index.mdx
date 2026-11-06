@@ -41,7 +41,7 @@ Cyborg Harness переворачивает это. В ядре нет ни аг
     Плагин объявляет, что даёт и что ему нужно. Ядро строит граф заранее и видит циклы, пропавших поставщиков и несовместимые версии, а не падает на первом вызове.
   </Card>
   <Card title="Сбой изолирован" icon="shield">
-    Плагины работают в отдельных процессах-хостах под сторожем. Зависший или упавший плагин получает страйк, а после трёх подряд выключается, а окно и терминалы продолжают работать.
+    Плагины работают в отдельных процессах-хостах под сторожем. Зависший или упавший плагин получает страйк, а после трёх подряд выключается; окно и терминалы продолжают работать.
   </Card>
   <Card title="Терминалы переживают всё" icon="laptop">
     pty - ресурс ядра в отдельном процессе. Он переживает перезапуск плагина, хоста и окна, а вывод идёт прямо к виду, мимо хоста плагина.
@@ -64,7 +64,7 @@ Cyborg Harness переворачивает это. В ядре нет ни аг
 1. Установите Node.js 24 и подключите пакеты в приложение на Electron 45:
 
    ```bash
-   npm install @cyborg/core @cyborg/electron @cyborg/contracts
+   npm install @cyborg-harness/core @cyborg-harness/electron @cyborg-harness/contracts
    ```
 
 2. Или посмотрите ядро вживую на стенде:
@@ -87,7 +87,7 @@ Cyborg Harness переворачивает это. В ядре нет ни аг
 </Steps>
 
 :::caution[Пакеты ещё не опубликованы]
-Пакеты `@cyborg/*` и команда `cyborg-plugin` публикуются задачами [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9); имя npm-scope решается в [D-00](https://github.com/dex-it/cyborg-harness/issues/21). Не ставьте пакеты с таким именем из npmjs.com до публикации: scope `@cyborg` на npmjs.com занят посторонним владельцем. До выпуска работайте из репозитория (`npm ci`, `npm start`).
+Пакеты `@cyborg-harness/*` и команда `cyborg-plugin` публикуются задачами [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9). Пакеты scope `@cyborg` на npmjs.com к проекту не относятся. До выпуска работайте из репозитория (`npm ci`, `npm start`).
 :::
 
 <LinkCard title="Подробная установка" description="Требования, подключение пакетов, первый плагин, стенд." href="/start/" />

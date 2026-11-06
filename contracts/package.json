@@ -1,5 +1,5 @@
 {
-  "name": "@cyborg/contracts",
+  "name": "@cyborg-harness/contracts",
   "version": "1.0.0",
   "private": true,
   "description": "Типы контрактов cyborg.* без логики; сторонние пакеты дополняют карту Contracts",

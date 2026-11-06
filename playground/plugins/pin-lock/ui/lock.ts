@@ -1,6 +1,6 @@
 // Экран замка pin-lock: единственное, что видно и доступно, пока окно закрыто.
 
-import type { Disposable, UiContext, UiModule } from '@cyborg/contracts';
+import type { Disposable, UiContext, UiModule } from '@cyborg-harness/contracts';
 
 export function mount(root: HTMLElement, ctx: UiContext): Disposable {
   const form = document.createElement('form');

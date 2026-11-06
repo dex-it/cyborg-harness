@@ -1,4 +1,4 @@
-import type { PluginModule } from '@cyborg/contracts';
+import type { PluginModule } from '@cyborg-harness/contracts';
 import type { ChatMessage } from '../contracts.ts';
 
 // Подписчики живут в других процессах: listener здесь - заглушка ядра, вызов уходит в хост потребителя.

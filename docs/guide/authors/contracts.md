@@ -42,11 +42,11 @@ ctx.subscriptions.add(ctx.contracts.onChange('cyborg.tab', () => refresh()));
 
 ## Свой контракт
 
-Контракты вашего пространства (`acme.*`) объявляет ваш пакет: он дополняет карту, ничего не меняя в `@cyborg/contracts`.
+Контракты вашего пространства (`acme.*`) объявляет ваш пакет: он дополняет карту, ничего не меняя в `@cyborg-harness/contracts`.
 
 ```ts
 // @acme/contracts/index.ts
-declare module '@cyborg/contracts' {
+declare module '@cyborg-harness/contracts' {
   interface Contracts {
     'acme.clock': { 1: Clock };
   }
@@ -57,7 +57,7 @@ export interface Clock {
 }
 ```
 
-Пространство `cyborg.*` закреплено за пакетом `@cyborg/contracts` и за встроенными плагинами: поставщиком контракта `cyborg.*` сторонний плагин стать не может.
+Пространство `cyborg.*` закреплено за пакетом `@cyborg-harness/contracts` и за встроенными плагинами: поставщиком контракта `cyborg.*` сторонний плагин стать не может.
 
 ## Правила типов
 
@@ -97,7 +97,7 @@ export interface Clock {
 
 ## Контракты ядра и примеры
 
-Пакет `@cyborg/contracts` содержит `cyborg.agent`, `cyborg.agent-tool`, `cyborg.session-prompt` и контракты базовых плагинов; перечень - в справке [Каталог контрактов](/reference/contracts-catalog/). Общий набор тестов для поставщика - в [Тестировании](/authors/testing/).
+Пакет `@cyborg-harness/contracts` содержит `cyborg.agent`, `cyborg.agent-tool`, `cyborg.session-prompt` и контракты базовых плагинов; перечень - в справке [Каталог контрактов](/reference/contracts-catalog/). Общий набор тестов для поставщика - в [Тестировании](/authors/testing/).
 
 ## Дальше
 

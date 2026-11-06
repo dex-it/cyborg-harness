@@ -1,4 +1,4 @@
-import type { PluginModule } from '@cyborg/contracts';
+import type { PluginModule } from '@cyborg-harness/contracts';
 
 // Ленивый плагин: ядро поднимает его по первой команде, а не при старте окна.
 const later: PluginModule = {

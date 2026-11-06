@@ -6,11 +6,11 @@ description: "Как подключить ядро и адаптер Electron к
 Ядро подключается к приложению как зависимость, а не копируется из репозитория. Приложение ставит три пакета, остальное делают они.
 
 ```bash
-npm install @cyborg/core @cyborg/electron @cyborg/contracts
+npm install @cyborg-harness/core @cyborg-harness/electron @cyborg-harness/contracts
 ```
 
 :::caution[Пакеты ещё не опубликованы]
-Пакеты `@cyborg/*` и команда `cyborg-plugin` публикуются задачами [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9); имя npm-scope решается в [D-00](https://github.com/dex-it/cyborg-harness/issues/21). Не ставьте пакеты с таким именем из npmjs.com до публикации: scope `@cyborg` на npmjs.com занят посторонним владельцем. До выпуска работайте из репозитория (`npm ci`, `npm start`).
+Пакеты `@cyborg-harness/*` и команда `cyborg-plugin` публикуются задачами [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9). Пакеты scope `@cyborg` на npmjs.com к проекту не относятся. До выпуска работайте из репозитория (`npm ci`, `npm start`).
 :::
 
 ## Что делает каждый пакет
@@ -18,9 +18,9 @@ npm install @cyborg/core @cyborg/electron @cyborg/contracts
 ```mermaid
 flowchart LR
   app["Ваше приложение<br/>раскладка окна, меню"]
-  el["@cyborg/electron<br/>хосты, адаптер ОС, мост видов"]
-  core["@cyborg/core<br/>граф, реестр, сторож, шлюз"]
-  ct["@cyborg/contracts<br/>типы"]
+  el["@cyborg-harness/electron<br/>хосты, адаптер ОС, мост видов"]
+  core["@cyborg-harness/core<br/>граф, реестр, сторож, шлюз"]
+  ct["@cyborg-harness/contracts<br/>типы"]
   plugins["Плагины<br/>каталог поставки"]
   app --> el --> core
   app -.-> ct
@@ -29,9 +29,9 @@ flowchart LR
   el -->|"загружает"| plugins
 ```
 
-- **`@cyborg/core`** - ядро без зависимостей и без импортов Electron. У пакета только одна внешняя связь: peer-зависимость от `@cyborg/contracts`, откуда он берёт типы.
-- **`@cyborg/electron`** - всё, что связывает ядро с Electron: хосты в `utilityProcess`, адаптер ОС (хранилище секретов `safeStorage`, `node-pty`, диалоги, буфер обмена, уведомления), схема `cyborg-plugin://`, мост видов и оболочка вида, перехват клавиш, одиночный экземпляр, события питания и окна, служба плагинов.
-- **`@cyborg/contracts`** - типы без логики. Приложение и каждый плагин импортируют их отсюда.
+- **`@cyborg-harness/core`** - ядро без зависимостей и без импортов Electron. У пакета только одна внешняя связь: peer-зависимость от `@cyborg-harness/contracts`, откуда он берёт типы.
+- **`@cyborg-harness/electron`** - всё, что связывает ядро с Electron: хосты в `utilityProcess`, адаптер ОС (хранилище секретов `safeStorage`, `node-pty`, диалоги, буфер обмена, уведомления), схема `cyborg-plugin://`, мост видов и оболочка вида, перехват клавиш, одиночный экземпляр, события питания и окна, служба плагинов.
+- **`@cyborg-harness/contracts`** - типы без логики. Приложение и каждый плагин импортируют их отсюда.
 
 ## Что остаётся приложению
 

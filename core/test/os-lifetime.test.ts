@@ -7,7 +7,7 @@ import { mkdtemp, mkdir, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { PluginContext } from '@cyborg/contracts';
+import type { PluginContext } from '@cyborg-harness/contracts';
 import { load } from '../src/loader.ts';
 import type { OsEnvironment } from '../src/os-gateway.ts';
 import { groupKilled, type PtyProcess } from '../src/pty.ts';

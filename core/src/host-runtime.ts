@@ -1,7 +1,7 @@
 import { resolveSection, VERSION_KEY, type SectionResult } from './config.ts';
 import { DisposableStore, toDisposable, type Disposable } from './disposable.ts';
 import { compileSchema } from './json-schema.ts';
-import type { ContractName, ContractType, DocumentChange, DocumentInfo, DocumentInit, HttpServer, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue, ServeRequest, ServeResponse } from '@cyborg/contracts';
+import type { ContractName, ContractType, DocumentChange, DocumentInfo, DocumentInit, HttpServer, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue, ServeRequest, ServeResponse } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';

@@ -1,4 +1,4 @@
-import type { PluginModule, UiLock } from '@cyborg/contracts';
+import type { PluginModule, UiLock } from '@cyborg-harness/contracts';
 
 // Демо: PIN зашит, настоящий плагин сверял бы его с хранилищем ОС.
 const PIN = '0000';

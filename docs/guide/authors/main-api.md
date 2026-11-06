@@ -3,10 +3,10 @@ title: "Главная часть"
 description: "PluginModule и PluginContext: что делает activate и что даёт ctx."
 ---
 
-Главная часть - модуль, который хост загружает в свой процесс. Его `default`-экспорт - объект `PluginModule`; типы берутся из `@cyborg/contracts`.
+Главная часть - модуль, который хост загружает в свой процесс. Его `default`-экспорт - объект `PluginModule`; типы берутся из `@cyborg-harness/contracts`.
 
 ```ts
-import type { PluginModule } from '@cyborg/contracts';
+import type { PluginModule } from '@cyborg-harness/contracts';
 
 const plugin: PluginModule = {
   config: { defaults: { greeting: 'привет' } },

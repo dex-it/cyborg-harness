@@ -1,7 +1,7 @@
 // Тесты гоняют границу хоста формами, которых в настоящем контракте быть не должно: синхронный метод, зависание, падение процесса.
-import type { Subscription } from '@cyborg/contracts';
+import type { Subscription } from '@cyborg-harness/contracts';
 
-declare module '@cyborg/contracts' {
+declare module '@cyborg-harness/contracts' {
   interface Contracts {
     'test.files': { 1: TestFiles; 2: TestFiles };
     'test.clock': { 1: { tick(): Promise<() => number> } };

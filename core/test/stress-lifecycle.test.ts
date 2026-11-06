@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
 import v8 from 'node:v8';
 import vm from 'node:vm';
-import type { Disposable, PluginContext } from '@cyborg/contracts';
+import type { Disposable, PluginContext } from '@cyborg-harness/contracts';
 import { DisposableStore, toDisposable } from '../src/disposable.ts';
 import { load, type JournalEntry, type Kernel, type LoadOptions } from '../src/loader.ts';
 import type { PluginModule } from '../src/plugin.ts';
@@ -68,7 +68,7 @@ interface Svc {
   ping(): Promise<string>;
 }
 
-declare module '@cyborg/contracts' {
+declare module '@cyborg-harness/contracts' {
   interface Contracts {
     'test.svc': { 1: object };
     'test.src': { 1: { readonly name: string } };

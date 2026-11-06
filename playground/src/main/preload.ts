@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { ThemeTokens } from '@cyborg/contracts';
+import type { ThemeTokens } from '@cyborg-harness/contracts';
 import type { FeedLine, PluginsSnapshot, Reply } from '../shared/plugins.ts';
 import { VIEW_SCHEME, type SpikeBridge, type SpikePing, type SpikeReport, type TerminalEvent, type ViewBridge } from '../shared/views.ts';
 

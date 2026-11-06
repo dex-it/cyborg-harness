@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { PluginContext } from '@cyborg/contracts';
+import type { PluginContext } from '@cyborg-harness/contracts';
 import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
 import { inlineHosts } from '../src/transports.ts';

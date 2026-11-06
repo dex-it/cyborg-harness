@@ -6,7 +6,7 @@ description: "UiModule и UiContext: как устроен вид плагина
 Вид - браузерный модуль, который окно загружает в отдельный `<iframe>`. Модуль экспортирует функцию `mount`; ядро зовёт её один раз на документ вида и вызывает `dispose` у возвращённого значения, когда снимает вид.
 
 ```ts
-import type { Disposable, UiContext, UiModule } from '@cyborg/contracts';
+import type { Disposable, UiContext, UiModule } from '@cyborg-harness/contracts';
 
 export function mount(root: HTMLElement, ctx: UiContext): Disposable {
   const list = document.createElement('cy-list');

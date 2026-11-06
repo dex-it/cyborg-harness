@@ -1,6 +1,6 @@
 // Слой окна (SAD §3.8): диалоги видов поверх всех фреймов и замок окна. Состояние держит ядро, рисует приложение.
 
-import type { DialogChoice, DialogSpec } from '@cyborg/contracts';
+import type { DialogChoice, DialogSpec } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
 import { isRecord } from './wire.ts';
 

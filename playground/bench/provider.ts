@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { PluginModule } from '@cyborg/contracts';
+import type { PluginModule } from '@cyborg-harness/contracts';
 
 /** Поставщик замера: отвечает на вызовы и занимает поток хоста синхронной работой, как это делает настоящий плагин. */
 const provider: PluginModule = {

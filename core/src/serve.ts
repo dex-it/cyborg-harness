@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { ServeRequest } from '@cyborg/contracts';
+import type { ServeRequest } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
 import { isRecord } from './wire.ts';
 

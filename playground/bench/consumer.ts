@@ -1,4 +1,4 @@
-import type { PluginModule } from '@cyborg/contracts';
+import type { PluginModule } from '@cyborg-harness/contracts';
 import { percentiles } from './contracts.ts';
 
 /** Потребитель замера: меряет вызовы контракта и поток событий изнутри своего хоста. */

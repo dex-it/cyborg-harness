@@ -1,7 +1,7 @@
 // Открытые документы окна (SAD §3.8, «Вкладки после перезапуска»): порядок и данные держит ядро, поднимает документ его владелец.
 
 import { randomUUID } from 'node:crypto';
-import type { DocumentChange, DocumentInfo } from '@cyborg/contracts';
+import type { DocumentChange, DocumentInfo } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
 
 export interface StoredDocument extends DocumentInfo {

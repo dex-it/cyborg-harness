@@ -1,4 +1,4 @@
-import type { AgentTool, PluginModule, SessionAction } from '@cyborg/contracts';
+import type { AgentTool, PluginModule, SessionAction } from '@cyborg-harness/contracts';
 
 export const TOOL = 'suggest_actions';
 
