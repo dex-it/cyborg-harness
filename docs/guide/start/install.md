@@ -9,6 +9,10 @@ description: "Как подключить ядро и адаптер Electron к
 npm install @cyborg/core @cyborg/electron @cyborg/contracts
 ```
 
+:::caution[Пакеты ещё не опубликованы]
+Пакеты `@cyborg/*` и команда `cyborg-plugin` публикуются задачами [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9); имя npm-scope решается в [D-00](https://github.com/dex-it/cyborg-harness/issues/21). Не ставьте пакеты с таким именем из npmjs.com до публикации: scope `@cyborg` на npmjs.com занят посторонним владельцем. До выпуска работайте из репозитория (`npm ci`, `npm start`).
+:::
+
 ## Что делает каждый пакет
 
 ```mermaid
