@@ -32,8 +32,8 @@ export const PTY_SCRIPT = 'stty raw -echo; printf R; exec cat';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Разгон и замер: `op(i)` - одно действие, `pause` после него в замер не входит; первый вызов отдельно, как холодный путь. */
-async function loop(op: (i: number) => Promise<void>, pause = 0): Promise<Sampled> {
+/** Разгон и замер: `op(i)` - одно действие, `settle` после него в замер не входит; первый вызов отдельно, как холодный путь. */
+async function loop(op: (i: number) => Promise<void>, settle?: () => Promise<unknown>): Promise<Sampled> {
   let first = NaN;
   const times: number[] = [];
   for (let i = 0; i < WARMUP + SAMPLES; i++) {
@@ -42,7 +42,7 @@ async function loop(op: (i: number) => Promise<void>, pause = 0): Promise<Sample
     const ms = performance.now() - t;
     if (i === 0) first = ms;
     if (i >= WARMUP) times.push(ms);
-    if (pause > 0) await sleep(pause);
+    await settle?.();
   }
   return { first, times };
 }
@@ -72,7 +72,7 @@ export async function measure(os: ProbeOs, probe: ProbePath, target: string, siz
           fs.appendFileSync(file, payload);
           await got;
           arrived = undefined;
-        }, 5);
+        }, () => sleep(5));
       } finally {
         await dispose();
       }
@@ -88,13 +88,18 @@ export async function measure(os: ProbeOs, probe: ProbePath, target: string, siz
       });
       const ready = new Promise<void>((r) => (arrived = r));
       if (!buffer.endsWith(want)) await ready;
+      let echoed = Promise.resolve();
       try {
-        return await loop(async (i) => {
-          want = `#${String(i)}$`;
-          buffer = '';
-          const got = new Promise<void>((r) => (arrived = r));
-          await Promise.all([pty.write('x'.repeat(Math.max(0, size - want.length)) + want), got]);
-        });
+        // Цена - сам вызов; эхо ждётся вне замера, чтобы следующая запись не стояла в очереди за выводом прежней.
+        return await loop(
+          async (i) => {
+            want = `#${String(i)}$`;
+            buffer = '';
+            echoed = new Promise<void>((r) => (arrived = r));
+            await pty.write('x'.repeat(Math.max(0, size - want.length)) + want);
+          },
+          () => echoed,
+        );
       } finally {
         await pty.kill();
       }

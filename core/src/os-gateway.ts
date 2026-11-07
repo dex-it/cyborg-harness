@@ -238,6 +238,9 @@ export class OsGateway {
   readonly #grants: GrantStore | undefined;
   #grantWrites: Promise<unknown> = Promise.resolve();
   readonly #serves: HttpServes;
+  // Каталоги приложения ведёт ядро, а не человек: ссылка, подложенная на их место позже, по снятому realpath область не расширит.
+  readonly #appReal = new Map<string, string>();
+  readonly #ownMade = new Map<string, Promise<void>>();
 
   constructor(
     env: OsEnvironment,
@@ -279,6 +282,7 @@ export class OsGateway {
   forget(pluginId: string, pty: 'release' | 'detach' | 'park' = 'release'): number {
     this.#roots.delete(pluginId);
     this.#approved.delete(pluginId);
+    this.#ownMade.delete(pluginId);
     for (const [key, close] of this.#watches) if (key.startsWith(`${pluginId}\0`)) close();
     for (const cancel of this.#pending.get(pluginId) ?? []) cancel();
     this.#pending.delete(pluginId);
@@ -313,17 +317,30 @@ export class OsGateway {
     return new CoreError('PermissionDenied', `${m.id}: ${method} - ${detail}`);
   }
 
+  async #realApp(p: string): Promise<string> {
+    const known = this.#appReal.get(p);
+    if (known !== undefined) return known;
+    try {
+      const resolved = await fs.realpath(p);
+      this.#appReal.set(p, resolved);
+      return resolved;
+    } catch {
+      return path.resolve(p);
+    }
+  }
+
   async #areas(m: PluginManifest, right: 'fs.read' | 'fs.write' | 'shell'): Promise<Area[]> {
     const own = this.pathsOf(m.id);
     const named = m.permissions[right] ?? [];
     const plain = async (p: string, git = false): Promise<Area> => ({ root: await real(p), segs: [], git });
+    const ownArea = async (p: string): Promise<Area> => ({ root: await this.#realApp(p), segs: [], git: false });
     const workspace = () => [...(this.#env.roots?.() ?? []), ...[...this.#roots.values()].flat()];
     // У shell своих каталогов нет: открыть свой файл в системе - тоже выход наружу, и он объявляется.
-    const out: Promise<Area>[] = right === 'shell' ? [] : [plain(own.data), plain(own.temp)];
+    const out: Promise<Area>[] = right === 'shell' ? [] : [ownArea(own.data), ownArea(own.temp)];
     for (const area of named) {
       if (area === 'workspace' || area === 'workspace.git') out.push(...workspace().map((r) => plain(r, area === 'workspace.git')));
       else if (area === 'granted') out.push(...[...(this.#granted.get(m.id) ?? [])].map((g) => plain(g)));
-      else if (area === 'plugin-data' || area === 'plugin-temp') out.push(...(right === 'shell' ? [plain(area === 'plugin-data' ? own.data : own.temp)] : []));
+      else if (area === 'plugin-data' || area === 'plugin-temp') out.push(...(right === 'shell' ? [ownArea(area === 'plugin-data' ? own.data : own.temp)] : []));
       else if (area.startsWith('/') || area.startsWith('~')) out.push(this.#maskArea(area));
     }
     return Promise.all(out);
@@ -347,10 +364,10 @@ export class OsGateway {
     const area = matched[0]?.dir;
     if (area === undefined) throw this.#denied(m, method, `вне области ${right}: ${given}`, reason);
     const own = this.pathsOf(m.id);
-    const isOwn = inside(await real(own.data), target) || inside(await real(own.temp), target);
+    const isOwn = inside(await this.#realApp(own.data), target) || inside(await this.#realApp(own.temp), target);
     if (isOwn) return target;
-    for (const dir of [this.#env.dataDir, this.#env.tempDir]) if (inside(await real(dir), target)) throw this.#denied(m, method, `каталог другого плагина: ${given}`, reason);
-    if (this.#env.appDir !== undefined && inside(await real(this.#env.appDir), target)) {
+    for (const dir of [this.#env.dataDir, this.#env.tempDir]) if (inside(await this.#realApp(dir), target)) throw this.#denied(m, method, `каталог другого плагина: ${given}`, reason);
+    if (this.#env.appDir !== undefined && inside(await this.#realApp(this.#env.appDir), target)) {
       const appRoots = await Promise.all((this.#env.roots?.() ?? []).map(real));
       if (!appRoots.some((r) => inside(r, target))) throw this.#denied(m, method, `данные приложения: ${given}`, reason);
     }
@@ -388,10 +405,17 @@ export class OsGateway {
     return write;
   }
 
-  async #ownDirs(pluginId: string): Promise<void> {
+  /** Свои каталоги создаются раз за активацию плагина: удалить их целиком плагину не даёт `fs.remove`. */
+  #ownDirs(pluginId: string): Promise<void> {
+    const known = this.#ownMade.get(pluginId);
+    if (known) return known;
     const own = this.pathsOf(pluginId);
-    await fs.mkdir(own.data, { recursive: true });
-    await fs.mkdir(own.temp, { recursive: true });
+    const made = Promise.all([fs.mkdir(own.data, { recursive: true }), fs.mkdir(own.temp, { recursive: true })]).then(() => undefined);
+    this.#ownMade.set(pluginId, made);
+    made.catch(() => {
+      if (this.#ownMade.get(pluginId) === made) this.#ownMade.delete(pluginId);
+    });
+    return made;
   }
 
   async call(m: PluginManifest, method: string, args: readonly unknown[]): Promise<unknown> {
@@ -505,10 +529,10 @@ export class OsGateway {
         await this.#ownDirs(m.id);
         const target = await this.#checkPath(m, method, args[0], true);
         const own = this.pathsOf(m.id);
-        if (target === (await real(own.data)) || target === (await real(own.temp))) throw this.#denied(m, method, 'свой каталог целиком не удаляется');
+        if (target === (await this.#realApp(own.data)) || target === (await this.#realApp(own.temp))) throw this.#denied(m, method, 'свой каталог целиком не удаляется');
         const areas = await this.#areas(m, 'fs.write');
         if (areas.some((a) => areaDir(a, target) === target)) throw this.#denied(m, method, `корень области не удаляется: ${String(args[0])}`);
-        if (!inside(await real(own.data), target) && !inside(await real(own.temp), target) && (await containsGit(target))) {
+        if (!inside(await this.#realApp(own.data), target) && !inside(await this.#realApp(own.temp), target) && (await containsGit(target))) {
           throw this.#denied(m, method, `внутри есть .git: ${String(args[0])}`);
         }
         await fs.rm(target, { recursive: true, force: true });
