@@ -223,3 +223,35 @@ test('сирота: pty с persist без attach завершается по с�
   assert.deepEqual(table.list('gone'), [], 'запись завершившегося сироты убрана сроком');
 });
 
+test('оставленный: release и detach его не трогают; claim вернувшегося плагина даёт срок на attach; endKept - только оставленным', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const backend = fakePty();
+  const expired: PtyExpiry[] = [];
+  let changes = 0;
+  const table = new PtyTable(backend, () => undefined, 1000, 30_000, { graceMs: 1000, expired: (e) => void expired.push(e), kept: () => {
+      changes++;
+    },
+  });
+  const [taken, done, lost] = ['taken', 'done', 'lost'].map((program) => table.spawn('p', { ...spawnOpts, program }));
+  const other = table.spawn('other', spawnOpts);
+  assert.equal(table.park('p'), 3);
+  table.release('p');
+  table.detach('p');
+  t.mock.timers.tick(10_000);
+  assert.deepEqual(backend.procs.map((p) => p.killed), [undefined, undefined, undefined, undefined], 'оставленный завершён без человека');
+  assert.deepEqual(table.kept().map((k) => k.id), [taken!.id, done!.id, lost!.id]);
+
+  backend.procs[1]!.exit(0);
+  assert.deepEqual(table.kept()[1]?.exit, { code: 0 }, 'завершившийся сам остаётся в списке с выходом');
+  assert.throws(() => table.endKept(other.id), { code: 'NotFound' });
+  const before = changes;
+  table.claim('p');
+  assert.deepEqual(table.kept(), []);
+  assert.ok(changes > before);
+  table.attach('p', taken!.id);
+  t.mock.timers.tick(1000);
+  assert.equal(backend.procs[0]!.killed, undefined, 'взятый после возврата живёт');
+  assert.equal(backend.procs[2]!.killed, 'SIGHUP');
+  assert.deepEqual(expired, [{ pluginId: 'p', id: lost!.id, program: 'lost', graceMs: 1000 }], 'сам завершившийся в журнал не попадает');
+  assert.deepEqual(table.list('p').map((p) => p.id), [taken!.id]);
+});

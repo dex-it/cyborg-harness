@@ -349,6 +349,15 @@ button:focus-visible {
   font-size: 12px;
 }
 
+.plugin-kept {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.plugin-kept p {
+  margin: 0;
+}
+
 .plugin-error {
   margin: 6px 0 0;
   color: var(--danger);

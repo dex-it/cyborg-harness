@@ -7,7 +7,7 @@ import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, Pr
 import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import { LOGIN_SHELL } from './permissions.ts';
-import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type PtyExpiry, type TerminalSink, type TerminalView } from './pty.ts';
+import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type KeptPty, type PtyExpiry, type TerminalSink, type TerminalView } from './pty.ts';
 import { HttpServes, type AskHost } from './serve.ts';
 import type { GuardRight } from './via-contract.ts';
 import { isRecord } from './wire.ts';
@@ -249,7 +249,7 @@ export class OsGateway {
     manifestOf: (pluginId: string) => PluginManifest | undefined = () => undefined,
     grants?: GrantStore,
     ask: AskHost = () => Promise.reject(new CoreError('Unavailable', 'хоста нет')),
-    ptyExpired: (expiry: PtyExpiry) => void = () => undefined,
+    ptyEvents: { readonly expired?: (expiry: PtyExpiry) => void; readonly kept?: () => void } = {},
   ) {
     this.#env = env;
     this.#serves = new HttpServes(ask);
@@ -267,7 +267,7 @@ export class OsGateway {
     this.#push = push;
     this.#deny = deny;
     this.#configOf = configOf;
-    this.#pty = env.pty && new PtyTable(env.pty, push, env.ptyBacklog, undefined, { ...(env.ptyOrphanGrace !== undefined && { graceMs: env.ptyOrphanGrace }), expired: ptyExpired });
+    this.#pty = env.pty && new PtyTable(env.pty, push, env.ptyBacklog, undefined, { ...(env.ptyOrphanGrace !== undefined && { graceMs: env.ptyOrphanGrace }), ...ptyEvents });
   }
 
   pathsOf(pluginId: string): { data: string; temp: string; home: string } {
@@ -299,6 +299,20 @@ export class OsGateway {
 
   releaseAllPty(): void {
     this.#pty?.releaseAll();
+  }
+
+  /** Плагин активирован: с этого момента идёт льготный срок на `attach` его pty без владельца. */
+  claimPty(pluginId: string): void {
+    this.#pty?.claim(pluginId);
+  }
+
+  keptPty(): KeptPty[] {
+    return this.#pty?.kept() ?? [];
+  }
+
+  endKeptPty(id: string): void {
+    if (!this.#pty) throw new CoreError('NotFound', `оставленного pty ${id} нет`);
+    this.#pty.endKept(id);
   }
 
   /** Вид плагина предъявил билет своей главной части; `pluginId` приложение берёт из origin фрейма, а не из слов вида. */

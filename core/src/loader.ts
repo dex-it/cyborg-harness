@@ -20,7 +20,7 @@ import { DocumentTable, type DocumentRow } from './documents.ts';
 import { guardedValue, guardsOf } from './via-contract.ts';
 import { isRecord, own, parseWire, type Parsed, type WireSpec } from './wire.ts';
 import type { HostHandle, SpawnHost } from './transports.ts';
-import type { TerminalSink, TerminalView } from './pty.ts';
+import type { KeptPty, TerminalSink, TerminalView } from './pty.ts';
 import { WINDOW_COMMANDS, WINDOW_OWNER, WindowLayer, type WindowSnapshot } from './window-layer.ts';
 
 export type JournalEntry =
@@ -49,7 +49,7 @@ export type JournalEntry =
     }
   /** Снят по disable: сам (`by` - он же) или вместе с поставщиком, которого требовал. */
   | { readonly pluginId: string; readonly kind: 'unloaded'; readonly by: string; readonly error?: string; readonly keptPty?: number }
-  /** pty с `persist` ждал `attach` после падения хоста дольше срока и завершён. */
+  /** pty без владельца не взят через `attach` за льготное время после падения хоста или активации плагина и завершён. */
   | { readonly pluginId: string; readonly kind: 'pty-expired'; readonly id: string; readonly program: string; readonly graceMs: number }
   /** Сочетание объявлено и другим плагином; нажатие получает `winner`. */
   | { readonly pluginId: string; readonly kind: 'key-conflict'; readonly key: string; readonly command: string; readonly winner: string }
@@ -142,6 +142,8 @@ export interface LoadOptions {
   readonly onWindow?: ((snapshot: WindowSnapshot) => void) | undefined;
   /** Документ открыт, переименован или закрыт: приложение перерисовывает вкладки по `kernel.documents`. */
   readonly onDocuments?: (() => void) | undefined;
+  /** Оставленные процессы выключенных плагинов поменялись: приложение перечитывает `kernel.keptPty()`. */
+  readonly onKeptPty?: (() => void) | undefined;
 }
 
 export interface DisableOptions {
@@ -192,6 +194,10 @@ export interface Kernel {
   wake(pluginId: string): Promise<void>;
   /** Вид плагина открывает pty по билету `share()` его главной части; вывод идёт в `sink` мимо хоста. */
   openTerminal(pluginId: string, ticket: string, sink: TerminalSink): TerminalView;
+  /** Процессы, оставленные человеком при выключении плагинов, пока плагин не вернулся: без показа приложением их не видно до выхода. */
+  keptPty(): KeptPty[];
+  /** Человек завершил оставленный процесс или убрал завершившийся; чужой или не оставленный id - `NotFound`. */
+  endKeptPty(id: string): void;
   /** Память вида из state воркспейса: раздел ядра `$views`, ключ `<плагин>/<вид>`; вида нет в манифесте - `Invalid`. */
   viewState(pluginId: string, view: string): unknown;
   /** JSON до 64 КБ, undefined - забыть; записи идут по очереди, чтобы параллельные не затёрли друг друга. */
@@ -390,7 +396,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       if (!host || host.down) throw new CoreError('Unavailable', `${id}: хост не работает`);
       return host.endpoint.request('serve.request', params);
     },
-    (e) => record({ kind: 'pty-expired', ...e }),
+    { expired: (e) => record({ kind: 'pty-expired', ...e }), kept: () => options.onKeptPty?.() },
   );
 
   const manifests: PluginManifest[] = [];
@@ -906,6 +912,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
         return;
       }
       active.push(pluginId);
+      gateway.claimPty(pluginId);
       record({ pluginId, kind: 'activated', hostId, ms: performance.now() - started });
     } catch (error) {
       if (host.down) return;
@@ -1090,6 +1097,8 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     keysOf: (pluginId) => Object.fromEntries([...keys.values()].filter((k) => k.pluginId === pluginId).map((k) => [k.command, k.key])),
     wake,
     openTerminal: (pluginId, ticket, sink) => gateway.openTerminal(pluginId, ticket, sink),
+    keptPty: () => gateway.keptPty(),
+    endKeptPty: (id) => gateway.endKeptPty(id),
     viewState: (pluginId, view) => {
       const value = viewMemory()[viewKey(pluginId, view)];
       return value === undefined ? undefined : structuredClone(value);

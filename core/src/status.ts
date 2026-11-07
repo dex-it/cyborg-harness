@@ -125,7 +125,7 @@ export function describeEntry(e: JournalEntry): string {
     case 'denied':
       return e.repeats ? `отказ ctx.os: ${e.detail} - ещё ${String(e.repeats)} раз за ${String(DENIED_WINDOW_MS / 1000)} с` : `отказ ctx.os: ${e.detail}`;
     case 'pty-expired':
-      return `терминал ${e.id} (${e.program}) завершён: плагин не подхватил его за ${String(e.graceMs / 1000)} с после падения хоста`;
+      return `терминал ${e.id} (${e.program}) завершён: плагин не подхватил его за ${String(e.graceMs / 1000)} с`;
     case 'unloaded': {
       const base = e.by === e.pluginId ? 'выгружен' : `выгружен вместе с ${e.by}: требует его контракт`;
       const what = e.keptPty ? `${base}; процессов в терминале оставлено: ${String(e.keptPty)}` : base;

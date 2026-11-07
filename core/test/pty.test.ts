@@ -11,7 +11,7 @@ import { inlineHosts, type HostHandle } from '../src/transports.ts';
 
 const tick = () => new Promise((r) => setTimeout(r, 30));
 
-async function setup(plugins: Record<string, unknown>, withBackend = true, ptyOrphanGrace?: number) {
+async function setup(plugins: Record<string, unknown>, withBackend = true, ptyOrphanGrace?: number, onKeptPty?: () => void) {
   // На macOS tmpdir - симлинк /var -> /private/var, а шлюз отдаёт пути после realpath.
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-pty-')));
   const work = path.join(root, 'work');
@@ -30,6 +30,7 @@ async function setup(plugins: Record<string, unknown>, withBackend = true, ptyOr
       handles.set(id, h);
       return h;
     },
+    onKeptPty,
   });
   const pty = (id: string) => {
     const p = contexts.get(id)?.os.pty;
@@ -262,4 +263,31 @@ test('выключение: preview называет живые pty; keepPty о�
   await s.k.disable('quiet', { keepPty: true });
   await s.k.unload();
   assert.equal(s.backend.procs.find((p) => p.pid === parked.pid)?.killed, 'SIGHUP', 'припаркованный pty пережил выгрузку ядра');
+});
+
+test('оставленный: ждёт без срока, пока плагин выключен, виден приложению и завершается человеком; вернувшийся плагин без attach теряет его по сроку', async () => {
+  let changes = 0;
+  await using s = await setup({ agent: shell }, true, 100, () => {
+    changes++;
+  });
+  const ended = await s.pty('agent').spawn({ program: '/bin/bash' });
+  const left = await s.pty('agent').spawn({ program: '/bin/bash' });
+  const [endedProc, leftProc] = s.backend.procs as [FakeProc, FakeProc];
+
+  await s.k.disable('agent', { keepPty: true });
+  assert.deepEqual(s.k.keptPty().map((p) => [p.pluginId, p.id, typeof p.keptAt]), [['agent', ended.id, 'number'], ['agent', left.id, 'number']]);
+  assert.ok(changes > 0, 'приложение не узнало об оставленных');
+  await new Promise((r) => setTimeout(r, 250));
+  assert.equal(leftProc.killed, undefined, 'срок сработал, пока плагин выключен');
+
+  s.k.endKeptPty(ended.id);
+  assert.equal(endedProc.killed, 'SIGHUP');
+  assert.deepEqual(s.k.keptPty().map((p) => p.id), [left.id]);
+  assert.throws(() => s.k.endKeptPty(ended.id), { code: 'NotFound' });
+
+  await s.k.enable('agent');
+  assert.deepEqual(s.k.keptPty(), [], 'вернувшийся плагин владеет процессом, он больше не оставленный');
+  await new Promise((r) => setTimeout(r, 250));
+  assert.equal(leftProc.killed, 'SIGHUP', 'плагин не взял процесс за срок, а он жив');
+  assert.deepEqual(s.k.journal.filter((e) => e.kind === 'pty-expired'), [{ kind: 'pty-expired', pluginId: 'agent', id: left.id, program: '/bin/bash', graceMs: 100 }]);
 });

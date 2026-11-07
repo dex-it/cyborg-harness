@@ -28,6 +28,19 @@ export interface PluginRow {
   readonly view?: string;
   /** Адрес экрана замка `ui.overlay`: окно показывает его, пока замок плагина стоит. */
   readonly overlay?: string;
+  /** Процессы, оставленные человеком при выключении: без строки в окне их не видно до выхода. */
+  readonly kept?: readonly KeptPtyRow[];
+}
+
+export interface KeptPtyRow {
+  readonly id: string;
+  readonly pid: number;
+  /** Программа с аргументами. */
+  readonly command: string;
+  /** Когда оставлен, мс от эпохи. */
+  readonly keptAt: number;
+  /** Код выхода, если процесс завершился сам. */
+  readonly exitCode?: number;
 }
 
 export interface KeyRow {

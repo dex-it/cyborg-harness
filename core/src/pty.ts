@@ -48,6 +48,8 @@ interface Entry {
   readonly viewers: Set<TerminalSink>;
   exit?: PtyExit;
   orphaned?: ReturnType<typeof setTimeout>;
+  /** Оставлен человеком при выключении плагина; снимается, когда плагин вернулся. */
+  keptAt: number | undefined;
 }
 
 /** pty без владельца завершён по сроку: плагин не вернулся и не сделал `attach`. */
@@ -56,6 +58,13 @@ export interface PtyExpiry {
   readonly id: string;
   readonly program: string;
   readonly graceMs: number;
+}
+
+/** Оставленный человеком процесс выключенного плагина: ждёт без срока, пока плагин не вернётся. */
+export interface KeptPty extends PtyInfo {
+  readonly pluginId: string;
+  /** Когда оставлен, мс от эпохи. */
+  readonly keptAt: number;
 }
 
 export const PTY_SIGNALS = ['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGHUP'] as const;
@@ -111,6 +120,7 @@ export class PtyTable {
   readonly #ticketTtl: number;
   readonly #grace: number;
   readonly #expired: (expiry: PtyExpiry) => void;
+  readonly #keptChanged: () => void;
   readonly #entries = new Map<string, Entry>();
   readonly #tickets = new Map<string, { pluginId: string; id: string; expires: number }>();
   #next = 0;
@@ -120,7 +130,7 @@ export class PtyTable {
     push: (pluginId: string, method: 'pty.data' | 'pty.exit', params: unknown) => void,
     backlogLimit = BACKLOG_LIMIT,
     ticketTtl = 30_000,
-    orphan: { readonly graceMs?: number; readonly expired?: (expiry: PtyExpiry) => void } = {},
+    orphan: { readonly graceMs?: number; readonly expired?: (expiry: PtyExpiry) => void; readonly kept?: () => void } = {},
   ) {
     this.#backend = backend;
     this.#push = push;
@@ -128,11 +138,12 @@ export class PtyTable {
     this.#ticketTtl = ticketTtl;
     this.#grace = orphan.graceMs ?? ORPHAN_GRACE;
     this.#expired = orphan.expired ?? (() => undefined);
+    this.#keptChanged = orphan.kept ?? (() => undefined);
   }
 
   spawn(pluginId: string, o: { program: string; args: string[]; cwd?: string; env: Record<string, string>; cols: number; rows: number; persist: boolean }): PtyWire {
     const proc = this.#backend.spawn(o.program, o.args, { name: 'xterm-256color', ...(o.cwd !== undefined && { cwd: o.cwd }), env: o.env, cols: o.cols, rows: o.rows });
-    const e: Entry = { id: `pty-${String(++this.#next)}`, pluginId, proc, program: o.program, args: o.args, persist: o.persist, cols: o.cols, rows: o.rows, tail: new Tail(this.#limit), attached: true, viewers: new Set() };
+    const e: Entry = { id: `pty-${String(++this.#next)}`, pluginId, proc, program: o.program, args: o.args, persist: o.persist, cols: o.cols, rows: o.rows, tail: new Tail(this.#limit), attached: true, viewers: new Set(), keptAt: undefined };
     this.#entries.set(e.id, e);
     proc.onData((data) => {
       // Хвост держится и при живом владельце: после перезапуска хоста им восстанавливается экран, где TUI не перерисует себя сам.
@@ -145,6 +156,7 @@ export class PtyTable {
       e.exit = exit;
       for (const v of e.viewers) v.exit(exit);
       e.viewers.clear();
+      if (e.keptAt !== undefined) this.#keptChanged();
       if (!e.attached) return;
       this.#entries.delete(e.id);
       this.#push(pluginId, 'pty.exit', { pluginId, id: e.id, exit: e.exit });
@@ -160,6 +172,10 @@ export class PtyTable {
     const e = this.#own(pluginId, id);
     const wire = { ...info(e), backlog: e.tail.text() };
     clearTimeout(e.orphaned);
+    if (e.keptAt !== undefined) {
+      e.keptAt = undefined;
+      this.#keptChanged();
+    }
     if (e.exit) {
       this.#entries.delete(id);
       return wire;
@@ -225,31 +241,34 @@ export class PtyTable {
 
   /** Хост плагина упал: `persist` ждут attach не дольше льготного срока, прочие завершаются - их вывод больше некому принять. */
   detach(pluginId: string): void {
-    for (const e of this.#of(pluginId)) {
+    for (const e of this.#unkept(pluginId)) {
       if (!e.persist || e.exit) {
         this.#end(e);
         continue;
       }
       e.attached = false;
-      clearTimeout(e.orphaned);
-      e.orphaned = setTimeout(() => {
-        if (e.attached || this.#entries.get(e.id) !== e) return;
-        // Завершившийся сам процесс сроком не убит: запись просто уходит.
-        const alive = !e.exit;
-        this.#end(e);
-        if (alive) this.#expired({ pluginId, id: e.id, program: e.program, graceMs: this.#grace });
-      }, this.#grace);
-      // Ждущий срока pty не держит процесс приложения: выход из него и так завершит все.
-      e.orphaned.unref();
+      this.#orphan(e);
     }
   }
 
-  /** Плагин выключен, выгружен или не вернётся после падения хоста. */
-  release(pluginId: string): void {
-    for (const e of this.#of(pluginId)) this.#end(e);
+  /** Плагин активирован: его pty без владельца, оставленные человеком тоже, ждут attach не дольше льготного срока. */
+  claim(pluginId: string): void {
+    let unkept = false;
+    for (const e of this.#of(pluginId)) {
+      if (e.attached) continue;
+      unkept ||= e.keptAt !== undefined;
+      e.keptAt = undefined;
+      this.#orphan(e);
+    }
+    if (unkept) this.#keptChanged();
   }
 
-  /** Человек выключил плагин и оставил его процессы: живые ждут attach без срока, до выхода из приложения; число оставленных. */
+  /** Плагин выключен, выгружен или не вернётся после падения хоста; оставленные человеком ждут дальше. */
+  release(pluginId: string): void {
+    for (const e of this.#unkept(pluginId)) this.#end(e);
+  }
+
+  /** Человек выключил плагин и оставил его процессы: живые ждут без срока, пока плагин не вернётся; число оставленных. */
   park(pluginId: string): number {
     let kept = 0;
     for (const e of this.#of(pluginId)) {
@@ -258,10 +277,25 @@ export class PtyTable {
       if (e.exit) this.#entries.delete(e.id);
       else {
         e.attached = false;
+        e.keptAt ??= Date.now();
         kept++;
       }
     }
+    if (kept > 0) this.#keptChanged();
     return kept;
+  }
+
+  /** Оставленные человеком процессы выключенных плагинов, в том числе завершившиеся сами. */
+  kept(): KeptPty[] {
+    return [...this.#entries.values()].flatMap((e) => (e.keptAt === undefined ? [] : [{ ...info(e), pluginId: e.pluginId, keptAt: e.keptAt }]));
+  }
+
+  /** Человек завершил оставленный процесс или убрал завершившийся. */
+  endKept(id: string): void {
+    const e = this.#entries.get(id);
+    if (e?.keptAt === undefined) throw new CoreError('NotFound', `оставленного pty ${id} нет`);
+    this.#end(e);
+    this.#keptChanged();
   }
 
   /** Приложение завершается: припаркованные pty выключенных плагинов тоже уходят. */
@@ -275,8 +309,25 @@ export class PtyTable {
     if (!e.exit) e.proc.kill();
   }
 
+  #orphan(e: Entry): void {
+    clearTimeout(e.orphaned);
+    e.orphaned = setTimeout(() => {
+      if (e.attached || this.#entries.get(e.id) !== e) return;
+      // Завершившийся сам процесс сроком не убит: запись просто уходит.
+      const alive = !e.exit;
+      this.#end(e);
+      if (alive) this.#expired({ pluginId: e.pluginId, id: e.id, program: e.program, graceMs: this.#grace });
+    }, this.#grace);
+    // Ждущий срока pty не держит процесс приложения: выход из него и так завершит все.
+    e.orphaned.unref();
+  }
+
   #of(pluginId: string): Entry[] {
     return [...this.#entries.values()].filter((e) => e.pluginId === pluginId);
+  }
+
+  #unkept(pluginId: string): Entry[] {
+    return this.#of(pluginId).filter((e) => e.keptAt === undefined);
   }
 
   #own(pluginId: string, id: string): Entry {
