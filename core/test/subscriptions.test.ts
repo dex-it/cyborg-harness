@@ -164,3 +164,16 @@ test('метод без подписки в ответ: колбэк живёт 
   assert.deepEqual(seen, [1], 'синхронный вызов до ответа дошёл, поздний - нет');
   await kernel.unload();
 });
+
+test('предел подписок потребителя: сверх предела - Invalid, снятая подписка освобождает место', async () => {
+  const { kernel, api, listen } = await start({ limits: { subscriptions: 2 } });
+  const a = await listen('a');
+  await listen('b');
+  await assert.rejects(listen('c'), { code: 'Invalid', message: /подписок через контракты больше 2/ });
+  assert.equal(await api.listeners(), 2, 'отказ не дошёл до поставщика');
+  a.dispose();
+  await settle();
+  await listen('c');
+  assert.equal(await api.listeners(), 2);
+  await kernel.unload();
+});
