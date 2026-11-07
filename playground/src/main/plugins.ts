@@ -26,6 +26,7 @@ import { isRecord } from '../../../core/src/manifest.ts';
 import { WINDOW_OWNER } from '../../../core/src/window-layer.ts';
 import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from '../shared/plugins.ts';
 import { viewOrigin } from '../shared/views.ts';
+import { migrateLegacyWorkspace } from './legacy-workspace.ts';
 import type { PluginUi } from './view-files.ts';
 
 export const PLUGIN_API_VERSION = '1.0.0';
@@ -118,7 +119,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     options.onProblem?.(p);
   };
   const file = options.workspace ?? path.join(options.userData, 'workspace.cyborg.json');
-  const opened = await openWorkspace({ file, userFile: path.join(options.userData, 'cyborg.json'), stateDir: path.join(options.userData, 'state') });
+  const opened = await openWorkspace({ file, userFile: path.join(options.userData, 'cyborg.json'), stateDir: path.join(options.userData, 'state'), migrate: migrateLegacyWorkspace });
   if (!opened.ok) throw new Error(`воркспейс ${file} уже открыт процессом ${opened.owner}`);
   const ws = opened.workspace;
   for (const p of ws.problems) report(p);
