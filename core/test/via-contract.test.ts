@@ -113,3 +113,50 @@ test('via-contract: вызов из вида (callAs) проходит ту же
   await assert.rejects(s.k.callAs('files', 'test.guarded', 1, 'read', [s.file]), { code: 'NotDeclared' }, 'вид без контракта в манифесте');
   assert.deepEqual(s.denied(), [{ pluginId: 'nosy', method: 'test.guarded.open', reason: 'via-contract' }]);
 });
+
+test('via-contract: файл из области записи вызывающего поставщик с правом shell откроет, только если это документ; пропавший путь - отказ', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'cyborg-via-open-'));
+  const work = path.join(root, 'work');
+  await mkdir(work, { recursive: true });
+  const payload = path.join(work, 'payload.xyz');
+  const report = path.join(work, 'report.md');
+  for (const f of [payload, report]) await writeFile(f, 'x');
+  const opened: string[] = [];
+  const contexts = new Map<string, PluginContext>();
+  const consumer = (id: string, permissions: Record<string, unknown>) => ({ ...base, id, requires: { 'test.guarded': '^1' }, permissions });
+  const k = await load({
+    apiVersion: '1.0.0',
+    spawnHost: inlineHosts(async (entry) => ({
+      activate: (ctx: PluginContext) => {
+        contexts.set(entry, ctx);
+        if (entry === 'opener') {
+          ctx.contracts.provide('test.guarded', '1.0', {
+            read: async () => '',
+            open: async () => '',
+            size: async () => 0,
+            reveal: (p) => ctx.os.shell!.openPath!(p),
+          });
+        }
+      },
+    })),
+    enabled: ['opener', 'writer', 'reader'],
+    manifests: [
+      { ...base, id: 'opener', provides: { 'test.guarded': { version: '1.0', guard: { reveal: { shell: 0 } } } }, permissions: { shell: [work] } },
+      consumer('writer', { 'fs.write': [work], shell: [work] }),
+      consumer('reader', { shell: [work] }),
+    ],
+    os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), shell: { openPath: async (p) => void opened.push(p), openExternal: async () => undefined } },
+  });
+  try {
+    const guarded = (id: string) => contexts.get(id)!.contracts.get('test.guarded', 1)!;
+    await assert.rejects(guarded('writer').reveal!(payload), { code: 'PermissionDenied' }, 'вызывающий пишет туда сам');
+    await guarded('writer').reveal!(report);
+    await guarded('reader').reveal!(payload);
+    await assert.rejects(guarded('writer').reveal!(path.join(work, 'later.xyz')), { code: 'NotFound' }, 'пропавший путь вызывающий создал бы до открытия');
+    assert.deepEqual(opened, [report, payload]);
+    assert.ok(k.journal.some((e) => e.kind === 'denied' && e.pluginId === 'writer' && e.reason === 'via-contract'));
+  } finally {
+    await k.unload();
+    await rm(root, { recursive: true, force: true });
+  }
+});

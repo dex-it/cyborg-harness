@@ -460,6 +460,92 @@ test('права: маски путей, workspace.git, выбор в dialog к�
   await k.unload();
 });
 
+test('shell.openPath: где плагин сам пишет, открывается только документ - файл с неизвестным расширением не запустится', async () => {
+  await using box = await sandbox();
+  const proj = path.join(box.work, 'proj');
+  await mkdir(path.join(proj, 'reports'), { recursive: true });
+  const opened: string[] = [];
+  const { k, os, denied } = await kernel(
+    {
+      writer: { 'fs.write': ['workspace'], shell: ['workspace', 'plugin-data'] },
+      viewer: { 'fs.read': ['workspace'], shell: ['workspace'] },
+    },
+    { dataDir: box.data, tempDir: box.temp, roots: () => [box.work], shell: { openPath: async (p) => void opened.push(p), openExternal: async () => undefined } },
+  );
+  const writer = os('writer');
+  const opener = (id: string) => {
+    const shell = os(id).shell;
+    if (typeof shell?.openPath !== 'function') throw new Error(`у ${id} нет shell.openPath`);
+    return (file: string) => shell.openPath!(file);
+  };
+  const open = opener('writer');
+  const payload = path.join(proj, 'payload.xyz');
+  const report = path.join(proj, 'reports', 'report.MD');
+  const own = path.join(writer.paths.data, 'out.pdf');
+  for (const [file, text] of [[payload, 'код'], [report, '# отчёт'], [own, '%PDF'], [path.join(writer.paths.data, 'page.html'), '<script>']] as const) await writer.fs.writeText(file, text);
+
+  await assert.rejects(open(payload), { code: 'PermissionDenied' }, 'неизвестный тип в области записи');
+  await assert.rejects(open(path.join(writer.paths.data, 'page.html')), { code: 'PermissionDenied' }, 'страница выполнит скрипт в браузере');
+  await assert.rejects(open(path.join(proj, 'reports')), { code: 'PermissionDenied' }, 'каталог - не документ');
+  await open(report);
+  await open(own);
+  assert.ok(denied().includes('writer:shell.openPath'));
+
+  await opener('viewer')(payload);
+  assert.deepEqual(opened, [report, own, payload]);
+  assert.deepEqual(describePermissions({ 'fs.read': ['workspace'], shell: ['workspace'] }), ['читает файлы: проекты воркспейса', 'открывает в системе: проекты воркспейса - кроме программ и скриптов']);
+  assert.ok(describePermissions({ shell: ['plugin-data'] }).includes('открывает в системе: свои данные - кроме программ и скриптов; где сам пишет - только документы'));
+  await k.unload();
+});
+
+test('shell any: документ или каталог вне корней; программа, файл не документом, пропавший путь, защищённое и чужое - отказ; читать area any не даёт', async () => {
+  await using box = await sandbox();
+  const guarded = path.join(box.work, 'team.cyborg.json');
+  const doc = path.join(box.outside, 'build.log');
+  const program = path.join(box.outside, 'run');
+  const script = path.join(box.outside, 'setup.sh');
+  const page = path.join(box.outside, 'page.html');
+  const payload = path.join(box.outside, 'payload.xyz');
+  for (const f of [guarded, doc, program, script, page, payload]) await writeFile(f, 'x');
+  await chmod(program, 0o755);
+  const opened: string[] = [];
+  const { k, os, denied } = await kernel(
+    { linker: { shell: ['any'] }, narrow: { shell: ['workspace'] }, other: { 'fs.write': ['plugin-data'] } },
+    { dataDir: box.data, tempDir: box.temp, roots: () => [box.work], protectedPaths: [guarded], shell: { openPath: async (p) => void opened.push(p), openExternal: async () => undefined } },
+  );
+  const opener = (id: string) => {
+    const shell = os(id).shell;
+    if (typeof shell?.openPath !== 'function') throw new Error(`у ${id} нет shell.openPath`);
+    return (file: string) => shell.openPath!(file);
+  };
+  const open = opener('linker');
+  await open(doc);
+  await open(box.outside);
+  await assert.rejects(open(program), { code: 'PermissionDenied' }, 'файл с битом x');
+  await assert.rejects(open(script), { code: 'PermissionDenied' }, 'скрипт по расширению');
+  await assert.rejects(open(page), { code: 'PermissionDenied' }, 'страницу мог положить кто угодно, браузер выполнит её скрипт');
+  await assert.rejects(open(payload), { code: 'PermissionDenied' }, 'тип не из списка документов');
+  await assert.rejects(open(path.join(box.outside, 'gone.txt')), { code: 'NotFound' });
+  await assert.rejects(open(guarded), { code: 'PermissionDenied' }, 'защищённый путь');
+  const foreign = path.join(os('other').paths.data, 'note.txt');
+  await os('other').fs.writeText(foreign, 'x');
+  await assert.rejects(open(foreign), { code: 'PermissionDenied' }, 'каталог другого плагина');
+  const own = path.join(os('linker').paths.data, 'payload.xyz');
+  await os('linker').fs.writeText(own, 'x');
+  await assert.rejects(open(own), { code: 'PermissionDenied' }, 'там, где пишет сам, - только документ');
+  await assert.rejects(opener('narrow')(doc), { code: 'PermissionDenied' }, 'без области any - вне области');
+  assert.deepEqual(opened, [doc, box.outside]);
+  assert.ok(denied().includes('narrow:shell.openPath'));
+  await assert.rejects(os('linker').fs.readText(doc), { code: 'PermissionDenied' }, 'any не даёт чтения');
+  await k.unload();
+
+  assert.deepEqual(describePermissions({ shell: ['any'] }), ['открывает в системе: любой документ или каталог - кроме программ и скриптов; где сам пишет - только документы']);
+  for (const right of ['fs.read', 'fs.write']) {
+    const r = parseManifest(manifest('p', { [right]: ['any'] }));
+    assert.ok(!r.ok && r.errors.some((e) => e.startsWith(`permissions.${right}`)), right);
+  }
+});
+
 test('granted: выбор в dialog лежит в state воркспейса и действует после перезапуска; кривые записи и сбой записи не мешают', async () => {
   await using box = await sandbox();
   const [picked, kept, late] = ['picked.txt', 'kept.txt', 'late.txt'].map((name) => path.join(box.outside, name));
@@ -516,5 +602,5 @@ test('права в манифесте: маска под названным к�
   for (const bad of [{ 'fs.read': ['/*'] }, { 'fs.read': ['~/*/x'] }, { 'fs.read': ['/a/../b'] }, { 'fs.read': ['/a/x**'] }, { 'fs.read': ['workspace.git'] }, { shell: ['file:'] }, { shell: ['javascript:'] }, { shell: ['https'] }]) {
     assert.notDeepEqual(errors(bad), [], JSON.stringify(bad));
   }
-  assert.ok(describePermissions({ shell: ['granted', 'https:'], 'fs.write': ['workspace.git'] }).includes('открывает в системе: выбранное человеком в диалоге, https:'));
+  assert.ok(describePermissions({ shell: ['granted', 'https:'], 'fs.write': ['workspace.git'] }).includes('открывает в системе: выбранное человеком в диалоге, https: - кроме программ и скриптов; где сам пишет - только документы'));
 });

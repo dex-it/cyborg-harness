@@ -9,7 +9,7 @@ export interface PluginPermissions {
   readonly 'fs.read'?: readonly string[];
   /** Те же области и `workspace.git` - корни воркспейса вместе с записью в `.git`. */
   readonly 'fs.write'?: readonly string[];
-  /** Открыть в системе: области путей, как у `fs.read`, и схемы URL с двоеточием (`https:`, `mailto:`). */
+  /** Открыть в системе: области путей, как у `fs.read`, `any` - любой существующий документ или каталог, и схемы URL с двоеточием (`https:`, `mailto:`). */
   readonly shell?: readonly string[];
   readonly process?: readonly ProgramRule[];
   /** Программы в псевдотерминале; правило той же формы, что у `process`. */
