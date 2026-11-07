@@ -12,9 +12,14 @@
         <h1>Cyborg Playground</h1>
         <p id="plugins-summary" class="plugins-summary" aria-live="polite"></p>
         <div id="plugins-problems" class="plugins-problems" hidden></div>
+        <div id="safe-mode" class="safe-mode" role="status" hidden>
+          <span>Безопасный режим: код плагинов не запускается.</span>
+          <button id="safe-mode-exit" type="button">Выйти из безопасного режима</button>
+        </div>
         <div class="workspace">
           <span id="workspace-current" class="workspace-current"></span>
           <button id="workspace-open" type="button">Открыть…</button>
+          <button id="safe-mode-enter" type="button">Перезапустить в безопасном режиме</button>
           <ul id="workspace-recent" class="workspace-recent" aria-label="Недавние воркспейсы"></ul>
         </div>
       </header>
