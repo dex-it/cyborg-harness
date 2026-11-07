@@ -309,6 +309,26 @@ test('«Включить снова»: не поднявшийся плагин 
   await k.unload();
 });
 
+test('пространство поставки: отказ стороннему поставщику идёт в журнал, без bundled проверки нет', async () => {
+  const noop: PluginModule = { activate: () => undefined };
+  const table = { claude: noop, rogue: noop, sessions: noop };
+  const options = {
+    enabled: Object.keys(table),
+    manifests: [manifest('claude', { provides: { 'cyborg.agent': '1.0' } }), manifest('rogue', { provides: { 'cyborg.agent': '1.0' } }), manifest('sessions', { requires: { 'cyborg.agent': '^1' } })],
+    reservedPrefixes: ['cyborg.'],
+  };
+  const k = await kernel(table, { ...options, bundled: ['claude', 'sessions'] });
+  assert.deepEqual(k.active, ['claude', 'sessions']);
+  assert.deepEqual(
+    k.journal.filter((e) => e.kind === 'rejected'),
+    [{ pluginId: 'rogue', kind: 'rejected', reasons: [{ kind: 'reserved', what: 'provides', name: 'cyborg.agent', prefix: 'cyborg.' }] }],
+  );
+  await k.unload();
+  const open = await kernel(table, options);
+  assert.deepEqual(open.active, ['claude', 'rogue']);
+  await open.unload();
+});
+
 test('хосты: из поставки - по группам, сторонний всегда один в своём хосте', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const ids = ['a', 'b', 'x', 'y', 'z', 'w'];
