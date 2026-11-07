@@ -13,7 +13,7 @@ description: "Какие проверки гоняет репозиторий, �
 | `npm test` | модульные, сценарные и стресс-тесты на встроенном `node:test` |
 | `npm run smoke` | дымовой тест окна по DevTools Protocol |
 | `npm run demo` | сценарии ядра в консоли с пошаговым режимом `--step` |
-| `npm run spike`, `npm run spike:hosts` | замеры фреймов и хостов, не тесты |
+| `npm run spike`, `npm run spike:hosts`, `npm run spike:gateway` | замеры фреймов, хостов и шлюза, не тесты; `spike:gateway` - проверка бюджета для CI по медиане трёх прогонов |
 
 ## Типы и линтер
 
