@@ -114,7 +114,7 @@ test('via-contract: вызов из вида (callAs) проходит ту же
   assert.deepEqual(s.denied(), [{ pluginId: 'nosy', method: 'test.guarded.open', reason: 'via-contract' }]);
 });
 
-test('via-contract: файл из области записи вызывающего поставщик с правом shell откроет, только если это документ', async () => {
+test('via-contract: файл из области записи вызывающего поставщик с правом shell откроет, только если это документ; пропавший путь - отказ', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'cyborg-via-open-'));
   const work = path.join(root, 'work');
   await mkdir(work, { recursive: true });
@@ -152,6 +152,7 @@ test('via-contract: файл из области записи вызывающе
     await assert.rejects(guarded('writer').reveal!(payload), { code: 'PermissionDenied' }, 'вызывающий пишет туда сам');
     await guarded('writer').reveal!(report);
     await guarded('reader').reveal!(payload);
+    await assert.rejects(guarded('writer').reveal!(path.join(work, 'later.xyz')), { code: 'NotFound' }, 'пропавший путь вызывающий создал бы до открытия');
     assert.deepEqual(opened, [report, payload]);
     assert.ok(k.journal.some((e) => e.kind === 'denied' && e.pluginId === 'writer' && e.reason === 'via-contract'));
   } finally {

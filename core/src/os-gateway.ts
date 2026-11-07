@@ -379,8 +379,11 @@ export class OsGateway {
     if (right !== 'secrets.ref') {
       const target = await this.#checkPath(m, method, value, right === 'fs.write', right, 'via-contract');
       // Иначе вызывающий запишет файл и попросит открыть его поставщика, который туда не пишет.
-      const st = right === 'shell' ? await fs.stat(target).catch(() => undefined) : undefined;
-      if (st) await this.#checkOpen(m, method, target, st, value, 'via-contract');
+      if (right !== 'shell') return;
+      const st = await fs.stat(target).catch(() => undefined);
+      // Пропавший путь вызывающий успел бы создать, пока вызов идёт к поставщику.
+      if (st === undefined) throw new CoreError('NotFound', `${method}: нет ${value}`);
+      await this.#checkOpen(m, method, target, st, value, 'via-contract');
       return;
     }
     if (!this.refAllowed(m, value)) throw this.#denied(m, method, `ссылка вне secrets.ref: ${value}`, 'via-contract');
