@@ -10,6 +10,7 @@ import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { keepFocus } from '../src/ui-shell.ts';
 import { parseDialog, reservedId, WINDOW_OWNER, WindowLayer, type WindowSnapshot } from '../src/window-layer.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 const shown = (layer: WindowLayer) => layer.snapshot.dialog;
 const shownId = (layer: WindowLayer): number => {
@@ -122,7 +123,7 @@ function kernel(table: Record<string, PluginModule>, options: Omit<LoadOptions, 
     snaps,
     start: () =>
       load({
-        apiVersion: '1.0.0',
+        apiVersion: PLUGIN_API_VERSION,
         spawnHost: (id) => {
           const h = base(id);
           handles.set(id, h);
