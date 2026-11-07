@@ -7,7 +7,27 @@ export const ACTIONS_WAIT_MS = 20_000;
 interface Actions {
   version: number;
   list: readonly SessionAction[];
+  ready: boolean;
+  turnOver: boolean;
   readonly waiters: Set<() => void>;
+}
+
+/** Агент ждёт новой реплики: ход кончился, и с тех пор агент ничего не начал. */
+export function readyAfter(event: AgentEvent, ready: boolean, turnOver: boolean): boolean {
+  switch (event.type) {
+    case 'turnEnd':
+      return !event.background;
+    // Ход кончился и ничего не началось - агент не работает, значит и не спрашивает: это «ждёт ответа» после хода.
+    case 'waiting':
+      return turnOver;
+    case 'prompt':
+      return false;
+    case 'activity':
+      return event.tool === undefined && ready;
+    case 'cwd':
+    case 'session':
+      return ready;
+  }
 }
 
 const describe = (e: AgentEvent): string => {
@@ -61,13 +81,25 @@ const plugin: PluginModule = {
     const byTicket = new Map<string, string>();
     const actions = new Map<string, Actions>();
     const tokens = new Map<string, string>();
+    const changed = (a: Actions) => {
+      a.version++;
+      for (const wake of a.waiters) wake();
+      a.waiters.clear();
+    };
     const setActions = (sessionId: string, list: readonly SessionAction[]) => {
       const a = actions.get(sessionId);
       if (!a || (a.list.length === 0 && list.length === 0)) return;
-      a.version++;
       a.list = list;
-      for (const wake of a.waiters) wake();
-      a.waiters.clear();
+      changed(a);
+    };
+    const onEvent = (sessionId: string, e: AgentEvent) => {
+      const a = actions.get(sessionId);
+      if (!a) return;
+      const ready = readyAfter(e, a.ready, a.turnOver);
+      a.turnOver = e.type === 'turnEnd' && !e.background;
+      if (ready === a.ready) return;
+      a.ready = ready;
+      changed(a);
     };
     const toolSources = () => ctx.contracts.all('cyborg.agent-tool', 1);
     let server: Promise<string> | undefined;
@@ -105,7 +137,7 @@ const plugin: PluginModule = {
         actions.delete(sessionId);
         for (const wake of a?.waiters ?? []) wake();
       };
-      actions.set(sessionId, { version: 0, list: [], waiters: new Set() });
+      actions.set(sessionId, { version: 0, list: [], ready: false, turnOver: false, waiters: new Set() });
       let handle: PtyHandle;
       try {
         const spec = await provider.impl.launch({ sessionId, cwd: ctx.os.paths.data, ...(resume !== undefined && { resumeId: resume }), ...(promptFragments.length > 0 && { promptFragments }), ...(tools && { tools }) });
@@ -122,6 +154,7 @@ const plugin: PluginModule = {
       const watch = facts.capabilities.events
         ? provider.impl.watch(sessionId, (e) => {
             ctx.log(`${facts.id} ${sessionId}: ${describe(e)}`);
+            onEvent(sessionId, e);
             // Человек написал сам или нажал кнопку: прежние предложения к новому ходу не относятся.
             if (e.type === 'prompt') setActions(sessionId, []);
             // Документ закрыт человеком - сохранять некуда.
@@ -173,7 +206,7 @@ const plugin: PluginModule = {
           a.waiters.add(wake);
         });
       }
-      return actions.get(sessionId) === a ? { version: a.version, actions: a.list } : null;
+      return actions.get(sessionId) === a ? { version: a.version, actions: a.list, ready: a.ready } : null;
     });
     // Человек закрыл вкладку в окне: сессии за ней больше не на что показываться.
     ctx.documents.onClose((id) => {

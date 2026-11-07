@@ -76,7 +76,7 @@ export interface AgentToolResult {
   readonly actions?: readonly SessionAction[];
 }
 
-/** Кнопка: `text` уходит в сессию, `submit` - сразу с Enter. */
+/** Кнопка: `text` уходит в сессию; `submit` - сразу с Enter, если агент ждёт новой реплики, иначе в строку ввода. */
 export interface SessionAction {
   readonly label: string;
   readonly text: string;

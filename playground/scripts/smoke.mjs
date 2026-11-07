@@ -1,7 +1,7 @@
 // Дымовой тест собранного playground по DevTools Protocol; нужен дисплей (на Linux - xvfb-run ... --no-sandbox).
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -27,9 +27,17 @@ async function waitFor(what, probe, timeout = TIMEOUT_MS) {
   throw new Error(`не дождались: ${what}${last instanceof Error ? ` (${last.message})` : ''}`);
 }
 
+const liveClaude = process.env.CYBORG_SMOKE_CLAUDE === '1';
+// Без живого claude оболочка входа находит подставной (fake-claude.mjs): профиль человека с его PATH в smoke не нужен.
+const fakeBin = join(userData, 'fake-bin');
+mkdirSync(fakeBin);
+writeFileSync(join(fakeBin, 'claude'), `#!/bin/sh\nexec '${process.execPath}' '${join(repo, 'playground', 'scripts', 'fake-claude.mjs')}' "$@"\n`, { mode: 0o755 });
+writeFileSync(join(fakeBin, 'login-shell'), `#!/bin/sh\nPATH='${fakeBin}':"$PATH"; export PATH\nif [ "$1" = -lc ]; then shift; exec /bin/sh -c "$@"; fi\nexec /bin/sh "$@"\n`, { mode: 0o755 });
+
 // --inspect=0 - инспектор главного процесса: нажатие оттуда идёт через before-input-event, как с клавиатуры.
 const app = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${userData}`, '--remote-debugging-port=0', ...electronArgs], {
   stdio: ['ignore', 'ignore', 'pipe'],
+  env: liveClaude ? process.env : { ...process.env, SHELL: join(fakeBin, 'login-shell') },
 });
 let stderr = '';
 app.stderr.on('data', (d) => (stderr += d));
@@ -396,7 +404,7 @@ async function main() {
   log('документы: вкладка сессии в окне, «Закрыть» уводит onClose владельцу и завершает его сессию');
 
   // Живой claude нужен с входом в аккаунт и сетью: шаг по CYBORG_SMOKE_CLAUDE=1, в CI его нет.
-  if (process.env.CYBORG_SMOKE_CLAUDE === '1') {
+  if (liveClaude) {
     assert.match(await agentButtons(), /claude-code\+/, 'CYBORG_SMOKE_CLAUDE=1, а claude не найден в PATH оболочки входа');
     await inView('sessions', "document.querySelector('#agents cy-button[data-agent=\"claude-code\"]').click()");
     const screen = () => sessionScreen();
@@ -418,7 +426,29 @@ async function main() {
     await ev("document.querySelector('#documents-list .document-row button').click()");
     await waitFor('сессия claude закрыта', async () => (await docRows()) === '' && /вышла/.test(await inView('sessions', "document.getElementById('session-state').textContent")));
     log(`живой claude: оболочка входа по праву launch поставщика, ${reached}; вкладка закрывает сессию`);
-  } else log('живой claude пропущен: CYBORG_SMOKE_CLAUDE не задан');
+  } else {
+    await inView('sessions', "document.querySelector('#agents cy-button[data-agent=\"claude-code\"]').click()");
+    await waitFor('подставной claude запущен', async () => /fake claude: готов/.test(await sessionScreen()));
+    // Подписка на файл событий начинается с его конца: хук до неё не дошёл бы.
+    await sleep(500);
+    const say = (text) => inView('sessions', `(() => { const l = document.getElementById('line'); l.value = ${JSON.stringify(text)}; l.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); })()`);
+    const action = () => inView('sessions', "(() => { const b = document.querySelector('#actions cy-button'); const r = b?.querySelector('.reply'); return b && !b.closest('[hidden]') && r.getBoundingClientRect().height > 0 ? `${b.querySelector('.label').textContent}/${r.textContent}/${b.getAttribute('variant') === 'primary' ? 'отправит' : 'в строку'}` : ''; })()");
+    const received = async () => (await sessionScreen()).split('получено: smoke-reply').length - 1;
+    await say('go');
+    await waitFor('ход кончился: кнопка с репликой второй строкой отправляет сразу', async () => (await action()) === 'Продолжить/smoke-reply/отправит');
+    await inView('sessions', "document.querySelector('#actions cy-button').click()");
+    await waitFor('реплика кнопки ушла агенту с Enter', async () => (await received()) === 1);
+    await say('ask');
+    await waitFor('агент спрашивает: кнопка ставит реплику в строку', async () => (await action()) === 'Продолжить/smoke-reply/в строку' && /просит разрешение/.test(await sessionScreen()));
+    await inView('sessions', "document.querySelector('#actions cy-button').click()");
+    assert.equal(await inView('sessions', "document.getElementById('line').value"), 'smoke-reply', 'реплика не встала в строку ввода');
+    await sleep(300);
+    assert.equal(await received(), 1, 'кнопка ответила на вопрос агента за человека');
+    await waitFor('вкладка сессии подставного claude в панели «Документы»', async () => (await docRows()) === 'sessions · session:true');
+    await ev("document.querySelector('#documents-list .document-row button').click()");
+    await waitFor('сессия подставного claude закрыта', async () => (await docRows()) === '');
+    log('кнопки агента: реплика на кнопке второй строкой; Enter за человека - только после конца хода, при вопросе агента реплика встаёт в строку ввода');
+  }
 
   assert.equal(await button('flaky', 'Журнал'), true, 'у flaky нет кнопки «Журнал»');
   assert.equal(await text('#plugins-journal-title'), 'Журнал: flaky');
