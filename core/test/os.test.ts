@@ -67,7 +67,7 @@ test('без прав: свои каталоги работают, чужой п
   await k.unload();
 });
 
-test('fs.read и fs.write: область по праву, симлинк наружу не пускает, .git и защищённые пути закрыты', async () => {
+test('fs.read и fs.write: область по праву, симлинк наружу не пускает, .git, защищённые пути и их соседи <файл>.* закрыты', async () => {
   await using box = await sandbox();
   await writeFile(path.join(box.outside, 'secret.txt'), 'нельзя');
   await writeFile(path.join(box.work, 'readme.md'), 'можно');
@@ -75,6 +75,8 @@ test('fs.read и fs.write: область по праву, симлинк нар
   await mkdir(path.join(box.work, '.git'));
   const workspaceFile = path.join(box.work, 'cyborg.json');
   await writeFile(workspaceFile, '{}');
+  await writeFile(`${workspaceFile}.corrupt-2026-11-07T10-00-00-000Z`, '{"secret"');
+  await writeFile(path.join(box.work, 'cyborg.json5'), 'чужое имя');
   const { k, os } = await kernel(
     { reader: { 'fs.read': [box.work] }, writer: { 'fs.read': [box.work], 'fs.write': [box.work] } },
     { dataDir: box.data, tempDir: box.temp, protectedPaths: [workspaceFile] },
@@ -83,6 +85,9 @@ test('fs.read и fs.write: область по праву, симлинк нар
   await assert.rejects(os('reader').fs.readText(path.join(box.work, 'escape', 'secret.txt')), { code: 'PermissionDenied' });
   await assert.rejects(os('reader').fs.writeText(path.join(box.work, 'new.txt'), 'x'), { code: 'PermissionDenied' });
   await assert.rejects(os('reader').fs.readText(workspaceFile), { code: 'PermissionDenied' });
+  await assert.rejects(os('reader').fs.readText(`${workspaceFile}.corrupt-2026-11-07T10-00-00-000Z`), { code: 'PermissionDenied' }, 'копия битого файла несёт его содержимое');
+  await assert.rejects(os('writer').fs.writeText(`${workspaceFile}.4242.tmp`, 'x'), { code: 'PermissionDenied' }, 'временный файл атомарной записи');
+  assert.equal(await os('reader').fs.readText(path.join(box.work, 'cyborg.json5')), 'чужое имя', 'сосед - только с точкой после имени');
   await os('writer').fs.mkdir(path.join(box.work, 'deep'));
   await os('writer').fs.writeText(path.join(box.work, 'deep', 'new.txt'), 'x');
   assert.equal(await readFile(path.join(box.work, 'deep', 'new.txt'), 'utf8'), 'x');
@@ -458,6 +463,27 @@ test('права: маски путей, workspace.git, выбор в dialog к�
   assert.deepEqual(opened, [picked, 'https://example.com/a']);
   assert.ok(denied().includes('picker:shell.openExternal'));
   await k.unload();
+});
+
+test('команда ядра cyborg.workspace.reveal: среда показывает файл воркспейса, плагину файл закрыт и команда недоступна', async () => {
+  await using box = await sandbox();
+  const file = path.join(box.work, 'team.cyborg.json');
+  await writeFile(file, '{}');
+  const shown: string[] = [];
+  const { k, os, ctx } = await kernel(
+    { reader: { 'fs.read': ['workspace'], shell: ['workspace'] } },
+    { dataDir: box.data, tempDir: box.temp, roots: () => [box.work], protectedPaths: [file], workspaceFile: file, shell: { openPath: async () => undefined, openExternal: async () => undefined, showItemInFolder: (p) => void shown.push(p) } },
+  );
+  await k.run('cyborg.workspace.reveal');
+  assert.deepEqual(shown, [file]);
+  await assert.rejects(os('reader').fs.readText(file), { code: 'PermissionDenied' }, 'файл воркспейса - защищённый путь');
+  await assert.rejects(ctx('reader').commands.run('cyborg.workspace.reveal'), { code: 'PermissionDenied' }, 'команду ядра зовёт приложение');
+  assert.deepEqual(shown, [file]);
+  await k.unload();
+
+  const bare = await kernel({}, { dataDir: box.data, tempDir: box.temp });
+  await assert.rejects(bare.k.run('cyborg.workspace.reveal'), { code: 'Unavailable' });
+  await bare.k.unload();
 });
 
 test('granted: выбор в dialog лежит в state воркспейса и действует после перезапуска; кривые записи и сбой записи не мешают', async () => {

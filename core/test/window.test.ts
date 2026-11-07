@@ -9,7 +9,7 @@ import { parseManifest } from '../src/manifest.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { keepFocus } from '../src/ui-shell.ts';
-import { parseDialog, reservedId, WINDOW_OWNER, WindowLayer, type WindowSnapshot } from '../src/window-layer.ts';
+import { KERNEL_OWNER, parseDialog, reservedId, WINDOW_OWNER, WindowLayer, type WindowSnapshot } from '../src/window-layer.ts';
 
 const shown = (layer: WindowLayer) => layer.snapshot.dialog;
 const shownId = (layer: WindowLayer): number => {
@@ -244,7 +244,7 @@ test('манифест: ui.lock только с ui.overlay, overlay и lock.onSt
   assert.match(errors({ permissions: { 'ui.lock': true }, ui: { overlay: '../lock.js' } }).join(), /ui.overlay: ожидается путь/);
 });
 
-test('команды окна: F6 и Shift+F6 у ядра, плагин их не перехватит, человек переназначит; под замком не работают', async () => {
+test('команды окна: F6 и Shift+F6 у ядра, плагин их не перехватит, человек переназначит и даст сочетание команде ядра; под замком не работают', async () => {
   const pad: PluginModule = {
     activate(ctx) {
       ctx.commands.register('pad.open', () => 'open');
@@ -259,6 +259,7 @@ test('команды окна: F6 и Shift+F6 у ядра, плагин их н�
       keybindings: [
         { key: 'Ctrl+Alt+Right', command: 'cyborg.window.focus-next' },
         { key: 'Shift+F6', command: null },
+        { key: 'Ctrl+Alt+W', command: 'cyborg.workspace.reveal' },
       ],
       platform: 'linux',
     },
@@ -269,6 +270,7 @@ test('команды окна: F6 и Shift+F6 у ядра, плагин их н�
   assert.equal(k.keybinding('Ctrl+Alt+Right')?.command, 'cyborg.window.focus-next');
   assert.ok(!k.journal.some((e) => e.kind === 'key-ignored'), 'команда окна - известная команда');
   assert.equal(k.keybinding('Shift+F6'), undefined, 'освобождённое сочетание идёт в окно');
+  assert.equal(k.keybinding('Ctrl+Alt+W')?.pluginId, KERNEL_OWNER, 'команда ядра берёт сочетание человека');
   await k.run('pin.lock', false);
   assert.equal(k.keybinding('F6'), undefined, 'под замком области недоступны');
   await k.run('pin.unlock');
@@ -277,7 +279,7 @@ test('команды окна: F6 и Shift+F6 у ядра, плагин их н�
 });
 
 test('манифест: id, в пространстве которого лежат команды окна, занят', () => {
-  for (const id of ['cyborg', 'cyborg.window']) assert.equal(reservedId(id), true, id);
+  for (const id of ['cyborg', 'cyborg.window', 'cyborg.workspace']) assert.equal(reservedId(id), true, id);
   for (const id of ['cyborg.files', 'cyborg.window.focus-next', 'window']) assert.equal(reservedId(id), false, id);
   const r = parseManifest(manifest('cyborg.window'));
   assert.ok(!r.ok && r.errors.join().includes('занято командами окна'));

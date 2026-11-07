@@ -21,7 +21,7 @@ import { guardedValue, guardsOf } from './via-contract.ts';
 import { isRecord, own, parseWire, type Parsed, type WireSpec } from './wire.ts';
 import type { HostHandle, SpawnHost } from './transports.ts';
 import type { TerminalSink, TerminalView } from './pty.ts';
-import { WINDOW_COMMANDS, WINDOW_OWNER, WindowLayer, type WindowSnapshot } from './window-layer.ts';
+import { KERNEL_COMMANDS, KERNEL_OWNER, WINDOW_COMMANDS, WINDOW_OWNER, WindowLayer, type WindowSnapshot } from './window-layer.ts';
 
 export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'invalid'; readonly errors: readonly string[] }
@@ -288,6 +288,8 @@ function assignHosts(
   return result;
 }
 
+const isKernelCommand = (name: string): boolean => (Object.values(KERNEL_COMMANDS) as string[]).includes(name);
+
 // Встроенный побеждает сторонний, между равными - первый по id: исход не зависит от порядка каталогов на диске.
 function bindKeys(
   manifests: readonly PluginManifest[],
@@ -316,7 +318,7 @@ function bindKeys(
 
 /** Выбор пользователя сильнее манифестов: конфликт он уже разрешил, поэтому вытесненные - в shadowed без записи о конфликте. */
 function applyUserKeys(table: Map<string, Keybinding>, user: readonly UserKeybinding[], manifests: readonly PluginManifest[], platform: string, record: (entry: JournalEntry) => void): void {
-  const ownerOf = new Map([...Object.keys(WINDOW_COMMANDS).map((c) => [c, WINDOW_OWNER] as const), ...manifests.flatMap((m) => Object.keys(m.commands).map((c) => [c, m.id] as const))]);
+  const ownerOf = new Map([...Object.keys(WINDOW_COMMANDS).map((c) => [c, WINDOW_OWNER] as const), ...Object.values(KERNEL_COMMANDS).map((c) => [c, KERNEL_OWNER] as const), ...manifests.flatMap((m) => Object.keys(m.commands).map((c) => [c, m.id] as const))]);
   for (const u of user) {
     const normalized = normalizeKey(u.key);
     if (normalized === undefined) {
@@ -685,7 +687,10 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       if (s.consumerHost !== host || s.consumer !== p.caller) throw new CoreError('Unavailable', `подписка ${p.subscription} не у ${p.caller}`);
       release(p.subscription);
     });
-    onRequest('run', { name: 'string', args: 'array' }, (p) => run(p.name, ...p.args));
+    onRequest('run', { name: 'string', args: 'array' }, (p) => {
+      if (isKernelCommand(p.name)) throw new CoreError('PermissionDenied', `${p.name}: команду ядра зовёт приложение, а не плагин`);
+      return run(p.name, ...p.args);
+    });
     onNote('idle.watch', { pluginId: 'string', id: 'string', seconds: 'number' }, (p) => {
       mine(p.pluginId);
       if (!p.id.startsWith(`${p.pluginId}#`)) throw new CoreError('Invalid', `idle.watch: ${p.id} не у ${p.pluginId}`);
@@ -913,6 +918,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   }
 
   async function run(command: string, ...args: unknown[]): Promise<unknown> {
+    if (command === KERNEL_COMMANDS.revealWorkspace) return gateway.revealWorkspace();
     const declares = (id: string) => Object.hasOwn(manifestOf(id).commands, command);
     if (!commandOwners.has(command)) {
       const sleeper = [...waiting].find(declares);
@@ -1065,7 +1071,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     keybinding(key) {
       const k = keys.get(key);
       if (!k || !layer.allows(k.pluginId)) return undefined;
-      return k.pluginId === WINDOW_OWNER || active.includes(k.pluginId) || waiting.has(k.pluginId) || waking.has(k.pluginId) ? k : undefined;
+      return k.pluginId === WINDOW_OWNER || k.pluginId === KERNEL_OWNER || active.includes(k.pluginId) || waiting.has(k.pluginId) || waking.has(k.pluginId) ? k : undefined;
     },
     get window() {
       return layer.snapshot;

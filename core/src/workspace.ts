@@ -32,6 +32,38 @@ export function readJson(file: string): Record<string, unknown> | undefined {
   return doc;
 }
 
+/** Битый файл ядро не перезаписывает, но человек может: копия `<файл>.corrupt-<время>` хранит исходник, и та же порча второй копии не даёт. */
+export function keepCorrupt(file: string, now = new Date()): string | undefined {
+  let bytes: Buffer;
+  try {
+    bytes = fs.readFileSync(file);
+  } catch {
+    return undefined;
+  }
+  const dir = path.dirname(file);
+  const prefix = `${path.basename(file)}.corrupt-`;
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.startsWith(prefix)) continue;
+    try {
+      if (fs.readFileSync(path.join(dir, name)).equals(bytes)) return name;
+    } catch {
+      continue;
+    }
+  }
+  const stamp = `${prefix}${now.toISOString().replace(/[:.]/g, '-')}`;
+  // Две разные порчи за одну миллисекунду - второй копии нужно своё имя.
+  for (let n = 0; n < 100; n++) {
+    const name = n === 0 ? stamp : `${stamp}-${String(n)}`;
+    try {
+      fs.writeFileSync(path.join(dir, name), bytes, { flag: 'wx' });
+      return name;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') return undefined;
+    }
+  }
+  return undefined;
+}
+
 /** Ключ state: один и тот же воркспейс, открытый по разным путям (симлинк, относительный путь), - одно состояние. */
 export function workspaceKey(file: string): string {
   return createHash('sha256').update(realFile(file)).digest('hex').slice(0, 16);
@@ -206,7 +238,8 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
       try {
         return readJson(f);
       } catch (error) {
-        problems.push(`${f}: ${error instanceof Error ? error.message : String(error)}`);
+        const copy = keepCorrupt(f);
+        problems.push(`${f}: ${error instanceof Error ? error.message : String(error)}${copy === undefined ? '' : `; копия - ${copy}`}`);
         return undefined;
       }
     };

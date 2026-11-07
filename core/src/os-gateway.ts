@@ -27,7 +27,7 @@ export interface OsEnvironment {
   readonly tempDir: string;
   /** Домашний каталог: `~` в правах и `paths.home`; по умолчанию - домашний каталог ОС. */
   readonly home?: string;
-  /** Закрыты всегда: файл воркспейса, его замок, файл пользователя. */
+  /** Закрыты всегда вместе с соседями `<файл>.*`: файл воркспейса, его замок, файл пользователя. */
   readonly protectedPaths?: readonly string[];
   /** Каталог данных приложения: закрыт целиком, кроме своих каталогов плагина и корней проектов от приложения. */
   readonly appDir?: string;
@@ -44,7 +44,9 @@ export interface OsEnvironment {
   /** Хвост вывода pty, символов; по умолчанию 256 К. */
   readonly ptyBacklog?: number;
   /** Открыть программой ОС; путь и URL шлюз уже проверил. */
-  readonly shell?: { openPath(path: string): Promise<void>; openExternal(url: string): Promise<void> };
+  readonly shell?: { openPath(path: string): Promise<void>; openExternal(url: string): Promise<void>; showItemInFolder?(path: string): void | Promise<void> };
+  /** Файл воркспейса: его показывает в файловом менеджере команда ядра, а не плагин. */
+  readonly workspaceFile?: string;
   /** Системный выбор файла; ответ - выбранные пути, отмена - пустой список. */
   readonly dialog?: { open(options: OpenDialogOptions): Promise<readonly string[]> };
 }
@@ -106,6 +108,8 @@ const int = (method: string, v: unknown, name: string, min: number, max: number)
 const BASE_ENV = /^(PATH|HOME|USER|LOGNAME|SHELL|TERM|TMPDIR|LANG|LC_[A-Z]+|SystemRoot|SYSTEMROOT|ComSpec|PATHEXT|USERPROFILE|APPDATA|LOCALAPPDATA|TEMP|TMP|WINDIR)$/;
 
 const inside = (dir: string, target: string) => target === dir || target.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);
+/** Сосед `<файл>.<что угодно>` несёт содержимое защищённого файла: копия `.corrupt-<время>`, `.v1.bak`, временный файл атомарной записи. */
+const sibling = (file: string, target: string) => path.dirname(target) === path.dirname(file) && path.basename(target).startsWith(`${path.basename(file)}.`);
 
 async function real(p: string): Promise<string> {
   try {
@@ -294,6 +298,14 @@ export class OsGateway {
     return (this.#pty?.list(pluginId) ?? []).filter((p) => !p.exit);
   }
 
+  /** Команда ядра, не плагина: файл воркспейса защищён от плагинов, а показать его человеку можно. */
+  async revealWorkspace(): Promise<void> {
+    const file = this.#env.workspaceFile;
+    const shell = this.#env.shell;
+    if (file === undefined || shell?.showItemInFolder === undefined) throw new CoreError('Unavailable', 'показа файла воркспейса нет в этой среде');
+    await shell.showItemInFolder(file);
+  }
+
   releaseAllPty(): void {
     this.#pty?.releaseAll();
   }
@@ -357,7 +369,7 @@ export class OsGateway {
     for (const p of this.#env.protectedPaths ?? []) {
       const protectedPath = await real(p);
       // Предок защищённого пути закрыт только для записи: удаление или перезапись каталога унесли бы и его.
-      if (inside(protectedPath, target) || (write && inside(target, protectedPath))) throw this.#denied(m, method, `защищённый путь: ${given}`, reason);
+      if (inside(protectedPath, target) || (write && inside(target, protectedPath)) || sibling(protectedPath, target)) throw this.#denied(m, method, `защищённый путь: ${given}`, reason);
     }
     const gitOk = matched.some((a) => a.git);
     // От корня области, а не от каталога под маску: `*` совпадает и с самим `.git`, и путь внутри него был бы без сегмента `.git`.
