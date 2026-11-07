@@ -29,7 +29,9 @@ export function navigationAllowed(nav: Navigation, windowUrl: string, mainFrame:
   if (nav.isMainFrame) return withoutHash(nav.url) === withoutHash(windowUrl);
   const target = pluginOfOrigin(originOf(nav.url));
   if (target === undefined || !nav.url.startsWith(`${VIEW_SCHEME}://`)) return false;
-  if (!nav.initiator || nav.initiator === mainFrame) return true;
+  if (nav.initiator === mainFrame) return true;
+  // Инициатора нет у перехода браузера (перезагрузка) и у удалённого фрейма: пускаем только на тот вид, что уже во фрейме.
+  if (!nav.initiator) return pluginOfOrigin(nav.frame?.origin ?? '') === target;
   const by = pluginOfOrigin(nav.initiator.origin);
   return by === target && pluginOfOrigin(nav.frame?.origin ?? '') === by;
 }

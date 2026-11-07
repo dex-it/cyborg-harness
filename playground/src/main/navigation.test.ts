@@ -29,3 +29,10 @@ test('навигация: документ окна ставит во фрейм
   assert.equal(sub('data:text/html,<b>x</b>', echo, echo), false);
   assert.equal(sub('file:///app/renderer/index.html', echo, echo), false);
 });
+
+test('навигация: без инициатора фрейм остаётся на своём виде - перезагрузка да, подмена вида нет', () => {
+  assert.equal(sub('cyborg-plugin://echo/', echo, null), true);
+  assert.equal(sub('cyborg-plugin://chat/', echo, null), false, 'удалённый инициатор подставил чужой вид');
+  assert.equal(sub('cyborg-plugin://echo/', frame('null'), null), false);
+  assert.equal(sub('cyborg-plugin://echo/', null, null), false);
+});
