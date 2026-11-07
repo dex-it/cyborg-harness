@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext } from '@cyborg-harness/contracts';
@@ -115,7 +115,7 @@ test('via-contract: вызов из вида (callAs) проходит ту же
 });
 
 test('via-contract: файл из области записи вызывающего поставщик с правом shell откроет, только если это документ; пропавший путь - отказ', async () => {
-  const root = await mkdtemp(path.join(tmpdir(), 'cyborg-via-open-'));
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-via-open-')));
   const work = path.join(root, 'work');
   await mkdir(work, { recursive: true });
   const payload = path.join(work, 'payload.xyz');
