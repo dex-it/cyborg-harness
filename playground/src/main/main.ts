@@ -33,6 +33,9 @@ const workspaceFile = process.argv.includes('--no-workspace')
     ? path.resolve(workspaceArg)
     : (recent.list()[0] ?? path.join(app.getPath('userData'), 'workspace.cyborg.json'));
 const spiking = spikeOut !== undefined || hostsSpikeOut !== undefined;
+/** `--safe-mode` (BR-CH-005): манифесты разобраны, код плагинов не запускается; смена воркспейса флаг сохраняет, снимает его только «Выйти из безопасного режима». */
+const SAFE_MODE = '--safe-mode';
+const safeMode = process.argv.includes(SAFE_MODE);
 
 // Один экземпляр - один воркспейс - одно окно: второй запуск с любым воркспейсом поднимает открытое окно, а не второе ядро.
 if (!spiking && !app.requestSingleInstanceLock({ workspace: workspaceFile ?? null })) app.exit(0);
@@ -105,6 +108,7 @@ windowChannel('plugins:run', (command) => plugins.run(command));
 windowChannel('window:answer', (arg) => plugins.answerDialog(arg));
 windowChannel('documents:close', (id) => plugins.closeDocument(id));
 windowChannel('workspace:open', (file) => openWorkspace(file));
+windowChannel('app:safe-mode', (on) => switchSafeMode(on));
 
 const realOf = (file: string) => {
   try {
@@ -132,15 +136,29 @@ async function openWorkspace(arg: unknown): Promise<void> {
     throw new Error('воркспейса нет в «Недавних»');
   }
   if (file === undefined || (workspaceFile !== undefined && realOf(file) === realOf(workspaceFile))) return;
-  const live = plugins.livePty;
-  if (live > 0) {
-    const message = { type: 'question' as const, buttons: ['Открыть', 'Отмена'], defaultId: 1, cancelId: 1, message: `Открыть ${path.basename(file)}?`, detail: `Живых процессов плагинов: ${String(live)}. Они завершатся вместе с воркспейсом.` };
-    const answer = win ? await dialog.showMessageBox(win, message) : await dialog.showMessageBox(message);
-    if (answer.response !== 0) return;
-  }
+  if (!(await livePtyAgreed('Открыть', `Открыть ${path.basename(file)}?`))) return;
   const keep = process.argv.slice(1).filter((a) => a !== '--no-workspace' && !a.startsWith('--workspace='));
   app.relaunch({ args: [...keep, `--workspace=${file}`] });
   app.quit();
+}
+
+/** Перезапуск, а не переключение на ходу: ядро решает про безопасный режим один раз, до первого хоста. */
+async function switchSafeMode(on: unknown): Promise<void> {
+  if (typeof on !== 'boolean') throw new Error('ожидается true или false');
+  if (on === safeMode) return;
+  if (!(await livePtyAgreed('Перезапустить', on ? 'Перезапустить в безопасном режиме?' : 'Выйти из безопасного режима?'))) return;
+  const keep = process.argv.slice(1).filter((a) => a !== SAFE_MODE);
+  app.relaunch({ args: on ? [...keep, SAFE_MODE] : keep });
+  app.quit();
+}
+
+/** Перезапуск завершает живые pty плагинов: без них вопроса нет. */
+async function livePtyAgreed(action: string, question: string): Promise<boolean> {
+  const live = plugins.livePty;
+  if (live === 0) return true;
+  const message = { type: 'question' as const, buttons: [action, 'Отмена'], defaultId: 1, cancelId: 1, message: question, detail: `Живых процессов плагинов: ${String(live)}. Они завершатся при перезапуске.` };
+  const answer = win ? await dialog.showMessageBox(win, message) : await dialog.showMessageBox(message);
+  return answer.response === 0;
 }
 ipcMain.handle('view:dialog', (event, view: unknown, spec: unknown) => {
   const pluginId = senderPlugin(event);
@@ -295,6 +313,7 @@ void app.whenReady().then(() => {
   void plugins.start({
     userData,
     workspace: workspaceFile,
+    safeMode,
     builtinDir: path.join(__dirname, 'plugins'),
     spawnHost: hosts.spawn,
     pidOf: hosts.pidOf,
