@@ -11,7 +11,7 @@ import { inlineHosts, type HostHandle } from '../src/transports.ts';
 
 const tick = () => new Promise((r) => setTimeout(r, 30));
 
-async function setup(plugins: Record<string, unknown>, withBackend = true) {
+async function setup(plugins: Record<string, unknown>, withBackend = true, ptyOrphanGrace?: number) {
   // На macOS tmpdir - симлинк /var -> /private/var, а шлюз отдаёт пути после realpath.
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-pty-')));
   const work = path.join(root, 'work');
@@ -24,7 +24,7 @@ async function setup(plugins: Record<string, unknown>, withBackend = true) {
     apiVersion: '1.0.0',
     enabled: Object.keys(plugins),
     manifests: Object.entries(plugins).map(([id, permissions]) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...(permissions !== undefined && { permissions }) })),
-    os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), env: { PATH: '/usr/bin', HOME: '/h', SECRET: 'x' }, ...(withBackend && { pty: backend }) },
+    os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), env: { PATH: '/usr/bin', HOME: '/h', SECRET: 'x' }, ...(withBackend && { pty: backend }), ...(ptyOrphanGrace !== undefined && { ptyOrphanGrace }) },
     spawnHost: (id) => {
       const h = spawn(id);
       handles.set(id, h);
@@ -141,6 +141,22 @@ test('падение хоста: pty с persist живёт и копит выв�
 
   await s.k.disable('agent');
   assert.equal(keptProc.killed, 'SIGHUP', 'выключенный плагин оставил pty');
+});
+
+test('сирота: плагин вернулся после падения хоста, но не взял pty за срок - процесс завершён, журнал называет срок', async () => {
+  await using s = await setup({ agent: shell }, true, 100);
+  const taken = await s.pty('agent').spawn({ program: '/bin/bash', persist: true });
+  await s.pty('agent').spawn({ program: '/bin/bash', persist: true });
+  const [takenProc, orphanProc] = s.backend.procs as [FakeProc, FakeProc];
+  s.handles.get('agent')!.kill();
+  await s.k.idle();
+  await s.pty('agent').attach(taken.id);
+  await new Promise((r) => setTimeout(r, 250));
+  assert.equal(orphanProc.killed, 'SIGHUP');
+  assert.equal(takenProc.killed, undefined, 'взятый до срока живёт');
+  assert.deepEqual((await s.pty('agent').list()).map((p) => p.id), [taken.id]);
+  const expired = s.k.journal.filter((e) => e.kind === 'pty-expired');
+  assert.deepEqual(expired, [{ kind: 'pty-expired', pluginId: 'agent', id: 'pty-2', program: '/bin/bash', graceMs: 100 }]);
 });
 
 test('pty завершился без владельца: list показывает выход, attach отдаёт хвост и выход и убирает запись', async () => {

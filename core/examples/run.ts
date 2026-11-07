@@ -125,6 +125,8 @@ function journalLine(e: JournalEntry): string {
       return `${yellow('⛔')} ${id} отказ ctx.os: ${e.detail}`;
     case 'unloaded':
       return `${dim('⏏')} ${id} выгружен${e.by === e.pluginId ? '' : ` вместе с ${e.by}`}${e.error ? `, ошибка: ${e.error}` : ''}`;
+    case 'pty-expired':
+      return `${yellow('⚠')} ${id} терминал ${e.id} (${e.program}) завершён: не подхвачен за ${String(e.graceMs / 1000)} с`;
     case 'key-conflict':
       return `${yellow('⌨')} ${id}: ${e.key} уже у ${e.winner}, ${e.command} не получит нажатие`;
     case 'key-ignored':

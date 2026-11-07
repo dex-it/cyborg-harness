@@ -34,4 +34,8 @@ test('запись журнала словами и уровень', () => {
   assert.equal(describeEntry(off), 'выключен, сбоев подряд: 2');
   assert.equal(entryLevel(off), 'error');
   assert.equal(describeEntry({ pluginId: 'x', kind: 'rejected', reasons: [{ kind: 'cycle', members: ['x', 'y', 'x'] }] }), 'цикл зависимостей: x → y → x');
+  const expired: JournalEntry = { pluginId: 'agent', kind: 'pty-expired', id: 'pty-2', program: 'claude', graceMs: 60_000 };
+  assert.equal(describeEntry(expired), 'терминал pty-2 (claude) завершён: плагин не подхватил его за 60 с после падения хоста');
+  assert.equal(entryLevel(expired), 'warn');
+  assert.deepEqual(pluginStatuses([{ pluginId: 'agent', kind: 'activated', hostId: 'h', ms: 1 }, expired]).map((s) => s.state), ['active']);
 });

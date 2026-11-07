@@ -49,6 +49,8 @@ export type JournalEntry =
     }
   /** Снят по disable: сам (`by` - он же) или вместе с поставщиком, которого требовал. */
   | { readonly pluginId: string; readonly kind: 'unloaded'; readonly by: string; readonly error?: string; readonly keptPty?: number }
+  /** pty с `persist` ждал `attach` после падения хоста дольше срока и завершён. */
+  | { readonly pluginId: string; readonly kind: 'pty-expired'; readonly id: string; readonly program: string; readonly graceMs: number }
   /** Сочетание объявлено и другим плагином; нажатие получает `winner`. */
   | { readonly pluginId: string; readonly kind: 'key-conflict'; readonly key: string; readonly command: string; readonly winner: string }
   /** Привязка `plugins.keybindings` не применена: сочетание не разобралось или команды нет ни у одного плагина. */
@@ -388,6 +390,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       if (!host || host.down) throw new CoreError('Unavailable', `${id}: хост не работает`);
       return host.endpoint.request('serve.request', params);
     },
+    (e) => record({ kind: 'pty-expired', ...e }),
   );
 
   const manifests: PluginManifest[] = [];

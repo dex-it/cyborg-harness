@@ -47,6 +47,15 @@ interface Entry {
   attached: boolean;
   readonly viewers: Set<TerminalSink>;
   exit?: PtyExit;
+  orphaned?: ReturnType<typeof setTimeout>;
+}
+
+/** pty без владельца завершён по сроку: плагин не вернулся и не сделал `attach`. */
+export interface PtyExpiry {
+  readonly pluginId: string;
+  readonly id: string;
+  readonly program: string;
+  readonly graceMs: number;
 }
 
 export const PTY_SIGNALS = ['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGHUP'] as const;
@@ -92,21 +101,33 @@ export class Tail {
 }
 
 export const BACKLOG_LIMIT = 256 * 1024;
+/** Столько ждёт pty с `persist`, чей хост упал: перезапуск и активация укладываются в секунды, как переподключение в VS Code. */
+export const ORPHAN_GRACE = 60_000;
 
 export class PtyTable {
   readonly #backend: PtyBackend;
   readonly #push: (pluginId: string, method: 'pty.data' | 'pty.exit', params: unknown) => void;
   readonly #limit: number;
   readonly #ticketTtl: number;
+  readonly #grace: number;
+  readonly #expired: (expiry: PtyExpiry) => void;
   readonly #entries = new Map<string, Entry>();
   readonly #tickets = new Map<string, { pluginId: string; id: string; expires: number }>();
   #next = 0;
 
-  constructor(backend: PtyBackend, push: (pluginId: string, method: 'pty.data' | 'pty.exit', params: unknown) => void, backlogLimit = BACKLOG_LIMIT, ticketTtl = 30_000) {
+  constructor(
+    backend: PtyBackend,
+    push: (pluginId: string, method: 'pty.data' | 'pty.exit', params: unknown) => void,
+    backlogLimit = BACKLOG_LIMIT,
+    ticketTtl = 30_000,
+    orphan: { readonly graceMs?: number; readonly expired?: (expiry: PtyExpiry) => void } = {},
+  ) {
     this.#backend = backend;
     this.#push = push;
     this.#limit = backlogLimit;
     this.#ticketTtl = ticketTtl;
+    this.#grace = orphan.graceMs ?? ORPHAN_GRACE;
+    this.#expired = orphan.expired ?? (() => undefined);
   }
 
   spawn(pluginId: string, o: { program: string; args: string[]; cwd?: string; env: Record<string, string>; cols: number; rows: number; persist: boolean }): PtyWire {
@@ -138,6 +159,7 @@ export class PtyTable {
   attach(pluginId: string, id: string): PtyWire {
     const e = this.#own(pluginId, id);
     const wire = { ...info(e), backlog: e.tail.text() };
+    clearTimeout(e.orphaned);
     if (e.exit) {
       this.#entries.delete(id);
       return wire;
@@ -201,11 +223,24 @@ export class PtyTable {
     this.#live(pluginId, id).proc.kill(signal);
   }
 
-  /** Хост плагина упал: `persist` ждут attach, прочие завершаются - их вывод больше некому принять. */
+  /** Хост плагина упал: `persist` ждут attach не дольше льготного срока, прочие завершаются - их вывод больше некому принять. */
   detach(pluginId: string): void {
     for (const e of this.#of(pluginId)) {
-      if (e.persist && !e.exit) e.attached = false;
-      else this.#end(e);
+      if (!e.persist || e.exit) {
+        this.#end(e);
+        continue;
+      }
+      e.attached = false;
+      clearTimeout(e.orphaned);
+      e.orphaned = setTimeout(() => {
+        if (e.attached || this.#entries.get(e.id) !== e) return;
+        // Завершившийся сам процесс сроком не убит: запись просто уходит.
+        const alive = !e.exit;
+        this.#end(e);
+        if (alive) this.#expired({ pluginId, id: e.id, program: e.program, graceMs: this.#grace });
+      }, this.#grace);
+      // Ждущий срока pty не держит процесс приложения: выход из него и так завершит все.
+      e.orphaned.unref();
     }
   }
 
@@ -214,10 +249,12 @@ export class PtyTable {
     for (const e of this.#of(pluginId)) this.#end(e);
   }
 
-  /** Человек выключил плагин и оставил его процессы: живые ждут attach, как `persist` после падения хоста; число оставленных. */
+  /** Человек выключил плагин и оставил его процессы: живые ждут attach без срока, до выхода из приложения; число оставленных. */
   park(pluginId: string): number {
     let kept = 0;
     for (const e of this.#of(pluginId)) {
+      // Выбор человека сильнее срока, взведённого падением хоста.
+      clearTimeout(e.orphaned);
       if (e.exit) this.#entries.delete(e.id);
       else {
         e.attached = false;
@@ -233,6 +270,7 @@ export class PtyTable {
   }
 
   #end(e: Entry): void {
+    clearTimeout(e.orphaned);
     this.#entries.delete(e.id);
     if (!e.exit) e.proc.kill();
   }

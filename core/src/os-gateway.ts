@@ -7,7 +7,7 @@ import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, Pr
 import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import { LOGIN_SHELL } from './permissions.ts';
-import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type TerminalSink, type TerminalView } from './pty.ts';
+import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type PtyExpiry, type TerminalSink, type TerminalView } from './pty.ts';
 import { HttpServes, type AskHost } from './serve.ts';
 import type { GuardRight } from './via-contract.ts';
 import { isRecord } from './wire.ts';
@@ -43,6 +43,8 @@ export interface OsEnvironment {
   readonly pty?: PtyBackend;
   /** Хвост вывода pty, символов; по умолчанию 256 К. */
   readonly ptyBacklog?: number;
+  /** Сколько мс pty с `persist` ждёт `attach` плагина после падения его хоста; по умолчанию 60 000. */
+  readonly ptyOrphanGrace?: number;
   /** Открыть программой ОС; путь и URL шлюз уже проверил. */
   readonly shell?: { openPath(path: string): Promise<void>; openExternal(url: string): Promise<void> };
   /** Системный выбор файла; ответ - выбранные пути, отмена - пустой список. */
@@ -247,6 +249,7 @@ export class OsGateway {
     manifestOf: (pluginId: string) => PluginManifest | undefined = () => undefined,
     grants?: GrantStore,
     ask: AskHost = () => Promise.reject(new CoreError('Unavailable', 'хоста нет')),
+    ptyExpired: (expiry: PtyExpiry) => void = () => undefined,
   ) {
     this.#env = env;
     this.#serves = new HttpServes(ask);
@@ -264,7 +267,7 @@ export class OsGateway {
     this.#push = push;
     this.#deny = deny;
     this.#configOf = configOf;
-    this.#pty = env.pty && new PtyTable(env.pty, push, env.ptyBacklog);
+    this.#pty = env.pty && new PtyTable(env.pty, push, env.ptyBacklog, undefined, { ...(env.ptyOrphanGrace !== undefined && { graceMs: env.ptyOrphanGrace }), expired: ptyExpired });
   }
 
   pathsOf(pluginId: string): { data: string; temp: string; home: string } {
