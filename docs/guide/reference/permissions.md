@@ -17,7 +17,7 @@ description: "Перечень прав плагина в манифесте: ф
 | `launch` | Список программ | Ничего: описывает запуск, который выполнит потребитель |
 | `net` | Список хостов | `net.fetch` |
 | `env` | Список имён переменных | `env.get` |
-| `notify` | `true` | `notify.show` |
+| `notify` | `true` | `notify.show`, `notify.close` |
 | `clipboard` | `["read"]`, `["write"]` или оба | `clipboard.readText`, `clipboard.writeText` |
 | `secrets.ref` | Маски ссылок | Разрешение ссылок на внешний источник секретов |
 | `security.roots` | `true` | `security.setRoots` |

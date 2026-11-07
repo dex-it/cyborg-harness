@@ -8,6 +8,7 @@ import { SectionStore, type LayerStore } from '../src/config.ts';
 import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
 import { describePermissions } from '../src/permissions.ts';
+import type { NoticeEvents } from '../src/notices.ts';
 import type { OsEnvironment, SecretStore } from '../src/os-gateway.ts';
 import { inlineHosts } from '../src/transports.ts';
 
@@ -170,6 +171,80 @@ test('env, notify, clipboard: только названное в праве; н�
   const bare = await kernel({ c: { notify: true } }, { dataDir: box.data, tempDir: box.temp });
   await assert.rejects(bare.os('c').notify!.show('x'), { code: 'Unavailable' });
   await bare.k.unload();
+});
+
+test('notify: клик поднимает окно, закрывает уведомление и запускает свою команду; команда и аргументы сверяются при show; close, пределы и выгрузка', async () => {
+  await using box = await sandbox();
+  const shown: { title: string; body: string | undefined; events: NoticeEvents; closed: boolean }[] = [];
+  const ran: unknown[] = [];
+  let raised = 0;
+  const contexts = new Map<string, PluginContext>();
+  const k = await load({
+    apiVersion: '1.0.0',
+    spawnHost: inlineHosts(async (entry) => ({
+      activate: (ctx: PluginContext) => {
+        contexts.set(entry, ctx);
+        if (entry === 'bell') ctx.commands.register('bell.open', (session) => void ran.push(session));
+      },
+    })),
+    enabled: ['bell', 'mute'],
+    manifests: [
+      { ...manifest('bell', { notify: true }), commands: { 'bell.open': { args: ['string'] } } },
+      { ...manifest('mute', { notify: true }), commands: { 'mute.go': {} } },
+    ],
+    os: {
+      dataDir: box.data,
+      tempDir: box.temp,
+      notifyLimits: { title: 20, body: 50, live: 2 },
+      raiseWindow: () => {
+        raised++;
+      },
+      notify: (title, body, events) => {
+        const n = { title, body, events, closed: false };
+        shown.push(n);
+        return {
+          close: () => {
+            n.closed = true;
+          },
+        };
+      },
+    },
+  });
+  const bell = contexts.get('bell')!.os.notify!;
+  const first = await bell.show('Сессия ждёт', 'ответа', { onClick: { command: 'bell.open', args: ['s1'] } });
+  assert.equal(typeof first, 'string');
+  shown[0]!.events.click();
+  for (let i = 0; i < 100 && ran.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(ran, ['s1']);
+  assert.equal(raised, 1);
+  assert.equal(shown[0]!.closed, true, 'клик закрывает уведомление');
+  shown[0]!.events.click();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(ran, ['s1'], 'второй клик по закрытому не повторяет команду');
+
+  await assert.rejects(bell.show('x', undefined, { onClick: { command: 'bell.nope' } }), { code: 'CommandNotFound' });
+  await assert.rejects(bell.show('x', undefined, { onClick: { command: 'mute.go' } }), { code: 'CommandNotFound' }, 'чужая команда');
+  await assert.rejects(bell.show('x', undefined, { onClick: { command: 'bell.open', args: [42] } }), { code: 'Invalid' });
+  await assert.rejects(bell.show('x'.repeat(21)), { code: 'Invalid' });
+  await assert.rejects(bell.show('x', 'y'.repeat(51)), { code: 'Invalid' });
+  assert.equal(shown.length, 1, 'отказ не доходит до среды');
+
+  const a = await bell.show('a');
+  const b = await bell.show('b');
+  await assert.rejects(bell.show('c'), { code: 'Invalid', message: /живых уведомлений больше 2/ });
+  await bell.close(a);
+  await bell.close(a);
+  assert.equal(shown[1]!.closed, true);
+  await contexts.get('mute')!.os.notify!.close(b);
+  assert.equal(shown[2]!.closed, false, 'чужой id ничего не закрывает');
+  await bell.show('c');
+  shown[2]!.events.closed();
+  await bell.show('d');
+  await assert.rejects(bell.show('e'), { code: 'Invalid' }, 'закрытое ОС уведомление место освобождает, а предел держится');
+
+  await k.disable('bell');
+  assert.deepEqual(shown.slice(3).map((n) => n.closed), [true, true], 'выгрузка закрывает живые уведомления');
+  await k.unload();
 });
 
 test('секреты: ключи своего плагина, $secret, без шифрования ОС - Unavailable, внешний источник по маске', async () => {

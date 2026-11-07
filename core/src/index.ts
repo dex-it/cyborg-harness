@@ -15,6 +15,7 @@ export { appendBounded, MAX_DENIED } from './journal.ts';
 export * from './keys.ts';
 export * from './permissions.ts';
 export * from './os-gateway.ts';
+export * from './notices.ts';
 export type { PtyBackend, PtyProcess, TerminalSink, TerminalView } from './pty.ts';
 export { groupKilled } from './pty.ts';
 export type { SystemEvent } from './host-runtime.ts';
