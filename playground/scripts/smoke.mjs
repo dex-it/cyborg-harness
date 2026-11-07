@@ -244,6 +244,25 @@ async function main() {
   await waitFor('вид echo открыл pty по билету главной части', async () => /^pty \d+$/.test(await inView('echo', "document.getElementById('term-state').textContent")));
   await type('echo до-$((6*7))');
   await waitFor('терминал вида ответил', async () => /до-42/.test(await screen()));
+
+  const windows = () => main("process.mainModule.require('electron').BrowserWindow.getAllWindows().length");
+  assert.equal(await inView('echo', "window.open('https://example.com/login') === null"), true, 'window.open вида вернул окно');
+  await sleep(500);
+  assert.equal(await windows(), 1, 'вид открыл новое окно');
+  await inView('echo', "location.href = 'https://example.com/away'; true");
+  await waitFor('переход фрейма вида отклонён и записан в журнал echo', () =>
+    lines().some((l) => l.includes('"pluginId":"echo","kind":"denied","method":"navigate"') && l.includes('https://example.com/away')),
+  );
+  assert.equal(await inView('echo', 'location.protocol'), 'cyborg-plugin:', 'фрейм вида ушёл со своего адреса');
+  await type('echo на-месте-$((2*21))');
+  await waitFor('вид после отказа работает', async () => /на-месте-42/.test(await screen()));
+  const windowUrl = await ev('location.href');
+  await ev("location.href = 'https://example.com/'; true");
+  await sleep(500);
+  assert.equal(await ev('location.href'), windowUrl, 'окно ушло на внешний адрес');
+  assert.equal(await windows(), 1);
+  log('окно не открывает новых окон и не уходит со своих адресов: отказ виду - в журнал его плагина');
+
   if (process.platform !== 'win32') {
     const hung = await pid('echo');
     assert.equal(await button('echo', 'Повесить хост'), true);

@@ -2,10 +2,12 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, Notification, powerMonitor, screen, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { viewOrigin } from '../shared/views.ts';
 import { electronOs } from './os-env.ts';
 import { utilityHosts } from './plugin-hosts.ts';
+import { guardNavigation } from './navigation.ts';
 import { PluginsService } from './plugins.ts';
 import { runSpike } from './spike.ts';
 import { runHostsSpike } from './spike-hosts.ts';
@@ -232,7 +234,9 @@ function createWindow(): void {
     title: `Cyborg Playground - ${workspaceFile === undefined ? 'без воркспейса' : path.basename(workspaceFile)}`,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegrationInSubFrames: true },
   });
-  void win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  const page = path.join(__dirname, 'renderer', 'index.html');
+  guardNavigation(win.webContents, pathToFileURL(page).href, (pluginId, url) => plugins.viewDenied(pluginId, url));
+  void win.loadFile(page);
   // Ядро видит нажатие раньше страницы: сочетание активного плагина до окна не доходит.
   win.webContents.on('before-input-event', (event, input) => {
     if (input.type === 'keyDown' && !input.isAutoRepeat && plugins.press(input)) event.preventDefault();

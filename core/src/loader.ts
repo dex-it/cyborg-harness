@@ -37,13 +37,13 @@ export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'revived' }
   /** `activation: "lazy"`: ждёт первой команды, сочетания, показа вида или потребителя своего контракта. */
   | { readonly pluginId: string; readonly kind: 'waiting' }
-  /** Шлюз `ctx.os` отказал: вызов вне прав манифеста. */
+  /** Шлюз `ctx.os` отказал: вызов вне прав манифеста; `reason: 'window'` - окно не пустило вид на чужой адрес. */
   | {
       readonly pluginId: string;
       readonly kind: 'denied';
       readonly method: string;
       readonly detail: string;
-      readonly reason?: 'via-contract';
+      readonly reason?: 'via-contract' | 'window';
       /** Столько таких же отказов склеено за окно после первого. */
       readonly repeats?: number;
     }
@@ -157,6 +157,8 @@ const VIEW_STATE = '$views';
 const VIEW_STATE_MAX = 64 * 1024;
 const DOCUMENTS_STATE = '$documents';
 const GRANTED_STATE = '$granted';
+// Адрес задаёт вид: data:-адрес на мегабайты раздул бы журнал и снимок окна.
+const MAX_DENIED_URL = 200;
 
 export interface Kernel {
   readonly journal: readonly JournalEntry[];
@@ -204,6 +206,8 @@ export interface Kernel {
   showDialog(pluginId: string, view: string, spec: unknown): Promise<string | undefined>;
   /** Ответ человека на диалог `window.dialog`. */
   answerDialog(id: number, choice: string | undefined): void;
+  /** Окно не пустило вид плагина на чужой адрес: запись `denied` в журнал плагина, повторы склеиваются. */
+  viewDenied(pluginId: string, url: string): void;
   /** Свои команды плагина с сочетаниями, как их ловит `keybinding`. */
   keysOf(pluginId: string): Readonly<Record<string, string>>;
   /** Событие окна или ОС от приложения: ядро раздаёт его активным плагинам. */
@@ -1084,6 +1088,11 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       return layer.show(pluginId, view, spec);
     },
     answerDialog: (id, choice) => layer.answer(id, choice),
+    viewDenied(pluginId, url) {
+      if (!known.some((m) => m.id === pluginId)) return;
+      const shown = url.length > MAX_DENIED_URL ? `${url.slice(0, MAX_DENIED_URL)}…` : url;
+      record({ pluginId, kind: 'denied', method: 'navigate', detail: `переход на ${shown}`, reason: 'window' });
+    },
     keysOf: (pluginId) => Object.fromEntries([...keys.values()].filter((k) => k.pluginId === pluginId).map((k) => [k.command, k.key])),
     wake,
     openTerminal: (pluginId, ticket, sink) => gateway.openTerminal(pluginId, ticket, sink),

@@ -2,7 +2,8 @@
 <html lang="ru">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; frame-src cyborg-plugin:" />
+    <!-- frame-src широкий: чужой адрес фрейма отменяет главный процесс (navigation.ts), а отказ CSP оставил бы на месте вида страницу ошибки. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; frame-src cyborg-plugin: * data: blob:" />
     <title>Cyborg Playground</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
