@@ -43,8 +43,7 @@ quality-checks: входных записей нет
 | Журнал вызовов `@deprecated` | не начато |
 | Род области и `order` вида в манифесте ([3.8](../03-architecture/design/sad.md#38-изоляция-рендера)) | не начато; область вида выбирает окно playground |
 | Набор тестов контракта, общий для всех поставщиков ([вопрос 10](../03-architecture/design/sad.md#8-открытые-вопросы)) | не начато |
-| Задержка шлюза `ctx.os` на горячих путях ([вопрос 9](../03-architecture/design/sad.md#8-открытые-вопросы)) | цена RPC замерена, шлюз - нет |
-| Замеры на macOS: хосты и фреймы, клавиши во фрейме | замеры сняты, [macos-check.md](../04-verification/macos-check.md); клавиши и терминал человеком - [#2](https://github.com/dex-it/cyborg-harness/issues/2) |
+| Замеры на macOS: хосты и фреймы, клавиши во фрейме, шлюз `ctx.os` | хосты и фреймы сняты, [macos-check.md](../04-verification/macos-check.md); шлюз - нет, [spike-gateway.md](../04-verification/spike-gateway.md); клавиши и терминал человеком - [#2](https://github.com/dex-it/cyborg-harness/issues/2) |
 | pty на Windows | не проверялся; в области ли Windows - [вопрос 12](../03-architecture/design/sad.md#8-открытые-вопросы) |
 | Настройка `sessions.restore`, `cwd` и `projectId` сессии | подъём сейчас ручной |
 | pty-хост - отдельный `utilityProcess` ядра, вывод к виду по `MessagePort` ([ADR-CH-0012](../03-architecture/adr/ADR-CH-0012-pty-host.md)) | не начато; `node-pty` и таблица pty в главном процессе |
