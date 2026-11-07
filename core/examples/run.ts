@@ -20,7 +20,7 @@ const step = args.includes('--step');
 const names = args.filter((a) => !a.startsWith('--'));
 
 if (args.includes('--help') || names.some((n) => n !== 'all' && !scenarios.some((s) => s.name === n))) {
-  console.log(`${bold('npm run core:demo -- [сценарий ...|all] [--step]')}\n`);
+  console.log(`${bold('npm run demo -- [сценарий ...|all] [--step]')}\n`);
   for (const s of scenarios) console.log(`  ${cyan(s.name.padEnd(10))} ${s.title}`);
   console.log(`\n  без имени - basic; --step - пауза на Enter после каждого шага`);
   process.exit(names.length > 0 && !args.includes('--help') ? 1 : 0);
