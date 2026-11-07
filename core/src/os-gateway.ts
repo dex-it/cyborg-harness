@@ -6,7 +6,7 @@ import path from 'node:path';
 import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, ProcessResult, PtyInfo, SecretValue } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
-import { LOGIN_SHELL } from './permissions.ts';
+import { ANY_PATH, LOGIN_SHELL } from './permissions.ts';
 import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type TerminalSink, type TerminalView } from './pty.ts';
 import { HttpServes, type AskHost } from './serve.ts';
 import type { GuardRight } from './via-contract.ts';
@@ -67,6 +67,11 @@ interface Area {
 // PATHEXT и список высокого риска Windows, пакеты и ярлыки macOS, установщики и скрипты Linux: всё, что система откроет запуском.
 const EXECUTABLE =
   /\.(exe|bat|cmd|com|pif|scr|ps1|ps1xml|psc1|psm1|msi|msp|mst|msc|msix|appx|appinstaller|application|appref-ms|gadget|lnk|url|scf|settingcontent-ms|library-ms|reg|inf|ins|isp|chm|hta|cpl|xll|xbap|diagcab|vsix|vb|vbs|vbe|js|jse|mjs|cjs|ws|wsf|wsh|jar|py|pyw|pl|rb|iso|img|vhd|vhdx|app|bundle|prefpane|workflow|action|scpt|applescript|terminal|fileloc|inetloc|webloc|command|tool|sh|bash|zsh|csh|ksh|fish|desktop|appimage|run|bin|deb|rpm|snap|flatpakref|pkg|mpkg|dmg)$/i;
+
+// Файл в области своей записи плагин мог создать сам, а запретительный список не бывает полным: там открывается только документ.
+// HTML и SVG не здесь: браузер выполнит их скрипт и сходит в сеть в обход права `net`.
+const DOCUMENT =
+  /\.(txt|text|md|markdown|log|csv|tsv|json|pdf|rtf|odt|ods|odp|docx|xlsx|pptx|epub|png|jpe?g|gif|webp|bmp|tiff?|avif|heic|mp3|wav|ogg|oga|flac|m4a|opus|mp4|m4v|webm|mkv|mov|ogv)$/i;
 
 export interface Denial {
   readonly pluginId: string;
@@ -324,6 +329,7 @@ export class OsGateway {
       if (area === 'workspace' || area === 'workspace.git') out.push(...workspace().map((r) => plain(r, area === 'workspace.git')));
       else if (area === 'granted') out.push(...[...(this.#granted.get(m.id) ?? [])].map((g) => plain(g)));
       else if (area === 'plugin-data' || area === 'plugin-temp') out.push(...(right === 'shell' ? [plain(area === 'plugin-data' ? own.data : own.temp)] : []));
+      else if (area === ANY_PATH && right === 'shell') out.push(plain(path.parse(process.cwd()).root));
       else if (area.startsWith('/') || area.startsWith('~')) out.push(this.#maskArea(area));
     }
     return Promise.all(out);
@@ -598,6 +604,8 @@ export class OsGateway {
         const st = await fs.stat(target).catch(() => undefined);
         if (st === undefined) throw new CoreError('NotFound', `${method}: нет ${String(args[0])}`);
         if (EXECUTABLE.test(target) || (st.isFile() && (st.mode & 0o111) !== 0)) throw this.#denied(m, method, `исполняемый файл: ${String(args[0])}`);
+        const writable = (await this.#areas(m, 'fs.write')).some((a) => areaDir(a, target) !== undefined);
+        if (writable && !(st.isFile() && DOCUMENT.test(target))) throw this.#denied(m, method, `в области своей записи открывается только документ: ${String(args[0])}`);
         if (!this.#env.shell) throw new CoreError('Unavailable', 'открытия в системе нет в этой среде');
         await this.#env.shell.openPath(target);
         return undefined;

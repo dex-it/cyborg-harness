@@ -16,6 +16,8 @@ const isPath = (v: string) => {
 };
 const isArea = (v: string) => (AREAS as readonly string[]).includes(v) || isPath(v);
 const isWriteArea = (v: string) => v === 'workspace.git' || isArea(v);
+/** Область только права `shell`: любой существующий путь, как ссылка из вывода сессии. Читать и писать там она не даёт. */
+export const ANY_PATH = 'any';
 // file: открыл бы путь мимо проверки областей, javascript: и data: - не адрес.
 const isScheme = (v: string) => /^[a-z][a-z0-9+.-]*:$/.test(v) && !['file:', 'javascript:', 'data:', 'vbscript:'].includes(v);
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -48,7 +50,7 @@ export function readPermissions(raw: unknown, errors: string[]): PluginPermissio
   const areas = `области ${AREAS.join(', ')}, абсолютные пути или маски под названным каталогом`;
   set('fs.read', strings('fs.read', raw['fs.read'], errors, isArea, areas));
   set('fs.write', strings('fs.write', raw['fs.write'], errors, isWriteArea, `${areas}, workspace.git`));
-  set('shell', strings('shell', raw.shell, errors, (v) => isArea(v) || isScheme(v), `${areas} или схемы URL с двоеточием, кроме file:`));
+  set('shell', strings('shell', raw.shell, errors, (v) => v === ANY_PATH || isArea(v) || isScheme(v), `${areas}, ${ANY_PATH} или схемы URL с двоеточием, кроме file:`));
   set('net', strings('net', raw.net, errors, (v) => HOST.test(v), 'хосты или config:<поле>'));
   set('env', strings('env', raw.env, errors, (v) => ENV_NAME.test(v), 'имена переменных'));
   set('secrets.ref', strings('secrets.ref', raw['secrets.ref'], errors, (v) => /^[a-z][a-z0-9+.-]*:\/\/./.test(v), 'маски ссылок со схемой'));
@@ -85,6 +87,7 @@ const AREA_WORDS: Readonly<Record<string, string>> = {
   'plugin-data': 'свои данные',
   'plugin-temp': 'свой временный каталог',
   granted: 'выбранное человеком в диалоге',
+  [ANY_PATH]: 'любой файл',
 };
 const areaWords = (areas: readonly string[]) => areas.map((a) => AREA_WORDS[a] ?? a).join(', ');
 
@@ -93,7 +96,9 @@ export function describePermissions(p: PluginPermissions): string[] {
   const out: string[] = [];
   if (p['fs.read']) out.push(`читает файлы: ${areaWords(p['fs.read'])}`);
   if (p['fs.write']) out.push(`пишет файлы: ${areaWords(p['fs.write'])}`);
-  if (p.shell) out.push(`открывает в системе: ${areaWords(p.shell)}`);
+  // Свои каталоги плагин пишет и без права `fs.write`.
+  const writes = p['fs.write'] !== undefined || p.shell?.some((a) => a === 'plugin-data' || a === 'plugin-temp' || a === ANY_PATH);
+  if (p.shell) out.push(`открывает в системе: ${areaWords(p.shell)} - кроме программ и скриптов${writes ? '; где сам пишет - только документы' : ''}`);
   const program = (p: string) => (p === LOGIN_SHELL ? 'оболочка входа' : p);
   const programs = (rules: PluginPermissions['process']) => (rules ?? []).map((r) => (typeof r === 'string' ? r : [program(r.program), ...r.args].join(' ') + (r.env?.length ? ` (окружение: ${r.env.join(', ')})` : ''))).join(', ');
   if (p.process) out.push(`запускает программы: ${programs(p.process)} - полный доступ через программу`);

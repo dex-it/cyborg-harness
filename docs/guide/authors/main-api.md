@@ -84,7 +84,7 @@ ctx.commands.register('acme.open', async (path) => {
 | `env` | `env` | `get(name)` для перечисленных переменных |
 | `notify` | `notify` | Системное уведомление |
 | `clipboard` | `clipboard` | Чтение и запись буфера по списку |
-| `shell` | `shell` | `openPath`, `openExternal`; исполняемый файл не открывается |
+| `shell` | `shell` | `openPath`, `openExternal`; исполняемый файл не открывается, а где плагин пишет сам - только документ |
 | `serve` | `serve` | `http(handler)` - сервер на `127.0.0.1` для программ этого компьютера |
 | `security` | `security.roots` | `setRoots(paths)` - корни проектов |
 | `ui` | `ui.lock` | `lock()` - закрыть окно своим экраном |
