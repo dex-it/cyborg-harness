@@ -498,13 +498,15 @@ test('shell.openPath: где плагин сам пишет, открывает�
   await k.unload();
 });
 
-test('shell any: любой существующий неисполняемый путь вне корней; программа, пропавший путь, защищённое и чужое - отказ; читать area any не даёт', async () => {
+test('shell any: документ или каталог вне корней; программа, файл не документом, пропавший путь, защищённое и чужое - отказ; читать area any не даёт', async () => {
   await using box = await sandbox();
   const guarded = path.join(box.work, 'team.cyborg.json');
   const doc = path.join(box.outside, 'build.log');
   const program = path.join(box.outside, 'run');
   const script = path.join(box.outside, 'setup.sh');
-  for (const f of [guarded, doc, program, script]) await writeFile(f, 'x');
+  const page = path.join(box.outside, 'page.html');
+  const payload = path.join(box.outside, 'payload.xyz');
+  for (const f of [guarded, doc, program, script, page, payload]) await writeFile(f, 'x');
   await chmod(program, 0o755);
   const opened: string[] = [];
   const { k, os, denied } = await kernel(
@@ -521,6 +523,8 @@ test('shell any: любой существующий неисполняемый 
   await open(box.outside);
   await assert.rejects(open(program), { code: 'PermissionDenied' }, 'файл с битом x');
   await assert.rejects(open(script), { code: 'PermissionDenied' }, 'скрипт по расширению');
+  await assert.rejects(open(page), { code: 'PermissionDenied' }, 'страницу мог положить кто угодно, браузер выполнит её скрипт');
+  await assert.rejects(open(payload), { code: 'PermissionDenied' }, 'тип не из списка документов');
   await assert.rejects(open(path.join(box.outside, 'gone.txt')), { code: 'NotFound' });
   await assert.rejects(open(guarded), { code: 'PermissionDenied' }, 'защищённый путь');
   const foreign = path.join(os('other').paths.data, 'note.txt');
@@ -535,7 +539,7 @@ test('shell any: любой существующий неисполняемый 
   await assert.rejects(os('linker').fs.readText(doc), { code: 'PermissionDenied' }, 'any не даёт чтения');
   await k.unload();
 
-  assert.deepEqual(describePermissions({ shell: ['any'] }), ['открывает в системе: любой файл - кроме программ и скриптов; где сам пишет - только документы']);
+  assert.deepEqual(describePermissions({ shell: ['any'] }), ['открывает в системе: любой документ или каталог - кроме программ и скриптов; где сам пишет - только документы']);
   for (const right of ['fs.read', 'fs.write']) {
     const r = parseManifest(manifest('p', { [right]: ['any'] }));
     assert.ok(!r.ok && r.errors.some((e) => e.startsWith(`permissions.${right}`)), right);

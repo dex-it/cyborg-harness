@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
-import { constants, watch as watchFs, type Dirent } from 'node:fs';
+import { constants, watch as watchFs, type Dirent, type Stats } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, ProcessResult, PtyInfo, SecretValue } from '@cyborg-harness/contracts';
@@ -61,6 +61,8 @@ interface Area {
   readonly root: string;
   readonly segs: readonly string[];
   readonly git: boolean;
+  /** Область `any`: файл в ней мог положить кто угодно, не только человек. */
+  readonly any?: boolean;
 }
 
 // Открыть такой файл - запустить его: это право `process`, а не `shell`.
@@ -329,7 +331,7 @@ export class OsGateway {
       if (area === 'workspace' || area === 'workspace.git') out.push(...workspace().map((r) => plain(r, area === 'workspace.git')));
       else if (area === 'granted') out.push(...[...(this.#granted.get(m.id) ?? [])].map((g) => plain(g)));
       else if (area === 'plugin-data' || area === 'plugin-temp') out.push(...(right === 'shell' ? [plain(area === 'plugin-data' ? own.data : own.temp)] : []));
-      else if (area === ANY_PATH && right === 'shell') out.push(plain(path.parse(process.cwd()).root));
+      else if (area === ANY_PATH && right === 'shell') out.push(plain(path.parse(process.cwd()).root).then((a) => ({ ...a, any: true })));
       else if (area.startsWith('/') || area.startsWith('~')) out.push(this.#maskArea(area));
     }
     return Promise.all(out);
@@ -375,7 +377,10 @@ export class OsGateway {
   /** `via-contract`: право вызывающего на аргумент чужого члена контракта; поставщик потом выполнит вызов по своим правам. */
   async checkFor(m: PluginManifest, method: string, right: GuardRight, value: string): Promise<void> {
     if (right !== 'secrets.ref') {
-      await this.#checkPath(m, method, value, right === 'fs.write', right, 'via-contract');
+      const target = await this.#checkPath(m, method, value, right === 'fs.write', right, 'via-contract');
+      // Иначе вызывающий запишет файл и попросит открыть его поставщика, который туда не пишет.
+      const st = right === 'shell' ? await fs.stat(target).catch(() => undefined) : undefined;
+      if (st) await this.#checkOpen(m, method, target, st, value, 'via-contract');
       return;
     }
     if (!this.refAllowed(m, value)) throw this.#denied(m, method, `ссылка вне secrets.ref: ${value}`, 'via-contract');
@@ -392,6 +397,16 @@ export class OsGateway {
     const write = this.#grantWrites.then(() => store.write(Object.fromEntries([...this.#granted].map(([id, set]) => [id, [...set]]))));
     this.#grantWrites = write.catch(() => undefined);
     return write;
+  }
+
+  /** Программой ОС открывается не программа; файл, который мог подготовить не человек, - только документ. */
+  async #checkOpen(m: PluginManifest, method: string, target: string, st: Stats, given: string, reason?: 'via-contract'): Promise<void> {
+    if (EXECUTABLE.test(target) || (st.isFile() && (st.mode & 0o111) !== 0)) throw this.#denied(m, method, `исполняемый файл: ${given}`, reason);
+    const document = st.isFile() && DOCUMENT.test(target);
+    const writable = (await this.#areas(m, 'fs.write')).some((a) => areaDir(a, target) !== undefined);
+    if (writable && !document) throw this.#denied(m, method, `в области своей записи открывается только документ: ${given}`, reason);
+    const named = (await this.#areas(m, 'shell')).some((a) => a.any !== true && areaDir(a, target) !== undefined);
+    if (!named && st.isFile() && !document) throw this.#denied(m, method, `вне названных областей открывается только документ или каталог: ${given}`, reason);
   }
 
   async #ownDirs(pluginId: string): Promise<void> {
@@ -603,9 +618,7 @@ export class OsGateway {
         const target = await this.#checkPath(m, method, args[0], false, 'shell');
         const st = await fs.stat(target).catch(() => undefined);
         if (st === undefined) throw new CoreError('NotFound', `${method}: нет ${String(args[0])}`);
-        if (EXECUTABLE.test(target) || (st.isFile() && (st.mode & 0o111) !== 0)) throw this.#denied(m, method, `исполняемый файл: ${String(args[0])}`);
-        const writable = (await this.#areas(m, 'fs.write')).some((a) => areaDir(a, target) !== undefined);
-        if (writable && !(st.isFile() && DOCUMENT.test(target))) throw this.#denied(m, method, `в области своей записи открывается только документ: ${String(args[0])}`);
+        await this.#checkOpen(m, method, target, st, String(args[0]));
         if (!this.#env.shell) throw new CoreError('Unavailable', 'открытия в системе нет в этой среде');
         await this.#env.shell.openPath(target);
         return undefined;

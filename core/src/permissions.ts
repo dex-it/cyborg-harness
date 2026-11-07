@@ -16,7 +16,7 @@ const isPath = (v: string) => {
 };
 const isArea = (v: string) => (AREAS as readonly string[]).includes(v) || isPath(v);
 const isWriteArea = (v: string) => v === 'workspace.git' || isArea(v);
-/** Область только права `shell`: любой существующий путь, как ссылка из вывода сессии. Читать и писать там она не даёт. */
+/** Область только права `shell`: любой существующий документ или каталог, как ссылка из вывода сессии. Читать и писать там она не даёт. */
 export const ANY_PATH = 'any';
 // file: открыл бы путь мимо проверки областей, javascript: и data: - не адрес.
 const isScheme = (v: string) => /^[a-z][a-z0-9+.-]*:$/.test(v) && !['file:', 'javascript:', 'data:', 'vbscript:'].includes(v);
@@ -87,7 +87,7 @@ const AREA_WORDS: Readonly<Record<string, string>> = {
   'plugin-data': 'свои данные',
   'plugin-temp': 'свой временный каталог',
   granted: 'выбранное человеком в диалоге',
-  [ANY_PATH]: 'любой файл',
+  [ANY_PATH]: 'любой документ или каталог',
 };
 const areaWords = (areas: readonly string[]) => areas.map((a) => AREA_WORDS[a] ?? a).join(', ');
 
