@@ -15,7 +15,7 @@ const spawnOpts = { program: 'sh', args: [] as string[], env: {}, cols: 80, rows
 function table(limit = 1000, ttl = 30_000) {
   const backend = fakePty();
   const pushed: { pluginId: string; method: string; params: unknown }[] = [];
-  const t = new PtyTable(backend, (pluginId, method, params) => void pushed.push({ pluginId, method, params }), limit, ttl);
+  const t = new PtyTable(backend, (pluginId, method, params) => void pushed.push({ pluginId, method, params }), limit, ttl, { ptys: 1000 });
   return { t, backend, pushed };
 }
 
@@ -197,4 +197,86 @@ test('stress-pty: плагин spawn-ит pty и не подписывается
   h.onData((c) => void (got += c.length));
   // 12.8 МБ вывода без подписчика; ядро держит хвост 256 КБ (SAD 3.6) - хост не вправе держать больше этого.
   assert.ok(got <= 256 * 1024 + 64 * 1024, `хост накопил ${String(got)} символов до первой подписки`);
+});
+
+test('stress-pty: 10 000 мелких кусков - хосту и зрителю уходят десятки пачек, порядок и содержимое целы, накопленное не повторяется в хвосте, exit после последнего data', async () => {
+  const backend = fakePty();
+  const host = { data: '', messages: 0, order: [] as string[] };
+  const t = new PtyTable(
+    backend,
+    (_, method, params) => {
+      host.order.push(method);
+      if (method === 'pty.data') {
+        host.messages++;
+        host.data += (params as { data: string }).data;
+      }
+    },
+    undefined,
+    undefined,
+    { ptyFlushMs: 4 },
+  );
+  const wire = t.spawn('p', spawnOpts);
+  const proc = backend.procs[0];
+  assert.ok(proc);
+  await sleep(10);
+  const view = { data: '', messages: 0, order: [] as string[] };
+  const opened = t.openTerminal('p', t.share('p', wire.id), {
+    data: (c) => {
+      view.messages++;
+      view.data += c;
+      view.order.push('data');
+    },
+    exit: () => void view.order.push('exit'),
+  });
+  assert.equal(opened.backlog, '$ ');
+
+  proc.emit('a');
+  proc.emit('b');
+  const late = t.openTerminal('p', t.share('p', wire.id), sink());
+  assert.equal(late.backlog, '$ ab', 'накопленное к открытию - в хвосте нового зрителя');
+  assert.equal(view.data, 'ab', 'прежний зритель получил накопленное до открытия нового');
+
+  let all = '';
+  for (let i = 0; i < 10_000; i++) {
+    const chunk = `[${String(i)}]`;
+    all += chunk;
+    proc.emit(chunk);
+    if (i % 1000 === 999 && i < 9999) await sleep(5);
+  }
+  proc.exit(0);
+  assert.equal(host.data, `$ ab${all}`);
+  assert.equal(view.data, `ab${all}`);
+  assert.ok(host.messages < 100, `в хост ушло ${String(host.messages)} сообщений на 10 002 куска`);
+  assert.ok(view.messages < 100, `во фрейм ушло ${String(view.messages)} сообщений`);
+  assert.equal(host.order.at(-1), 'pty.exit');
+  assert.equal(host.order.filter((m) => m === 'pty.exit').length, 1);
+  assert.deepEqual(view.order.slice(-2), ['data', 'exit'], 'exit зрителю - после последнего data');
+});
+
+test('stress-pty: ptyFlushMs 0 - каждый кусок уходит сразу, как без склейки', () => {
+  const backend = fakePty();
+  const got: string[] = [];
+  const t = new PtyTable(backend, (_, method, params) => {
+    if (method === 'pty.data') got.push((params as { data: string }).data);
+  }, undefined, undefined, { ptyFlushMs: 0 });
+  t.spawn('p', spawnOpts);
+  const proc = backend.procs[0];
+  assert.ok(proc);
+  for (const c of ['x', 'y', 'z']) proc.emit(c);
+  assert.deepEqual(got, ['x', 'y', 'z']);
+});
+
+test('stress-pty: пачка уходит по размеру, не дожидаясь интервала', () => {
+  const backend = fakePty();
+  const got: string[] = [];
+  const t = new PtyTable(backend, (_, method, params) => {
+    if (method === 'pty.data') got.push((params as { data: string }).data);
+  }, undefined, undefined, { ptyFlushMs: 60_000, ptyFlushChars: 10 });
+  t.spawn('p', spawnOpts);
+  const proc = backend.procs[0];
+  assert.ok(proc);
+  proc.emit('1');
+  for (const c of ['2345', '6789', '0abc', 'd']) proc.emit(c);
+  assert.deepEqual(got, ['1', '234567890abc'], 'первый - сразу, затем по накоплении 10 символов');
+  t.release('p');
 });

@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import type { FSWatcher } from 'node:fs';
-import { mkdtemp, mkdir, readFile, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { PluginContext } from '@cyborg-harness/contracts';
-import { load } from '../src/loader.ts';
+import { load, type LoadOptions } from '../src/loader.ts';
 import type { OsEnvironment } from '../src/os-gateway.ts';
 import { groupKilled, type PtyProcess } from '../src/pty.ts';
 import { inlineHosts } from '../src/transports.ts';
@@ -40,7 +40,7 @@ async function sandbox() {
   return { root, work, data: path.join(root, 'data'), temp: path.join(root, 'temp'), [Symbol.asyncDispose]: () => rm(root, { recursive: true, force: true }) };
 }
 
-async function kernel(plugins: Record<string, unknown>, env: Partial<OsEnvironment> & Pick<OsEnvironment, 'dataDir' | 'tempDir'>) {
+async function kernel(plugins: Record<string, unknown>, env: Partial<OsEnvironment> & Pick<OsEnvironment, 'dataDir' | 'tempDir'>, limits?: LoadOptions['limits']) {
   const contexts = new Map<string, PluginContext>();
   const k = await load({
     apiVersion: '1.0.0',
@@ -48,6 +48,7 @@ async function kernel(plugins: Record<string, unknown>, env: Partial<OsEnvironme
     enabled: Object.keys(plugins),
     manifests: Object.entries(plugins).map(([id, permissions]) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, permissions })),
     os: env,
+    ...(limits && { limits }),
   });
   return { k, ctx: (id: string) => contexts.get(id)! };
 }
@@ -206,4 +207,34 @@ test('вызов контракта: зависший поставщик - по�
   await assert.rejects(k.callAs('user', 'test.files', 1, 'read', ['y']), { code: 'Timeout' });
   assert.ok(Date.now() - started < 2000);
   await k.unload();
+});
+
+test('пределы: одновременных process.run у плагина - Invalid сверх предела, место освобождают выход, тайм-аут и выключение; readText крупнее предела - Invalid', async () => {
+  await using box = await sandbox();
+  const node = [{ program: process.execPath, args: ['-e'] }];
+  const { k, ctx } = await kernel({ a: { process: node, 'fs.read': [box.work] }, b: { process: node } }, { dataDir: box.data, tempDir: box.temp }, { runs: 2, readText: 16 });
+  try {
+    const wait = (ms: number) => ['-e', `setTimeout(()=>{},${String(ms)})`];
+    const quick = ctx('a').os.process!.run(process.execPath, wait(200));
+    const slow = ctx('a').os.process!.run(process.execPath, wait(60_000), { timeoutMs: 600 });
+    await assert.rejects(ctx('a').os.process!.run(process.execPath, wait(0)), { code: 'Invalid', message: /уже 2 программ/ });
+    assert.equal((await ctx('b').os.process!.run(process.execPath, wait(0))).code, 0, 'предел у каждого плагина свой');
+    assert.equal((await quick).code, 0);
+    const third = ctx('a').os.process!.run(process.execPath, wait(60_000));
+    await assert.rejects(ctx('a').os.process!.run(process.execPath, wait(0)), { code: 'Invalid' });
+    assert.equal((await slow).signal, 'SIGTERM');
+    assert.equal((await ctx('a').os.process!.run(process.execPath, wait(0))).code, 0, 'тайм-аут освободил место');
+    await k.disable('a');
+    await third.catch(() => undefined);
+    await k.enable('a');
+    await Promise.all([ctx('a').os.process!.run(process.execPath, wait(0)), ctx('a').os.process!.run(process.execPath, wait(0))]);
+
+    await writeFile(path.join(box.work, 'ok.txt'), 'x'.repeat(16));
+    await writeFile(path.join(box.work, 'big.txt'), 'x'.repeat(17));
+    assert.equal(await ctx('a').os.fs.readText(path.join(box.work, 'ok.txt')), 'x'.repeat(16));
+    await assert.rejects(ctx('a').os.fs.readText(path.join(box.work, 'big.txt')), { code: 'Invalid', message: /больше 16 байт.*fs\.readSlice/ });
+    assert.equal((await ctx('a').os.fs.readSlice(path.join(box.work, 'big.txt'), 0, 64)).size, 17, 'крупный файл читается частями');
+  } finally {
+    await k.unload();
+  }
 });

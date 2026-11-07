@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, ProcessResult, PtyInfo, SecretValue } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
+import { limitsOf, type ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
 import { LOGIN_SHELL } from './permissions.ts';
 import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type TerminalSink, type TerminalView } from './pty.ts';
@@ -43,6 +44,8 @@ export interface OsEnvironment {
   readonly pty?: PtyBackend;
   /** Хвост вывода pty, символов; по умолчанию 256 К. */
   readonly ptyBacklog?: number;
+  /** Пределы ресурсов плагина поверх `LIMITS`; загрузчик кладёт сюда `LoadOptions.limits`. */
+  readonly limits?: Partial<ResourceLimits> | undefined;
   /** Открыть программой ОС; путь и URL шлюз уже проверил. */
   readonly shell?: { openPath(path: string): Promise<void>; openExternal(url: string): Promise<void> };
   /** Системный выбор файла; ответ - выбранные пути, отмена - пустой список. */
@@ -238,6 +241,9 @@ export class OsGateway {
   readonly #grants: GrantStore | undefined;
   #grantWrites: Promise<unknown> = Promise.resolve();
   readonly #serves: HttpServes;
+  readonly #limits: ResourceLimits;
+  // Счёт на поколение плагина: убитая при выгрузке программа закрывается позже, место уже у нового поколения.
+  readonly #runs = new Map<string, { n: number }>();
 
   constructor(
     env: OsEnvironment,
@@ -249,6 +255,7 @@ export class OsGateway {
     ask: AskHost = () => Promise.reject(new CoreError('Unavailable', 'хоста нет')),
   ) {
     this.#env = env;
+    this.#limits = limitsOf(env.limits);
     this.#serves = new HttpServes(ask);
     this.#grants = grants;
     const saved = grants?.read();
@@ -264,7 +271,7 @@ export class OsGateway {
     this.#push = push;
     this.#deny = deny;
     this.#configOf = configOf;
-    this.#pty = env.pty && new PtyTable(env.pty, push, env.ptyBacklog);
+    this.#pty = env.pty && new PtyTable(env.pty, push, env.ptyBacklog, undefined, this.#limits);
   }
 
   pathsOf(pluginId: string): { data: string; temp: string; home: string } {
@@ -282,6 +289,7 @@ export class OsGateway {
     for (const [key, close] of this.#watches) if (key.startsWith(`${pluginId}\0`)) close();
     for (const cancel of this.#pending.get(pluginId) ?? []) cancel();
     this.#pending.delete(pluginId);
+    this.#runs.delete(pluginId);
     this.#serves.forget(pluginId);
     if (pty === 'park') return this.#pty?.park(pluginId) ?? 0;
     if (pty === 'detach') this.#pty?.detach(pluginId);
@@ -403,6 +411,8 @@ export class OsGateway {
         // O_NOFOLLOW: путь уже без ссылок, подменённый на ссылку последний компонент не откроется.
         const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
         try {
+          const max = this.#limits.readText;
+          if ((await handle.stat()).size > max) throw new CoreError('Invalid', `${method}: файл больше ${String(max)} байт - читайте частями через fs.readSlice`);
           return await handle.readFile('utf8');
         } finally {
           await handle.close();
@@ -693,6 +703,18 @@ export class OsGateway {
     const options = isRecord(args[2]) ? args[2] : {};
     const { file, argv, cwd, env } = await this.#program(m, 'process', method, program, args[1], options);
     const timeout = typeof options.timeoutMs === 'number' ? options.timeoutMs : 0;
+    const runs = this.#runs.get(m.id) ?? { n: 0 };
+    if (runs.n >= this.#limits.runs) throw new CoreError('Invalid', `${method}: у ${m.id} уже ${String(runs.n)} программ - дождитесь завершения прежних`);
+    this.#runs.set(m.id, runs);
+    runs.n++;
+    try {
+      return await this.#spawnRun(m.id, program, file, argv, cwd, env, timeout, options.input);
+    } finally {
+      runs.n--;
+    }
+  }
+
+  #spawnRun(pluginId: string, program: string, file: string, argv: string[], cwd: string | undefined, env: Record<string, string>, timeout: number, input: unknown): Promise<ProcessResult> {
     return new Promise((resolve, reject) => {
       // Своя группа процессов: тайм-аут и выгрузка плагина гасят и то, что программа запустила сама.
       const child = spawn(file, argv, { cwd, env, shell: false, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
@@ -701,7 +723,7 @@ export class OsGateway {
         if (child.pid !== undefined) killGroup(child.pid, signal);
       };
       const timer = timeout > 0 ? setTimeout(() => stop('SIGTERM'), timeout) : undefined;
-      const untrack = this.#track(m.id, () => stop('SIGKILL'));
+      const untrack = this.#track(pluginId, () => stop('SIGKILL'));
       const done = () => {
         clearTimeout(timer);
         untrack();
@@ -719,7 +741,7 @@ export class OsGateway {
         done();
         resolve({ code, signal, stdout, stderr });
       });
-      child.stdin.end(typeof options.input === 'string' ? options.input : undefined);
+      child.stdin.end(typeof input === 'string' ? input : undefined);
     });
   }
 
