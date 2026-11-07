@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import type { FSWatcher } from 'node:fs';
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -209,7 +209,7 @@ test('вызов контракта: зависший поставщик - по�
   await k.unload();
 });
 
-test('пределы: одновременных process.run у плагина - Invalid сверх предела, место освобождают выход, тайм-аут и выключение; readText крупнее предела - Invalid', async () => {
+test('пределы: одновременных process.run у плагина - Invalid сверх предела, место освобождают выход, тайм-аут и выключение; readText крупнее предела и не обычный файл - Invalid', async () => {
   await using box = await sandbox();
   const node = [{ program: process.execPath, args: ['-e'] }];
   const { k, ctx } = await kernel({ a: { process: node, 'fs.read': [box.work] }, b: { process: node } }, { dataDir: box.data, tempDir: box.temp }, { runs: 2, readText: 16 });
@@ -234,6 +234,12 @@ test('пределы: одновременных process.run у плагина -
     assert.equal(await ctx('a').os.fs.readText(path.join(box.work, 'ok.txt')), 'x'.repeat(16));
     await assert.rejects(ctx('a').os.fs.readText(path.join(box.work, 'big.txt')), { code: 'Invalid', message: /больше 16 байт.*fs\.readSlice/ });
     assert.equal((await ctx('a').os.fs.readSlice(path.join(box.work, 'big.txt'), 0, 64)).size, 17, 'крупный файл читается частями');
+    if (posix) {
+      const fifo = path.join(box.work, 'pipe');
+      execFileSync('mkfifo', [fifo]);
+      await assert.rejects(ctx('a').os.fs.readText(fifo), { code: 'Invalid', message: /не обычный файл/ }, 'FIFO без писателя не вешает чтение и не обходит предел');
+      await assert.rejects(ctx('a').os.fs.readSlice(fifo, 0, 64), { code: 'Invalid', message: /не обычный файл/ });
+    }
   } finally {
     await k.unload();
   }

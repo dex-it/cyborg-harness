@@ -100,6 +100,34 @@ function utf8End(buf: Buffer, n: number): number {
   return n;
 }
 
+/** Обычный файл без ссылки в последнем компоненте; O_NONBLOCK - FIFO не повесит поток пула в ожидании писателя. */
+async function openFile(method: string, file: string): Promise<{ handle: fs.FileHandle; size: number }> {
+  const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  const st = await handle.stat().catch(async (error: unknown) => {
+    await handle.close();
+    throw error;
+  });
+  if (!st.isFile()) {
+    await handle.close();
+    throw new CoreError('Invalid', `${method}: не обычный файл: ${file}`);
+  }
+  return { handle, size: st.size };
+}
+
+/** Размер из stat - только подсказка: файл растёт и после проверки, поэтому предел держит само чтение. */
+async function readAtMost(method: string, handle: fs.FileHandle, size: number, max: number): Promise<string> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for (;;) {
+    const chunk = Buffer.allocUnsafe(Math.min(Math.max(size + 1 - total, 64 * 1024), max + 1 - total));
+    const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+    if (bytesRead === 0) return Buffer.concat(chunks, total).toString('utf8');
+    chunks.push(chunk.subarray(0, bytesRead));
+    total += bytesRead;
+    if (total > max) throw new CoreError('Invalid', `${method}: файл больше ${String(max)} байт - читайте частями через fs.readSlice`);
+  }
+}
+
 const int = (method: string, v: unknown, name: string, min: number, max: number): number => {
   if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < min || v > max) throw new CoreError('Invalid', `${method}: ${name} - целое от ${String(min)} до ${String(max)}`);
   return v;
@@ -409,11 +437,11 @@ export class OsGateway {
         await this.#ownDirs(m.id);
         const file = await this.#checkPath(m, method, args[0], false);
         // O_NOFOLLOW: путь уже без ссылок, подменённый на ссылку последний компонент не откроется.
-        const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+        const { handle, size } = await openFile(method, file);
         try {
           const max = this.#limits.readText;
-          if ((await handle.stat()).size > max) throw new CoreError('Invalid', `${method}: файл больше ${String(max)} байт - читайте частями через fs.readSlice`);
-          return await handle.readFile('utf8');
+          if (size > max) throw new CoreError('Invalid', `${method}: файл больше ${String(max)} байт - читайте частями через fs.readSlice`);
+          return await readAtMost(method, handle, size, max);
         } finally {
           await handle.close();
         }
@@ -423,9 +451,8 @@ export class OsGateway {
         const file = await this.#checkPath(m, method, args[0], false);
         const offset = int(method, args[1], 'offset', 0, Number.MAX_SAFE_INTEGER);
         const max = int(method, args[2], 'maxBytes', 4, MAX_SLICE);
-        const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+        const { handle, size } = await openFile(method, file);
         try {
-          const size = (await handle.stat()).size;
           const buf = Buffer.alloc(Math.min(max, Math.max(0, size - offset)));
           const { bytesRead } = await handle.read(buf, 0, buf.length, offset);
           const end = offset + bytesRead >= size ? bytesRead : utf8End(buf, bytesRead);
