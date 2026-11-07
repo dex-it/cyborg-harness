@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { PluginContext } from '@cyborg-harness/contracts';
 import type { HostHandle } from '../src/transports.ts';
 import { load, type LoadOptions } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
@@ -329,5 +330,36 @@ test('замок окна: системный диалог чужого плаг
   await assert.rejects(k.run('picker.pick'), { code: 'Unavailable' });
   await k.run('pin.unlock');
   assert.deepEqual(await k.run('picker.pick'), ['/выбран']);
+  await k.unload();
+});
+
+test('заголовок окна: воркспейс, фрагменты по id плагина, приложение; undefined и выгрузка снимают, управляющие символы убираются, длинный - Invalid, под замком только свои', async () => {
+  const contexts = new Map<string, PluginContext>();
+  const titled: PluginModule = {
+    activate(ctx) {
+      contexts.set(ctx.pluginId, ctx);
+      return undefined;
+    },
+  };
+  const { start, snaps } = kernel(
+    { zeta: titled, alpha: titled, pin },
+    { enabled: ['zeta', 'alpha', 'pin'], manifests: [manifest('zeta'), manifest('alpha'), pinManifest()], windowTitle: { workspace: 'team.cyborg.json', app: 'Cyborg' } },
+  );
+  const k = await start();
+  assert.equal(k.window.title, 'team.cyborg.json - Cyborg');
+  const win = (id: string) => contexts.get(id)!.window;
+  await win('zeta').setTitle('Проект\n\u202eX\t');
+  await win('alpha').setTitle('main');
+  assert.equal(k.window.title, 'team.cyborg.json - main - Проект X - Cyborg');
+  assert.equal(snaps.at(-1)?.title, k.window.title, 'приложение получает строку');
+  await assert.rejects(win('alpha').setTitle('x'.repeat(81)), { code: 'Invalid' });
+  assert.equal(k.window.title, 'team.cyborg.json - main - Проект X - Cyborg');
+  await k.run('pin.lock', false);
+  assert.equal(k.window.title, 'team.cyborg.json - Cyborg', 'под замком фрагменты других плагинов не видны');
+  await k.run('pin.unlock');
+  await win('alpha').setTitle(undefined);
+  assert.equal(k.window.title, 'team.cyborg.json - Проект X - Cyborg');
+  await k.disable('zeta');
+  assert.equal(k.window.title, 'team.cyborg.json - Cyborg');
   await k.unload();
 });

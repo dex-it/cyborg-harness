@@ -86,6 +86,9 @@ const plugins = new PluginsService({
   log: (pluginId, line) => {
     if (win && !win.isDestroyed()) for (const frame of framesOf(win.webContents, viewOrigin(pluginId))) frame.send('view:log', line);
   },
+  title: (title) => {
+    if (win && !win.isDestroyed()) win.setTitle(title);
+  },
 });
 
 function windowChannel(channel: string, handler: (arg: unknown) => unknown): void {
@@ -232,6 +235,8 @@ function createWindow(): void {
     title: `Cyborg Playground - ${workspaceFile === undefined ? 'без воркспейса' : path.basename(workspaceFile)}`,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegrationInSubFrames: true },
   });
+  // Заголовок собирает ядро; `<title>` страницы его бы затёр.
+  win.on('page-title-updated', (event) => event.preventDefault());
   void win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   // Ядро видит нажатие раньше страницы: сочетание активного плагина до окна не доходит.
   win.webContents.on('before-input-event', (event, input) => {
@@ -299,7 +304,7 @@ void app.whenReady().then(() => {
     spawnHost: hosts.spawn,
     pidOf: hosts.pidOf,
     idleSeconds: () => powerMonitor.getSystemIdleTime(),
-    os: electronOs({ userData, roots: () => [workspace], protectedPaths: [workspaceFile, `${workspaceFile}.lock`] }),
+    os: electronOs({ userData, roots: () => [workspace], protectedPaths: [workspaceFile, `${workspaceFile}.lock`], raiseWindow: showWindow }),
     // Короче, чем в Cyborg: зависание по кнопке «Повесить хост» видно через пару секунд.
     watchdog: { interval: 500, timeout: 2500 },
     // eslint-disable-next-line no-console -- журнал ядра в главном процессе - это stderr приложения

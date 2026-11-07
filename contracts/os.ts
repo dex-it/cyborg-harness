@@ -174,6 +174,25 @@ export interface OsPty {
   attach(id: string): Promise<PtyHandle>;
 }
 
+/** Клик по уведомлению: своя команда из манифеста, аргументы сверяются её схемой. Команда, а не колбэк: клик переживёт перезапуск хоста. */
+export interface NotifyClick {
+  readonly command: string;
+  readonly args?: readonly unknown[];
+}
+
+export interface NotifyOptions {
+  /** Клик поднимает окно, закрывает уведомление и запускает команду. */
+  readonly onClick?: NotifyClick;
+}
+
+/** Выгрузка плагина закрывает его живые уведомления; падение хоста - нет, клик дойдёт до вернувшегося плагина. */
+export interface OsNotify {
+  /** Ответ - id уведомления для `close`. Длина заголовка и текста и число живых уведомлений ограничены средой: превышение - `Invalid`. */
+  show(title: string, body?: string, options?: NotifyOptions): Promise<string>;
+  /** Уже закрытое или чужое уведомление - ничего не делает. */
+  close(id: string): Promise<void>;
+}
+
 export interface PluginOs {
   /** Свои каталоги: данные и временный; читать и писать в них можно без права. */
   readonly paths: { readonly data: string; readonly temp: string; readonly home: string };
@@ -182,7 +201,7 @@ export interface PluginOs {
   readonly process?: { run(program: string, args: readonly string[], options?: ProcessOptions): Promise<ProcessResult> };
   readonly net?: { fetch(url: string, request?: HttpRequest): Promise<HttpResponse> };
   readonly env?: { get(name: string): Promise<string | undefined> };
-  readonly notify?: { show(title: string, body?: string): Promise<void> };
+  readonly notify?: OsNotify;
   readonly clipboard?: { readText?(): Promise<string>; writeText?(text: string): Promise<void> };
   readonly secrets: OsSecrets;
   readonly security?: { setRoots(paths: readonly string[]): Promise<void> };
