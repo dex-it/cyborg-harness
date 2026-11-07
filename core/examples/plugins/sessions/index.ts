@@ -3,10 +3,10 @@ import type { PluginModule } from '@cyborg-harness/contracts';
 const plugin: PluginModule = {
   state: { defaults: { open: [] } },
   activate(ctx) {
-    const projects = ctx.contracts.get('cyborg.projects', 1);
+    const projects = ctx.contracts.get('demo.projects', 1);
     const state = ctx.state;
-    if (!projects || !state) throw new Error('cyborg.projects и раздел state объявлены, но не пришли');
-    const lock = () => ctx.contracts.get('cyborg.lock', 1);
+    if (!projects || !state) throw new Error('demo.projects и раздел state объявлены, но не пришли');
+    const lock = () => ctx.contracts.get('demo.lock', 1);
     ctx.log(lock() ? 'блокировка экрана есть, учитываю её' : 'блокировки экрана нет, работаю без неё');
 
     ctx.commands.register('sessions.restore', async () => {

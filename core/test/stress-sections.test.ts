@@ -5,6 +5,7 @@ import type { PluginContext } from '@cyborg-harness/contracts';
 import { resolveSection, SectionStore, type LayerStore } from '../src/config.ts';
 import { load } from '../src/loader.ts';
 import { inlineHosts } from '../src/transports.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 function memory(initial: Record<string, Record<string, unknown>> = {}) {
   const docs = new Map(Object.entries(initial));
@@ -16,7 +17,7 @@ test('stress-sections: setViewState и documents.open одновременно -
   const { docs, store } = memory();
   let ctx!: PluginContext;
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async () => ({ activate: (c) => void (ctx = c) })),
     enabled: ['own'],
     manifests: [{ id: 'own', version: '1.0.0', engines: { cyborg: '^1' }, ui: { views: { main: './ui.js' } }, documents: { note: { restorable: true } } }],
@@ -34,7 +35,7 @@ test('stress-sections: config.set в два слоя одновременно - 
   const { docs, store } = memory();
   let ctx!: PluginContext;
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async () => ({ config: { defaults: { a: 0, b: 0 } }, activate: (c) => void (ctx = c) })),
     enabled: ['p'],
     manifests: [{ id: 'p', version: '1.0.0', engines: { cyborg: '^1' }, config: { version: 1 } }],

@@ -4,6 +4,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { load } from '../src/loader.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 
@@ -15,7 +16,7 @@ function start(table: Record<string, PluginModule>, ids: string[], hosts: Record
     spawned,
     handles,
     kernel: load({
-      apiVersion: '1.0.0',
+      apiVersion: PLUGIN_API_VERSION,
       enabled: ids,
       manifests: ids.map((id) => manifest(id)),
       hosts,
@@ -85,7 +86,7 @@ test('stress-restart: 30 падений подряд посреди живой �
   const spawned: { id: string; h: HostHandle }[] = [];
   const base = inlineHosts(async (entry) => (entry === 'w' ? worker : other));
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: ids,
     manifests: [manifest('w', { commands: { 'w.slow': {} } }), manifest('o', { commands: { 'o.ping': {} } })],
     hosts: { hw: ['w'], ho: ['o'] },
