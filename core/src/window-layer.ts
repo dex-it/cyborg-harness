@@ -13,6 +13,15 @@ export const WINDOW_COMMANDS: Readonly<Record<string, string>> = {
   'cyborg.window.focus-prev': 'Shift+F6',
 };
 
+/** Владелец команд ядра в таблице клавиш: сочетание пользователя на них работает, как на команду плагина. */
+export const KERNEL_OWNER = 'cyborg.kernel';
+
+/** Команды, которые исполняет само ядро: им нужна среда, закрытая плагинам. Зовёт их приложение, не плагин. */
+export const KERNEL_COMMANDS = {
+  /** Показать файл воркспейса в файловом менеджере: сам файл плагинам закрыт как защищённый путь. */
+  revealWorkspace: 'cyborg.workspace.reveal',
+} as const;
+
 const MAX_PENDING = 8;
 const MAX_CHOICES = 12;
 const MAX_LABEL = 80;
@@ -62,7 +71,7 @@ function choices(field: string, raw: unknown): DialogChoice[] {
 /** Описание от вида - недоверенные данные: в окно уходит только разобранная копия. */
 /** Плагин с таким id мог бы объявить команду окна в своём пространстве имён. */
 export function reservedId(id: string): boolean {
-  return Object.keys(WINDOW_COMMANDS).some((c) => c.startsWith(`${id}.`));
+  return [...Object.keys(WINDOW_COMMANDS), ...Object.values(KERNEL_COMMANDS)].some((c) => c.startsWith(`${id}.`));
 }
 
 export function parseDialog(raw: unknown): DialogSpec {

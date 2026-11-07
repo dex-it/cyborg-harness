@@ -460,6 +460,27 @@ test('права: маски путей, workspace.git, выбор в dialog к�
   await k.unload();
 });
 
+test('команда ядра cyborg.workspace.reveal: среда показывает файл воркспейса, плагину файл закрыт и команда недоступна', async () => {
+  await using box = await sandbox();
+  const file = path.join(box.work, 'team.cyborg.json');
+  await writeFile(file, '{}');
+  const shown: string[] = [];
+  const { k, os, ctx } = await kernel(
+    { reader: { 'fs.read': ['workspace'], shell: ['workspace'] } },
+    { dataDir: box.data, tempDir: box.temp, roots: () => [box.work], protectedPaths: [file], workspaceFile: file, shell: { openPath: async () => undefined, openExternal: async () => undefined, showItemInFolder: (p) => void shown.push(p) } },
+  );
+  await k.run('cyborg.workspace.reveal');
+  assert.deepEqual(shown, [file]);
+  await assert.rejects(os('reader').fs.readText(file), { code: 'PermissionDenied' }, 'файл воркспейса - защищённый путь');
+  await assert.rejects(ctx('reader').commands.run('cyborg.workspace.reveal'), { code: 'PermissionDenied' }, 'команду ядра зовёт приложение');
+  assert.deepEqual(shown, [file]);
+  await k.unload();
+
+  const bare = await kernel({}, { dataDir: box.data, tempDir: box.temp });
+  await assert.rejects(bare.k.run('cyborg.workspace.reveal'), { code: 'Unavailable' });
+  await bare.k.unload();
+});
+
 test('granted: выбор в dialog лежит в state воркспейса и действует после перезапуска; кривые записи и сбой записи не мешают', async () => {
   await using box = await sandbox();
   const [picked, kept, late] = ['picked.txt', 'kept.txt', 'late.txt'].map((name) => path.join(box.outside, name));

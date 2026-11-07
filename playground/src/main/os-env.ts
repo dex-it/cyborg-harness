@@ -34,12 +34,13 @@ export function fileSecrets(file: string): SecretStore {
   };
 }
 
-export function electronOs(options: { userData: string; roots: () => readonly string[]; protectedPaths: readonly string[] }): OsEnvironment {
+export function electronOs(options: { userData: string; roots: () => readonly string[]; protectedPaths: readonly string[]; workspaceFile?: string }): OsEnvironment {
   return {
     dataDir: path.join(options.userData, 'plugin-data'),
     tempDir: path.join(options.userData, 'plugin-temp'),
     appDir: options.userData,
     protectedPaths: options.protectedPaths,
+    ...(options.workspaceFile !== undefined && { workspaceFile: options.workspaceFile }),
     roots: options.roots,
     secrets: fileSecrets(path.join(options.userData, 'secrets.json')),
     notify: (title, body) => new Notification({ title, ...(body !== undefined && { body }) }).show(),
@@ -50,6 +51,7 @@ export function electronOs(options: { userData: string; roots: () => readonly st
         if (error) throw new Error(error);
       },
       openExternal: (url) => shell.openExternal(url),
+      showItemInFolder: (p) => shell.showItemInFolder(p),
     },
     dialog: {
       open: async (o) => {

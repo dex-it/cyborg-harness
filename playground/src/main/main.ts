@@ -299,7 +299,7 @@ void app.whenReady().then(() => {
     spawnHost: hosts.spawn,
     pidOf: hosts.pidOf,
     idleSeconds: () => powerMonitor.getSystemIdleTime(),
-    os: electronOs({ userData, roots: () => [workspace], protectedPaths: [workspaceFile, `${workspaceFile}.lock`] }),
+    os: electronOs({ userData, roots: () => [workspace], protectedPaths: [workspaceFile, `${workspaceFile}.lock`], workspaceFile }),
     // Короче, чем в Cyborg: зависание по кнопке «Повесить хост» видно через пару секунд.
     watchdog: { interval: 500, timeout: 2500 },
     // eslint-disable-next-line no-console -- журнал ядра в главном процессе - это stderr приложения

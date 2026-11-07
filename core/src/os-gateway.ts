@@ -44,7 +44,9 @@ export interface OsEnvironment {
   /** Хвост вывода pty, символов; по умолчанию 256 К. */
   readonly ptyBacklog?: number;
   /** Открыть программой ОС; путь и URL шлюз уже проверил. */
-  readonly shell?: { openPath(path: string): Promise<void>; openExternal(url: string): Promise<void> };
+  readonly shell?: { openPath(path: string): Promise<void>; openExternal(url: string): Promise<void>; showItemInFolder?(path: string): void | Promise<void> };
+  /** Файл воркспейса: его показывает в файловом менеджере команда ядра, а не плагин. */
+  readonly workspaceFile?: string;
   /** Системный выбор файла; ответ - выбранные пути, отмена - пустой список. */
   readonly dialog?: { open(options: OpenDialogOptions): Promise<readonly string[]> };
 }
@@ -292,6 +294,14 @@ export class OsGateway {
   /** Живые pty плагина - что завершит выключение без оставления. */
   ptysOf(pluginId: string): PtyInfo[] {
     return (this.#pty?.list(pluginId) ?? []).filter((p) => !p.exit);
+  }
+
+  /** Команда ядра, не плагина: файл воркспейса защищён от плагинов, а показать его человеку можно. */
+  async revealWorkspace(): Promise<void> {
+    const file = this.#env.workspaceFile;
+    const shell = this.#env.shell;
+    if (file === undefined || shell?.showItemInFolder === undefined) throw new CoreError('Unavailable', 'показа файла воркспейса нет в этой среде');
+    await shell.showItemInFolder(file);
   }
 
   releaseAllPty(): void {
