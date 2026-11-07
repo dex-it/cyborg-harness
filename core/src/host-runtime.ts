@@ -1,8 +1,9 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { resolveSection, VERSION_KEY, type SectionResult } from './config.ts';
 import { DisposableStore, toDisposable, type Disposable } from './disposable.ts';
 import { compileSchema } from './json-schema.ts';
 import type { ContractName, ContractType, DocumentChange, DocumentInfo, DocumentInit, HttpServer, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue, ServeRequest, ServeResponse } from '@cyborg-harness/contracts';
-import { CoreError } from './errors.ts';
+import { CoreError, errorMessage } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';
 import { ContractRegistry, type ContractImpl } from './registry.ts';
@@ -242,8 +243,7 @@ class HostSystem {
     const quitting = [...this.#listeners].filter((l) => l.kind === 'quit');
     await Promise.allSettled(quitting.map(async (l) => {
       try {
-        this.#running.enter(l.pluginId);
-        await l.fn();
+        await this.#running.run(l.pluginId, l.fn);
       } catch (error) {
         this.#log(l.pluginId, 'onBeforeQuit', error);
       }
@@ -262,8 +262,7 @@ class HostSystem {
 
   #safely(pluginId: string, what: string, fn: () => unknown): void {
     try {
-      this.#running.enter(pluginId);
-      const r = fn();
+      const r = this.#running.run(pluginId, fn);
       if (r instanceof Promise) r.catch((error: unknown) => this.#log(pluginId, what, error));
     } catch (error) {
       this.#log(pluginId, what, error);
@@ -336,13 +335,34 @@ class Running implements Owner {
   #current: string | undefined;
   #reported: string | undefined;
   #sent = 0;
+  // Последний вошедший не годится в виновники ошибки: продолжение чужой цепочки идёт после него, а хранилище несёт имя вдоль цепочки.
+  readonly #chain = new AsyncLocalStorage<string>();
+  // Обработчик исключения видит хранилище уже снятым, а после queueMicrotask в Electron - пустым: имя остаётся на самой ошибке.
+  readonly #thrown = new WeakMap<object, string>();
 
   bind(endpoint: Endpoint): void {
     this.#endpoint = endpoint;
   }
 
   current(): string | undefined {
-    return this.#current;
+    return this.#chain.getStore() ?? this.#current;
+  }
+
+  /** Колбэк, заведённый сейчас, пойдёт в той же цепочке; заведённый вне цепочки лишь отметится для сторожа зависаний, вины не неся. */
+  schedule<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
+    const chain = this.#chain.getStore();
+    if (chain !== undefined) return this.as(chain, fn);
+    const last = this.#current;
+    if (last === undefined) return fn;
+    return (...args) => {
+      this.enter(last);
+      return fn(...args);
+    };
+  }
+
+  /** Плагин, с чьего входа началась цепочка, бросившая или отклонившая `error`; ошибка кода самого хоста ничья. */
+  blame(error?: unknown): string | undefined {
+    return (isObject(error) ? this.#thrown.get(error) : undefined) ?? this.#chain.getStore();
   }
 
   enter(pluginId: string | undefined): void {
@@ -353,11 +373,18 @@ class Running implements Owner {
     this.#endpoint?.notify('running', { pluginId });
   }
 
+  run<R>(pluginId: string, fn: () => R): R {
+    this.enter(pluginId);
+    try {
+      return this.#chain.run(pluginId, fn);
+    } catch (error) {
+      if (isObject(error) && !this.#thrown.has(error)) this.#thrown.set(error, pluginId);
+      throw error;
+    }
+  }
+
   as<A extends unknown[], R>(pluginId: string, fn: (...args: A) => R): (...args: A) => R {
-    return (...args) => {
-      this.enter(pluginId);
-      return fn(...args);
-    };
+    return (...args) => this.run(pluginId, () => fn(...args));
   }
 
   // Ответ на пинг стирает отметку в ядре: первый вход после него называет себя заново.
@@ -368,13 +395,16 @@ class Running implements Owner {
   }
 }
 
-/** Таймеры процесса хоста помнят, чей код их завёл: зависший колбэк таймера иначе остался бы без имени. */
+function isObject(value: unknown): value is object {
+  return (typeof value === 'object' && value !== null) || typeof value === 'function';
+}
+
+/** Таймеры и микрозадачи процесса хоста помнят, чей код их завёл: зависший или упавший колбэк иначе остался бы без имени. */
 function attributeTimers(running: Running): void {
-  for (const name of ['setTimeout', 'setInterval', 'setImmediate'] as const) {
+  for (const name of ['setTimeout', 'setInterval', 'setImmediate', 'queueMicrotask'] as const) {
     const original = globalThis[name] as (fn: unknown, ...rest: unknown[]) => unknown;
     const patched = (fn: unknown, ...rest: unknown[]) => {
-      const owner = running.current();
-      return original(owner !== undefined && typeof fn === 'function' ? running.as(owner, fn as (...args: unknown[]) => unknown) : fn, ...rest);
+      return original(typeof fn === 'function' ? running.schedule(fn as (...args: unknown[]) => unknown) : fn, ...rest);
     };
     // Свойства оригинала (util.promisify.custom) переносятся: promisify(setTimeout) должен работать как прежде.
     Object.defineProperties(patched, Object.getOwnPropertyDescriptors(original));
@@ -382,8 +412,27 @@ function attributeTimers(running: Running): void {
   }
 }
 
+/** Отклонение плагина хост держит и называет ядру; исключение и ничейное отклонение завершают процесс, назвав виновника. */
+function attributeFailures(running: Running, endpoint: Endpoint): void {
+  let fatal: { readonly pluginId: string | undefined } | undefined;
+  process.on('unhandledRejection', (reason) => {
+    const pluginId = running.blame(reason);
+    // Ничейное отклонение - сбой самого хоста: процесс завершается, как без обработчика.
+    if (pluginId === undefined) throw reason;
+    endpoint.notify('rejected', { pluginId, error: errorMessage(reason) });
+  });
+  process.on('uncaughtExceptionMonitor', (error) => {
+    fatal = { pluginId: running.blame(error) };
+  });
+  // exit приходит от process.exit и необработанного исключения, но не от сигнала: убийство снаружи плагину не вменяется.
+  process.on('exit', () => {
+    const pluginId = fatal ? fatal.pluginId : running.blame();
+    if (pluginId !== undefined) endpoint.notify('exiting', { pluginId });
+  });
+}
+
 export interface HostOptions {
-  /** Процесс принадлежит хосту: подменить его таймеры и назвать ядру плагин, чей код завершает процесс. Не для хоста внутри ядра. */
+  /** Процесс принадлежит хосту: подменить его таймеры и назвать ядру плагин, чей код завершает процесс или не обработал отклонение промиса. Не для хоста внутри ядра. */
   readonly ownsProcess?: boolean;
 }
 
@@ -394,11 +443,7 @@ export function runHost(port: Port, importer: Importer, options: HostOptions = {
   running.bind(endpoint);
   if (options.ownsProcess) {
     attributeTimers(running);
-    // exit приходит от process.exit и необработанного исключения, но не от сигнала: убийство снаружи плагину не вменяется.
-    process.on('exit', () => {
-      const pluginId = running.current();
-      if (pluginId !== undefined) endpoint.notify('exiting', { pluginId });
-    });
+    attributeFailures(running, endpoint);
   }
   let manifests = new Map<string, PluginManifest>();
   let mirror: ContractRegistry | undefined;
@@ -407,10 +452,8 @@ export function runHost(port: Port, importer: Importer, options: HostOptions = {
   const proxies = new Proxies(endpoint, (caller) => plugins.get(caller)?.store, running);
   const to =
     <P extends { pluginId: string }, R>(fn: (p: P) => R) =>
-    (p: P): R => {
-      running.enter(p.pluginId);
-      return fn(p);
-    };
+    (p: P): R =>
+      running.run(p.pluginId, () => fn(p));
   const ptys = new HostPtys();
   endpoint.handle('pty.data', to((p: { pluginId: string; id: string; data: string }) => ptys.data(p)));
   endpoint.handle('pty.exit', to((p: { pluginId: string; id: string; exit: PtyExit }) => ptys.exit(p)));
@@ -437,10 +480,9 @@ export function runHost(port: Port, importer: Importer, options: HostOptions = {
     );
   });
 
-  endpoint.handle('activate', async (p: { pluginId: string; entry: string; paths: OsPaths; config?: SectionInput; state?: SectionInput }) => {
+  endpoint.handle('activate', (p: { pluginId: string; entry: string; paths: OsPaths; config?: SectionInput; state?: SectionInput }) => running.run(p.pluginId, async () => {
     const manifest = manifests.get(p.pluginId);
     if (!manifest || !mirror) throw new CoreError('Remote', `хост не знает плагин ${p.pluginId}`);
-    running.enter(p.pluginId);
     const module = await importer(p.entry);
     running.enter(p.pluginId);
     const loaded: Loaded = { store: new DisposableStore(), provided: new Map(), commands: new Map(), served: new Map() };
@@ -466,7 +508,7 @@ export function runHost(port: Port, importer: Importer, options: HostOptions = {
       loaded.store.dispose();
       throw error;
     }
-  });
+  }));
 
   endpoint.handle('section.reload', to((p: { pluginId: string; kind: 'config' | 'state'; layers: SectionInput['layers'] }) => {
     const reload = reloaders.get(`${p.pluginId}/${p.kind}`);
@@ -520,8 +562,7 @@ export function runHost(port: Port, importer: Importer, options: HostOptions = {
     for (const [pluginId, loaded] of plugins) {
       const served = loaded.served.get(p.subscription);
       if (!served) continue;
-      running.enter(pluginId);
-      served.dispose();
+      running.run(pluginId, () => served.dispose());
     }
   });
 
@@ -579,8 +620,7 @@ class Proxies {
   deliver(id: string, args: unknown[]): unknown {
     const listener = this.#listeners.get(id);
     if (!listener) return undefined;
-    this.#running.enter(id.slice(0, id.lastIndexOf('#')));
-    return listener(...args);
+    return this.#running.run(id.slice(0, id.lastIndexOf('#')), () => listener(...args));
   }
 
   forget(ids: readonly string[]): void {

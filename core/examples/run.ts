@@ -107,6 +107,8 @@ function journalLine(e: JournalEntry): string {
       return `${green('✔')} ${id} активен ${dim(`в хосте ${e.hostId}, за ${e.ms.toFixed(1)} мс`)}`;
     case 'deactivated':
       return e.error ? `${red('✖')} ${id} снят с ошибкой: ${e.error}` : `${dim('↓')} ${id} снят`;
+    case 'unhandled-rejection':
+      return `${yellow('⚠')} ${id} необработанное отклонение промиса: ${e.error}`;
     case 'switched-off':
       return `${red('⏻')} ${id} выключен после ${e.strikes} сбоев за сессию${e.affects.length > 0 ? `; без него: ${e.affects.join(', ')}` : ''}`;
     case 'host-down': {
