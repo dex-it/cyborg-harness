@@ -1,27 +1,8 @@
 // Preload окна и видов: мосты к каналам главного процесса. Имена каналов те же, что в channels.ts; их соответствие держит test/channels.test.ts.
 import { contextBridge, ipcRenderer } from 'electron';
 import type { ThemeTokens } from '@cyborg-harness/contracts';
-import type { FeedLine, PluginsSnapshot, Reply } from './snapshot.ts';
+import type { FeedLine, PluginsSnapshot, Reply, WindowApi } from './snapshot.ts';
 import { VIEW_SCHEME, type TerminalEvent, type ViewBridge } from './view-protocol.ts';
-
-/** Что окно может просить у главного процесса. */
-export interface WindowApi {
-  pluginsSnapshot(): Promise<PluginsSnapshot>;
-  enablePlugin(id: string): Promise<Reply>;
-  disablePlugin(id: string, keepPty?: boolean): Promise<Reply>;
-  disablePreview(id: string): Promise<Reply>;
-  endKeptPty(id: string): Promise<Reply>;
-  crashHost(id: string): Promise<Reply>;
-  hangHost(id: string): Promise<Reply>;
-  runCommand(command: string): Promise<Reply>;
-  onPluginsChanged(listener: () => void): void;
-  onWindowCommand(listener: (command: string) => void): void;
-  setViewVisible(id: string, visible: boolean): Promise<void>;
-  answerDialog(id: number, choice: string | undefined): Promise<Reply>;
-  closeDocument(id: string): Promise<Reply>;
-  openWorkspace(file?: string): Promise<Reply>;
-  setSafeMode(on: boolean): Promise<Reply>;
-}
 
 /** Мост окна к службе плагинов: приложение кладёт его в окно под своим именем (`contextBridge.exposeInMainWorld`). */
 export function windowApi(): WindowApi {
