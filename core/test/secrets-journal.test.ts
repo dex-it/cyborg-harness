@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { PluginContext } from '@cyborg-harness/contracts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { load, type JournalEntry } from '../src/loader.ts';
 import type { SecretStore } from '../src/os-gateway.ts';
 import { describeEntry } from '../src/status.ts';
@@ -52,7 +53,7 @@ test('секрет не попадает в журнал, его описани�
   const logged: string[] = [];
   let ctx: PluginContext | undefined;
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async () => ({ config: { defaults: {} }, state: { defaults: {} }, activate: (c: PluginContext) => void (ctx = c) })),
     enabled: ws.plugins.enabled,
     manifests: [
