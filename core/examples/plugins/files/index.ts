@@ -11,17 +11,17 @@ const plugin: PluginModule = {
   activate(ctx) {
     if (ctx.config?.get().failOnStart) throw new Error('диск недоступен');
 
-    ctx.contracts.provide('cyborg.files', '1.4', {
+    ctx.contracts.provide('demo.files', '1.4', {
       read: async (path: string) => disk.get(path),
       list: async () => [...disk.keys()],
     });
-    ctx.contracts.provide('cyborg.files', '2.0', {
+    ctx.contracts.provide('demo.files', '2.0', {
       readText: async (path: string) => {
         const text = disk.get(path);
         return text === undefined ? undefined : { path, text, size: text.length };
       },
     });
-    ctx.log(`отдаю cyborg.files 1.4 и 2.0, файлов ${disk.size}`);
+    ctx.log(`отдаю demo.files 1.4 и 2.0, файлов ${disk.size}`);
   },
 };
 

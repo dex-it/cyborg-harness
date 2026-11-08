@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { PluginContext } from '@cyborg-harness/contracts';
 import { load } from '../src/loader.ts';
 import { inlineHosts } from '../src/transports.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 interface Dirs {
   readonly data: string;
@@ -23,7 +24,7 @@ async function box(plugins: Record<string, unknown>) {
   for (const d of [dirs.work, dirs.outside]) await mkdir(d, { recursive: true });
   const contexts = new Map<string, PluginContext>();
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async (entry) => ({ activate: (ctx: PluginContext) => void contexts.set(entry, ctx) })),
     enabled: Object.keys(plugins),
     manifests: Object.entries(plugins).map(([id, p]) => manifest(id, typeof p === 'function' ? (p as (d: Dirs) => unknown)(dirs) : p)),

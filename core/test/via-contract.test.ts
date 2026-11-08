@@ -7,6 +7,7 @@ import type { PluginContext } from '@cyborg-harness/contracts';
 import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
 import { inlineHosts } from '../src/transports.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 const base = { version: '1.0.0', engines: { cyborg: '^1' } };
 
@@ -52,7 +53,7 @@ async function setup() {
   const contexts = new Map<string, PluginContext>();
   const consumer = (id: string, permissions: Record<string, unknown> = {}) => ({ ...base, id, requires: { 'test.guarded': '^1' }, permissions });
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async (entry) => ({
       activate: (ctx: PluginContext) => {
         contexts.set(entry, ctx);

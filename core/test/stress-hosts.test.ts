@@ -4,6 +4,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { load, type JournalEntry, type Kernel, type LoadOptions } from '../src/loader.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 
@@ -19,7 +20,7 @@ function rig(table: Record<string, PluginModule>, options: Omit<LoadOptions, 'ap
     handles,
     start: () =>
       load({
-        apiVersion: '1.0.0',
+        apiVersion: PLUGIN_API_VERSION,
         watchdog: { interval: 20, timeout: 200 },
         spawnHost: (id) => {
           hook?.(handles.length + 1);

@@ -74,6 +74,10 @@ function rejection(r: Rejection): string {
       return `несколько поставщиков ${r.contract}: ${r.providers.join(', ')}`;
     case 'cycle':
       return `цикл зависимостей: ${r.members.join(' → ')}`;
+    case 'reserved':
+      return r.what === 'id'
+        ? `id ${r.name} из пространства ${r.prefix}* - только у встроенных плагинов`
+        : `отдаёт ${r.name}, а контракты пространства ${r.prefix}* отдают только встроенные плагины`;
   }
 }
 

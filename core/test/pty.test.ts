@@ -8,6 +8,7 @@ import { load } from '../src/loader.ts';
 import { describePermissions } from '../src/permissions.ts';
 import { fakePty, type FakeProc } from './fake-pty.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 const tick = () => new Promise((r) => setTimeout(r, 30));
 
@@ -21,7 +22,7 @@ async function setup(plugins: Record<string, unknown>, withBackend = true) {
   const handles = new Map<string, HostHandle>();
   const spawn = inlineHosts(async (entry) => ({ activate: (ctx: PluginContext) => void contexts.set(entry, ctx) }));
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: Object.keys(plugins),
     manifests: Object.entries(plugins).map(([id, permissions]) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...(permissions !== undefined && { permissions }) })),
     os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), env: { PATH: '/usr/bin', HOME: '/h', SECRET: 'x' }, ...(withBackend && { pty: backend }) },

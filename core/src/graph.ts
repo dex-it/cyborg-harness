@@ -7,7 +7,15 @@ export type Rejection =
   | { readonly kind: 'engines'; readonly range: string; readonly api: string }
   | { readonly kind: 'missing'; readonly contract: string; readonly range: string }
   | { readonly kind: 'ambiguous'; readonly contract: string; readonly providers: readonly string[] }
-  | { readonly kind: 'cycle'; readonly members: readonly string[] };
+  | { readonly kind: 'cycle'; readonly members: readonly string[] }
+  | { readonly kind: 'reserved'; readonly what: 'id' | 'provides'; readonly name: string; readonly prefix: string };
+
+/** Пространства имён, которые занимают только плагины из поставки: `provides` и `id` с таким префиксом у стороннего - отказ. */
+export interface Reserved {
+  /** С точкой на конце: `app.` закрывает контракт `app.x`, id `app` и id `app.x`. */
+  readonly prefixes: readonly string[];
+  readonly bundled: ReadonlySet<string>;
+}
 
 export interface ContractGraph {
   /** Порядок активации: поставщик раньше потребителя по requires и optional. */
@@ -18,7 +26,7 @@ export interface ContractGraph {
 }
 
 /** Решает граф по одним манифестам, до запуска кода. Отказ каскадирует до неподвижной точки. */
-export function resolveGraph(manifests: readonly PluginManifest[], apiVersion: string): ContractGraph {
+export function resolveGraph(manifests: readonly PluginManifest[], apiVersion: string, reserved?: Reserved): ContractGraph {
   const rejected = new Map<string, Rejection[]>();
   const reject = (id: string, reason: Rejection) => {
     const list = rejected.get(id);
@@ -33,6 +41,7 @@ export function resolveGraph(manifests: readonly PluginManifest[], apiVersion: s
   }
   for (const m of byId.values()) {
     if (!satisfies(apiVersion, m.engines.cyborg)) reject(m.id, { kind: 'engines', range: m.engines.cyborg, api: apiVersion });
+    if (reserved && !reserved.bundled.has(m.id)) for (const r of trespasses(m, reserved.prefixes)) reject(m.id, r);
   }
 
   const alive = () => [...byId.values()].filter((m) => !rejected.has(m.id));
@@ -47,6 +56,13 @@ export function resolveGraph(manifests: readonly PluginManifest[], apiVersion: s
   }
 
   return { order: topoOrder(alive(), bindings), rejected, bindings };
+}
+
+function* trespasses(m: PluginManifest, prefixes: readonly string[]): Generator<Rejection> {
+  for (const prefix of prefixes) {
+    if (m.id.startsWith(prefix) || `${m.id}.` === prefix) yield { kind: 'reserved', what: 'id', name: m.id, prefix };
+    for (const contract of Object.keys(m.provides)) if (contract.startsWith(prefix)) yield { kind: 'reserved', what: 'provides', name: contract, prefix };
+  }
 }
 
 /** Один проход: каждому живому - поставщики; отказавшие в этом проходе выпадают в следующем. */
