@@ -4,7 +4,7 @@ import { normalizeKey } from './keys.ts';
 import { readPermissions, type PluginPermissions } from './permissions.ts';
 import { readGuard, type MemberGuards } from './via-contract.ts';
 import { isRecord, isWireKind, matchesKind, own, type WireKind } from './wire.ts';
-import { reservedId, WINDOW_COMMANDS } from './window-layer.ts';
+import { KERNEL_COMMANDS, reservedId, WINDOW_COMMANDS } from './window-layer.ts';
 
 export { isRecord };
 
@@ -90,7 +90,7 @@ export function parseManifest(raw: unknown, apiVersion?: string): ManifestResult
 
   const id = typeof raw.id === 'string' ? raw.id : undefined;
   if (id === undefined || !isValidId(id)) errors.push(`id: ожидается имя вида "pin-lock" или "cyborg.files", получено ${show(raw.id)}`);
-  else if (reservedId(id)) errors.push(`id: "${id}" занято командами окна ядра (${Object.keys(WINDOW_COMMANDS).join(', ')})`);
+  else if (reservedId(id)) errors.push(`id: "${id}" занято командами окна ядра (${[...Object.keys(WINDOW_COMMANDS), ...Object.values(KERNEL_COMMANDS)].join(', ')})`);
 
   const version = raw.version;
   if (typeof version !== 'string' || !parseVersion(version)) errors.push(`version: ожидается версия x.y.z, получено ${show(version)}`);

@@ -59,12 +59,13 @@ function showNotification(title: string, body: string | undefined, events: Notic
   };
 }
 
-export function electronOs(options: { userData: string; roots: () => readonly string[]; protectedPaths: readonly string[]; raiseWindow: () => void }): OsEnvironment {
+export function electronOs(options: { userData: string; roots: () => readonly string[]; protectedPaths: readonly string[]; workspaceFile?: string; raiseWindow: () => void }): OsEnvironment {
   return {
     dataDir: path.join(options.userData, 'plugin-data'),
     tempDir: path.join(options.userData, 'plugin-temp'),
     appDir: options.userData,
     protectedPaths: options.protectedPaths,
+    ...(options.workspaceFile !== undefined && { workspaceFile: options.workspaceFile }),
     roots: options.roots,
     secrets: fileSecrets(path.join(options.userData, 'secrets.json')),
     notify: showNotification,
@@ -76,6 +77,7 @@ export function electronOs(options: { userData: string; roots: () => readonly st
         if (error) throw new Error(error);
       },
       openExternal: (url) => shell.openExternal(url),
+      showItemInFolder: (p) => shell.showItemInFolder(p),
     },
     dialog: {
       open: async (o) => {

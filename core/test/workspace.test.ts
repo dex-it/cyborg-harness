@@ -1,14 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, PluginModule } from '@cyborg-harness/contracts';
 import { load } from '../src/loader.ts';
 import { RecentWorkspaces } from '../src/recent.ts';
 import { inlineHosts } from '../src/transports.ts';
-import { lockWorkspace, migrateLegacy, openWorkspace, workspaceKey, type Workspace } from '../src/workspace.ts';
+import { lockWorkspace, openWorkspace, workspaceKey, type MigrateWorkspace, type Workspace } from '../src/workspace.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 async function sandbox() {
   // На macOS tmpdir - симлинк /var -> /private/var, а «Недавние» хранят путь после realpath.
@@ -62,37 +63,45 @@ test('state по ключу воркспейса: тот же файл чере�
   assert.notEqual(workspaceKey(path.join(box.root, 'other.json')), workspaceKey(box.file));
 });
 
-test('перенос {projects, lastProjectId}: проекты и трекеры в settings, активный проект в state, копия старого файла', async () => {
+test('перенос старого формата хуком приложения: копия .v1.bak, config с полем cyborg, разделы state, повтор не идёт', async () => {
   await using box = await sandbox();
-  const legacy = {
-    projects: [
-      { id: 'p1', name: 'Cyborg', path: '/w/cyborg', trackers: { github: true }, jira: { enabled: false, projects: [] } },
-      { id: 'p2', name: 'Core', description: 'ядро', repos: ['/w/a', '/w/b'] },
-    ],
-    lastProjectId: 'p2',
+  const old = { items: ['a', 'b'], current: 'b', plugins: { enabled: ['list'] } };
+  await writeFile(box.file, JSON.stringify(old));
+  await mkdir(box.stateDir, { recursive: true });
+  const seen: Record<string, unknown>[] = [];
+  const migrate: MigrateWorkspace = (doc) => {
+    seen.push(doc);
+    if (!Array.isArray(doc.items)) return undefined;
+    const { items, current, ...rest } = doc;
+    return { config: { ...rest, settings: { list: { items } } }, state: typeof current === 'string' ? { list: { current } } : {} };
   };
-  await writeFile(box.file, JSON.stringify(legacy));
-  const ws = await open(box);
+  const opened = await openWorkspace({ file: box.file, userFile: box.userFile, stateDir: box.stateDir, migrate });
+  assert.ok(opened.ok);
+  const ws = opened.workspace;
   assert.equal(ws.migrated.length, 2);
-  assert.deepEqual(await json(box.file), {
-    cyborg: 2,
-    settings: {
-      projects: {
-        items: [
-          { id: 'p1', name: 'Cyborg', description: '', repos: ['/w/cyborg'] },
-          { id: 'p2', name: 'Core', description: 'ядро', repos: ['/w/a', '/w/b'] },
-        ],
-      },
-      trackers: { byProject: { p1: { github: true, jira: { enabled: false, projects: [] } } } },
-    },
-  });
-  assert.deepEqual(await json(ws.stateFile), { projects: { lastProjectId: 'p2' } });
-  assert.deepEqual(await json(`${box.file}.v1.bak`), legacy);
+  assert.deepEqual(await json(box.file), { cyborg: 2, plugins: { enabled: ['list'] }, settings: { list: { items: ['a', 'b'] } } });
+  assert.deepEqual(ws.plugins.enabled, ['list']);
+  assert.deepEqual(await json(ws.stateFile), { list: { current: 'b' } });
+  assert.deepEqual(await json(`${box.file}.v1.bak`), old);
   ws.close();
-  const second = await open(box);
-  assert.deepEqual(second.migrated, [], 'перенос повторился');
-  second.close();
-  assert.equal(migrateLegacy({ cyborg: 2, projects: [] }), undefined);
+  const second = await openWorkspace({ file: box.file, userFile: box.userFile, stateDir: box.stateDir, migrate });
+  assert.ok(second.ok);
+  assert.deepEqual(second.workspace.migrated, [], 'перенос повторился');
+  assert.equal(seen.length, 1, 'хук позван для документа с полем cyborg');
+  second.workspace.close();
+});
+
+test('хук вернул undefined или его нет: файл не тронут, копии нет', async () => {
+  await using box = await sandbox();
+  const old = { unknown: true };
+  await writeFile(box.file, JSON.stringify(old));
+  const opened = await openWorkspace({ file: box.file, userFile: box.userFile, stateDir: box.stateDir, migrate: () => undefined });
+  assert.ok(opened.ok);
+  assert.deepEqual(opened.workspace.migrated, []);
+  opened.workspace.close();
+  (await open(box)).close();
+  assert.deepEqual(await json(box.file), old);
+  await assert.rejects(readFile(`${box.file}.v1.bak`), { code: 'ENOENT' });
 });
 
 test('plugins: воркспейс перекрывает enabled пользователя, группы хостов сливаются; нет файла - пустой новый', async () => {
@@ -124,7 +133,7 @@ test('правка файла извне доходит до ctx.config.onChange
     },
   };
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async () => lock),
     enabled: ws.plugins.enabled,
     manifests: [{ id: 'lock', version: '1.0.0', engines: { cyborg: '^1' }, config: { version: 1 } }],
@@ -175,7 +184,7 @@ test('слежение: правка между открытием ворксп�
     },
   };
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async () => lock),
     enabled: ws.plugins.enabled,
     manifests: [{ id: 'lock', version: '1.0.0', engines: { cyborg: '^1' }, config: { version: 1 } }],
@@ -204,6 +213,28 @@ test('битый файл пользователя не роняет откры�
   await assert.rejects(ws.config.write('user', 'x', 1, { a: 1 }));
   assert.equal(await readFile(box.userFile, 'utf8'), '{ "plugins": ');
   ws.close();
+});
+
+test('битый файл воркспейса: рядом копия .corrupt-<время> с исходником, сам файл не тронут, повторное открытие копий не плодит', async () => {
+  await using box = await sandbox();
+  const broken = '{ "cyborg": 2, "plugins": ';
+  await writeFile(box.file, broken);
+  const copies = async () => (await readdir(box.root)).filter((n) => n.startsWith('team.cyborg.json.corrupt-'));
+  const first = await open(box);
+  const [copy] = await copies();
+  assert.ok(copy, 'копии нет');
+  assert.match(copy, /^team\.cyborg\.json\.corrupt-\d{4}-\d\d-\d\dT[\d-]+Z(-\d+)?$/);
+  assert.match(first.problems[0] ?? '', new RegExp(`копия - ${copy.replaceAll('.', '\\.')}`));
+  assert.equal(await readFile(path.join(box.root, copy), 'utf8'), broken);
+  assert.equal(await readFile(box.file, 'utf8'), broken);
+  first.close();
+
+  const again = await open(box);
+  assert.deepEqual(await copies(), [copy], 'та же порча - та же копия');
+  again.close();
+  await writeFile(box.file, `${broken} "иначе"`);
+  (await open(box)).close();
+  assert.equal((await copies()).length, 2, 'новая порча - новая копия');
 });
 
 test('«Недавние»: последний открытый первым, без повторов по realpath, пропавший файл не показывается, битый список не мешает', async () => {

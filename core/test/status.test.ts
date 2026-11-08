@@ -34,4 +34,12 @@ test('запись журнала словами и уровень', () => {
   assert.equal(describeEntry(off), 'выключен, сбоев подряд: 2');
   assert.equal(entryLevel(off), 'error');
   assert.equal(describeEntry({ pluginId: 'x', kind: 'rejected', reasons: [{ kind: 'cycle', members: ['x', 'y', 'x'] }] }), 'цикл зависимостей: x → y → x');
+  assert.equal(
+    describeEntry({ pluginId: 'rogue', kind: 'rejected', reasons: [{ kind: 'reserved', what: 'provides', name: 'cyborg.agent', prefix: 'cyborg.' }] }),
+    'отдаёт cyborg.agent, а контракты пространства cyborg.* отдают только встроенные плагины',
+  );
+  assert.equal(
+    describeEntry({ pluginId: 'cyborg.x', kind: 'rejected', reasons: [{ kind: 'reserved', what: 'id', name: 'cyborg.x', prefix: 'cyborg.' }] }),
+    'id cyborg.x из пространства cyborg.* - только у встроенных плагинов',
+  );
 });

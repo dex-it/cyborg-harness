@@ -11,6 +11,7 @@ import type { PluginModule } from '../src/plugin.ts';
 import { pluginStatuses } from '../src/status.ts';
 import type { NoticeEvents } from '../src/notices.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 const settle = () => sleep(20);
@@ -18,7 +19,7 @@ const settle = () => sleep(20);
 function start(table: Record<string, PluginModule>, options: Omit<LoadOptions, 'apiVersion' | 'spawnHost' | 'enabled'> & { enabled?: string[] }) {
   const logs: string[] = [];
   return load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: options.enabled ?? Object.keys(table),
     spawnHost: inlineHosts(async (entry) => {
       const mod = table[entry];
@@ -211,7 +212,7 @@ test('клик по уведомлению, пока хост перезапус
   }));
   const dir = mkdtempSync(path.join(tmpdir(), 'cyborg-notify-'));
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: ['bell'],
     manifests: [manifest('bell', { commands: { 'bell.open': { args: ['string'] } }, permissions: { notify: true } })],
     spawnHost: (id) => {

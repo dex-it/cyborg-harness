@@ -1,3 +1,4 @@
+export * from './api-version.ts';
 export * from './config.ts';
 export * from './disposable.ts';
 export * from './errors.ts';

@@ -59,7 +59,6 @@ export interface OsPaths {
   readonly home: string;
 }
 
-/** `ctx.os` по правам манифеста: нет права - нет члена; проверяет всё равно шлюз ядра, здесь только форма. */
 /** Слушатели pty в хосте; вывод, пришедший до первого onData, копится - иначе первые байты ушли бы мимо подписки. */
 class HostPtys {
   readonly #items = new Map<string, { data: Set<(c: string) => void>; exit: Set<(e: PtyExit) => void>; early: Tail; exited?: PtyExit }>();
@@ -275,6 +274,7 @@ class HostSystem {
   }
 }
 
+/** `ctx.os` по правам манифеста: нет права - нет члена; проверяет всё равно шлюз ядра, здесь только форма. */
 function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths: OsPaths, ptys: HostPtys, watches: HostWatches, serves: HostServes): PluginOs {
   const call =
     <R>(method: string) =>
