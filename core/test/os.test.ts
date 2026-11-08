@@ -550,6 +550,7 @@ test('shell any: документ или каталог вне корней; п�
     const r = parseManifest(manifest('p', { [right]: ['any'] }));
     assert.ok(!r.ok && r.errors.some((e) => e.startsWith(`permissions.${right}`)), right);
   }
+});
 
 test('команда ядра cyborg.workspace.reveal: среда показывает файл воркспейса, плагину файл закрыт и команда недоступна', async () => {
   await using box = await sandbox();
