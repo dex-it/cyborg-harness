@@ -1,19 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { deepMerge, resolveSection, SectionStore, type LayerStore } from '../src/config.ts';
-
-function memory(initial: Record<string, Record<string, unknown>> = {}) {
-  const docs = new Map(Object.entries(structuredClone(initial)));
-  const saves: string[] = [];
-  const store: LayerStore = {
-    load: async (layer) => structuredClone(docs.get(layer)),
-    save: async (layer, doc) => {
-      saves.push(layer);
-      docs.set(layer, structuredClone(doc));
-    },
-  };
-  return { store, docs, saves };
-}
+import { memoryStore as memory } from '@cyborg-harness/testing';
+import { deepMerge, resolveSection, SectionStore } from '../src/config.ts';
 
 test('слияние: объекты по ключам, массивы целиком', () => {
   assert.deepEqual(deepMerge({ a: { x: 1, y: 2 }, list: [1, 2] }, { a: { y: 3 }, list: [9] }), { a: { x: 1, y: 3 }, list: [9] });

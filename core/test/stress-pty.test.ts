@@ -8,7 +8,7 @@ import type { PluginContext, PtyHandle } from '@cyborg-harness/contracts';
 import { load } from '../src/loader.ts';
 import { PtyTable, type PtyExpiry, type TerminalSink } from '../src/pty.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
-import { fakePty } from './fake-pty.ts';
+import { fakePty } from '@cyborg-harness/testing';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 const spawnOpts = { program: 'sh', args: [] as string[], env: {}, cols: 80, rows: 24, persist: true };

@@ -1,25 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFile, chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { appendFile, chmod, mkdir, readFile, stat, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { AgentEvent, PluginContext } from '@cyborg-harness/contracts';
-import { SectionStore, type LayerStore } from '@cyborg-harness/core';
-import { load } from '@cyborg-harness/core';
-import { inlineHosts } from '@cyborg-harness/core';
-import { fakePty } from '../../core/test/fake-pty.ts';
+import type { LayerStore } from '@cyborg-harness/core';
+import { agentContractSuite, sandbox, startKernel, type InlinePlugin, type Sandbox } from '@cyborg-harness/testing';
 import { claudeArgs, LAUNCH_SCRIPT, waitAfterStop } from '../plugins/agent-claude-code/index.ts';
 import { NEXT_ACTIONS_PROMPT } from '../plugins/next-actions/index.ts';
 import { readyAfter } from '../plugins/sessions/index.ts';
 import { collectTools } from '../plugins/sessions/mcp.ts';
 import { projectDirName } from '../plugins/agent-claude-code/history.ts';
 import { ISOLATION_PROMPT } from '../plugins/session-isolation/index.ts';
-import { PLUGIN_API_VERSION } from '@cyborg-harness/core';
 
 const PLUGINS = path.join(import.meta.dirname, '..', 'plugins');
 const PROVIDERS = ['agent-claude-code', 'agent-shell'];
-const manifestOf = (id: string): unknown => JSON.parse(readFileSync(path.join(PLUGINS, id, 'manifest.json'), 'utf8'));
 
 async function waitFor<T>(what: string, probe: () => T | undefined | false | Promise<T | undefined | false>): Promise<T> {
   for (let i = 0; i < 200; i++) {
@@ -30,30 +24,30 @@ async function waitFor<T>(what: string, probe: () => T | undefined | false | Pro
   throw new Error(`не дождались: ${what}`);
 }
 
-/** Настоящие модули плагинов в ядре; probe - потребитель, через которого тест зовёт контракт; claude - скрипт в PATH. */
-async function setup(store?: LayerStore, extra: readonly string[] = []) {
-  // На macOS tmpdir - симлинк /var -> /private/var, а шлюз отдаёт пути после realpath.
-  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-agents-')));
-  const bin = path.join(root, 'bin');
+/** Среда поставщиков: подставной claude в PATH и оболочка входа без профиля (/etc/profile переписал бы PATH, и тест не нашёл бы свой claude). */
+async function agentEnv(box: Sandbox): Promise<{ home: string; env: Record<string, string> }> {
+  const bin = box.path('bin');
   await mkdir(bin);
   await writeFile(path.join(bin, 'claude'), '#!/bin/sh\necho "2.1.7 (Claude Code)"\n');
-  // Оболочка входа без профиля: /etc/profile переписал бы PATH, и тест не нашёл бы свой claude.
   const shell = path.join(bin, 'login-shell');
   await writeFile(shell, '#!/bin/sh\nshift\nexec /bin/sh -c "$@"\n');
   await chmod(path.join(bin, 'claude'), 0o755);
   await chmod(shell, 0o755);
-  const backend = fakePty();
+  return { home: box.root, env: { PATH: `${bin}:/usr/bin:/bin`, HOME: box.root, SHELL: shell } };
+}
+
+/** Настоящие модули плагинов в ядре; probe - потребитель, через которого тест зовёт контракт; claude - скрипт в PATH. */
+async function setup(store?: LayerStore, extra: readonly string[] = []) {
+  const box = await sandbox('cyborg-agents-');
+  const os = await agentEnv(box);
   let probe: PluginContext | undefined;
-  const k = await load({
-    apiVersion: PLUGIN_API_VERSION,
-    enabled: [...PROVIDERS, ...extra, 'session-isolation', 'sessions', 'probe'],
-    manifests: [...PROVIDERS, ...extra, 'session-isolation', 'sessions'].map(manifestOf).concat({ id: 'probe', version: '1.0.0', engines: { cyborg: '^1' }, consumes: { 'cyborg.agent': '^1' } }),
-    entry: (m) => (m.id === 'probe' ? 'probe' : path.join(PLUGINS, m.id, 'index.ts')),
-    spawnHost: inlineHosts(async (entry) => (entry === 'probe' ? { activate: (ctx: PluginContext) => void (probe = ctx) } : ((await import(entry)) as { default: never }).default)),
-    ...(store && { state: await SectionStore.open(store, ['workspace']) }),
-    os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), home: root, env: { PATH: `${bin}:/usr/bin:/bin`, HOME: root, SHELL: shell }, pty: backend },
-  });
-  assert.deepEqual(k.active.toSorted(), [...PROVIDERS, ...extra, 'probe', 'session-isolation', 'sessions'].toSorted(), JSON.stringify(k.journal.filter((e) => e.kind === 'failed')));
+  const probePlugin: InlinePlugin = {
+    manifest: { id: 'probe', version: '1.0.0', engines: { cyborg: '^1' }, consumes: { 'cyborg.agent': '^1' } },
+    module: { activate: (ctx) => void (probe = ctx) },
+  };
+  const ids = [...PROVIDERS, ...extra, 'session-isolation', 'sessions'];
+  const k = await startKernel({ plugins: [...ids.map((id) => path.join(PLUGINS, id)), probePlugin], os, ...(store && { state: store }) });
+  assert.deepEqual(k.active.toSorted(), [...ids, 'probe'].toSorted(), JSON.stringify(k.journal.filter((e) => e.kind === 'failed')));
   assert.ok(probe);
   const ctx = probe;
   const agent = (id: string) => {
@@ -61,35 +55,31 @@ async function setup(store?: LayerStore, extra: readonly string[] = []) {
     assert.ok(p, `${id} не отдаёт cyborg.agent`);
     return p.impl;
   };
-  return { k, backend, agent, root, shell, data: (id: string) => path.join(root, 'data', id), [Symbol.asyncDispose]: async () => {
-      await k.unload();
-      await rm(root, { recursive: true, force: true });
+  return {
+    k,
+    backend: k.pty,
+    agent,
+    root: box.root,
+    shell: box.path('bin', 'login-shell'),
+    data: (id: string) => k.dataDir(id),
+    [Symbol.asyncDispose]: async () => {
+      await k[Symbol.asyncDispose]();
+      await box[Symbol.asyncDispose]();
     },
   };
 }
 
-test('cyborg.agent, общий набор: факты, запуск через потребителя по его праву pty, причина выхода, история', async () => {
+// Общий набор тестов cyborg.agent из тест-кита: один и тот же для обоих поставщиков стенда и для любого стороннего.
+for (const id of PROVIDERS) agentContractSuite(path.join(PLUGINS, id), { os: agentEnv });
+
+test('sessions запускает обоих поставщиков по своему праву pty: каталог данных, оболочка, фрагмент изоляции', async () => {
   await using s = await setup();
   for (const id of PROVIDERS) {
-    const agent = s.agent(id);
-    const facts = await agent.facts();
-    assert.deepEqual(structuredClone(facts), facts, `${id}: факты не данные`);
-    assert.equal(typeof facts.id, 'string');
-    assert.equal(facts.found, true, `${id}: программа не найдена`);
-    for (const flag of ['resume', 'history', 'events'] as const) assert.equal(typeof facts.capabilities[flag], 'boolean', `${id}: capabilities.${flag}`);
-    const spec = await agent.launch({ sessionId: 'probe-1', cwd: s.root });
-    assert.deepEqual(structuredClone(spec), spec, `${id}: запуск не данные`);
-    assert.equal(spec.cwd, s.root);
-
     const before = s.backend.procs.length;
     assert.equal(typeof (await s.k.run('sessions.new', id)), 'string', `${id}: sessions.new не вернул билет`);
     const proc = s.backend.procs[before];
     assert.ok(proc, `${id}: потребитель не запустил pty`);
     assert.equal(proc.options.cwd, s.data('sessions'));
-    assert.equal((await agent.ended('probe-1', { code: 127 }))?.kind, 'notFound', `${id}: 127 - не найдена программа`);
-    assert.equal(await agent.ended('probe-1', { code: 0 }), null);
-    assert.ok(Array.isArray(await agent.history(s.root)));
-    if (!facts.capabilities.history) assert.deepEqual(await agent.history(s.root), []);
   }
   const shell = s.backend.procs.find((p) => p.file === '/bin/sh');
   assert.deepEqual(shell?.args, []);

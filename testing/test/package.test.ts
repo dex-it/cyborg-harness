@@ -87,6 +87,30 @@ describe('граница пакета', () => {
   });
 });
 
+describe('тесты репозитория берут подделки из тест-кита', () => {
+  const dirs = [path.join(root, 'core', 'test'), path.join(root, 'playground', 'test'), path.join(root, 'playground', 'src')];
+  // В playground/src лежат ещё замеры памяти с функцией memory(): смотрим только тесты.
+  const files = dirs.flatMap(walk).filter((f) => f.endsWith('.ts') && (f.endsWith('.test.ts') || !f.includes(`${path.sep}src${path.sep}`)));
+
+  it('нет копий fakePty, memory() и memorySecrets, нет core/test/fake-pty.ts', () => {
+    assert.ok(files.length > 50, `файлов: ${files.length}`);
+    assert.ok(!fs.existsSync(path.join(root, 'core', 'test', 'fake-pty.ts')));
+    const copies = /(?:function|const)\s+(?:fakePty|memory|memoryStore|memorySecrets)\b/;
+    const bad = files.flatMap((f) =>
+      fs
+        .readFileSync(f, 'utf8')
+        .split('\n')
+        .flatMap((line, i) => (copies.test(line) ? [`${path.relative(root, f)}:${i + 1}: ${line.trim()}`] : [])),
+    );
+    assert.deepEqual(bad, []);
+  });
+
+  it('никто не импортирует поддельный pty из core/test', () => {
+    const bad = files.filter((f) => /from\s+'[^']*fake-pty(?:\.ts)?'/.test(fs.readFileSync(f, 'utf8'))).map((f) => path.relative(root, f));
+    assert.deepEqual(bad, []);
+  });
+});
+
 describe('собранный пакет (testing/dist)', () => {
   const dist = path.join(pkg, 'dist');
   const files = fs.existsSync(dist) ? walk(dist) : [];
