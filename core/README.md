@@ -16,6 +16,7 @@
 | `@cyborg-harness/core/host` | `runHost`: код хоста плагинов поверх любого порта сообщений | процесс хоста (Node `fork`, Electron `utilityProcess`) |
 | `@cyborg-harness/core/host-entry` | готовый вход хоста для `child_process.fork`; сам импортировать не нужно, на него указывает `forkHosts` | дочерний процесс Node |
 | `@cyborg-harness/core/ui-shell` | оболочка вида плагина: `mountModule`, `connectView`, `keepFocus` | окно (браузер), без `node:*` |
+| `@cyborg-harness/core/plugin-check` | `checkPlugin(dir, options)`: проверка каталога плагина без запуска его кода (манифест, версия API, файлы из манифеста, правило импортов); те же данные печатает команда `cyborg-plugin check` | Node, инструмент автора и сборки |
 | `@cyborg-harness/core/elements` | кастомные элементы `cy-*`; регистрирует их при импорте; нужен DOM | окно (браузер) |
 
 Рантайм-зависимостей нет. Единственная связь - peer `@cyborg-harness/contracts` (`^1.0.0`), и только типами: в собранном JS на него ссылок нет.
@@ -58,6 +59,23 @@ export default plugin;
 ```
 
 Рабочие сценарии - `core/examples` (`npm run demo -- all`); та же сборка, идущая на пакете, проверяется тестом `core/test/consumer.test.ts`.
+
+### Проверка плагина вне репозитория
+
+```sh
+npx cyborg-plugin check path/to/plugin [--declarations ../contracts.ts] [--declarations-package @acme/contracts]
+```
+
+Код возврата 0 - нарушений нет, 1 - есть, 2 - неверный вызов; нарушения печатаются как `файл:строка: причина`, права плагина - словами. Из кода:
+
+```ts
+import { checkPlugin, formatProblem } from '@cyborg-harness/core/plugin-check';
+
+const report = await checkPlugin('path/to/plugin', { declarationPackages: ['@acme/contracts'] });
+if (!report.ok) throw new Error(report.problems.map(formatProblem).join('\n'));
+```
+
+Импорты разбирает лёгкий лексер (`src/plugin-scan.ts`), а не компилятор TypeScript: зависимостей у ядра нет. Что проверяется и чего проверка не видит - `docs/guide/authors/testing.md`.
 
 ### Хост в бандле
 

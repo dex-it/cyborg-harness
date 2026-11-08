@@ -2,7 +2,7 @@
 level: plan
 feature: cyborg-harness
 status: review
-date: 2026-11-06
+date: 2026-11-08
 origin: derived
 quality-checks: входных записей нет
 ---
@@ -31,7 +31,7 @@ quality-checks: входных записей нет
 | [3.10](../03-architecture/design/sad.md#310-главный-конфиг-и-состояние) `config` и `state` по разделам | `core/src/config.ts`, `core/src/workspace.ts` | - |
 | [5.3](../03-architecture/design/sad.md#53-восстановление-сессий) Контракт `cyborg.agent`, `agent-claude-code`, восстановление сессий | `contracts/agent.ts`, `playground/plugins/agent-claude-code`, `playground/plugins/sessions` | настройка `sessions.restore` (`lazy`, `eager`, `off`); `cwd` и `projectId` в данных сессии |
 
-Дисциплина, которая держит путь ко второму этапу ([6.1](../03-architecture/design/sad.md#61-этап-1-ядро-без-изоляции-доступа)), проверяется тестами: импорты плагинов - `core/test/plugin-imports.test.ts`, клонируемость данных вызова - канал ядра (`core/src/rpc.ts`).
+Дисциплина, которая держит путь ко второму этапу ([6.1](../03-architecture/design/sad.md#61-этап-1-ядро-без-изоляции-доступа)), проверяется тестами: импорты плагинов - `checkPlugin` (`core/src/plugin-check.ts`, команда `cyborg-plugin check`; тест репозитория - `core/test/plugin-imports.test.ts`), клонируемость данных вызова - канал ядра (`core/src/rpc.ts`).
 
 ## 2. Остаток этапа 1
 
