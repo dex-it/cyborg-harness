@@ -114,10 +114,10 @@ export class WindowLayer {
     this.#frame = frame;
   }
 
-  /** Под замком в заголовке только фрагменты владельцев замка: заголовок виден в панели задач и на экране замка. */
+  /** Под замком в заголовке только фрагменты владельцев замка, с `hideNotifications` - и без имени воркспейса: заголовок виден в панели задач и на экране замка. */
   get title(): string {
     const segments = [...this.#titles].filter(([id]) => this.allows(id)).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-    return [this.#frame.workspace, ...segments.map(([, s]) => s), this.#frame.app].filter((s) => s !== undefined && s !== '').join(' - ');
+    return [this.hideNotifications ? undefined : this.#frame.workspace, ...segments.map(([, s]) => s), this.#frame.app].filter((s) => s !== undefined && s !== '').join(' - ');
   }
 
   /** `undefined` или пустая после чистки строка снимает фрагмент. */
