@@ -9,7 +9,7 @@ export interface RequiredCheck {
 
 const SOURCE = 'docs/03-architecture/design/sad.md';
 
-/** Причина, по которой каркас не проверяет: типов контракта нет в `@cyborg-harness/contracts`, а форма в SAD открыта (раздел 8, вопросы 3 и 10). */
+/** Причина, по которой каркас не проверяет: типов контракта нет в `@cyborg-harness/contracts`, а форма в SAD не закрыта (`cyborg.project-settings` - раздел 8, вопрос 3; `cyborg.secret-source` отложен, раздел «Секреты»). */
 const PENDING = 'контракт ещё не объявлен в @cyborg-harness/contracts: набор станет рабочим вместе с типом';
 
 /** `cyborg.secret-source` 1, кратность many, поставщик выбирается по схеме ссылки (SAD, раздел «Секреты»). */

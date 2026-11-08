@@ -64,6 +64,20 @@ describe('набор cyborg.agent на плохих поставщиках', () 
     await assert.rejects(checkAgentContract(provider({ history: async () => [entry] })), /history: .*capabilities\.history ложно/);
   });
 
+  it('отказ шлюза, проглоченный поставщиком, виден в журнале: denied', async () => {
+    const module: PluginModule = {
+      activate: (ctx) =>
+        void ctx.contracts.provide('cyborg.agent', '1.0', {
+          ...GOOD,
+          facts: async () => {
+            await ctx.os.fs.readText('/etc/hosts').catch(() => undefined);
+            return FACTS;
+          },
+        }),
+    };
+    await assert.rejects(checkAgentContract({ manifest: provider().manifest, module }), /в журнале нет denied и failed/);
+  });
+
   it('плагин, который не активируется, назван в ошибке', async () => {
     const broken: InlinePlugin = { manifest: { id: 'fake-agent', version: '1.0.0', engines: { cyborg: '^1' }, provides: { 'cyborg.agent': '1.0' } }, module: { activate: () => Promise.reject(new Error('упал при активации')) } };
     await assert.rejects(checkAgentContract(broken), /fake-agent не активирован.*упал при активации/);

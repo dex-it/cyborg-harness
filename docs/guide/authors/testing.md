@@ -73,7 +73,7 @@ agentContractSuite(new URL('../my-agent', import.meta.url).pathname, {
 - `history` отвечает пустым списком там, где `capabilities.history` ложно;
 - в журнале нет записей `denied` и `failed`.
 
-Параметр `os` нужен, если поставщик ищет программу агента: без неё `facts().found` ложно, и набор скажет об этом. Плагины, без которых поставщик не активируется, передайте в `plugins`. Те же проверки одной функцией, которая бросает на первой неудачной, - `checkAgentContract(provider, options)`.
+Параметр `os` нужен, если поставщик ищет программу агента: без него `facts().found` ложно, и набор скажет об этом. Плагины, без которых поставщик не активируется, передайте в `plugins`. Те же проверки одной функцией, которая бросает на первой неудачной, - `checkAgentContract(provider, options)`.
 
 Для контрактов `cyborg.secret-source` и `cyborg.project-settings` в пакете лежат каркасы наборов (`secretSourceContractSuite`, `projectSettingsContractSuite`): они перечисляют обязательные проверки и в отчёте теста стоят как `todo`. Проверять они начнут, когда контракты появятся в `@cyborg-harness/contracts`.
 

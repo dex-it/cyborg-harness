@@ -61,36 +61,44 @@ describe('граница пакета', () => {
   const src = path.join(pkg, 'src');
   const sources = walk(src).filter((f) => f.endsWith('.ts'));
 
+  /** Почему импорт из `file` запрещён; undefined - разрешён. */
+  function refusal(file: string, spec: string): string | undefined {
+    // Точка входа каталога плагина вычисляется: startKernel и есть загрузчик кода плагина автора.
+    if (spec === COMPUTED && path.basename(file) === 'kernel.ts') return undefined;
+    if (spec.startsWith('node:') || spec === '@cyborg-harness/core' || spec === '@cyborg-harness/contracts') return undefined;
+    if (spec.startsWith('.')) return path.resolve(path.dirname(file), spec).startsWith(src + path.sep) ? undefined : 'модуль вне testing/src';
+    return 'чужой пакет';
+  }
+
   it('src импортирует только node:*, ядро, контракты и свои модули: ни playground, ни core/src', () => {
     assert.ok(sources.length >= 6, `файлов: ${sources.length}`);
     const bad = sources.flatMap((file) =>
       usesOf(file, fs.readFileSync(file, 'utf8')).flatMap((use) => {
-        const where = `${path.relative(pkg, file)}:${use.line} '${use.spec}'`;
-        // Точка входа каталога плагина вычисляется: startKernel и есть загрузчик кода плагина автора.
-        if (use.spec === COMPUTED && path.basename(file) === 'kernel.ts') return [];
-        if (use.spec.startsWith('node:') || use.spec === '@cyborg-harness/core' || use.spec === '@cyborg-harness/contracts') return [];
-        if (use.spec.startsWith('.')) {
-          const target = path.resolve(path.dirname(file), use.spec);
-          return target.startsWith(src + path.sep) ? [] : [`${where}: модуль вне testing/src`];
-        }
-        return [`${where}: чужой пакет`];
+        const why = refusal(file, use.spec);
+        return why === undefined ? [] : [`${path.relative(pkg, file)}:${use.line} '${use.spec}': ${why}`];
       }),
     );
     assert.deepEqual(bad, []);
   });
 
   it('проверка ловит то, что запрещает', () => {
-    const text = "import { x } from '../../playground/src/main/plugins.ts';\nimport { y } from '@cyborg-harness/core/host';\nimport z from 'electron';\n";
-    const specs = usesOf(path.join(src, 'x.ts'), text).map((u) => u.spec);
-    assert.deepEqual(specs, ['../../playground/src/main/plugins.ts', '@cyborg-harness/core/host', 'electron']);
-    assert.ok(specs.every((s) => !(s.startsWith('node:') || s === '@cyborg-harness/core' || s === '@cyborg-harness/contracts')));
+    const file = path.join(src, 'x.ts');
+    const text = "import { x } from '../../playground/src/main/plugins.ts';\nimport { s } from '../../core/src/loader.ts';\nimport { y } from '@cyborg-harness/core/host';\nimport z from 'electron';\nimport { k } from './kernel.ts';\n";
+    const verdicts = usesOf(file, text).map((u) => [u.spec, refusal(file, u.spec)]);
+    assert.deepEqual(verdicts, [
+      ['../../playground/src/main/plugins.ts', 'модуль вне testing/src'],
+      ['../../core/src/loader.ts', 'модуль вне testing/src'],
+      ['@cyborg-harness/core/host', 'чужой пакет'],
+      ['electron', 'чужой пакет'],
+      ['./kernel.ts', undefined],
+    ]);
   });
 });
 
 describe('тесты репозитория берут подделки из тест-кита', () => {
   const dirs = [path.join(root, 'core', 'test'), path.join(root, 'playground', 'test'), path.join(root, 'playground', 'src')];
   // В playground/src лежат ещё замеры памяти с функцией memory(): смотрим только тесты.
-  const files = dirs.flatMap(walk).filter((f) => f.endsWith('.ts') && (f.endsWith('.test.ts') || !f.includes(`${path.sep}src${path.sep}`)));
+  const files = dirs.flatMap(walk).filter((f) => f.endsWith('.ts') && (f.endsWith('.test.ts') || !path.relative(root, f).includes(`${path.sep}src${path.sep}`)));
 
   it('нет копий fakePty, memory() и memorySecrets, нет core/test/fake-pty.ts', () => {
     assert.ok(files.length > 50, `файлов: ${files.length}`);
