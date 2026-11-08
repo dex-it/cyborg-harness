@@ -121,6 +121,8 @@ export interface PluginDocuments {
 
 export interface PluginWindow {
   onFocusChange(listener: (focused: boolean) => void): Disposable;
+  /** Свой фрагмент заголовка окна: ядро собирает «воркспейс - фрагменты по id плагина - приложение». `undefined` снимает фрагмент, выгрузка плагина - тоже. Управляющие символы ядро убирает, длиннее 80 символов - `Invalid`. Права не нужно. */
+  setTitle(segment: string | undefined): Promise<void>;
 }
 
 /** События ОС; слушатель, бросивший исключение, пишет в журнал плагина и не мешает соседям. */

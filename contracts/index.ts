@@ -4,11 +4,7 @@ import type { Agent, AgentTool } from './agent.ts';
 export interface Contracts {
   'cyborg.agent': { 1: Agent };
   'cyborg.agent-tool': { 1: AgentTool };
-  'cyborg.files': { 1: FilesV1; 2: FilesV2 };
-  'cyborg.lock': { 1: Lock };
-  'cyborg.projects': { 1: Projects };
   'cyborg.session-prompt': { 1: SessionPrompt };
-  'cyborg.tab': { 1: Tab };
 }
 
 export type * from './plugin.ts';
@@ -22,48 +18,10 @@ export interface Subscription {
   dispose(): void;
 }
 
-export interface FilesV1 {
-  read(path: string): Promise<string | undefined>;
-  list(): Promise<string[]>;
-}
-
-export interface FileText {
-  readonly path: string;
-  readonly text: string;
-  readonly size: number;
-}
-
-/** 2.0 ломает 1.x: `read` и `list` ушли, текст приходит с размером. */
-export interface FilesV2 {
-  readText(path: string): Promise<FileText | undefined>;
-}
-
-export interface Lock {
-  isLocked(): Promise<boolean>;
-}
-
-export interface Project {
-  readonly id: string;
-  readonly name: string;
-  readonly path: string;
-}
-
-export interface Projects {
-  list(): Promise<Project[]>;
-  current(): Promise<Project | undefined>;
-}
-
 /** Кратность many (ADR-CH-0004, п. 6): потребитель сессий собирает фрагменты всех поставщиков и передаёт в `launch({ promptFragments })`. */
 export interface SessionPrompt {
   /** Пустая строка - вклада нет. */
   fragment(): string;
-}
-
-export interface Tab {
-  readonly kind: string;
-  /** С 1.1. */
-  readonly icon?: string;
-  open(path: string): Promise<string>;
 }
 
 export type ContractName = Extract<keyof Contracts, string>;

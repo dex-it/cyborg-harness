@@ -29,12 +29,13 @@ description: "Какие проверки гоняет репозиторий, �
 |---|---|
 | Загрузка: разбор манифеста, граф контрактов, версии, ленивая активация, журнал, безопасный режим, выгрузка с зависимыми | `loader`, `graph`, `registry`, `lifecycle`, `status`, `semver-manifest` |
 | Хосты и сторож: падение, зависание, перезапуск, три страйка | `hosts`, `stress-hosts`, `stress-restart` |
-| Границы доверия: подделка сообщений хоста, недоверенный ввод, шлюз `ctx.os`, права через контракт | `trust`, `untrusted-input`, `security-gateway`, `via-contract`, `os` |
+| Границы доверия: подделка сообщений хоста, недоверенный ввод, шлюз `ctx.os`, права через контракт, значение секрета вне журнала, `config` и `state` | `trust`, `untrusted-input`, `security-gateway`, `via-contract`, `os`, `secrets-journal` |
 | Данные: разделы `config` и `state`, миграции, схема, воркспейс | `config`, `json-schema`, `workspace`, `stress-sections`, `stress-workspace` |
 | Терминалы | `pty`, `stress-pty` на поддельном pty |
 | Окно и вид: оболочка вида, слой диалогов и замок, элементы `cy-*`, документы, события | `ui-shell`, `window`, `elements`, `documents`, `events`, `subscriptions` |
 | Канал и данные вызова: клонируемость, подписки | `rpc` |
 | Сторож импортов плагинов: плагин импортирует только `@cyborg-harness/contracts` и свои модули | `plugin-imports` |
+| Чистота ядра: нет предметных слов, Electron, импортов вне `core/src` и зависимостей npm | `purity` |
 | Стенд: поиск плагинов, схема `cyborg-plugin://`, мост видов, перетаскивание, билеты терминала, замеры памяти, общий набор тестов `cyborg.agent` | `playground/src/main/*.test.ts`, `playground/test/` |
 
 :::note[Проверки чистоты]

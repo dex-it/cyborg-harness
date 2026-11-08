@@ -5,10 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { safeStorage } from 'electron';
-import { load, OsGateway, parseManifest, type JournalEntry, type OsEnvironment, type PluginManifest } from '../../../core/src/index.ts';
+import { load, OsGateway, parseManifest, PLUGIN_API_VERSION, type JournalEntry, type OsEnvironment, type PluginManifest } from '../../../core/src/index.ts';
 import { measure, PTY_SCRIPT, SAMPLES, WARMUP, type ProbeOs, type ProbePath, type Sampled } from '../../bench/gateway-probe.ts';
 import { electronOs } from './os-env.ts';
-import { PLUGIN_API_VERSION } from './plugins.ts';
 import { utilityHosts } from './plugin-hosts.ts';
 
 export interface GatewaySpikeOptions {
@@ -164,7 +163,7 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
     };
     const parsed = parseManifest(raw, PLUGIN_API_VERSION);
     if (!parsed.ok) throw new Error(`манифест замера: ${parsed.errors.join('; ')}`);
-    const env = electronOs({ userData: path.join(base, 'app'), roots: () => [], protectedPaths: [] });
+    const env = electronOs({ userData: path.join(base, 'app'), roots: () => [], protectedPaths: [], raiseWindow: () => undefined });
     const kernel = await load({
       apiVersion: PLUGIN_API_VERSION,
       enabled: [ID],
