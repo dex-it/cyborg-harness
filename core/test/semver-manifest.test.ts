@@ -126,3 +126,60 @@ test('команды: аргументы сверяются по числу и �
   assert.throws(() => checkArgs('r', rest, ['a', {}, []]), { message: 'r: аргумент 3 не record' });
   assert.throws(() => checkArgs('r', { args: [{ kind: 'any', optional: false }] }, [undefined]), { message: 'r: аргумент 1 не any' });
 });
+
+// K-03: род области (area), order и заголовок вида; area и order типа документа. Строка "./ui.js" остаётся краткой записью.
+const uiErrors = (ui: unknown) => {
+  const r = parseManifest({ ...base, ui });
+  return r.ok ? [] : r.errors;
+};
+const docErrors = (documents: unknown) => {
+  const r = parseManifest({ ...base, documents });
+  return r.ok ? [] : r.errors;
+};
+const AREAS = 'sidebar, main, toolbar или popup';
+
+test('вид: объект с module, area, order и title; строка остаётся краткой записью и не получает размещения', () => {
+  const r = parseManifest({
+    ...base,
+    ui: { views: { sessions: { module: './ui/s.js', area: 'main', order: 100, title: 'Сессии' }, tree: './ui/tree.js', bar: { module: './bar.js' } } },
+  });
+  assert.ok(r.ok);
+  const { views, placement } = r.manifest.ui ?? {};
+  assert.deepEqual(views, { sessions: './ui/s.js', tree: './ui/tree.js', bar: './bar.js' });
+  assert.deepEqual(placement, { sessions: { area: 'main', order: 100, title: 'Сессии' } });
+  const short = parseManifest({ ...base, ui: { views: { tree: './ui/tree.js' } } });
+  assert.ok(short.ok);
+  assert.equal(short.manifest.ui?.placement, undefined, 'старая форма манифеста не получает новых полей');
+});
+
+test('вид: неизвестная область и нечисловой order - отказ с именем поля', () => {
+  assert.deepEqual(uiErrors({ views: { a: { module: './a.js', area: 'basement' } } }), [`ui.views.a.area: ожидается ${AREAS}, получено "basement"`]);
+  assert.deepEqual(uiErrors({ views: { a: { module: './a.js', area: 7 } } }), [`ui.views.a.area: ожидается ${AREAS}, получено 7`]);
+  assert.deepEqual(uiErrors({ views: { a: { module: './a.js', order: '100' } } }), ['ui.views.a.order: ожидается число, получено "100"']);
+  assert.deepEqual(uiErrors({ views: { a: { module: './a.js', order: null } } }), ['ui.views.a.order: ожидается число, получено null']);
+  assert.equal(uiErrors({ views: { a: { module: './a.js', order: Number.POSITIVE_INFINITY } } }).length, 1, 'бесконечность - не порядок');
+  assert.match(uiErrors({ views: { a: { module: './a.js', area: 'overlay' } } }).join(), /^ui\.views\.a\.area:.*ui\.overlay/);
+});
+
+test('вид: у объекта module обязателен, лишнее поле и неверный заголовок - отказ, ошибки пути прежние', () => {
+  const entry = 'ожидается путь "./<модуль>.js" внутри каталога плагина';
+  assert.deepEqual(uiErrors({ views: { a: { area: 'main' } } }), [`ui.views.a.module: ${entry}, получено ничего`]);
+  assert.deepEqual(uiErrors({ views: { a: { module: '../a.js' } } }), [`ui.views.a.module: ${entry}, получено "../a.js"`]);
+  assert.deepEqual(uiErrors({ views: { a: './../a.js' } }), [`ui.views.a: ${entry}, получено "./../a.js"`]);
+  assert.deepEqual(uiErrors({ views: { a: { module: './a.js', colour: 'red' } } }), ['ui.views.a.colour: незнакомое поле вида']);
+  assert.deepEqual(uiErrors({ views: { a: { module: './a.js', title: '' } } }), ['ui.views.a.title: ожидается непустая строка до 80 символов, получено ""']);
+  assert.equal(uiErrors({ views: { a: { module: './a.js', title: 'x'.repeat(81) } } }).length, 1);
+  assert.deepEqual(uiErrors({ views: { a: 7 } }), [`ui.views.a: ${entry} или объект { module, area?, order?, title? }, получено 7`]);
+});
+
+test('документ: area и order типа; короткая запись прежняя, ошибка называет поле', () => {
+  const ok = parseManifest({ ...base, documents: { note: { restorable: true, area: 'main', order: 200 }, plain: {} } });
+  assert.ok(ok.ok);
+  assert.deepEqual(ok.manifest.documents, { note: { restorable: true, area: 'main', order: 200 }, plain: { restorable: false } });
+  assert.deepEqual(docErrors({ note: { area: 'cellar' } }), [`documents.note.area: ожидается ${AREAS}, получено "cellar"`]);
+  assert.deepEqual(docErrors({ note: { order: 'first' } }), ['documents.note.order: ожидается число, получено "first"']);
+  assert.deepEqual(docErrors({ note: { colour: 1 } }), ['documents.note.colour: незнакомое поле типа документа']);
+  assert.deepEqual(docErrors({ note: { restorable: 'yes' } }), ['documents.note.restorable: ожидается true или false, получено "yes"']);
+  assert.deepEqual(docErrors({ note: true }), ['documents.note: ожидается объект { "restorable": true, "area"?, "order"? }, получено true']);
+});
+

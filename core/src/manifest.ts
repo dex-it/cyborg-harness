@@ -1,7 +1,8 @@
 import { CoreError } from './errors.ts';
 import { isValidRange, parseVersion, satisfies } from './semver.ts';
 import { normalizeKey } from './keys.ts';
-import { isValidId, show, VIEW_NAME } from './manifest-fields.ts';
+import { isValidId, show } from './manifest-fields.ts';
+import { readDocuments, type DocumentDecl, type Placement } from './manifest-layout.ts';
 import { readProvides } from './manifest-provides.ts';
 import { readUi } from './manifest-ui.ts';
 import { readPermissions, type PluginPermissions } from './permissions.ts';
@@ -58,13 +59,15 @@ export interface PluginManifest {
   /** Вид -> модуль с `mount` относительно каталога плагина; каждый вид живёт в своём `<iframe>`. */
   readonly ui?: {
     readonly views: Readonly<Record<string, string>>;
+    /** Вид -> что он объявил о своём месте (область, `order`, заголовок); у вида в краткой записи или без объявленного записи нет. */
+    readonly placement?: Readonly<Record<string, Placement>>;
     /** Модуль замка окна, вид с именем `overlay`: только при праве `ui.lock`. */
     readonly overlay?: string;
   };
   /** `onStart` - окно закрыто с первого кадра, плагин активируется сразу, даже `lazy`. */
   readonly lock?: { readonly onStart: true };
-  /** Типы документов плагина; `restorable` - документ переживает перезапуск окна. */
-  readonly documents?: Readonly<Record<string, { readonly restorable: boolean }>>;
+  /** Типы документов плагина; `restorable` - документ переживает перезапуск окна, `area` и `order` - место вкладки. */
+  readonly documents?: Readonly<Record<string, DocumentDecl>>;
   readonly permissions: PluginPermissions;
 }
 
@@ -270,25 +273,6 @@ function readKeybindings(raw: unknown, commands: Readonly<Record<string, Command
     if (spec.args.some((a) => !a.optional)) errors.push(`keybindings.${key}: у ${command} обязательные аргументы, нажатие их не даст`);
     else if (out.some((k) => k.key === key)) errors.push(`keybindings.${key}: сочетание повторяется`);
     else out.push({ key, command });
-  }
-  return out;
-}
-
-const MAX_DOCUMENT_TYPES = 16;
-
-function readDocuments(raw: unknown, errors: string[]): Record<string, { restorable: boolean }> | undefined {
-  if (raw === undefined) return undefined;
-  const form = 'documents: ожидается { "<тип>": { "restorable": true } }';
-  if (!isRecord(raw) || Object.keys(raw).length === 0) {
-    errors.push(form);
-    return undefined;
-  }
-  if (Object.keys(raw).length > MAX_DOCUMENT_TYPES) errors.push(`documents: не больше ${String(MAX_DOCUMENT_TYPES)} типов`);
-  const out: Record<string, { restorable: boolean }> = {};
-  for (const [type, spec] of Object.entries(raw)) {
-    if (!VIEW_NAME.test(type)) errors.push(`documents.${type}: имя типа - строчные латинские буквы, цифры и дефис`);
-    else if (!isRecord(spec) || Object.keys(spec).some((k) => k !== 'restorable') || (spec.restorable !== undefined && typeof spec.restorable !== 'boolean')) errors.push(`documents.${type}: ${form.slice('documents: '.length)}`);
-    else out[type] = { restorable: spec.restorable === true };
   }
   return out;
 }
