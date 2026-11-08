@@ -27,8 +27,3 @@ export function hasSignalMark(args: readonly unknown[]): boolean {
 export function withSignal(args: readonly unknown[], signal: AbortSignal): unknown[] {
   return hasSignalMark(args) ? [...args.slice(0, -1), signal] : [...args];
 }
-
-/** Аргументы без метки сигнала: для проверки по схеме, где сигнала нет. */
-export function withoutMark(args: readonly unknown[]): unknown[] {
-  return hasSignalMark(args) ? args.slice(0, -1) : [...args];
-}
