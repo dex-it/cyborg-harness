@@ -1,7 +1,7 @@
 ---
 feature: 01-plugin-host
 status: review
-date: 2026-11-06
+date: 2026-11-08
 origin: derived
 quality-checks: входных записей нет
 ---
@@ -104,10 +104,10 @@ quality-checks: входных записей нет
 
 ### FR-CH-1013 Набор автора плагина
 
-- **Требование:** автор пишет плагин на пакете объявлений `@cyborg-harness/contracts`: `PluginModule`, `PluginContext`, `UiContext` и карта `Contracts`, которую сторонний пакет дополняет через `declare module`; правила - `contracts/README.md`. Проверка импортов пропускает главной части только `@cyborg-harness/contracts`, свой пакет объявлений и свои модули; виду - ещё npm-пакеты; ни той, ни другому - `node:*` и `electron`. Примеры плагинов - `core/examples/plugins` (`npm run demo`) и `playground/plugins`. Общий набор тестов контракта, которым сторонний поставщик проверяет себя тем же, что и встроенный, есть для `cyborg.agent`.
+- **Требование:** автор пишет плагин на пакете объявлений `@cyborg-harness/contracts`: `PluginModule`, `PluginContext`, `UiContext` и карта `Contracts`, которую сторонний пакет дополняет через `declare module`; правила - `contracts/README.md`. Проверка импортов пропускает главной части только `@cyborg-harness/contracts`, свой пакет объявлений и свои модули; виду - ещё npm-пакеты; ни той, ни другому - `node:*` и `electron`. Примеры плагинов - `core/examples/plugins` (`npm run demo`) и `playground/plugins`. Общий набор тестов контракта, которым сторонний поставщик проверяет себя тем же, что и встроенный, есть для `cyborg.agent` (`agentContractSuite` пакета `@cyborg-harness/testing`); поднять ядро с поддельными pty и секретами в тесте плагина позволяет `startKernel` того же пакета.
 - **traced from:** BR-CH-004.
 - **источник:** [SAD, 6.1](../../03-architecture/design/sad.md#61-этап-1-ядро-без-изоляции-доступа), [открытый вопрос 10 SAD](../../03-architecture/design/sad.md#8-открытые-вопросы); bb 5.8 (`public-sdk-only`).
-- **verification:** испытание - `core/test/plugin-imports.test.ts` («проверка ловит то, что запрещает»), `core/test/contracts-types.ts` (`npm run typecheck`), `playground/test/agents.test.ts` («cyborg.agent, общий набор…»). Ещё нет: общий набор тестов для остальных контрактов.
+- **verification:** испытание - `core/test/plugin-imports.test.ts` («проверка ловит то, что запрещает»), `core/test/contracts-types.ts` (`npm run typecheck`), `testing/test/*.test.ts` (тест-кит и набор на хорошем и плохих поставщиках), `playground/test/agents.test.ts` («cyborg.agent, общий набор…» на `agent-claude-code` и `agent-shell`). Ещё нет: рабочие наборы для `cyborg.secret-source` и `cyborg.project-settings` (каркасы есть, ждут типов контрактов).
 - **класс:** Functions.
 
 ### FR-CH-1014 Воркспейс как главная сессия

@@ -2,7 +2,7 @@
 level: plan
 feature: cyborg-harness
 status: review
-date: 2026-11-06
+date: 2026-11-08
 origin: derived
 quality-checks: входных записей нет
 ---
@@ -42,7 +42,7 @@ quality-checks: входных записей нет
 | Удаление плагина: стереть его данные, секреты и `granted` | не начато; до него запись о выборе правят руками |
 | Журнал вызовов `@deprecated` | не начато |
 | Род области и `order` вида в манифесте ([3.8](../03-architecture/design/sad.md#38-изоляция-рендера)) | не начато; область вида выбирает окно playground |
-| Набор тестов контракта, общий для всех поставщиков ([вопрос 10](../03-architecture/design/sad.md#8-открытые-вопросы)) | не начато |
+| Набор тестов контракта, общий для всех поставщиков ([вопрос 10](../03-architecture/design/sad.md#8-открытые-вопросы)) | сделано для `cyborg.agent` (`agentContractSuite`, пакет `@cyborg-harness/testing`); для `cyborg.secret-source` и `cyborg.project-settings` - каркасы, рабочими станут с типами контрактов |
 | Замеры на macOS: хосты и фреймы, клавиши во фрейме, шлюз `ctx.os` | хосты и фреймы сняты, [macos-check.md](../04-verification/macos-check.md); шлюз - нет, [spike-gateway.md](../04-verification/spike-gateway.md); клавиши и терминал человеком - [#2](https://github.com/dex-it/cyborg-harness/issues/2) |
 | pty на Windows | не проверялся; в области ли Windows - [вопрос 12](../03-architecture/design/sad.md#8-открытые-вопросы) |
 | Настройка `sessions.restore`, `cwd` и `projectId` сессии | подъём сейчас ручной |
