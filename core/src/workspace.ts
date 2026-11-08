@@ -6,7 +6,7 @@ import { toDisposable, type Disposable } from './disposable.ts';
 import { isRecord } from './manifest.ts';
 import type { UserKeybinding } from './loader.ts';
 
-/** Формат главного конфига; старый `{projects, lastProjectId}` формата не имеет. */
+/** Формат главного конфига; документ без поля `cyborg` - старый формат приложения, его переводит хук `migrate`. */
 export const CONFIG_FORMAT = 2;
 
 /** Запись через временный файл и rename: оборванная запись не оставляет полупустой файл. */
@@ -106,32 +106,15 @@ function takeLock(lock: string, draft: string, pid: number): LockResult {
   throw new Error(`${lock}: замок не взят`);
 }
 
+/** Итог переноса старого формата приложения: ядро пишет его само, хук только переводит документ. */
 export interface Migrated {
   readonly config: Record<string, unknown>;
   /** Разделы state по id плагина. */
   readonly state: Record<string, Record<string, unknown>>;
 }
 
-/** Единственное место, где ядро знает чужие поля (SAD §3.10); удаляется через пару версий. */
-export function migrateLegacy(doc: Record<string, unknown>): Migrated | undefined {
-  if ('cyborg' in doc || !Array.isArray(doc.projects)) return undefined;
-  const items: Record<string, unknown>[] = [];
-  const byProject: Record<string, unknown> = {};
-  for (const p of doc.projects) {
-    if (!isRecord(p) || typeof p.id !== 'string') continue;
-    const repos = Array.isArray(p.repos) ? p.repos.filter((r): r is string => typeof r === 'string') : typeof p.path === 'string' ? [p.path] : [];
-    items.push({ id: p.id, name: typeof p.name === 'string' ? p.name : p.id, description: typeof p.description === 'string' ? p.description : '', repos });
-    const trackers = { ...(isRecord(p.trackers) ? p.trackers : {}), ...(p.jira !== undefined && { jira: p.jira }) };
-    if (Object.keys(trackers).length > 0) byProject[p.id] = trackers;
-  }
-  const { lastProjectId } = doc;
-  const rest = Object.fromEntries(Object.entries(doc).filter(([k]) => k !== 'projects' && k !== 'lastProjectId'));
-  const settings = { ...(isRecord(rest.settings) ? rest.settings : {}), projects: { items }, ...(Object.keys(byProject).length > 0 && { trackers: { byProject } }) };
-  return {
-    config: { ...rest, cyborg: CONFIG_FORMAT, settings },
-    state: typeof lastProjectId === 'string' ? { projects: { lastProjectId } } : {},
-  };
-}
+/** Перевод документа без поля `cyborg`; undefined - переводить нечего. Знание чужого формата живёт в приложении (SAD §3.10). */
+export type MigrateWorkspace = (doc: Record<string, unknown>) => Migrated | undefined;
 
 /** Слой config поверх `settings` файла; остальные поля файла (`plugins`, `cyborg`) не трогаются. */
 export function settingsLayer(file: string): { load(): Record<string, unknown> | undefined; save(settings: Record<string, unknown>): void } {
@@ -171,6 +154,8 @@ export interface WorkspaceOptions {
   /** Каталог приложения: state лежит в `<stateDir>/<ключ>.json`. */
   readonly stateDir: string;
   readonly pid?: number;
+  /** Перевод старого формата: зовётся один раз, пока у документа нет поля `cyborg`. */
+  readonly migrate?: MigrateWorkspace;
 }
 
 export interface Workspace {
@@ -219,10 +204,10 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
       }
     };
     const doc = tolerant(file);
-    const legacy = doc && migrateLegacy(doc);
+    const legacy = doc && !('cyborg' in doc) ? options.migrate?.(doc) : undefined;
     if (legacy) {
       writeJsonAtomic(`${file}.v1.bak`, doc);
-      writeJsonAtomic(file, legacy.config);
+      writeJsonAtomic(file, { ...legacy.config, cyborg: CONFIG_FORMAT });
       migrated.push(`${file}: старый формат переведён в cyborg ${CONFIG_FORMAT}, копия - ${path.basename(file)}.v1.bak`);
       if (Object.keys(legacy.state).length > 0) {
         writeJsonAtomic(stateFile, { ...readJson(stateFile), ...legacy.state });
