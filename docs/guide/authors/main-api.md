@@ -89,7 +89,7 @@ ctx.commands.register('acme.open', async (path) => {
 | `security` | `security.roots` | `setRoots(paths)` - корни проектов |
 | `ui` | `ui.lock` | `lock()` - закрыть окно своим экраном |
 
-Путь вне области - `PermissionDenied`, а не `NotFound`: наличие файла не раскрывается. Каждый отказ пишется в журнал как `denied`.
+Путь вне области - `PermissionDenied`, а не `NotFound`: наличие файла не раскрывается. Внутри области нет файла или каталога (`readText`, `readSlice`, `list`, `stat`, `realpath`, `watch`) или нет программы `process.run` - `NotFound`; проверка существования - `stat` и ловля `NotFound`. `writeText` пишет атомарно: читатель видит прежний файл или новый целиком. `process.run` отвечает `truncated: true`, если вывод дошёл до предела (`maxOutputBytes`). Каждый отказ пишется в журнал как `denied`.
 
 ## Документы
 

@@ -19,6 +19,7 @@
 | Спайк UI во фреймах: память, задержка, мост, клавиши, перетаскивание | [04-verification/spike-iframe-ui.md](04-verification/spike-iframe-ui.md) |
 | Спайк хостов плагинов: память на хост, цена вызова, пороги сторожа | [04-verification/spike-hosts.md](04-verification/spike-hosts.md) |
 | Замер шлюза `ctx.os`: цена проверок и канала хоста на горячих путях, проверка бюджета | [04-verification/spike-gateway.md](04-verification/spike-gateway.md) |
+| Достаточность `ctx.os` для базовых плагинов Cyborg: сценарий - вызовы - пробелы и решения (K-12) | [04-verification/ctx-os-coverage.md](04-verification/ctx-os-coverage.md) |
 | Замер горячего пути pty: задержка вывода и склейка | [04-verification/spike-pty.md](04-verification/spike-pty.md) |
 | Спайк экрана терминала после `attach`: хвост или снимок на настоящем `claude` | [04-verification/spike-pty-restore.md](04-verification/spike-pty-restore.md) |
 | Проверка на macOS: замеры хостов и фреймов, клавиши, терминал | [04-verification/macos-check.md](04-verification/macos-check.md) |
