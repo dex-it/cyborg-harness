@@ -2,7 +2,7 @@
 level: plan
 feature: cyborg-harness
 status: review
-date: 2026-11-06
+date: 2026-11-08
 origin: derived
 quality-checks: входных записей нет
 ---
@@ -25,7 +25,7 @@ quality-checks: входных записей нет
 | [3.4](../03-architecture/design/sad.md#34-связь-между-плагинами) Реестр контрактов и команд, права через контракт | `core/src/registry.ts`, `core/src/via-contract.ts` | - |
 | [3.5](../03-architecture/design/sad.md#35-изоляция-сбоев-хосты-и-сторож) Хосты и сторож | `core/src/host-runtime.ts`, `core/src/transports.ts`, [замер](../04-verification/spike-hosts.md) | - |
 | [3.6](../03-architecture/design/sad.md#36-ресурсы-дольше-плагина-pty) pty у ядра: `persist`, `attach`, билет вида | `core/src/pty.ts`, `playground/src/main/view-terminals.ts` | проверка на Windows |
-| [3.7](../03-architecture/design/sad.md#37-безопасность-данных-и-контроль-плагинов) `ctx.os`, права словами, хранилище секретов, `$secret`, `granted` в state | `core/src/os-gateway.ts`, `core/src/permissions.ts` | источник секретов `cyborg.secret-source` плагином; удаление плагина со стиранием его данных, секретов и `granted` |
+| [3.7](../03-architecture/design/sad.md#37-безопасность-данных-и-контроль-плагинов) `ctx.os`, права словами, хранилище секретов, `$secret`, `granted` в state | `core/src/os-gateway.ts`, `core/src/permissions.ts` | источник секретов `cyborg.secret-source` плагином; удаление плагина в других воркспейсах ([вопрос 17](../03-architecture/design/sad.md#8-открытые-вопросы)) |
 | [3.8](../03-architecture/design/sad.md#38-изоляция-рендера) `<iframe>` и `mount`, тема, элементы ядра, диалоги, замок, документы, порядок фокуса | `core/src/ui-shell.ts`, `core/src/window-layer.ts`, `core/src/documents.ts`, `core/elements/` | род области и `order` вида в манифесте |
 | [3.9](../03-architecture/design/sad.md#39-системные-клавиши-и-события) Клавиши с переназначением, события окна и системы | `core/src/keys.ts`, `core/test/events.test.ts` | - |
 | [3.10](../03-architecture/design/sad.md#310-главный-конфиг-и-состояние) `config` и `state` по разделам | `core/src/config.ts`, `core/src/workspace.ts` | - |
@@ -39,7 +39,6 @@ quality-checks: входных записей нет
 |---|---|
 | Источник секретов `cyborg.secret-source` - плагин-поставщик по схеме ссылки | отложено владельцем до первого источника |
 | Включение плагина, которого не было в графе при запуске | отложено владельцем; сейчас - запись «включатся после перезапуска» |
-| Удаление плагина: стереть его данные, секреты и `granted` | не начато; до него запись о выборе правят руками |
 | Журнал вызовов `@deprecated` | не начато |
 | Род области и `order` вида в манифесте ([3.8](../03-architecture/design/sad.md#38-изоляция-рендера)) | не начато; область вида выбирает окно playground |
 | Набор тестов контракта, общий для всех поставщиков ([вопрос 10](../03-architecture/design/sad.md#8-открытые-вопросы)) | не начато |

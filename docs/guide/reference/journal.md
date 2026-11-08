@@ -21,6 +21,7 @@ description: "Записи журнала плагинов: когда ядро 
 | `failed` | ошибка | Хост не запустился или `activate` упал | `hostId`, `error` |
 | `deactivated` | инфо или предупреждение | Плагин снят; с ошибкой - предупреждение | `error?` |
 | `unloaded` | инфо или предупреждение | Выключен человеком или вместе с поставщиком, которого требовал | `by`, `error?`, `keptPty?` |
+| `uninstalled` | инфо или ошибка | `kernel.uninstall`: что стёрто и что осталось словами; с `error` - какие шаги не удались, повтор доделает | `erased`, `left`, `error?` |
 | `revived` | инфо | Включён снова | - |
 | `unhandled-rejection` | предупреждение | Промис плагина отклонён без обработчика; хост держится, плагину страйк | `error` |
 | `switched-off` | ошибка | Выключен сторожем после череды сбоев: зависаний, падений, необработанных отклонений | `strikes`, `affects` |
@@ -81,13 +82,13 @@ description: "Записи журнала плагинов: когда ядро 
 | `host-down`, `host-restart`, `revived` | Перезапускается | - |
 | `switched-off`, `failed`, `skipped`, `host-abandoned` | Остановлен | Есть |
 | `unloaded` (выгружен сам) | Остановлен | Есть |
-| `unloaded` (вместе с поставщиком), `invalid`, `not-found`, `rejected`, `safe-mode`, `config`, `state`, `deactivated` | Остановлен | Нет: причина в манифесте, настройках или у поставщика |
+| `unloaded` (вместе с поставщиком), `uninstalled`, `invalid`, `not-found`, `rejected`, `safe-mode`, `config`, `state`, `deactivated` | Остановлен | Нет: причина в манифесте, настройках или у поставщика |
 
 ## Уровни
 
-- **инфо:** `activated`, `waiting`, `disabled`, `revived`, `host-restart`; `unloaded` и `deactivated` без ошибки.
+- **инфо:** `activated`, `waiting`, `disabled`, `revived`, `host-restart`; `unloaded`, `deactivated` и `uninstalled` без ошибки.
 - **предупреждение:** `denied`, `key-conflict`, `key-ignored`, `safe-mode`, `skipped`, `unhandled-rejection`, `pty-expired`, `host-down`, `host-isolated`, `host-own-grouped`; `unloaded` и `deactivated` с ошибкой.
-- **ошибка:** все остальные, а также `config` и `state`, если статус не `ok`.
+- **ошибка:** все остальные, а также `config` и `state`, если статус не `ok`, и `uninstalled` с `error`.
 
 ## Дальше
 

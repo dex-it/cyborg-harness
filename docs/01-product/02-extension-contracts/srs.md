@@ -1,7 +1,7 @@
 ---
 feature: 02-extension-contracts
 status: review
-date: 2026-11-05
+date: 2026-11-08
 origin: derived
 quality-checks: входных записей нет
 ---
@@ -99,7 +99,7 @@ quality-checks: входных записей нет
 - **Требование:** хранилище секретов ядра (`ctx.os.secrets`) держит ключи как `<плагин>/<ключ>`, каждый плагин видит только свои; без шифрования ОС вызов получает `Unavailable`, а не запись открытым текстом. В `config` лежит ссылка `{ "$secret": "ключ" }`, а не значение. Ссылку без схемы ядро разрешает из хранилища вызывающего; ссылку со схемой - по праву `secrets.ref` вызывающего у поставщика `cyborg.secret-source` этой схемы. Значение секрета не пишется в `config`, `state` и журнал, ядро его не кэширует.
 - **traced from:** BR-CH-005.
 - **источник:** [SAD, 3.7](../../03-architecture/design/sad.md#37-безопасность-данных-и-контроль-плагинов), [секреты](../../03-architecture/design/sad.md#секреты).
-- **verification:** испытание - `core/test/os.test.ts` («секреты: ключи своего плагина, $secret, без шифрования ОС - Unavailable, внешний источник по маске»); значение не в `config`, `state` и журнале - `core/test/secrets-journal.test.ts`. Отложено: поставщик `cyborg.secret-source` - до первого источника; стирание секретов при удалении плагина - удаления плагина в ядре нет.
+- **verification:** испытание - `core/test/os.test.ts` («секреты: ключи своего плагина, $secret, без шифрования ОС - Unavailable, внешний источник по маске»); значение не в `config`, `state` и журнале - `core/test/secrets-journal.test.ts`. Стирание при удалении плагина - `core/test/uninstall.test.ts` («uninstall: файлы, секреты, granted…»: ключи `<плагин>/*` стёрты, чужие целы), `core/test/os.test.ts` («uninstall, шлюз: eraseSecrets…»), `playground/src/main/secrets-file.test.ts` (`fileSecrets.deletePrefix`). Отложено: поставщик `cyborg.secret-source` - до первого источника.
 - **класс:** Security.
 
 ### NFR-CH-2001 Доступность
