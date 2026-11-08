@@ -1,7 +1,7 @@
 ---
 id: ADR-CH-0001
 status: review
-date: 2026-11-05
+date: 2026-11-08
 relates_to: product, cyborg-harness, ADR-0001, ADR-0002
 origin: derived
 quality-checks: входных записей нет
@@ -49,4 +49,4 @@ dsh строит всё на форке Cordis (`vendor/cordis`, 2811 строк
 
 ## Расхождения с текущим кодом
 
-- Приложение playground, а не ядро, выделяет плагин по имени: вид `sessions` получает основную область окна (`playground/src/renderer/plugins-panel.ts`). Снимается родами областей в манифесте ([ADR-CH-0007](ADR-CH-0007-ui-slots-and-commands.md)).
+- ~~Приложение playground, а не ядро, выделяет плагин по имени: вид `sessions` получает основную область окна.~~ Снято (K-03): область вида объявляет манифест (`ui.views.<имя>.area`), окно строит области по `Kernel.layout` и плагины по именам не выбирает ([ADR-CH-0007](ADR-CH-0007-ui-slots-and-commands.md), п. 1).
