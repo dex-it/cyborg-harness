@@ -349,9 +349,9 @@ describe('публичный API ядра: потребители в репоз�
     });
   }
 
-  it('playground берёт ядро только через точки входа пакета и только их именами', () => {
-    const all = files(path.join(root, 'playground'));
-    assert.ok(all.length > 50, `файлов playground: ${all.length}`);
+  it('playground и адаптер Electron берут ядро только через точки входа пакета и только их именами', () => {
+    const all = ['playground', 'electron'].flatMap((dir) => files(path.join(root, dir)));
+    assert.ok(all.length > 70, `файлов playground и electron: ${all.length}`);
     const bad = all.flatMap((f) => (path.relative(root, f) in INTERNAL ? [] : boundaryViolations(f, fs.readFileSync(f, 'utf8'), path.relative(root, f))));
     assert.deepEqual(bad, []);
   });
