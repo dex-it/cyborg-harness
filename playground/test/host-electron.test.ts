@@ -9,7 +9,7 @@ import type { SpawnHost } from '@cyborg-harness/core';
 
 // Пакет electron под Node отдаёт путь к бинарнику: хост идёт на рантайме Electron, где queueMicrotask теряет AsyncLocalStorage.
 const electron = createRequire(import.meta.url)('electron') as string;
-const hostEntry = fileURLToPath(new URL('../../core/src/host-entry.ts', import.meta.url));
+const hostEntry = fileURLToPath(import.meta.resolve('@cyborg-harness/core/host-entry'));
 
 const electronHosts: SpawnHost = (hostId) => {
   const child = fork(hostEntry, [hostId], {

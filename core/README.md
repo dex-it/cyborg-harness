@@ -15,6 +15,7 @@
 | `@cyborg-harness/core` | ядро целиком: `load`, `Kernel`, `forkHosts`, `inlineHosts`, `parseManifest`, `PLUGIN_API_VERSION`, разделы config и state, шлюз `ctx.os`, воркспейс, окно (`WindowLayer`), документы, оболочка вида | главный процесс, Node |
 | `@cyborg-harness/core/host` | `runHost`: код хоста плагинов поверх любого порта сообщений | процесс хоста (Node `fork`, Electron `utilityProcess`) |
 | `@cyborg-harness/core/host-entry` | готовый вход хоста для `child_process.fork`; сам импортировать не нужно, на него указывает `forkHosts` | дочерний процесс Node |
+| `@cyborg-harness/core/keys` | разбор нажатий: `keyOfInput` | окно (браузер), без `node:*` |
 | `@cyborg-harness/core/ui-shell` | оболочка вида плагина: `mountModule`, `connectView`, `keepFocus` | окно (браузер), без `node:*` |
 | `@cyborg-harness/core/elements` | кастомные элементы `cy-*`; регистрирует их при импорте; нужен DOM | окно (браузер) |
 
