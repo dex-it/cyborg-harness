@@ -41,14 +41,15 @@ export function main(args: readonly string[], options: CheckOptions = {}): Check
       if (!baseRef) throw new Error('--base требует ссылку git, например origin/master');
       const run = (...a: string[]): string => execFileSync('git', a, { cwd: gitDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
       run('rev-parse', '--verify', `${baseRef}^{commit}`);
+      const file = `${baseRef}:contracts/api-snapshot.txt`;
       let base: Snapshot | undefined;
       try {
-        const file = `${baseRef}:contracts/api-snapshot.txt`;
         run('cat-file', '-e', file);
-        base = parseSnapshot(run('show', file));
       } catch {
         said = `в ${baseRef} снимка нет: сравнивать не с чем\n`;
       }
+      // Снимок в базе есть, но не разбирается - ошибка, а не «сравнивать не с чем»: иначе проверка молча отключается.
+      if (!said) base = parseSnapshot(run('show', file));
       problems.push(...compareWithBase(base, readSnapshot(snapshotFile)));
     }
     if (problems.length > 0) return { code: 1, out: said, err: problems.map((p) => `ошибка: ${p}\n`).join('') };
