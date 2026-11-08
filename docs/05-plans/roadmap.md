@@ -2,7 +2,7 @@
 level: plan
 feature: cyborg-harness
 status: review
-date: 2026-11-06
+date: 2026-11-08
 origin: derived
 quality-checks: входных записей нет
 ---
@@ -27,7 +27,7 @@ quality-checks: входных записей нет
 | [3.6](../03-architecture/design/sad.md#36-ресурсы-дольше-плагина-pty) pty у ядра: `persist`, `attach`, билет вида | `core/src/pty.ts`, `playground/src/main/view-terminals.ts` | проверка на Windows |
 | [3.7](../03-architecture/design/sad.md#37-безопасность-данных-и-контроль-плагинов) `ctx.os`, права словами, хранилище секретов, `$secret`, `granted` в state | `core/src/os-gateway.ts`, `core/src/permissions.ts` | источник секретов `cyborg.secret-source` плагином; удаление плагина со стиранием его данных, секретов и `granted` |
 | [3.8](../03-architecture/design/sad.md#38-изоляция-рендера) `<iframe>` и `mount`, тема, элементы ядра, диалоги, замок, документы, порядок фокуса | `core/src/ui-shell.ts`, `core/src/window-layer.ts`, `core/src/documents.ts`, `core/elements/` | род области и `order` вида в манифесте |
-| [3.9](../03-architecture/design/sad.md#39-системные-клавиши-и-события) Клавиши с переназначением, события окна и системы | `core/src/keys.ts`, `core/test/events.test.ts` | - |
+| [3.9](../03-architecture/design/sad.md#39-системные-клавиши-и-события) Клавиши с переназначением, события окна и системы | `core/src/keys.ts`, `core/src/keybindings.ts` (в том числе `ctx.keys.register`), `core/test/keys-registry.test.ts`, `core/test/events.test.ts` | акселераторы меню окна - K-08 |
 | [3.10](../03-architecture/design/sad.md#310-главный-конфиг-и-состояние) `config` и `state` по разделам | `core/src/config.ts`, `core/src/workspace.ts` | - |
 | [5.3](../03-architecture/design/sad.md#53-восстановление-сессий) Контракт `cyborg.agent`, `agent-claude-code`, восстановление сессий | `contracts/agent.ts`, `playground/plugins/agent-claude-code`, `playground/plugins/sessions` | настройка `sessions.restore` (`lazy`, `eager`, `off`); `cwd` и `projectId` в данных сессии |
 
@@ -50,7 +50,7 @@ quality-checks: входных записей нет
 | Льготное время осиротевшего pty ([3.6](../03-architecture/design/sad.md#36-ресурсы-дольше-плагина-pty)) | сделано в ядре: 60 с по умолчанию, `ptyOrphanGrace` |
 | Группы рендера: `ui.group`, `plugins.uiGroups`, origin кадра по группе ([3.8](../03-architecture/design/sad.md#38-изоляция-рендера)) | не начато; origin кадра - по id плагина |
 | Закрытая CSP вида `default-src 'none'` с явными источниками ([3.8](../03-architecture/design/sad.md#38-изоляция-рендера)) | не начато; `VIEW_CSP` - `default-src 'self'` |
-| Форма API: вклады в меню, `ctx.keys.register` с условием, отмена запросов ([вопрос 15](../03-architecture/design/sad.md#8-открытые-вопросы)) | не начато |
+| Форма API: вклады в меню, отмена запросов ([вопрос 15](../03-architecture/design/sad.md#8-открытые-вопросы)) | `ctx.keys.register` с условием сделан (K-07, [3.9](../03-architecture/design/sad.md#39-системные-клавиши-и-события)); меню и отмена - не начато |
 
 ## 3. Стенд playground
 
