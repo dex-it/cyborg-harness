@@ -16,6 +16,9 @@
     "spike:gateway": "npm run build && node playground/scripts/spike-gateway.mjs",
     "spike:pty": "node playground/scripts/spike-pty.mjs",
     "spike:pty-restore": "node playground/scripts/spike-pty-restore.mjs",
+    "build:contracts": "node contracts/scripts/build.ts",
+    "check:contracts": "node contracts/scripts/check-api.ts",
+    "snapshot:contracts": "node contracts/scripts/check-api.ts --update",
     "lint": "eslint --max-warnings 0 .",
     "postinstall": "electron-rebuild -f -w node-pty"
   },
