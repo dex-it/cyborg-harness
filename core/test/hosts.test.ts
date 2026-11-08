@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { load, type JournalEntry, type Kernel } from '../src/loader.ts';
 import { pluginStatuses } from '../src/status.ts';
@@ -344,6 +345,25 @@ test('сторож: ответ на пинг и следующее за ним �
     await k.run('busy.late');
     await hostDown(k);
     assert.deepEqual(downs(k), [['shared', 'hang', ['busy'], []]]);
+  } finally {
+    await k.unload();
+  }
+});
+
+test('forkHosts: явный путь входа хоста берётся как есть - в cjs-бандле import.meta.url пуст и вывести путь нельзя', async () => {
+  const missing = fileURLToPath(new URL('./fixtures/нет-такого-входа.js', import.meta.url));
+  const host = forkHosts({ silent: true, entry: missing })('explicit');
+  const code = await Promise.race([new Promise<number | null>((resolve) => host.onExit(resolve)), sleep(5000).then(() => 'жив' as const)]);
+  host.kill();
+  assert.notEqual(code, 'жив', 'хост запущен по выведенному пути, а не по заданному');
+  assert.equal(code, 1);
+});
+
+test('forkHosts: заданный путь входа совпадает с выведенным - вызов между процессами работает', async () => {
+  const entry = fileURLToPath(new URL('../src/host-entry.ts', import.meta.url));
+  const k = await start(3, forkHosts({ entry }));
+  try {
+    assert.equal(await k.run('consumer.call', 'read', 'a.txt'), 'data:a.txt');
   } finally {
     await k.unload();
   }
