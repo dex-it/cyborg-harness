@@ -114,6 +114,8 @@ export interface LoadOptions {
   readonly keybindings?: readonly UserKeybinding[] | undefined;
   /** Плагины из поставки Cyborg; только они делят хост. Не названный здесь - сторонний и всегда один в своём хосте. */
   readonly bundled?: readonly string[] | undefined;
+  /** Префиксы пространств поставки (`app.`): сторонний плагин с таким `id` или `provides` отвергается до графа. Без `bundled` проверка выключена - поставку не от чего отличить. */
+  readonly reservedPrefixes?: readonly string[] | undefined;
   readonly config?: SectionStore | undefined;
   readonly state?: SectionStore | undefined;
   /** Разобранный JSON файла схемы раздела (`config.schema`, `state.schema`) из каталога плагина; бросок - отказ разделу. */
@@ -431,7 +433,8 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     () => options.onDocuments?.(),
   );
 
-  const graph = resolveGraph(manifests, options.apiVersion);
+  const reserved = options.bundled && options.reservedPrefixes ? { prefixes: options.reservedPrefixes, bundled: new Set(options.bundled) } : undefined;
+  const graph = resolveGraph(manifests, options.apiVersion, reserved);
   for (const [pluginId, reasons] of graph.rejected) record({ pluginId, kind: 'rejected', reasons });
   await options.onGraph?.(graph);
 

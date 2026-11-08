@@ -136,6 +136,8 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     keybindings: ws.plugins.keybindings,
     // Признак поставки - каталог установки, а не манифест: сторонний автор пишет в манифест что угодно.
     bundled: [...found.origins].filter(([, dir]) => dir === options.builtinDir).map(([id]) => id),
+    // ADR-CH-0002 п. 6: cyborg.* - пространство поставки; чужой поставщик cyborg.agent сделал бы встроенного потребителя ambiguous.
+    reservedPrefixes: ['cyborg.'],
     spawnHost: options.spawnHost,
     entry: (m) => found.entries.get(m.id) ?? m.id,
     config: ws.config,
