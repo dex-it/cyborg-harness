@@ -22,7 +22,8 @@ description: "Записи журнала плагинов: когда ядро 
 | `deactivated` | инфо или предупреждение | Плагин снят; с ошибкой - предупреждение | `error?` |
 | `unloaded` | инфо или предупреждение | Выключен человеком или вместе с поставщиком, которого требовал | `by`, `error?`, `keptPty?` |
 | `revived` | инфо | Включён снова | - |
-| `switched-off` | ошибка | Выключен сторожем после череды сбоев | `strikes`, `affects` |
+| `unhandled-rejection` | предупреждение | Промис плагина отклонён без обработчика; хост держится, плагину страйк | `error` |
+| `switched-off` | ошибка | Выключен сторожем после череды сбоев: зависаний, падений, необработанных отклонений | `strikes`, `affects` |
 | `denied` | предупреждение | Шлюз `ctx.os` отказал: вызов вне прав | `method`, `detail`, `reason?`, `repeats?` |
 | `key-conflict` | предупреждение | Сочетание уже занято другим плагином | `key`, `command`, `winner` |
 | `host-isolated` | предупреждение | Сторонний плагин назван в группе, но получил отдельный хост | `group`, `hostId` |
@@ -68,7 +69,7 @@ description: "Записи журнала плагинов: когда ядро 
 
 ## Состояние плагина по журналу
 
-Состояние вычисляется по последней записи, меняющей его. Записи `key-conflict`, `key-ignored` и `denied` о работе плагина ничего не говорят и состояние не меняют.
+Состояние вычисляется по последней записи, меняющей его. Записи `key-conflict`, `key-ignored`, `denied` и `unhandled-rejection` о работе плагина ничего не говорят и состояние не меняют.
 
 | Запись | Состояние | «Включить снова» |
 |---|---|---|
@@ -83,7 +84,7 @@ description: "Записи журнала плагинов: когда ядро 
 ## Уровни
 
 - **инфо:** `activated`, `waiting`, `disabled`, `revived`, `host-restart`; `unloaded` и `deactivated` без ошибки.
-- **предупреждение:** `denied`, `key-conflict`, `key-ignored`, `safe-mode`, `skipped`, `host-down`, `host-isolated`; `unloaded` и `deactivated` с ошибкой.
+- **предупреждение:** `denied`, `key-conflict`, `key-ignored`, `safe-mode`, `skipped`, `unhandled-rejection`, `host-down`, `host-isolated`; `unloaded` и `deactivated` с ошибкой.
 - **ошибка:** все остальные, а также `config` и `state`, если статус не `ok`.
 
 ## Дальше

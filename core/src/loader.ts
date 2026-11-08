@@ -57,6 +57,8 @@ export type JournalEntry =
   | { readonly pluginId?: undefined; readonly kind: 'key-ignored'; readonly key: string; readonly command: string | null; readonly reason: string }
   /** Сторонний плагин назван в группе plugins.hosts с другими - ядро всё равно дало ему свой хост. */
   | { readonly pluginId: string; readonly kind: 'host-isolated'; readonly group: string; readonly hostId: string }
+  /** Промис плагина отклонён без обработчика; хост держится, плагину страйк. */
+  | { readonly pluginId: string; readonly kind: 'unhandled-rejection'; readonly error: string }
   | {
       readonly pluginId: string;
       readonly kind: 'switched-off';
@@ -769,6 +771,17 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     onNote('exiting', { pluginId: 'string' }, (p) => {
       host.exiting = mine(p.pluginId).id;
     });
+    onNote('rejected', { pluginId: 'string', error: 'string' }, (p) => {
+      const id = mine(p.pluginId).id;
+      // Хвост отклонений уже выключенного плагина, пока его снимают, - не новые сбои.
+      if (switchedOff.has(id) || unloading) return;
+      record({ pluginId: id, kind: 'unhandled-rejection', error: p.error });
+      if (!strike(id)) return;
+      enqueue(async () => {
+        await activating.get(id);
+        if (!unloading && active.includes(id)) await unload(id);
+      }).catch((error: unknown) => options.onLog?.(id, `снятие после выключения не удалось: ${errorMessage(error)}`));
+    });
     onNote('log', { pluginId: 'string', message: 'string' }, (p) => {
       mine(p.pluginId);
       options.onLog?.(p.pluginId, p.message);
@@ -805,6 +818,15 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     if (hosts.get(host.id) === host) hosts.delete(host.id);
   }
 
+  /** Сбой плагина; череда подряд выключает его, а снять выключенного с хоста - дело вызывающего. */
+  function strike(id: string): boolean {
+    const n = bump(strikes, id);
+    if (n < watchdog.strikes) return false;
+    switchedOff.add(id);
+    record({ pluginId: id, kind: 'switched-off', strikes: n, affects: affected([id]) });
+    return true;
+  }
+
   function hostDown(host: Host, reason: 'hang' | 'crash'): void {
     if (host.down) return;
     const inflight = [...host.inflight].sort(([a], [b]) => a - b);
@@ -819,13 +841,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     record({ kind: 'host-down', hostId: host.id, reason, culprits, plugins: victims, affects: affected(victims) });
     for (const id of [...victims, ...halfway].reverse()) dropPlugin(id, 'detach');
 
-    for (const id of culprits) {
-      const n = bump(strikes, id);
-      if (n >= watchdog.strikes) {
-        switchedOff.add(id);
-        record({ pluginId: id, kind: 'switched-off', strikes: n, affects: affected([id]) });
-      }
-    }
+    for (const id of culprits) strike(id);
     if (culprits.length === 0) {
       const failures = bump(hostFailures, host.id);
       if (failures >= watchdog.strikes) {
@@ -1052,7 +1068,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     return gone;
   }
 
-  async function deactivate(pluginId: string, by: string, keepPty = false): Promise<void> {
+  async function unload(pluginId: string, keepPty = false): Promise<{ error?: string; keptPty: number }> {
     const host = hosts.get(hostOf(pluginId) ?? '');
     let error: string | undefined;
     try {
@@ -1061,9 +1077,14 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       error = errorMessage(e);
     }
     const keptPty = dropPlugin(pluginId, keepPty ? 'park' : 'release');
-    record({ pluginId, kind: 'unloaded', by, ...(error !== undefined && { error }), ...(keptPty > 0 && { keptPty }) });
     // Пустой хост гасится: следующая активация импортирует код плагина заново, в новом процессе.
     if (host && !host.down && !active.some((id) => hostOf(id) === host.id)) stopHost(host, new CoreError('HostGone', `хост ${host.id} без плагинов`));
+    return { ...(error !== undefined && { error }), keptPty };
+  }
+
+  async function deactivate(pluginId: string, by: string, keepPty = false): Promise<void> {
+    const { error, keptPty } = await unload(pluginId, keepPty);
+    record({ pluginId, kind: 'unloaded', by, ...(error !== undefined && { error }), ...(keptPty > 0 && { keptPty }) });
   }
 
   async function disable(pluginId: string, options: DisableOptions = {}): Promise<void> {
