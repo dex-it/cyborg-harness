@@ -1,0 +1,27 @@
+{
+  "name": "@cyborg-harness/electron",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Адаптер Electron для ядра плагинов Cyborg Harness: хосты в utilityProcess, схема cyborg-plugin, мост видов, среда ctx.os, слой окна",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": { "node": ">=24" },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" },
+    "./host-entry": { "types": "./dist/src/host-entry.d.ts", "default": "./dist/src/host-entry.js" },
+    "./preload": { "types": "./dist/src/index-preload.d.ts", "default": "./dist/src/index-preload.js" },
+    "./window": { "types": "./dist/src/index-window.d.ts", "default": "./dist/src/index-window.js" },
+    "./shell/shell.js": "./dist/shell/shell.js",
+    "./shell/shell.css": "./dist/shell/shell.css",
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md"],
+  "peerDependencies": {
+    "@cyborg-harness/contracts": "^1.0.0",
+    "@cyborg-harness/core": "^0.1.0",
+    "electron": ">=45",
+    "node-pty": "^1.1.0"
+  }
+}
