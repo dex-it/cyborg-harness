@@ -2,7 +2,7 @@
 
 import { defineElements } from '@cyborg-harness/core/elements';
 import { connectView, keepFocus, mountModule } from '@cyborg-harness/core/ui-shell';
-import type { ViewBridge } from '../../shared/views.ts';
+import type { ViewBridge } from '@cyborg-harness/electron/window';
 
 const script = document.currentScript as HTMLScriptElement;
 const { plugin = '', view = '', entry = '' } = script.dataset;

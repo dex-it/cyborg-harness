@@ -1,7 +1,7 @@
 // Пробный вид замера: отвечает на ping обоими мостами, сообщает о клавишах и перетаскивании.
 
 import type { SpikeBridge, SpikePing } from '../../shared/spike.ts';
-import { PATH_MIME, type ViewBridge } from '../../shared/views.ts';
+import { PATH_MIME, type ViewBridge } from '@cyborg-harness/electron/window';
 
 const spike = (window as unknown as { spike: SpikeBridge }).spike;
 const view = (window as unknown as { cyborgView: ViewBridge }).cyborgView;

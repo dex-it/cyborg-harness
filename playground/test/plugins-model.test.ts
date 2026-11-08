@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { PluginJournalLine, PluginRow, PluginsSnapshot } from '../src/shared/plugins.ts';
+import type { PluginJournalLine, PluginRow, PluginsSnapshot } from '@cyborg-harness/electron/window';
 import { actionsFor, conflictText, journalFor, keyStatus, mergeFeed, sortedPlugins, summary } from '../src/renderer/plugins-model.ts';
 
 const row = (id: string, state: PluginRow['state'], over: Partial<PluginRow> = {}): PluginRow => ({ id, state, revivable: state === 'stopped', unloaded: false, commands: [], permissions: [], ...over });

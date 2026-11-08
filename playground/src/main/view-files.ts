@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { pluginOfOrigin } from '../shared/views.ts';
+import { pluginOfOrigin } from '@cyborg-harness/electron/window';
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',

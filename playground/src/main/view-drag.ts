@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ViewDrop } from '../shared/views.ts';
+import type { ViewDrop } from '@cyborg-harness/electron/window';
 
 /** Файл внутри корня, который ядро разрешило перетаскивать; ссылки раскрываются до проверки, иначе ссылка в корне вывела бы наружу. */
 export function resolveDragFile(root: string, relative: unknown): string | undefined {

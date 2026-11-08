@@ -6,7 +6,7 @@ import path from 'node:path';
 import { inlineHosts } from '@cyborg-harness/core';
 import type { PluginModule } from '@cyborg-harness/core';
 import { WINDOW_OWNER } from '@cyborg-harness/core';
-import type { KeyRow } from '../shared/plugins.ts';
+import type { KeyRow } from '@cyborg-harness/electron/window';
 import { discoverPlugins, PluginsService, readSchemaFile, startPlugins } from './plugins.ts';
 
 function tmp(): string {

@@ -1,6 +1,6 @@
 // Виды плагинов во фреймах (SAD §3.8): фрейм живёт, пока плагин включён и не снят, и переживает перезапуск хоста.
 
-import type { PluginRow } from '../shared/plugins.ts';
+import type { PluginRow } from '@cyborg-harness/electron/window';
 import { el } from './dom.ts';
 
 export interface ViewsPort {

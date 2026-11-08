@@ -6,7 +6,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { app, BrowserWindow, ipcMain, type WebFrameMain } from 'electron';
 import type { SpikePing, SpikeReport } from '../shared/spike.ts';
-import { PATH_MIME, viewOrigin } from '../shared/views.ts';
+import { PATH_MIME, viewOrigin } from '@cyborg-harness/electron/window';
 import { pssKb as pss } from './proc-memory.ts';
 import { resolveStaticFile } from './view-files.ts';
 import { framesOf, serveViews } from './views.ts';

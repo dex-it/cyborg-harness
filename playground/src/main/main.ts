@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, Notification, powerMonitor, screen, type IpcMainInvokeEvent, type WebContents } from 'electron';
-import { viewOrigin } from '../shared/views.ts';
+import { viewOrigin } from '@cyborg-harness/electron/window';
 import { electronOs } from './os-env.ts';
 import { utilityHosts } from './plugin-hosts.ts';
 import { guardNavigation } from './navigation.ts';

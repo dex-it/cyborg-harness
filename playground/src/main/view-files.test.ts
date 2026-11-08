@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { pluginOfOrigin, viewOrigin } from '../shared/views.ts';
+import { pluginOfOrigin, viewOrigin } from '@cyborg-harness/electron/window';
 import { themeTokens } from './theme.ts';
 import { resolveStaticFile, resolveViewRequest, type PluginUi } from './view-files.ts';
 

@@ -25,8 +25,8 @@ import {
   WINDOW_OWNER,
 } from '@cyborg-harness/core';
 import { errorMessage, isRecord } from './guards.ts';
-import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from '../shared/plugins.ts';
-import { viewOrigin } from '../shared/views.ts';
+import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from '@cyborg-harness/electron/window';
+import { viewOrigin } from '@cyborg-harness/electron/window';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
 import type { PluginUi } from './view-files.ts';
 
