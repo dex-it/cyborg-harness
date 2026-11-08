@@ -63,3 +63,30 @@ test('журнал: плагин в цикле из 20 000 отказов не �
   const counted = k.journal.reduce((n, e) => n + (e.kind === 'denied' && e.detail.includes('/etc/hostname') ? (e.repeats ?? 1) : 0), 0);
   assert.equal(counted, 20_000, 'счёт повторов не потерян при выгрузке');
 });
+
+test('журнал: окно не пустило вид на чужой адрес - запись denied в журнал его плагина, адрес обрезан, повторы склеены, чужой id не пишется', async () => {
+  const k = await load({
+    apiVersion: '1.0.0',
+    spawnHost: inlineHosts(async () => ({ activate: () => undefined })),
+    enabled: ['p'],
+    manifests: [{ id: 'p', version: '1.0.0', engines: { cyborg: '^1' } }],
+  });
+  for (let i = 0; i < 5; i++) k.viewDenied('p', 'https://evil.example/login');
+  k.viewDenied('p', `data:text/html,${'x'.repeat(5000)}`);
+  k.viewDenied('ghost', 'https://evil.example/');
+  await k.unload();
+  const denied = k.journal.filter((e) => e.kind === 'denied');
+  assert.deepEqual(
+    denied.map((e) => [e.pluginId, e.method, e.reason, e.repeats]),
+    [
+      ['p', 'navigate', 'window', undefined],
+      ['p', 'navigate', 'window', undefined],
+      ['p', 'navigate', 'window', 4],
+    ],
+  );
+  const [away, nav] = denied;
+  assert.ok(away && nav);
+  assert.equal(describeEntry(away), 'отказ окна: переход на https://evil.example/login');
+  assert.ok(describeEntry(nav).length < 250, 'адрес вида не обрезан');
+  assert.match(describeEntry(nav), /^отказ окна: переход на data:text\/html,x+…$/);
+});

@@ -108,6 +108,8 @@ function journalLine(e: JournalEntry): string {
       return `${green('✔')} ${id} активен ${dim(`в хосте ${e.hostId}, за ${e.ms.toFixed(1)} мс`)}`;
     case 'deactivated':
       return e.error ? `${red('✖')} ${id} снят с ошибкой: ${e.error}` : `${dim('↓')} ${id} снят`;
+    case 'unhandled-rejection':
+      return `${yellow('⚠')} ${id} необработанное отклонение промиса: ${e.error}`;
     case 'switched-off':
       return `${red('⏻')} ${id} выключен после ${e.strikes} сбоев за сессию${e.affects.length > 0 ? `; без него: ${e.affects.join(', ')}` : ''}`;
     case 'host-down': {
@@ -126,6 +128,8 @@ function journalLine(e: JournalEntry): string {
       return `${yellow('⛔')} ${id} отказ ctx.os: ${e.detail}`;
     case 'unloaded':
       return `${dim('⏏')} ${id} выгружен${e.by === e.pluginId ? '' : ` вместе с ${e.by}`}${e.error ? `, ошибка: ${e.error}` : ''}`;
+    case 'pty-expired':
+      return `${yellow('⚠')} ${id} терминал ${e.id} (${e.program}) завершён: не подхвачен за ${String(e.graceMs / 1000)} с`;
     case 'key-conflict':
       return `${yellow('⌨')} ${id}: ${e.key} уже у ${e.winner}, ${e.command} не получит нажатие`;
     case 'key-ignored':

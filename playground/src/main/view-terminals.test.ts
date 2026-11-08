@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PtyExit } from '@cyborg-harness/contracts';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { TerminalSink } from '../../../core/src/index.ts';
+import { PtyTable, type PtyProcess } from '../../../core/src/pty.ts';
 import { ViewTerminals, type TerminalFrame } from './view-terminals.ts';
 
 function frame(routingId: number) {
@@ -46,4 +48,39 @@ test('терминалы вида: вывод - в открывший фрейм
   sinks[1]!.exit(exit);
   assert.deepEqual(again.sent, [{ tid: 3, exit }]);
   assert.equal(terminals.size, 0);
+});
+
+test('терминалы вида на таблице ядра: ввод больше предела - ошибка, терминал жив; тысяча кусков вывода - единицы сообщений во фрейм, exit после данных', async () => {
+  const data = new Set<(d: string) => void>();
+  const exits = new Set<(e: { exitCode: number }) => void>();
+  const writes: string[] = [];
+  const proc: PtyProcess = {
+    pid: 9,
+    onData: (l) => (data.add(l), { dispose: () => data.delete(l) }),
+    onExit: (l) => (exits.add(l), { dispose: () => exits.delete(l) }),
+    write: (d) => void writes.push(d),
+    resize: () => undefined,
+    kill: () => undefined,
+  };
+  const table = new PtyTable({ spawn: () => proc }, () => undefined, undefined, undefined, { ptyInput: 4, ptyFlushMs: 4 });
+  const wire = table.spawn('term', { program: '/bin/sh', args: [], env: {}, cols: 80, rows: 24, persist: false });
+  const terminals = new ViewTerminals((pluginId, ticket, sink) => table.openTerminal(pluginId, ticket, sink));
+  const own = frame(1);
+  const opened = terminals.open(own, 'term', table.share('term', wire.id));
+  const tid = (opened.value as { tid: number }).tid;
+  assert.match(terminals.write(own, tid, 'много').error ?? '', /больше 4 байт/);
+  assert.deepEqual(terminals.write(own, tid, 'ls\r'), {});
+  assert.deepEqual(writes, ['ls\r']);
+
+  let all = '';
+  for (let i = 0; i < 1000; i++) {
+    all += String(i % 10);
+    for (const l of data) l(String(i % 10));
+    if (i === 499) await sleep(10);
+  }
+  for (const l of exits) l({ exitCode: 0 });
+  const events = own.sent as { data?: string; exit?: PtyExit }[];
+  assert.equal(events.map((e) => e.data ?? '').join(''), all);
+  assert.ok(events.length < 10, `во фрейм ушло ${String(events.length)} сообщений на 1000 кусков`);
+  assert.deepEqual(events.at(-1)?.exit, { code: 0 });
 });

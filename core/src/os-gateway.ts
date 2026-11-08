@@ -5,9 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, ProcessResult, PtyInfo, SecretValue } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
+import { limitsOf, type ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
+import type { NotifyLimits, ShowNotice } from './notices.ts';
 import { ANY_PATH, LOGIN_SHELL } from './permissions.ts';
-import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type TerminalSink, type TerminalView } from './pty.ts';
+import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type KeptPty, type PtyExpiry, type TerminalSink, type TerminalView } from './pty.ts';
 import { HttpServes, type AskHost } from './serve.ts';
 import type { GuardRight } from './via-contract.ts';
 import { isRecord } from './wire.ts';
@@ -27,14 +29,19 @@ export interface OsEnvironment {
   readonly tempDir: string;
   /** Домашний каталог: `~` в правах и `paths.home`; по умолчанию - домашний каталог ОС. */
   readonly home?: string;
-  /** Закрыты всегда: файл воркспейса, его замок, файл пользователя. */
+  /** Закрыты всегда вместе с соседями `<файл>.*`: файл воркспейса, его замок, файл пользователя. */
   readonly protectedPaths?: readonly string[];
   /** Каталог данных приложения: закрыт целиком, кроме своих каталогов плагина и корней проектов от приложения. */
   readonly appDir?: string;
   /** Корни проектов от приложения; к ним добавляются корни плагинов с правом `security.roots`. */
   readonly roots?: () => readonly string[];
   readonly secrets?: SecretStore;
-  readonly notify?: (title: string, body: string | undefined) => void | Promise<void>;
+  /** Системное уведомление; дескриптор нужен для `ctx.os.notify.close`, события - для клика и учёта живых. */
+  readonly notify?: ShowNotice;
+  /** Пределы уведомлений; по умолчанию `NOTIFY_LIMITS`. */
+  readonly notifyLimits?: NotifyLimits;
+  /** Поднять и сфокусировать окно приложения: так начинается клик по уведомлению. */
+  readonly raiseWindow?: () => void;
   readonly clipboard?: { readText(): string | Promise<string>; writeText(text: string): void | Promise<void> };
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly fetch?: typeof fetch;
@@ -43,8 +50,14 @@ export interface OsEnvironment {
   readonly pty?: PtyBackend;
   /** Хвост вывода pty, символов; по умолчанию 256 К. */
   readonly ptyBacklog?: number;
+  /** Сколько мс pty с `persist` ждёт `attach` плагина после падения его хоста; по умолчанию 60 000. */
+  readonly ptyOrphanGrace?: number;
+  /** Пределы ресурсов плагина поверх `LIMITS`; загрузчик кладёт сюда `LoadOptions.limits`. */
+  readonly limits?: Partial<ResourceLimits> | undefined;
   /** Открыть программой ОС; путь и URL шлюз уже проверил. */
-  readonly shell?: { openPath(path: string): Promise<void>; openExternal(url: string): Promise<void> };
+  readonly shell?: { openPath(path: string): Promise<void>; openExternal(url: string): Promise<void>; showItemInFolder?(path: string): void | Promise<void> };
+  /** Файл воркспейса: его показывает в файловом менеджере команда ядра, а не плагин. */
+  readonly workspaceFile?: string;
   /** Системный выбор файла; ответ - выбранные пути, отмена - пустой список. */
   readonly dialog?: { open(options: OpenDialogOptions): Promise<readonly string[]> };
 }
@@ -104,6 +117,34 @@ function utf8End(buf: Buffer, n: number): number {
   return n;
 }
 
+/** Обычный файл без ссылки в последнем компоненте; O_NONBLOCK - FIFO не повесит поток пула в ожидании писателя. */
+async function openFile(method: string, file: string): Promise<{ handle: fs.FileHandle; size: number }> {
+  const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  const st = await handle.stat().catch(async (error: unknown) => {
+    await handle.close();
+    throw error;
+  });
+  if (!st.isFile()) {
+    await handle.close();
+    throw new CoreError('Invalid', `${method}: не обычный файл: ${file}`);
+  }
+  return { handle, size: st.size };
+}
+
+/** Размер из stat - только подсказка: файл растёт и после проверки, поэтому предел держит само чтение. */
+async function readAtMost(method: string, handle: fs.FileHandle, size: number, max: number): Promise<string> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for (;;) {
+    const chunk = Buffer.allocUnsafe(Math.min(Math.max(size + 1 - total, 64 * 1024), max + 1 - total));
+    const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+    if (bytesRead === 0) return Buffer.concat(chunks, total).toString('utf8');
+    chunks.push(chunk.subarray(0, bytesRead));
+    total += bytesRead;
+    if (total > max) throw new CoreError('Invalid', `${method}: файл больше ${String(max)} байт - читайте частями через fs.readSlice`);
+  }
+}
+
 const int = (method: string, v: unknown, name: string, min: number, max: number): number => {
   if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < min || v > max) throw new CoreError('Invalid', `${method}: ${name} - целое от ${String(min)} до ${String(max)}`);
   return v;
@@ -113,6 +154,8 @@ const int = (method: string, v: unknown, name: string, min: number, max: number)
 const BASE_ENV = /^(PATH|HOME|USER|LOGNAME|SHELL|TERM|TMPDIR|LANG|LC_[A-Z]+|SystemRoot|SYSTEMROOT|ComSpec|PATHEXT|USERPROFILE|APPDATA|LOCALAPPDATA|TEMP|TMP|WINDIR)$/;
 
 const inside = (dir: string, target: string) => target === dir || target.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);
+/** Сосед `<файл>.<что угодно>` несёт содержимое защищённого файла: копия `.corrupt-<время>`, `.v1.bak`, временный файл атомарной записи. */
+const sibling = (file: string, target: string) => path.dirname(target) === path.dirname(file) && path.basename(target).startsWith(`${path.basename(file)}.`);
 
 async function real(p: string): Promise<string> {
   try {
@@ -245,6 +288,12 @@ export class OsGateway {
   readonly #grants: GrantStore | undefined;
   #grantWrites: Promise<unknown> = Promise.resolve();
   readonly #serves: HttpServes;
+  // Каталоги приложения ведёт ядро, а не человек: ссылка, подложенная на их место позже, по снятому realpath область не расширит.
+  readonly #appReal = new Map<string, string>();
+  readonly #ownMade = new Map<string, Promise<void>>();
+  readonly #limits: ResourceLimits;
+  // Счёт на поколение плагина: убитая при выгрузке программа закрывается позже, место уже у нового поколения.
+  readonly #runs = new Map<string, { n: number }>();
 
   constructor(
     env: OsEnvironment,
@@ -254,8 +303,10 @@ export class OsGateway {
     manifestOf: (pluginId: string) => PluginManifest | undefined = () => undefined,
     grants?: GrantStore,
     ask: AskHost = () => Promise.reject(new CoreError('Unavailable', 'хоста нет')),
+    ptyEvents: { readonly expired?: (expiry: PtyExpiry) => void; readonly kept?: () => void } = {},
   ) {
     this.#env = env;
+    this.#limits = limitsOf(env.limits);
     this.#serves = new HttpServes(ask);
     this.#grants = grants;
     const saved = grants?.read();
@@ -271,7 +322,7 @@ export class OsGateway {
     this.#push = push;
     this.#deny = deny;
     this.#configOf = configOf;
-    this.#pty = env.pty && new PtyTable(env.pty, push, env.ptyBacklog);
+    this.#pty = env.pty && new PtyTable(env.pty, push, env.ptyBacklog, undefined, { ...this.#limits, ...(env.ptyOrphanGrace !== undefined && { graceMs: env.ptyOrphanGrace }), ...ptyEvents });
   }
 
   pathsOf(pluginId: string): { data: string; temp: string; home: string } {
@@ -286,9 +337,11 @@ export class OsGateway {
   forget(pluginId: string, pty: 'release' | 'detach' | 'park' = 'release'): number {
     this.#roots.delete(pluginId);
     this.#approved.delete(pluginId);
+    this.#ownMade.delete(pluginId);
     for (const [key, close] of this.#watches) if (key.startsWith(`${pluginId}\0`)) close();
     for (const cancel of this.#pending.get(pluginId) ?? []) cancel();
     this.#pending.delete(pluginId);
+    this.#runs.delete(pluginId);
     this.#serves.forget(pluginId);
     if (pty === 'park') return this.#pty?.park(pluginId) ?? 0;
     if (pty === 'detach') this.#pty?.detach(pluginId);
@@ -301,8 +354,30 @@ export class OsGateway {
     return (this.#pty?.list(pluginId) ?? []).filter((p) => !p.exit);
   }
 
+  /** Команда ядра, не плагина: файл воркспейса защищён от плагинов, а показать его человеку можно. */
+  async revealWorkspace(): Promise<void> {
+    const file = this.#env.workspaceFile;
+    const shell = this.#env.shell;
+    if (file === undefined || shell?.showItemInFolder === undefined) throw new CoreError('Unavailable', 'показа файла воркспейса нет в этой среде');
+    await shell.showItemInFolder(file);
+  }
+
   releaseAllPty(): void {
     this.#pty?.releaseAll();
+  }
+
+  /** Плагин активирован: с этого момента идёт льготный срок на `attach` его pty без владельца. */
+  claimPty(pluginId: string): void {
+    this.#pty?.claim(pluginId);
+  }
+
+  keptPty(): KeptPty[] {
+    return this.#pty?.kept() ?? [];
+  }
+
+  endKeptPty(id: string): void {
+    if (!this.#pty) throw new CoreError('NotFound', `оставленного pty ${id} нет`);
+    this.#pty.endKept(id);
   }
 
   /** Вид плагина предъявил билет своей главной части; `pluginId` приложение берёт из origin фрейма, а не из слов вида. */
@@ -320,17 +395,30 @@ export class OsGateway {
     return new CoreError('PermissionDenied', `${m.id}: ${method} - ${detail}`);
   }
 
+  async #realApp(p: string): Promise<string> {
+    const known = this.#appReal.get(p);
+    if (known !== undefined) return known;
+    try {
+      const resolved = await fs.realpath(p);
+      this.#appReal.set(p, resolved);
+      return resolved;
+    } catch {
+      return path.resolve(p);
+    }
+  }
+
   async #areas(m: PluginManifest, right: 'fs.read' | 'fs.write' | 'shell'): Promise<Area[]> {
     const own = this.pathsOf(m.id);
     const named = m.permissions[right] ?? [];
     const plain = async (p: string, git = false): Promise<Area> => ({ root: await real(p), segs: [], git });
+    const ownArea = async (p: string): Promise<Area> => ({ root: await this.#realApp(p), segs: [], git: false });
     const workspace = () => [...(this.#env.roots?.() ?? []), ...[...this.#roots.values()].flat()];
     // У shell своих каталогов нет: открыть свой файл в системе - тоже выход наружу, и он объявляется.
-    const out: Promise<Area>[] = right === 'shell' ? [] : [plain(own.data), plain(own.temp)];
+    const out: Promise<Area>[] = right === 'shell' ? [] : [ownArea(own.data), ownArea(own.temp)];
     for (const area of named) {
       if (area === 'workspace' || area === 'workspace.git') out.push(...workspace().map((r) => plain(r, area === 'workspace.git')));
       else if (area === 'granted') out.push(...[...(this.#granted.get(m.id) ?? [])].map((g) => plain(g)));
-      else if (area === 'plugin-data' || area === 'plugin-temp') out.push(...(right === 'shell' ? [plain(area === 'plugin-data' ? own.data : own.temp)] : []));
+      else if (area === 'plugin-data' || area === 'plugin-temp') out.push(...(right === 'shell' ? [ownArea(area === 'plugin-data' ? own.data : own.temp)] : []));
       else if (area === ANY_PATH && right === 'shell') out.push(plain(path.parse(process.cwd()).root).then((a) => ({ ...a, any: true })));
       else if (area.startsWith('/') || area.startsWith('~')) out.push(this.#maskArea(area));
     }
@@ -355,17 +443,17 @@ export class OsGateway {
     const area = matched[0]?.dir;
     if (area === undefined) throw this.#denied(m, method, `вне области ${right}: ${given}`, reason);
     const own = this.pathsOf(m.id);
-    const isOwn = inside(await real(own.data), target) || inside(await real(own.temp), target);
+    const isOwn = inside(await this.#realApp(own.data), target) || inside(await this.#realApp(own.temp), target);
     if (isOwn) return target;
-    for (const dir of [this.#env.dataDir, this.#env.tempDir]) if (inside(await real(dir), target)) throw this.#denied(m, method, `каталог другого плагина: ${given}`, reason);
-    if (this.#env.appDir !== undefined && inside(await real(this.#env.appDir), target)) {
+    for (const dir of [this.#env.dataDir, this.#env.tempDir]) if (inside(await this.#realApp(dir), target)) throw this.#denied(m, method, `каталог другого плагина: ${given}`, reason);
+    if (this.#env.appDir !== undefined && inside(await this.#realApp(this.#env.appDir), target)) {
       const appRoots = await Promise.all((this.#env.roots?.() ?? []).map(real));
       if (!appRoots.some((r) => inside(r, target))) throw this.#denied(m, method, `данные приложения: ${given}`, reason);
     }
     for (const p of this.#env.protectedPaths ?? []) {
       const protectedPath = await real(p);
       // Предок защищённого пути закрыт только для записи: удаление или перезапись каталога унесли бы и его.
-      if (inside(protectedPath, target) || (write && inside(target, protectedPath))) throw this.#denied(m, method, `защищённый путь: ${given}`, reason);
+      if (inside(protectedPath, target) || (write && inside(target, protectedPath)) || sibling(protectedPath, target)) throw this.#denied(m, method, `защищённый путь: ${given}`, reason);
     }
     const gitOk = matched.some((a) => a.git);
     // От корня области, а не от каталога под маску: `*` совпадает и с самим `.git`, и путь внутри него был бы без сегмента `.git`.
@@ -412,10 +500,17 @@ export class OsGateway {
     if (!named && st.isFile() && !document) throw this.#denied(m, method, `вне названных областей открывается только документ или каталог: ${given}`, reason);
   }
 
-  async #ownDirs(pluginId: string): Promise<void> {
+  /** Свои каталоги создаются раз за активацию плагина: удалить их целиком плагину не даёт `fs.remove`. */
+  #ownDirs(pluginId: string): Promise<void> {
+    const known = this.#ownMade.get(pluginId);
+    if (known) return known;
     const own = this.pathsOf(pluginId);
-    await fs.mkdir(own.data, { recursive: true });
-    await fs.mkdir(own.temp, { recursive: true });
+    const made = Promise.all([fs.mkdir(own.data, { recursive: true }), fs.mkdir(own.temp, { recursive: true })]).then(() => undefined);
+    this.#ownMade.set(pluginId, made);
+    made.catch(() => {
+      if (this.#ownMade.get(pluginId) === made) this.#ownMade.delete(pluginId);
+    });
+    return made;
   }
 
   async call(m: PluginManifest, method: string, args: readonly unknown[]): Promise<unknown> {
@@ -425,9 +520,11 @@ export class OsGateway {
         await this.#ownDirs(m.id);
         const file = await this.#checkPath(m, method, args[0], false);
         // O_NOFOLLOW: путь уже без ссылок, подменённый на ссылку последний компонент не откроется.
-        const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+        const { handle, size } = await openFile(method, file);
         try {
-          return await handle.readFile('utf8');
+          const max = this.#limits.readText;
+          if (size > max) throw new CoreError('Invalid', `${method}: файл больше ${String(max)} байт - читайте частями через fs.readSlice`);
+          return await readAtMost(method, handle, size, max);
         } finally {
           await handle.close();
         }
@@ -437,9 +534,8 @@ export class OsGateway {
         const file = await this.#checkPath(m, method, args[0], false);
         const offset = int(method, args[1], 'offset', 0, Number.MAX_SAFE_INTEGER);
         const max = int(method, args[2], 'maxBytes', 4, MAX_SLICE);
-        const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+        const { handle, size } = await openFile(method, file);
         try {
-          const size = (await handle.stat()).size;
           const buf = Buffer.alloc(Math.min(max, Math.max(0, size - offset)));
           const { bytesRead } = await handle.read(buf, 0, buf.length, offset);
           const end = offset + bytesRead >= size ? bytesRead : utf8End(buf, bytesRead);
@@ -529,10 +625,10 @@ export class OsGateway {
         await this.#ownDirs(m.id);
         const target = await this.#checkPath(m, method, args[0], true);
         const own = this.pathsOf(m.id);
-        if (target === (await real(own.data)) || target === (await real(own.temp))) throw this.#denied(m, method, 'свой каталог целиком не удаляется');
+        if (target === (await this.#realApp(own.data)) || target === (await this.#realApp(own.temp))) throw this.#denied(m, method, 'свой каталог целиком не удаляется');
         const areas = await this.#areas(m, 'fs.write');
         if (areas.some((a) => areaDir(a, target) === target)) throw this.#denied(m, method, `корень области не удаляется: ${String(args[0])}`);
-        if (!inside(await real(own.data), target) && !inside(await real(own.temp), target) && (await containsGit(target))) {
+        if (!inside(await this.#realApp(own.data), target) && !inside(await this.#realApp(own.temp), target) && (await containsGit(target))) {
           throw this.#denied(m, method, `внутри есть .git: ${String(args[0])}`);
         }
         await fs.rm(target, { recursive: true, force: true });
@@ -590,12 +686,6 @@ export class OsGateway {
         const name = str(method, args[0], 'имя');
         if (!p.env?.includes(name)) throw this.#denied(m, method, `переменная ${name} не в env`);
         return (this.#env.env ?? process.env)[name];
-      }
-      case 'notify.show': {
-        if (!p.notify) throw this.#denied(m, method, 'нет права notify');
-        if (!this.#env.notify) throw new CoreError('Unavailable', 'уведомлений нет в этой среде');
-        await this.#env.notify(str(method, args[0], 'заголовок'), typeof args[1] === 'string' ? args[1] : undefined);
-        return undefined;
       }
       case 'clipboard.readText':
       case 'clipboard.writeText': {
@@ -717,6 +807,18 @@ export class OsGateway {
     const options = isRecord(args[2]) ? args[2] : {};
     const { file, argv, cwd, env } = await this.#program(m, 'process', method, program, args[1], options);
     const timeout = typeof options.timeoutMs === 'number' ? options.timeoutMs : 0;
+    const runs = this.#runs.get(m.id) ?? { n: 0 };
+    if (runs.n >= this.#limits.runs) throw new CoreError('Invalid', `${method}: у ${m.id} уже ${String(runs.n)} программ - дождитесь завершения прежних`);
+    this.#runs.set(m.id, runs);
+    runs.n++;
+    try {
+      return await this.#spawnRun(m.id, program, file, argv, cwd, env, timeout, options.input);
+    } finally {
+      runs.n--;
+    }
+  }
+
+  #spawnRun(pluginId: string, program: string, file: string, argv: string[], cwd: string | undefined, env: Record<string, string>, timeout: number, input: unknown): Promise<ProcessResult> {
     return new Promise((resolve, reject) => {
       // Своя группа процессов: тайм-аут и выгрузка плагина гасят и то, что программа запустила сама.
       const child = spawn(file, argv, { cwd, env, shell: false, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
@@ -725,7 +827,7 @@ export class OsGateway {
         if (child.pid !== undefined) killGroup(child.pid, signal);
       };
       const timer = timeout > 0 ? setTimeout(() => stop('SIGTERM'), timeout) : undefined;
-      const untrack = this.#track(m.id, () => stop('SIGKILL'));
+      const untrack = this.#track(pluginId, () => stop('SIGKILL'));
       const done = () => {
         clearTimeout(timer);
         untrack();
@@ -743,7 +845,7 @@ export class OsGateway {
         done();
         resolve({ code, signal, stdout, stderr });
       });
-      child.stdin.end(typeof options.input === 'string' ? options.input : undefined);
+      child.stdin.end(typeof input === 'string' ? input : undefined);
     });
   }
 

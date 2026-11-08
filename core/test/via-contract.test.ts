@@ -126,7 +126,7 @@ test('via-contract: файл из области записи вызывающе
   const contexts = new Map<string, PluginContext>();
   const consumer = (id: string, permissions: Record<string, unknown>) => ({ ...base, id, requires: { 'test.guarded': '^1' }, permissions });
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async (entry) => ({
       activate: (ctx: PluginContext) => {
         contexts.set(entry, ctx);

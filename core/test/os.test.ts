@@ -8,6 +8,7 @@ import { SectionStore, type LayerStore } from '../src/config.ts';
 import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
 import { describePermissions } from '../src/permissions.ts';
+import type { NoticeEvents } from '../src/notices.ts';
 import type { OsEnvironment, SecretStore } from '../src/os-gateway.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
@@ -68,7 +69,19 @@ test('без прав: свои каталоги работают, чужой п
   await k.unload();
 });
 
-test('fs.read и fs.write: область по праву, симлинк наружу не пускает, .git и защищённые пути закрыты', async () => {
+test('свой каталог, подменённый ссылкой наружу после первого вызова, область плагина не расширяет', async () => {
+  await using box = await sandbox();
+  await writeFile(path.join(box.outside, 'secret.txt'), 'нельзя');
+  const { k, os } = await kernel({ plain: undefined }, { dataDir: box.data, tempDir: box.temp });
+  const own = os('plain');
+  await own.fs.writeText(path.join(own.paths.data, 'a.txt'), 'a');
+  await rm(own.paths.data, { recursive: true });
+  await symlink(box.outside, own.paths.data);
+  await assert.rejects(own.fs.readText(path.join(own.paths.data, 'secret.txt')), { code: 'PermissionDenied' });
+  await k.unload();
+});
+
+test('fs.read и fs.write: область по праву, симлинк наружу не пускает, .git, защищённые пути и их соседи <файл>.* закрыты', async () => {
   await using box = await sandbox();
   await writeFile(path.join(box.outside, 'secret.txt'), 'нельзя');
   await writeFile(path.join(box.work, 'readme.md'), 'можно');
@@ -76,6 +89,8 @@ test('fs.read и fs.write: область по праву, симлинк нар
   await mkdir(path.join(box.work, '.git'));
   const workspaceFile = path.join(box.work, 'cyborg.json');
   await writeFile(workspaceFile, '{}');
+  await writeFile(`${workspaceFile}.corrupt-2026-11-07T10-00-00-000Z`, '{"secret"');
+  await writeFile(path.join(box.work, 'cyborg.json5'), 'чужое имя');
   const { k, os } = await kernel(
     { reader: { 'fs.read': [box.work] }, writer: { 'fs.read': [box.work], 'fs.write': [box.work] } },
     { dataDir: box.data, tempDir: box.temp, protectedPaths: [workspaceFile] },
@@ -84,6 +99,9 @@ test('fs.read и fs.write: область по праву, симлинк нар
   await assert.rejects(os('reader').fs.readText(path.join(box.work, 'escape', 'secret.txt')), { code: 'PermissionDenied' });
   await assert.rejects(os('reader').fs.writeText(path.join(box.work, 'new.txt'), 'x'), { code: 'PermissionDenied' });
   await assert.rejects(os('reader').fs.readText(workspaceFile), { code: 'PermissionDenied' });
+  await assert.rejects(os('reader').fs.readText(`${workspaceFile}.corrupt-2026-11-07T10-00-00-000Z`), { code: 'PermissionDenied' }, 'копия битого файла несёт его содержимое');
+  await assert.rejects(os('writer').fs.writeText(`${workspaceFile}.4242.tmp`, 'x'), { code: 'PermissionDenied' }, 'временный файл атомарной записи');
+  assert.equal(await os('reader').fs.readText(path.join(box.work, 'cyborg.json5')), 'чужое имя', 'сосед - только с точкой после имени');
   await os('writer').fs.mkdir(path.join(box.work, 'deep'));
   await os('writer').fs.writeText(path.join(box.work, 'deep', 'new.txt'), 'x');
   assert.equal(await readFile(path.join(box.work, 'deep', 'new.txt'), 'utf8'), 'x');
@@ -171,6 +189,80 @@ test('env, notify, clipboard: только названное в праве; н�
   const bare = await kernel({ c: { notify: true } }, { dataDir: box.data, tempDir: box.temp });
   await assert.rejects(bare.os('c').notify!.show('x'), { code: 'Unavailable' });
   await bare.k.unload();
+});
+
+test('notify: клик поднимает окно, закрывает уведомление и запускает свою команду; команда и аргументы сверяются при show; close, пределы и выгрузка', async () => {
+  await using box = await sandbox();
+  const shown: { title: string; body: string | undefined; events: NoticeEvents; closed: boolean }[] = [];
+  const ran: unknown[] = [];
+  let raised = 0;
+  const contexts = new Map<string, PluginContext>();
+  const k = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    spawnHost: inlineHosts(async (entry) => ({
+      activate: (ctx: PluginContext) => {
+        contexts.set(entry, ctx);
+        if (entry === 'bell') ctx.commands.register('bell.open', (session) => void ran.push(session));
+      },
+    })),
+    enabled: ['bell', 'mute'],
+    manifests: [
+      { ...manifest('bell', { notify: true }), commands: { 'bell.open': { args: ['string'] } } },
+      { ...manifest('mute', { notify: true }), commands: { 'mute.go': {} } },
+    ],
+    os: {
+      dataDir: box.data,
+      tempDir: box.temp,
+      notifyLimits: { title: 20, body: 50, live: 2 },
+      raiseWindow: () => {
+        raised++;
+      },
+      notify: (title, body, events) => {
+        const n = { title, body, events, closed: false };
+        shown.push(n);
+        return {
+          close: () => {
+            n.closed = true;
+          },
+        };
+      },
+    },
+  });
+  const bell = contexts.get('bell')!.os.notify!;
+  const first = await bell.show('Сессия ждёт', 'ответа', { onClick: { command: 'bell.open', args: ['s1'] } });
+  assert.equal(typeof first, 'string');
+  shown[0]!.events.click();
+  for (let i = 0; i < 100 && ran.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(ran, ['s1']);
+  assert.equal(raised, 1);
+  assert.equal(shown[0]!.closed, true, 'клик закрывает уведомление');
+  shown[0]!.events.click();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(ran, ['s1'], 'второй клик по закрытому не повторяет команду');
+
+  await assert.rejects(bell.show('x', undefined, { onClick: { command: 'bell.nope' } }), { code: 'CommandNotFound' });
+  await assert.rejects(bell.show('x', undefined, { onClick: { command: 'mute.go' } }), { code: 'CommandNotFound' }, 'чужая команда');
+  await assert.rejects(bell.show('x', undefined, { onClick: { command: 'bell.open', args: [42] } }), { code: 'Invalid' });
+  await assert.rejects(bell.show('x'.repeat(21)), { code: 'Invalid' });
+  await assert.rejects(bell.show('x', 'y'.repeat(51)), { code: 'Invalid' });
+  assert.equal(shown.length, 1, 'отказ не доходит до среды');
+
+  const a = await bell.show('a');
+  const b = await bell.show('b');
+  await assert.rejects(bell.show('c'), { code: 'Invalid', message: /живых уведомлений больше 2/ });
+  await bell.close(a);
+  await bell.close(a);
+  assert.equal(shown[1]!.closed, true);
+  await contexts.get('mute')!.os.notify!.close(b);
+  assert.equal(shown[2]!.closed, false, 'чужой id ничего не закрывает');
+  await bell.show('c');
+  shown[2]!.events.closed();
+  await bell.show('d');
+  await assert.rejects(bell.show('e'), { code: 'Invalid' }, 'закрытое ОС уведомление место освобождает, а предел держится');
+
+  await k.disable('bell');
+  assert.deepEqual(shown.slice(3).map((n) => n.closed), [true, true], 'выгрузка закрывает живые уведомления');
+  await k.unload();
 });
 
 test('секреты: ключи своего плагина, $secret, без шифрования ОС - Unavailable, внешний источник по маске', async () => {
@@ -545,6 +637,27 @@ test('shell any: документ или каталог вне корней; п�
     const r = parseManifest(manifest('p', { [right]: ['any'] }));
     assert.ok(!r.ok && r.errors.some((e) => e.startsWith(`permissions.${right}`)), right);
   }
+});
+
+test('команда ядра cyborg.workspace.reveal: среда показывает файл воркспейса, плагину файл закрыт и команда недоступна', async () => {
+  await using box = await sandbox();
+  const file = path.join(box.work, 'team.cyborg.json');
+  await writeFile(file, '{}');
+  const shown: string[] = [];
+  const { k, os, ctx } = await kernel(
+    { reader: { 'fs.read': ['workspace'], shell: ['workspace'] } },
+    { dataDir: box.data, tempDir: box.temp, roots: () => [box.work], protectedPaths: [file], workspaceFile: file, shell: { openPath: async () => undefined, openExternal: async () => undefined, showItemInFolder: (p) => void shown.push(p) } },
+  );
+  await k.run('cyborg.workspace.reveal');
+  assert.deepEqual(shown, [file]);
+  await assert.rejects(os('reader').fs.readText(file), { code: 'PermissionDenied' }, 'файл воркспейса - защищённый путь');
+  await assert.rejects(ctx('reader').commands.run('cyborg.workspace.reveal'), { code: 'PermissionDenied' }, 'команду ядра зовёт приложение');
+  assert.deepEqual(shown, [file]);
+  await k.unload();
+
+  const bare = await kernel({}, { dataDir: box.data, tempDir: box.temp });
+  await assert.rejects(bare.k.run('cyborg.workspace.reveal'), { code: 'Unavailable' });
+  await bare.k.unload();
 });
 
 test('granted: выбор в dialog лежит в state воркспейса и действует после перезапуска; кривые записи и сбой записи не мешают', async () => {
