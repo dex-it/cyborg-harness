@@ -266,6 +266,21 @@ button:focus-visible {
   white-space: pre-wrap;
 }
 
+.safe-mode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--modified);
+  background: var(--bg-side);
+}
+
+.safe-mode[hidden] {
+  display: none;
+}
+
 .plugins-list {
   display: flex;
   flex-direction: column;

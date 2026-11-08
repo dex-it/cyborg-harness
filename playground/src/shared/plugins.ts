@@ -75,6 +75,8 @@ export interface WorkspaceInfo {
 
 export interface PluginsSnapshot {
   readonly phase: 'starting' | 'ready' | 'failed' | 'no-workspace';
+  /** Запуск с `--safe-mode`: код плагинов не запускается. */
+  readonly safeMode: boolean;
   readonly error?: string;
   /** Что не дошло до ядра: битый cyborg.json, непрочитанный манифест. */
   readonly problems: readonly string[];

@@ -1,7 +1,7 @@
 // Дымовой тест собранного playground по DevTools Protocol; нужен дисплей (на Linux - xvfb-run ... --no-sandbox).
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -11,6 +11,17 @@ const TIMEOUT_MS = 20_000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (text) => console.log(`smoke: ${text}`);
 const userData = mkdtempSync(join(tmpdir(), 'cyborg-playground-smoke-'));
+
+// Перезапуск приложения из окна smoke не отслеживает: relaunch и quit подменены, проверяются аргументы нового запуска.
+// quit подменён на один вызов: before-quit сам зовёт app.quit, и вечная подмена не дала бы закрыть приложение в конце.
+const STUB_RELAUNCH = `(() => {
+  const { app, dialog } = process.mainModule.require('electron');
+  globalThis.smokeRelaunch = undefined;
+  app.relaunch = (options) => { globalThis.smokeRelaunch = options.args; };
+  const quit = app.quit;
+  app.quit = () => { app.quit = quit; };
+  dialog.showMessageBox = async () => ({ response: 0 });
+})()`;
 
 async function waitFor(what, probe, timeout = TIMEOUT_MS) {
   const deadline = Date.now() + timeout;
@@ -453,7 +464,56 @@ async function main() {
   assert.ok(recent.some((f) => f.endsWith('workspace.cyborg.json')), 'открытый воркспейс не попал в «Недавние»');
   log('воркспейс: замок с pid, второй запуск отдаёт фокус первому и уходит, открытый - в «Недавних»');
 
+  await main(STUB_RELAUNCH);
+  assert.equal(await ev("document.getElementById('safe-mode').hidden"), true, 'плашка безопасного режима без флага');
+  await ev("document.getElementById('safe-mode-enter').click()");
+  const relaunched = await waitFor('перезапуск в безопасном режиме', () => main('globalThis.smokeRelaunch'));
+  assert.ok(relaunched.includes('--safe-mode'), `перезапуск без --safe-mode: ${relaunched.join(' ')}`);
+  log('безопасный режим: пункт окна перезапускает приложение с --safe-mode');
+
   await bareWindow();
+  await safeWindow();
+}
+
+/** Безопасный режим: свой userData, сторонний плагин с замком на старте; код плагинов не запускается, окно не закрыто. */
+async function safeWindow() {
+  const dir = mkdtempSync(join(tmpdir(), 'cyborg-playground-safe-'));
+  const locker = join(dir, 'plugins', 'locker');
+  mkdirSync(join(locker, 'ui'), { recursive: true });
+  writeFileSync(join(locker, 'manifest.json'), JSON.stringify({ id: 'locker', version: '1.0.0', engines: { cyborg: '^1' }, permissions: { 'ui.lock': true }, ui: { overlay: './ui/lock.js' }, lock: { onStart: true } }));
+  writeFileSync(join(locker, 'index.js'), 'export default { activate() {} };\n');
+  writeFileSync(join(locker, 'ui', 'lock.js'), 'export default { mount() {} };\n');
+  writeFileSync(join(dir, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['echo', 'pin-lock', 'locker'] } }));
+  const safe = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${dir}`, '--remote-debugging-port=0', '--safe-mode', ...electronArgs], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let err = '';
+  safe.stderr.on('data', (d) => (err += d));
+  try {
+    const port = await waitFor('порт DevTools окна в безопасном режиме', () => /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//.exec(err)?.[1]);
+    const page = await waitFor('окно в безопасном режиме', async () => (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page'));
+    const ev = await connect(page.webSocketDebuggerUrl);
+    const main = await connect(await waitFor('инспектор главного процесса', () => /Debugger listening on (ws:\/\/\S+)/.exec(err)?.[1]));
+    await waitFor('сводка безопасного режима', async () => /^Безопасный режим:/.test(await ev("document.getElementById('plugins-summary').textContent")));
+    assert.equal(await ev("!document.getElementById('safe-mode').hidden && document.getElementById('safe-mode-enter').hidden"), true, 'нет плашки безопасного режима');
+    const rows = await ev("[...document.querySelectorAll('#plugins-list [data-plugin]:not([data-state=\"disabled\"])')].map((r) => `${r.dataset.plugin}:${r.dataset.state}:${r.querySelector('.plugin-reason')?.textContent}`)");
+    assert.deepEqual(rows.sort(), ['echo', 'locker', 'pin-lock'].map((id) => `${id}:stopped:безопасный режим: код плагинов не запускается`));
+    const journal = err.split('\n').filter((l) => l.startsWith('[plugins] {'));
+    assert.deepEqual(journal.filter((l) => /"kind":"safe-mode"/.test(l)).length, 3, 'не у каждого плагина запись safe-mode');
+    assert.ok(!journal.some((l) => /"kind":"(activated|failed)"/.test(l)), 'в безопасном режиме поднялся хост');
+    assert.equal(await ev("document.body.dataset.locked !== 'true' && document.getElementById('lock-layer').hidden"), true, 'lock.onStart закрыл окно в безопасном режиме');
+    await ev("[...document.querySelectorAll('#plugins-list [data-plugin=\"echo\"] button')].find((b) => b.textContent === 'Включить снова').click()");
+    const refusal = await waitFor('отказ «Включить» в безопасном режиме', () => ev("document.querySelector('#plugins-list [data-plugin=\"echo\"] .plugin-error')?.textContent"));
+    assert.match(refusal, /безопасный режим/);
+    await main(STUB_RELAUNCH);
+    await ev("document.getElementById('safe-mode-exit').click()");
+    const relaunched = await waitFor('перезапуск без безопасного режима', () => main('globalThis.smokeRelaunch'));
+    assert.ok(!relaunched.includes('--safe-mode'), `выход из безопасного режима оставил флаг: ${relaunched.join(' ')}`);
+    log(`безопасный режим: хосты не подняты, lock.onStart не закрыл окно, «Включить» - отказ (${refusal}), выход перезапускает без флага`);
+  } finally {
+    safe.kill('SIGTERM');
+    await Promise.race([new Promise((r) => safe.once('exit', r)), sleep(8000)]);
+    if (safe.exitCode === null) safe.kill('SIGKILL');
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 /** Окно без воркспейса: свой userData, плагины не грузятся, «Недавние» - кнопками. */

@@ -38,4 +38,12 @@ test('запись журнала словами и уровень', () => {
   assert.equal(describeEntry(expired), 'терминал pty-2 (claude) завершён: плагин не подхватил его за 60 с');
   assert.equal(entryLevel(expired), 'warn');
   assert.deepEqual(pluginStatuses([{ pluginId: 'agent', kind: 'activated', hostId: 'h', ms: 1 }, expired]).map((s) => s.state), ['active']);
+  assert.equal(
+    describeEntry({ pluginId: 'rogue', kind: 'rejected', reasons: [{ kind: 'reserved', what: 'provides', name: 'cyborg.agent', prefix: 'cyborg.' }] }),
+    'отдаёт cyborg.agent, а контракты пространства cyborg.* отдают только встроенные плагины',
+  );
+  assert.equal(
+    describeEntry({ pluginId: 'cyborg.x', kind: 'rejected', reasons: [{ kind: 'reserved', what: 'id', name: 'cyborg.x', prefix: 'cyborg.' }] }),
+    'id cyborg.x из пространства cyborg.* - только у встроенных плагинов',
+  );
 });

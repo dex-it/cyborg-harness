@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { PtyExit, PtyInfo } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
+import { LIMITS, type ResourceLimits } from './limits.ts';
 
 /** Процесс в псевдотерминале; форма совпадает с IPty из node-pty, так что адаптер Electron отдаёт его как есть. */
 export interface PtyProcess {
@@ -50,6 +51,10 @@ interface Entry {
   orphaned?: ReturnType<typeof setTimeout>;
   /** Оставлен человеком при выключении плагина; снимается, когда плагин вернулся. */
   keptAt: number | undefined;
+  pending: string[];
+  pendingChars: number;
+  flushed: number;
+  timer?: ReturnType<typeof setTimeout> | undefined;
 }
 
 /** pty без владельца завершён по сроку: плагин не вернулся и не сделал `attach`. */
@@ -67,9 +72,17 @@ export interface KeptPty extends PtyInfo {
   readonly keptAt: number;
 }
 
+export type PtyLimits = Pick<ResourceLimits, 'ptyInput' | 'ptys' | 'ptyFlushMs' | 'ptyFlushChars'>;
+
+/** Льготный срок pty без владельца и уведомления приложению: срок вышел, список оставленных поменялся. */
+export interface PtyOrphan {
+  readonly graceMs?: number;
+  readonly expired?: (expiry: PtyExpiry) => void;
+  readonly kept?: () => void;
+}
+
 export const PTY_SIGNALS = ['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGHUP'] as const;
 
-/** pty всех плагинов: живут в главном процессе, переживают хост, если просили `persist`. */
 /** Хвост вывода: куски склеиваются при чтении и изредка при сжатии, а не копией всего хвоста на каждый кусок. */
 export class Tail {
   readonly #limit: number;
@@ -113,6 +126,7 @@ export const BACKLOG_LIMIT = 256 * 1024;
 /** Столько ждёт pty с `persist`, чей хост упал: перезапуск и активация укладываются в секунды, как переподключение в VS Code. */
 export const ORPHAN_GRACE = 60_000;
 
+/** pty всех плагинов: живут в главном процессе, переживают хост, если просили `persist`. */
 export class PtyTable {
   readonly #backend: PtyBackend;
   readonly #push: (pluginId: string, method: 'pty.data' | 'pty.exit', params: unknown) => void;
@@ -123,35 +137,30 @@ export class PtyTable {
   readonly #keptChanged: () => void;
   readonly #entries = new Map<string, Entry>();
   readonly #tickets = new Map<string, { pluginId: string; id: string; expires: number }>();
+  readonly #max: PtyLimits;
   #next = 0;
 
-  constructor(
-    backend: PtyBackend,
-    push: (pluginId: string, method: 'pty.data' | 'pty.exit', params: unknown) => void,
-    backlogLimit = BACKLOG_LIMIT,
-    ticketTtl = 30_000,
-    orphan: { readonly graceMs?: number; readonly expired?: (expiry: PtyExpiry) => void; readonly kept?: () => void } = {},
-  ) {
+  constructor(backend: PtyBackend, push: (pluginId: string, method: 'pty.data' | 'pty.exit', params: unknown) => void, backlogLimit = BACKLOG_LIMIT, ticketTtl = 30_000, options: Partial<PtyLimits> & PtyOrphan = {}) {
     this.#backend = backend;
     this.#push = push;
     this.#limit = backlogLimit;
     this.#ticketTtl = ticketTtl;
-    this.#grace = orphan.graceMs ?? ORPHAN_GRACE;
-    this.#expired = orphan.expired ?? (() => undefined);
-    this.#keptChanged = orphan.kept ?? (() => undefined);
+    this.#grace = options.graceMs ?? ORPHAN_GRACE;
+    this.#expired = options.expired ?? (() => undefined);
+    this.#keptChanged = options.kept ?? (() => undefined);
+    this.#max = { ptyInput: options.ptyInput ?? LIMITS.ptyInput, ptys: options.ptys ?? LIMITS.ptys, ptyFlushMs: options.ptyFlushMs ?? LIMITS.ptyFlushMs, ptyFlushChars: options.ptyFlushChars ?? LIMITS.ptyFlushChars };
   }
 
   spawn(pluginId: string, o: { program: string; args: string[]; cwd?: string; env: Record<string, string>; cols: number; rows: number; persist: boolean }): PtyWire {
-    const proc = this.#backend.spawn(o.program, o.args, { name: 'xterm-256color', ...(o.cwd !== undefined && { cwd: o.cwd }), env: o.env, cols: o.cols, rows: o.rows });
-    const e: Entry = { id: `pty-${String(++this.#next)}`, pluginId, proc, program: o.program, args: o.args, persist: o.persist, cols: o.cols, rows: o.rows, tail: new Tail(this.#limit), attached: true, viewers: new Set(), keptAt: undefined };
+    if (this.#of(pluginId).filter((x) => !x.exit).length >= this.#max.ptys) throw new CoreError('Invalid', `${pluginId}: живых pty больше ${String(this.#max.ptys)} - завершите прежние`);
+    // Терминал на той стороне - xterm.js вида: TERM и COLORTERM описывают его, а не окно, из которого запустили приложение.
+    const env = { COLORTERM: 'truecolor', ...o.env };
+    const proc = this.#backend.spawn(o.program, o.args, { name: 'xterm-256color', ...(o.cwd !== undefined && { cwd: o.cwd }), env, cols: o.cols, rows: o.rows });
+    const e: Entry = { id: `pty-${String(++this.#next)}`, pluginId, proc, program: o.program, args: o.args, persist: o.persist, cols: o.cols, rows: o.rows, tail: new Tail(this.#limit), attached: true, viewers: new Set(), pending: [], pendingChars: 0, flushed: -Infinity, keptAt: undefined };
     this.#entries.set(e.id, e);
-    proc.onData((data) => {
-      // Хвост держится и при живом владельце: после перезапуска хоста им восстанавливается экран, где TUI не перерисует себя сам.
-      e.tail.push(data);
-      if (e.attached) this.#push(pluginId, 'pty.data', { pluginId, id: e.id, data });
-      for (const v of e.viewers) v.data(data);
-    });
+    proc.onData((data) => this.#output(e, data));
     proc.onExit(({ exitCode, signal }) => {
+      this.#flush(e);
       const exit: PtyExit = { code: exitCode, ...(signal !== undefined && signal !== 0 && { signal }) };
       e.exit = exit;
       for (const v of e.viewers) v.exit(exit);
@@ -170,6 +179,7 @@ export class PtyTable {
 
   attach(pluginId: string, id: string): PtyWire {
     const e = this.#own(pluginId, id);
+    this.#flush(e);
     const wire = { ...info(e), backlog: e.tail.text() };
     clearTimeout(e.orphaned);
     if (e.keptAt !== undefined) {
@@ -203,6 +213,8 @@ export class PtyTable {
     this.#tickets.delete(ticket);
     if (t?.pluginId !== pluginId || t.expires <= Date.now()) throw new CoreError('NotFound', 'билет терминала не найден, просрочен или уже использован');
     const e = this.#live(pluginId, t.id);
+    // Накопленное уходит прежним зрителям до хвоста: в хвосте новому оно уже есть, повтора не будет.
+    this.#flush(e);
     e.viewers.add(sink);
     const own = () => {
       if (!e.viewers.has(sink) || e.exit) throw new CoreError('NotFound', `терминал ${e.id} закрыт`);
@@ -212,6 +224,7 @@ export class PtyTable {
       backlog: e.tail.text(),
       write: (data) => {
         own();
+        this.#input(data);
         e.proc.write(data);
       },
       resize: (cols, rows) => {
@@ -225,7 +238,9 @@ export class PtyTable {
   }
 
   write(pluginId: string, id: string, data: string): void {
-    this.#live(pluginId, id).proc.write(data);
+    const e = this.#live(pluginId, id);
+    this.#input(data);
+    e.proc.write(data);
   }
 
   resize(pluginId: string, id: string, cols: number, rows: number): void {
@@ -306,6 +321,10 @@ export class PtyTable {
   #end(e: Entry): void {
     clearTimeout(e.orphaned);
     this.#entries.delete(e.id);
+    clearTimeout(e.timer);
+    e.timer = undefined;
+    e.pending = [];
+    e.pendingChars = 0;
     if (!e.exit) e.proc.kill();
   }
 
@@ -320,6 +339,46 @@ export class PtyTable {
     }, this.#grace);
     // Ждущий срока pty не держит процесс приложения: выход из него и так завершит все.
     e.orphaned.unref();
+  }
+
+  #input(data: string): void {
+    const max = this.#max.ptyInput;
+    // Байт UTF-8 не меньше длины строки и не больше утроенной: подсчёт нужен только между границами.
+    if (data.length > max || (data.length * 3 > max && Buffer.byteLength(data, 'utf8') > max)) {
+      throw new CoreError('Invalid', `pty: ввод больше ${String(max)} байт - разбейте его на части`);
+    }
+  }
+
+  /** Первый кусок после затишья уходит сразу - эхо клавиши не ждёт; поток под нагрузкой уходит пачками раз в `ptyFlushMs`. */
+  #output(e: Entry, data: string): void {
+    const { ptyFlushMs: ms, ptyFlushChars: chars } = this.#max;
+    if (ms === 0) {
+      this.#deliver(e, data);
+      return;
+    }
+    e.pending.push(data);
+    e.pendingChars += data.length;
+    const quiet = performance.now() - e.flushed;
+    if (e.pendingChars >= chars || (e.timer === undefined && quiet >= ms)) this.#flush(e);
+    else e.timer ??= setTimeout(() => this.#flush(e), ms - quiet);
+  }
+
+  #flush(e: Entry): void {
+    clearTimeout(e.timer);
+    e.timer = undefined;
+    if (e.pending.length === 0) return;
+    const data = e.pending.length === 1 ? (e.pending[0] ?? '') : e.pending.join('');
+    e.pending = [];
+    e.pendingChars = 0;
+    e.flushed = performance.now();
+    this.#deliver(e, data);
+  }
+
+  #deliver(e: Entry, data: string): void {
+    // Хвост держится и при живом владельце: после перезапуска хоста им восстанавливается экран, где TUI не перерисует себя сам.
+    e.tail.push(data);
+    if (e.attached) this.#push(e.pluginId, 'pty.data', { pluginId: e.pluginId, id: e.id, data });
+    for (const v of e.viewers) v.data(data);
   }
 
   #of(pluginId: string): Entry[] {
