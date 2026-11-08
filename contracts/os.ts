@@ -62,6 +62,8 @@ export interface ProcessOptions {
   readonly env?: Readonly<Record<string, string>>;
   readonly input?: string;
   readonly timeoutMs?: number;
+  /** Отмена: сигнал сработал - программе и её группе `SIGTERM`, вызов отклоняется `Cancelled`. Сработал до вызова - программа не запускается. */
+  readonly signal?: AbortSignal;
 }
 
 export interface HttpRequest {

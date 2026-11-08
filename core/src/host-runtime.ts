@@ -303,7 +303,15 @@ function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths:
       remove: call('fs.remove'),
     }),
     secrets: Object.freeze({ get: call('secrets.get'), set: call('secrets.set'), delete: call('secrets.delete') }),
-    ...(p.process && { process: Object.freeze({ run: call('process.run') }) }),
+    ...(p.process && {
+      process: Object.freeze({
+        run(program: string, args: readonly string[], options?: { signal?: AbortSignal }) {
+          // Сигнал не переживает structuredClone: отмена едет сообщением cancel, ядро завершает программу и её группу.
+          const { signal, ...rest } = options ?? {};
+          return endpoint.request('os', { pluginId, method: 'process.run', args: options === undefined ? [program, args] : [program, args, rest] }, signal);
+        },
+      }),
+    }),
     ...(p.pty && {
       pty: Object.freeze({
         spawn: async (options: unknown) => ptys.open(endpoint, pluginId, await call<PtyWire>('pty.spawn')(options)),
