@@ -30,6 +30,8 @@ export interface ImportRules {
   readonly declarations: readonly string[];
   /** Пакеты объявлений по имени (`@acme/contracts`): только `import type`. */
   readonly packages: readonly string[];
+  /** Главную часть соберёт в один файл сборщик плагинов (P-06): npm-пакеты допустимы, их код уйдёт внутрь. `node:*`, `electron` и пакеты объявлений - по-прежнему нет. */
+  readonly bundled?: boolean;
 }
 
 export interface CheckOptions {
@@ -39,6 +41,10 @@ export interface CheckOptions {
   readonly declarations?: readonly string[];
   /** Имена пакетов объявлений, например `@acme/contracts`: только `import type`. */
   readonly declarationPackages?: readonly string[];
+  /** Главную часть соберут в один файл (`cyborg-plugin build`): npm-пакеты в ней допустимы. Без флага плагин грузится как есть, и пакетов в главной части нет. */
+  readonly bundled?: boolean;
+  /** Каталоги плагина (пути вниз от его корня), которые не читаются как исходники: например, результат сборки. */
+  readonly ignore?: readonly string[];
 }
 
 export interface CheckReport {
@@ -117,12 +123,15 @@ export function importProblems(file: string, text: string, rules: ImportRules): 
     }
     if (use.spec === CONTRACTS) continue;
     const relative = use.spec.startsWith('.');
-    if (view && !relative && !isBuiltin(use.spec) && use.spec !== 'electron' && !use.spec.startsWith('electron/')) continue;
+    const npm = !relative && !isBuiltin(use.spec) && use.spec !== 'electron' && !use.spec.startsWith('electron/');
+    // Вид - всегда бандл; главная часть - если её собирают. Пакет объявлений в бандл не уходит: он общий и только типы.
+    if (npm && (view || (rules.bundled === true && !rules.packages.includes(use.spec) && use.spec !== COMPUTED))) continue;
     if (!relative) {
       if (use.spec === COMPUTED) report('вычисляемый путь: статика не видит, какой модуль загрузится');
       else if (rules.packages.includes(use.spec)) {
         if (!use.typeOnly) report(`${quoted}: пакет объявлений - только import type`);
-      } else report(`${quoted}: только ${CONTRACTS} и свои модули${view ? ' (вид: без node:* и electron)' : ''}`);
+      } else if (rules.bundled === true && !view) report(`${quoted}: в бандле главной части нет ни node:*, ни electron`);
+      else report(`${quoted}: только ${CONTRACTS} и свои модули${view ? ' (вид: без node:* и electron)' : ''}`);
       continue;
     }
     const target = path.resolve(path.dirname(file), use.spec);
@@ -145,14 +154,14 @@ export function formatProblem(p: Problem): string {
 }
 
 /** Исходники плагина: без `node_modules`, скрытых каталогов, тестов и `.d.ts`; порядок не зависит от ОС. */
-async function sources(home: string): Promise<string[]> {
+async function sources(home: string, ignore: ReadonlySet<string>): Promise<string[]> {
   const out: string[] = [];
   const walk = async (dir: string): Promise<void> => {
     const entries = await fs.readdir(dir, { withFileTypes: true });
     for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name !== 'node_modules' && !entry.name.startsWith('.') && !isTestPath(entry.name)) await walk(full);
+        if (entry.name !== 'node_modules' && !entry.name.startsWith('.') && !isTestPath(entry.name) && !ignore.has(full)) await walk(full);
       } else if (/\.(?:m|c)?[tj]s$/.test(entry.name) && !entry.name.endsWith('.d.ts') && !isTestPath(entry.name)) out.push(full);
     }
   };
@@ -244,8 +253,10 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
 
   // Пути через realpath, как корень плагина: иначе `/var` и `/private/var` на macOS дали бы разные пути одного файла.
   const declarations = await Promise.all((options.declarations ?? []).map((d) => fs.realpath(d).catch(() => path.resolve(d))));
-  const rules: ImportRules = { home: root, declarations, packages: options.declarationPackages ?? [] };
-  const files = await sources(root);
+  const rules: ImportRules = { home: root, declarations, packages: options.declarationPackages ?? [], bundled: options.bundled === true };
+  // Только вниз от корня: `../x` и абсолютный путь ничего не скрывают.
+  const ignore = new Set((options.ignore ?? []).filter((d) => !path.isAbsolute(d)).map((d) => path.resolve(root, d)).filter((d) => d !== root && inside(root, d)));
+  const files = await sources(root, ignore);
   for (const file of files) {
     try {
       problems.push(...importProblems(file, await fs.readFile(file, 'utf8'), rules));
