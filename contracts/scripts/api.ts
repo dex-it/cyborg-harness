@@ -37,18 +37,16 @@ export function readSnapshot(): Snapshot {
   return parseSnapshot(fs.readFileSync(SNAPSHOT_FILE, 'utf8'));
 }
 
-/** Числа версии; суффикс предрелиза не сравнивается: он различает выпуски, но не порядок для этого правила. */
-function numbers(version: string): number[] {
-  const core = version.split(/[-+]/)[0] ?? '';
-  return core.split('.').map(Number);
-}
+/** Версия с суффиксом (`1.0.0-dev`) - линия разработки ещё не выпущенного пакета: её API меняется свободно, правило повышения действует после первого выпуска. */
+const isPrerelease = (version: string): boolean => version.includes('-');
 
+/** Порядок по числам версии; у равных чисел выпуск старше предрелиза, а два предрелиза не сравниваются. */
 function lower(a: string, b: string): boolean {
-  const [x, y] = [numbers(a), numbers(b)];
+  const [x, y] = [a, b].map((v) => (v.split(/[-+]/)[0] ?? '').split('.').map(Number));
   for (let i = 0; i < 3; i++) {
-    if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0);
+    if ((x?.[i] ?? 0) !== (y?.[i] ?? 0)) return (x?.[i] ?? 0) < (y?.[i] ?? 0);
   }
-  return false;
+  return isPrerelease(a) && !isPrerelease(b);
 }
 
 /** Снимок в репозитории против собранных деклараций `dir` и версии пакета. */
@@ -64,6 +62,6 @@ export function checkSnapshot(dir: string, packageVersion: string): string[] {
 export function compareWithBase(base: Snapshot | undefined, current: Snapshot): string[] {
   if (!base) return [];
   if (lower(current.version, base.version)) return [`версия пакета понижена: ${base.version} -> ${current.version}`];
-  if (current.body !== base.body && current.version === base.version) return [`публичные декларации изменены без повышения версии пакета (${base.version}): повысьте версию по правилам README.md и обновите снимок`];
+  if (current.body !== base.body && current.version === base.version && !isPrerelease(base.version)) return [`публичные декларации изменены без повышения версии пакета (${base.version}): повысьте версию по правилам README.md и обновите снимок`];
   return [];
 }

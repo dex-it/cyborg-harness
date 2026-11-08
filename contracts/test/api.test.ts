@@ -57,6 +57,14 @@ describe('сравнение с базой', () => {
   it('версия понижена - ошибка, даже если декларации те же', () => {
     assert.match(compareWithBase({ version: '1.1.0', body: 'A' }, { version: '1.0.9', body: 'A' })[0]!, /понижена/);
   });
+  it('линия разработки до первого выпуска (1.0.0-dev): декларации меняются без повышения версии', () => {
+    const dev = { version: '1.0.0-dev', body: 'A' };
+    assert.deepEqual(compareWithBase(dev, { version: '1.0.0-dev', body: 'B' }), []);
+    assert.deepEqual(compareWithBase(dev, { version: '1.0.0', body: 'B' }), [], 'выпуск 1.0.0 из линии разработки');
+  });
+  it('после выпуска возврат на предрелиз тех же чисел - понижение', () => {
+    assert.match(compareWithBase(base, { version: '1.0.0-dev', body: 'A' })[0]!, /понижена/);
+  });
   it('базы нет (первый снимок) - без замечаний', () => {
     assert.deepEqual(compareWithBase(undefined, { version: '1.0.0', body: 'B' }), []);
   });
@@ -83,9 +91,9 @@ describe('снимок в репозитории', () => {
       assert.equal(problems.length, 1, `${file}: ${problems.join('; ')}`);
       assert.match(problems[0]!, /изменены/);
 
-      // Автор повысил версию и обновил снимок: сравнение с базой (снимком до правки) проходит, без повышения - нет.
-      const base = readSnapshot();
-      const edited = { version: pkg.version, body: parseSnapshot(renderSnapshot(pkg.version, normalizeDeclarations(out))).body };
+      // Выпущенная версия (без суффикса -dev): автор повысил версию и обновил снимок - сравнение с базой проходит, без повышения - нет.
+      const base = { version: '1.0.0', body: readSnapshot().body };
+      const edited = { version: '1.0.0', body: parseSnapshot(renderSnapshot('1.0.0', normalizeDeclarations(out))).body };
       assert.match(compareWithBase(base, edited)[0]!, /без повышения версии/);
       assert.deepEqual(compareWithBase(base, { ...edited, version: '1.1.0' }), []);
       fs.rmSync(out, { recursive: true });
