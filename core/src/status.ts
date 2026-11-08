@@ -48,7 +48,9 @@ export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[]
         case 'key-conflict':
         case 'key-ignored':
         case 'denied':
-          // Ни конфликт сочетаний, ни отказ шлюза о работе плагина ничего не говорят: плагин работает как обычно.
+        case 'host-isolated':
+        case 'host-own-grouped':
+          // Ни конфликт сочетаний, ни отказ шлюза, ни выбор хоста о работе плагина ничего не говорят: плагин работает как обычно.
           break;
         case 'host-restart':
           // Причиной остаётся падение: «перезапуск» без «почему» человеку ничего не говорит.
@@ -138,6 +140,8 @@ export function describeEntry(e: JournalEntry): string {
       return `plugins.keybindings: ${e.key} -> ${String(e.command)} не применено: ${e.reason}`;
     case 'host-isolated':
       return `сторонний плагин не делит хост: группа ${e.group} из plugins.hosts не действует, работает в своём хосте ${e.hostId}`;
+    case 'host-own-grouped':
+      return `манифест просит свой хост, но группа ${e.group} из plugins.hosts сажает его к ${list(e.neighbours)}: его зависание перезапустит и их`;
     case 'switched-off':
       return `выключен, сбоев подряд: ${e.strikes}` + (e.affects.length ? `; его контракты брали: ${list(e.affects)}` : '');
     case 'host-down': {
@@ -176,6 +180,7 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
     case 'skipped':
     case 'host-down':
     case 'host-isolated':
+    case 'host-own-grouped':
       return 'warn';
     default:
       return 'error';

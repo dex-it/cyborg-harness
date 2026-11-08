@@ -6,6 +6,7 @@ import { load, type LoadOptions } from '../src/loader.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
+import { entryLevel, pluginStatuses } from '../src/status.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 
@@ -354,11 +355,40 @@ test('хосты: из поставки - по группам, сторонни�
     k.journal.filter((e) => e.kind === 'host-isolated'),
     [{ pluginId: 'x', kind: 'host-isolated', group: 'ui', hostId: 'x' }],
   );
+  assert.equal(pluginStatuses(k.journal.filter((e) => e.kind === 'host-isolated')).length, 0, 'запись о хосте состояния плагину не даёт');
   await k.unload();
 
   const unknown = await kernel({ p: noop, q: noop }, { enabled: ['p', 'q'], manifests: [manifest('p'), manifest('q')] });
   assert.deepEqual([unknown.hostOf('p'), unknown.hostOf('q')], ['p', 'q'], 'без bundled все сторонние');
   await unknown.unload();
+});
+
+test('хосты: host own у плагина поставки - свой хост без группы; в группе с соседом - хост группы и предупреждение host-own-grouped', async () => {
+  const noop: PluginModule = { activate: () => undefined };
+  const ids = ['solo', 'grouped', 'mate', 'alone', 'guest', 'rogue'];
+  const own = { host: 'own' };
+  const k = await kernel(Object.fromEntries(ids.map((id) => [id, noop])), {
+    enabled: ids,
+    manifests: [manifest('solo', own), manifest('grouped', own), manifest('mate'), manifest('alone', own), manifest('guest', own), manifest('rogue')],
+    bundled: ['solo', 'grouped', 'mate', 'alone', 'guest'],
+    hosts: { ui: ['grouped', 'mate'], one: ['alone'], mixed: ['guest', 'rogue'] },
+  });
+  assert.deepEqual(
+    ids.map((id) => [id, k.hostOf(id)]),
+    [
+      ['solo', 'solo'],
+      ['grouped', 'ui'],
+      ['mate', 'ui'],
+      ['alone', 'one'],
+      ['guest', 'mixed'],
+      ['rogue', 'rogue'],
+    ],
+  );
+  const warnings = k.journal.filter((e) => e.kind === 'host-own-grouped');
+  assert.deepEqual(warnings, [{ pluginId: 'grouped', kind: 'host-own-grouped', group: 'ui', neighbours: ['mate'] }], 'одному в группе и соседу стороннего, ушедшего в свой хост, предупреждать не о чем');
+  assert.equal(entryLevel(warnings[0]!), 'warn');
+  assert.equal(pluginStatuses(k.journal).find((s) => s.id === 'grouped')?.state, 'active');
+  await k.unload();
 });
 
 test('схема раздела из манифеста: значение не по схеме - отказ плагину, правка извне не по схеме - значение прежнее', async () => {
