@@ -528,6 +528,7 @@ async function main() {
 
   await bareWindow();
   await safeWindow();
+  await userPluginsWindow();
 }
 
 /** Безопасный режим: свой userData, сторонний плагин с замком на старте; код плагинов не запускается, окно не закрыто. */
@@ -539,7 +540,7 @@ async function safeWindow() {
   writeFileSync(join(locker, 'index.js'), 'export default { activate() {} };\n');
   writeFileSync(join(locker, 'ui', 'lock.js'), 'export default { mount() {} };\n');
   writeFileSync(join(dir, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['echo', 'pin-lock', 'locker'] } }));
-  const safe = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${dir}`, '--remote-debugging-port=0', '--safe-mode', ...electronArgs], { stdio: ['ignore', 'ignore', 'pipe'] });
+  const safe = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${dir}`, '--remote-debugging-port=0', '--safe-mode', '--user-plugins', ...electronArgs], { stdio: ['ignore', 'ignore', 'pipe'] });
   let err = '';
   safe.stderr.on('data', (d) => (err += d));
   try {
@@ -551,7 +552,15 @@ async function safeWindow() {
     assert.equal(await ev("!document.getElementById('safe-mode').hidden && document.getElementById('safe-mode-enter').hidden"), true, 'нет плашки безопасного режима');
     const rows = await ev("[...document.querySelectorAll('#plugins-list [data-plugin]:not([data-state=\"disabled\"])')].map((r) => `${r.dataset.plugin}:${r.dataset.state}:${r.querySelector('.plugin-reason')?.textContent}`)");
     assert.deepEqual(rows.sort(), ['echo', 'locker', 'pin-lock'].map((id) => `${id}:stopped:безопасный режим: код плагинов не запускается`));
+    // Политика этапа 1 (SAD 6.1): каталог пользователя включён флагом, его плагин помечен в окне; встроенный - нет.
+    assert.deepEqual(
+      await ev("[...document.querySelectorAll('#plugins-list [data-plugin]:not([data-state=\"disabled\"])')].map((r) => `${r.dataset.plugin}:${r.dataset.origin}:${r.querySelector('.plugin-origin')?.textContent ?? ''}:${r.querySelector('.plugin-origin-note') !== null}`).sort()"),
+      ['echo:bundled::false', 'locker:user:сторонний:true', 'pin-lock:bundled::false'],
+    );
+    assert.equal(await ev("!document.getElementById('user-plugins').hidden && /--user-plugins/.test(document.getElementById('user-plugins').textContent)"), true, 'нет плашки каталога пользователя');
     const journal = err.split('\n').filter((l) => l.startsWith('[plugins] {'));
+    assert.ok(journal.some((l) => /"pluginId":"locker","kind":"third-party"/.test(l)), 'нет записи third-party у стороннего плагина');
+    assert.ok(!journal.some((l) => /"pluginId":"(echo|pin-lock)","kind":"third-party"/.test(l)), 'запись third-party у встроенного плагина');
     assert.deepEqual(journal.filter((l) => /"kind":"safe-mode"/.test(l)).length, 3, 'не у каждого плагина запись safe-mode');
     assert.ok(!journal.some((l) => /"kind":"(activated|failed)"/.test(l)), 'в безопасном режиме поднялся хост');
     assert.equal(await ev("document.body.dataset.locked !== 'true' && document.getElementById('lock-layer').hidden"), true, 'lock.onStart закрыл окно в безопасном режиме');
@@ -562,11 +571,41 @@ async function safeWindow() {
     await ev("document.getElementById('safe-mode-exit').click()");
     const relaunched = await waitFor('перезапуск без безопасного режима', () => main('globalThis.smokeRelaunch'));
     assert.ok(!relaunched.includes('--safe-mode'), `выход из безопасного режима оставил флаг: ${relaunched.join(' ')}`);
+    assert.ok(relaunched.includes('--user-plugins'), `перезапуск потерял --user-plugins: ${relaunched.join(' ')}`);
     log(`безопасный режим: хосты не подняты, lock.onStart не закрыл окно, «Включить» - отказ (${refusal}), выход перезапускает без флага`);
   } finally {
     safe.kill('SIGTERM');
     await Promise.race([new Promise((r) => safe.once('exit', r)), sleep(8000)]);
     if (safe.exitCode === null) safe.kill('SIGKILL');
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Политика этапа 1 по умолчанию: без `--user-plugins` плагин из каталога пользователя не читается, в окне он не загружен и не помечен как найденный. */
+async function userPluginsWindow() {
+  const dir = mkdtempSync(join(tmpdir(), 'cyborg-playground-userdir-'));
+  const notes = join(dir, 'plugins', 'notes');
+  mkdirSync(notes, { recursive: true });
+  writeFileSync(join(notes, 'manifest.json'), JSON.stringify({ id: 'notes', version: '1.0.0', engines: { cyborg: '^1' } }));
+  writeFileSync(join(notes, 'index.js'), 'export default { activate() {} };\n');
+  writeFileSync(join(dir, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['echo', 'notes'] } }));
+  const plain = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${dir}`, '--remote-debugging-port=0', ...electronArgs], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let err = '';
+  plain.stderr.on('data', (d) => (err += d));
+  try {
+    const port = await waitFor('порт DevTools окна без флага каталога пользователя', () => /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//.exec(err)?.[1]);
+    const page = await waitFor('окно без флага каталога пользователя', async () => (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page'));
+    const ev = await connect(page.webSocketDebuggerUrl);
+    await waitFor('echo из поставки работает', () => ev("document.querySelector('#plugins-list [data-plugin=\"echo\"]')?.dataset.state === 'active'"));
+    assert.equal(await ev("document.querySelector('#plugins-list [data-plugin=\"notes\"]')?.dataset.state !== 'active'"), true, 'плагин из каталога пользователя загружен без флага');
+    assert.equal(await ev("document.querySelector('#plugins-list [data-origin=\"user\"]') === null && document.getElementById('user-plugins').hidden"), true, 'без флага в окне есть сторонние или плашка каталога');
+    assert.ok(err.includes('--user-plugins'), 'в лог не попала подсказка про флаг');
+    assert.ok(!/"kind":"third-party"/.test(err), 'без флага загружен сторонний плагин');
+    log('каталог пользователя без флага: плагин notes не загружен, в окне нет сторонних, подсказка про --user-plugins в логе');
+  } finally {
+    plain.kill('SIGTERM');
+    await Promise.race([new Promise((r) => plain.once('exit', r)), sleep(8000)]);
+    if (plain.exitCode === null) plain.kill('SIGKILL');
     rmSync(dir, { recursive: true, force: true });
   }
 }

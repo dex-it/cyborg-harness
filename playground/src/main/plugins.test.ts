@@ -42,10 +42,63 @@ test('старт: плагин из каталога пользователя - 
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['files', 'notes'], hosts: { ui: ['files', 'notes'] } } }));
   plugin(builtinDir, 'files', {}, 'export default {}');
   plugin(path.join(userData, 'plugins'), 'notes', {}, 'export default {}');
-  const kernel = await startPlugins({ userData, builtinDir, spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {} });
+  const kernel = await startPlugins({ userData, builtinDir, userPlugins: true, spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {} });
   assert.deepEqual([kernel.hostOf('files'), kernel.hostOf('notes')], ['ui', 'notes']);
   assert.ok(kernel.journal.some((e) => e.kind === 'host-isolated' && e.pluginId === 'notes'));
   await kernel.unload();
+});
+
+test('политика по умолчанию: каталог пользователя не читается, плагин оттуда не загружен, в журнале причина - его нет среди найденных; в лог идёт подсказка про флаг', async () => {
+  const userData = tmp();
+  const builtinDir = tmp();
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['files', 'notes'] } }));
+  plugin(builtinDir, 'files', {}, 'export default {}');
+  plugin(path.join(userData, 'plugins'), 'notes', {}, 'export default {}');
+  const lines: string[] = [];
+  const found: string[][] = [];
+  const kernel = await startPlugins({ userData, builtinDir, spawnHost: inlineHosts(async () => ({ activate() {} })), log: (l) => lines.push(l), onDiscovered: (d) => found.push([...d.origins.keys()]) });
+  assert.deepEqual(found, [['files']], 'каталог пользователя в поиск не попал');
+  assert.deepEqual(kernel.active, ['files']);
+  assert.ok(kernel.journal.some((e) => e.kind === 'not-found' && e.pluginId === 'notes'));
+  assert.ok(!kernel.journal.some((e) => e.kind === 'third-party'));
+  assert.ok(lines.some((l) => l.includes('--user-plugins') && l.includes(path.join(userData, 'plugins'))), 'нет подсказки про флаг');
+  await kernel.unload();
+
+  // Пустой или отсутствующий каталог подсказки не заслуживает.
+  const quiet: string[] = [];
+  const clean = tmp();
+  const again = await startPlugins({ userData: clean, builtinDir, spawnHost: inlineHosts(async () => ({ activate() {} })), log: (l) => quiet.push(l) });
+  assert.ok(!quiet.some((l) => l.includes('--user-plugins')));
+  await again.unload();
+});
+
+test('политика с флагом: плагин из каталога пользователя загружен, в журнале third-party, строка окна помечена origin user и показывает права словами', async () => {
+  const userData = tmp();
+  const builtinDir = tmp();
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['files', 'notes', 'idle'] } }));
+  plugin(builtinDir, 'files', {}, 'export default {}');
+  plugin(path.join(userData, 'plugins'), 'notes', { permissions: { shell: ['any'] } }, 'export default {}');
+  plugin(path.join(userData, 'plugins'), 'idle', {}, 'export default {}');
+  const service = new PluginsService({ changed: () => {}, alert: () => {} }, () => 1000);
+  await service.start({ userData, builtinDir, userPlugins: true, spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {} });
+  const snapshot = service.snapshot();
+  const row = (id: string) => snapshot.plugins.find((r) => r.id === id);
+  assert.equal(row('files')?.origin, 'bundled');
+  assert.equal(row('notes')?.origin, 'user');
+  assert.equal(row('idle')?.origin, 'user');
+  assert.ok((row('notes')?.permissions.length ?? 0) > 0, 'права словами у стороннего видны');
+  assert.equal(snapshot.userPlugins, true);
+  const line = snapshot.journal.find((l) => l.subject === 'notes' && l.level === 'warn' && l.text.includes('сторонний плагин'));
+  assert.ok(line, 'в журнале окна нет записи о стороннем плагине');
+  assert.deepEqual(line.plugins, ['notes']);
+  assert.ok(!snapshot.journal.some((l) => l.subject === 'files' && l.text.includes('сторонний')), 'встроенный не помечен');
+  await service.unload();
+
+  const off = new PluginsService({ changed: () => {}, alert: () => {} });
+  await off.start({ userData: tmp(), builtinDir, spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {} });
+  assert.equal(off.snapshot().userPlugins, false);
+  assert.ok(off.snapshot().plugins.every((r) => r.origin === 'bundled'));
+  await off.unload();
 });
 
 test('воркспейс: битый cyborg.json - жалоба, а не отказ; второй старт на том же воркспейсе получает отказ замка', async () => {
@@ -80,6 +133,7 @@ test('старт: включённый плагин активен, миграц
   const kernel = await startPlugins({
     userData,
     builtinDir: path.join(userData, 'нет'),
+    userPlugins: true,
     spawnHost: inlineHosts(async (entry) => {
       assert.match(entry, /^file:.*greeter\/index\.mjs$/);
       return greeter;
@@ -107,6 +161,7 @@ test('служба окна: снимок с причиной и журнало�
   await service.start({
     userData,
     builtinDir: path.join(userData, 'нет'),
+    userPlugins: true,
     spawnHost: inlineHosts(async () => ({
       activate() {
         if (broken) throw new Error('нет диска');
@@ -118,8 +173,8 @@ test('служба окна: снимок с причиной и журнало�
   assert.equal(before.phase, 'ready');
   assert.equal(before.problems.length, 1);
   assert.deepEqual(before.plugins, [
-    { id: 'spare', state: 'disabled', revivable: false, unloaded: false, commands: [], permissions: [], version: '1.0.0', reason: 'не включён в настройках (plugins.enabled)' },
-    { id: 'disk', state: 'stopped', revivable: true, unloaded: false, commands: [], permissions: [], version: '1.0.0', host: 'io', reason: 'не поднялся в хосте io: нет диска' },
+    { id: 'spare', origin: 'user', state: 'disabled', revivable: false, unloaded: false, commands: [], permissions: [], version: '1.0.0', reason: 'не включён в настройках (plugins.enabled)' },
+    { id: 'disk', origin: 'user', state: 'stopped', revivable: true, unloaded: false, commands: [], permissions: [], version: '1.0.0', host: 'io', reason: 'не поднялся в хосте io: нет диска' },
   ]);
   assert.deepEqual(before.journal.at(-1), { at: 1000, subject: 'disk', plugins: ['disk'], text: 'не поднялся в хосте io: нет диска', level: 'error' });
 
@@ -161,6 +216,7 @@ test('служба окна: сочетания с конфликтом, пер�
   await service.start({
     userData,
     builtinDir: path.join(userData, 'нет'),
+    userPlugins: true,
     spawnHost: inlineHosts(async (entry) => modules[/\/(\w+)\/index\.mjs$/.exec(entry)?.[1] ?? ''] ?? { activate() {} }),
     platform: 'linux',
     log: () => {},
@@ -234,6 +290,7 @@ test('виды: адрес у плагина с ui в манифесте и у �
   await service.start({
     userData,
     builtinDir: path.join(userData, 'нет'),
+    userPlugins: true,
     spawnHost: inlineHosts(async (entry) => modules[/\/(\w+)\/index\.mjs$/.exec(entry)?.[1] ?? ''] ?? { activate() {} }),
     log: () => {},
   });
@@ -284,6 +341,7 @@ test('схема раздела: файл из каталога плагина �
   const kernel = await startPlugins({
     userData,
     builtinDir: path.join(userData, 'нет'),
+    userPlugins: true,
     spawnHost: inlineHosts(async () => ({ activate: () => undefined })),
     log: () => undefined,
   });
@@ -311,6 +369,7 @@ test('plugins.enabled из файла воркспейса без перезап
     userData,
     workspace: ws,
     builtinDir: path.join(userData, 'нет'),
+    userPlugins: true,
     spawnHost: inlineHosts(async () => ({ activate: () => undefined })),
     log: () => undefined,
     onProblem: (p) => problems.push(p),

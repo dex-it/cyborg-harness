@@ -8,7 +8,7 @@ import { viewOrigin } from '../shared/views.ts';
 import { electronOs } from './os-env.ts';
 import { utilityHosts } from './plugin-hosts.ts';
 import { guardNavigation } from './navigation.ts';
-import { PluginsService } from './plugins.ts';
+import { PluginsService, USER_PLUGINS_FLAG } from './plugins.ts';
 import { runSpike } from './spike.ts';
 import { runHostsSpike } from './spike-hosts.ts';
 import { runGatewaySpike } from './spike-gateway.ts';
@@ -40,9 +40,11 @@ const spiking = spikeOut !== undefined || hostsSpikeOut !== undefined || gateway
 /** `--safe-mode` (BR-CH-005): манифесты разобраны, код плагинов не запускается; смена воркспейса флаг сохраняет, снимает его только «Выйти из безопасного режима». */
 const SAFE_MODE = '--safe-mode';
 const safeMode = process.argv.includes(SAFE_MODE);
+/** `--user-plugins` (SAD 6.1): читать каталог плагинов пользователя; без флага грузятся только плагины из поставки. Флаг только в командной строке: файл воркспейса может лежать в репозитории. Смена воркспейса и безопасного режима его сохраняет (перезапуск берёт argv). */
+const userPlugins = process.argv.includes(USER_PLUGINS_FLAG);
 
 // Один экземпляр - один воркспейс - одно окно: второй запуск с любым воркспейсом поднимает открытое окно, а не второе ядро.
-if (!spiking && !app.requestSingleInstanceLock({ workspace: workspaceFile ?? null, safeMode })) app.exit(0);
+if (!spiking && !app.requestSingleInstanceLock({ workspace: workspaceFile ?? null, safeMode, userPlugins })) app.exit(0);
 
 /** Первый запуск: alice и bob делят хост c - видно, как падение одного процесса снимает обоих, а чат в хосте b живёт. */
 const DEFAULT_CONFIG = {
@@ -64,13 +66,15 @@ function showWindow(): void {
 const notices = new Set<Notification>();
 
 app.on('second-instance', (_event, _argv, _cwd, data) => {
-  const asked = data as { workspace?: unknown; safeMode?: unknown } | null;
+  const asked = data as { workspace?: unknown; safeMode?: unknown; userPlugins?: unknown } | null;
   showWindow();
   if (!Notification.isSupported()) return;
   const say = (body: string) => new Notification({ title: 'Cyborg Playground', body }).show();
   if (asked?.workspace !== workspaceFile) say(`Открыт воркспейс ${workspaceFile ?? 'нет'}; другой открывается из окна - «Недавние» или «Открыть…».`);
   // Запрошенный режим вторым запуском не применяется: ядро решает про него один раз, до первого хоста.
   if ((asked?.safeMode === true) !== safeMode) say(safeMode ? 'Безопасный режим уже включён; выйти из него можно пунктом окна «Выйти из безопасного режима».' : 'Безопасный режим не включён: закройте приложение или выберите в окне «Перезапустить в безопасном режиме».');
+  // Каталог пользователя, как и безопасный режим, решается один раз при старте ядра.
+  if ((asked?.userPlugins === true) !== userPlugins) say(userPlugins ? `Каталог плагинов пользователя уже включён (${USER_PLUGINS_FLAG}); снять его можно, закрыв приложение и запустив без флага.` : `Каталог плагинов пользователя не включён: чтобы загрузить сторонние плагины, закройте приложение и запустите его с ${USER_PLUGINS_FLAG}.`);
 });
 const plugins = new PluginsService({
   windowCommand: (command) => {
@@ -332,6 +336,7 @@ void app.whenReady().then(() => {
     userData,
     workspace: workspaceFile,
     safeMode,
+    userPlugins,
     builtinDir: path.join(__dirname, 'plugins'),
     spawnHost: hosts.spawn,
     pidOf: hosts.pidOf,

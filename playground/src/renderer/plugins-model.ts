@@ -15,6 +15,17 @@ export function sortedPlugins(rows: readonly PluginRow[]): PluginRow[] {
   return [...rows].sort((a, b) => ORDER[a.state] - ORDER[b.state] || a.id.localeCompare(b.id));
 }
 
+/** Метка строки стороннего плагина: права словами рядом, но проверки кода на этапе 1 нет, поэтому это предупреждение, а не защита. */
+export function originNote(row: PluginRow): string | undefined {
+  if (row.origin !== 'user') return undefined;
+  return 'сторонний плагин из каталога пользователя: код не проверен, на этапе 1 исполняется в обычном процессе Node и может обойти шлюз ctx.os; права ниже - то, что он заявил, а не то, что ему можно';
+}
+
+/** Плашка над списком: каталог пользователя включён запуском, и всё, что в нём лежит, исполняется. */
+export function userPluginsNotice(snapshot: PluginsSnapshot): string | undefined {
+  return snapshot.userPlugins ? 'Запуск с --user-plugins: плагины из каталога пользователя загружаются, их код не проверен. Без флага они не читаются.' : undefined;
+}
+
 export type Action = 'run' | 'disable' | 'enable' | 'crash' | 'hang' | 'journal';
 
 export interface ActionButton {

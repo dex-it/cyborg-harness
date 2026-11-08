@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { PluginJournalLine, PluginRow, PluginsSnapshot } from '../src/shared/plugins.ts';
-import { actionsFor, conflictText, journalFor, keyStatus, mergeFeed, sortedPlugins, summary } from '../src/renderer/plugins-model.ts';
+import { actionsFor, conflictText, journalFor, keyStatus, mergeFeed, originNote, sortedPlugins, summary, userPluginsNotice } from '../src/renderer/plugins-model.ts';
 
 const row = (id: string, state: PluginRow['state'], over: Partial<PluginRow> = {}): PluginRow => ({ id, state, revivable: state === 'stopped', unloaded: false, commands: [], permissions: [], ...over });
-const snapshot = (plugins: PluginRow[], over: Partial<PluginsSnapshot> = {}): PluginsSnapshot => ({ phase: 'ready', safeMode: false, problems: [], plugins, keys: [], feed: [], journal: [], canHang: true, window: { title: '', queued: 0, locks: [] }, documents: [], workspace: { current: '/w.cyborg.json', recent: [] }, ...over });
+const snapshot = (plugins: PluginRow[], over: Partial<PluginsSnapshot> = {}): PluginsSnapshot => ({ phase: 'ready', safeMode: false, userPlugins: false, problems: [], plugins, keys: [], feed: [], journal: [], canHang: true, window: { title: '', queued: 0, locks: [] }, documents: [], workspace: { current: '/w.cyborg.json', recent: [] }, ...over });
 
 describe('окно «Плагины Cyborg»: модель', () => {
   it('выключенные сверху, затем ждущие перезапуска, работающие и невключённые; внутри - по имени', () => {
@@ -59,5 +59,13 @@ describe('окно «Плагины Cyborg»: модель', () => {
       mergeFeed([line(1, 'a'), line(3, 'c')], [line(2, 'b')]).map((l) => l.subject),
       ['a', 'b', 'c'],
     );
+  });
+
+  it('происхождение: сторонний помечен словами с предупреждением, встроенный и не найденный - нет; плашка каталога пользователя только с флагом', () => {
+    assert.match(originNote(row('notes', 'active', { origin: 'user' })) ?? '', /^сторонний плагин из каталога пользователя: код не проверен/);
+    assert.equal(originNote(row('files', 'active', { origin: 'bundled' })), undefined);
+    assert.equal(originNote(row('ghost', 'disabled')), undefined);
+    assert.equal(userPluginsNotice(snapshot([], { userPlugins: false })), undefined);
+    assert.match(userPluginsNotice(snapshot([], { userPlugins: true })) ?? '', /--user-plugins/);
   });
 });

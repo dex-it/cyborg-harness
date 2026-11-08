@@ -7,9 +7,13 @@ export type { FeedLine, Reply };
 
 export type PluginState = 'active' | 'waiting' | 'restarting' | 'stopped' | 'disabled';
 
+export type PluginOrigin = 'bundled' | 'user';
+
 export interface PluginRow {
   readonly id: string;
   readonly version?: string;
+  /** Откуда плагин: `bundled` - каталог поставки, `user` - каталог пользователя (сторонний, код не проверен). Нет у id, которого не нашли ни в одном каталоге. */
+  readonly origin?: PluginOrigin;
   /** Хост, в котором плагин работает или работал бы; у невключённых нет. */
   readonly host?: string;
   /** Процесс хоста; есть, пока хост жив и он отдельный процесс. */
@@ -77,6 +81,8 @@ export interface PluginsSnapshot {
   readonly phase: 'starting' | 'ready' | 'failed' | 'no-workspace';
   /** Запуск с `--safe-mode`: код плагинов не запускается. */
   readonly safeMode: boolean;
+  /** Запуск с `--user-plugins`: каталог плагинов пользователя читается, его плагины сторонние. */
+  readonly userPlugins: boolean;
   readonly error?: string;
   /** Что не дошло до ядра: битый cyborg.json, непрочитанный манифест. */
   readonly problems: readonly string[];
