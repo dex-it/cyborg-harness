@@ -8,22 +8,30 @@
 
 В пакете лежит собранный JS (ESM, без бандла, по файлу на модуль ядра) и `.d.ts`; исходники `.ts` в него не входят. Причина: Node не снимает типы у файлов внутри `node_modules`, а в самих исходниках импорты написаны с расширением `.ts`.
 
-Точки входа (`exports`; границу публичного API уточняет T-09, эта раскладка - стартовая):
+Точки входа (`exports`). Публичный API - только то, что перечислено ниже; всё остальное в пакете (`dist/src/*`, прочие модули ядра) внутреннее и совместимостью не обещано. Глубокие пути `@cyborg-harness/core/dist/...` пакет закрывает (`exports`), а в репозитории это держит `core/test/public-api.test.ts`.
 
 | Импорт | Что даёт | Где работает |
 |---|---|---|
-| `@cyborg-harness/core` | ядро целиком: `load`, `Kernel`, `forkHosts`, `inlineHosts`, `parseManifest`, `PLUGIN_API_VERSION`, разделы config и state, шлюз `ctx.os`, воркспейс, окно (`WindowLayer`), документы, оболочка вида | главный процесс, Node |
+| `@cyborg-harness/core` | главный процесс: `load` и `Kernel`, `forkHosts`, `inlineHosts`, `parseManifest`, `PLUGIN_API_VERSION`, `openWorkspace` и `RecentWorkspaces`, `SectionStore` (config и state), среда шлюза `ctx.os` (`OsEnvironment`), `PtyTable`, разбор журнала (`pluginStatuses`, `describeEntry`, `entryLevel`, `entryPlugins`, `describePermissions`) и типы к ним | главный процесс, Node |
 | `@cyborg-harness/core/host` | `runHost`: код хоста плагинов поверх любого порта сообщений | процесс хоста (Node `fork`, Electron `utilityProcess`) |
-| `@cyborg-harness/core/host-entry` | готовый вход хоста для `child_process.fork`; сам импортировать не нужно, на него указывает `forkHosts` | дочерний процесс Node |
-| `@cyborg-harness/core/ui-shell` | оболочка вида плагина: `mountModule`, `connectView`, `keepFocus` | окно (браузер), без `node:*` |
-| `@cyborg-harness/core/elements` | кастомные элементы `cy-*`; регистрирует их при импорте; нужен DOM | окно (браузер) |
+| `@cyborg-harness/core/host-entry` | готовый вход хоста для `child_process.fork`; сам импортировать не нужно, на него указывает `forkHosts`; имён не экспортирует | дочерний процесс Node |
+| `@cyborg-harness/core/keys` | `keyOfInput`, `KeyInput`: нажатие -> сочетание ядра | окно (браузер), без `node:*` |
+| `@cyborg-harness/core/ui-shell` | оболочка вида плагина: `mountModule`, `connectView`, `keepFocus` и типы моста | окно (браузер), без `node:*` |
+| `@cyborg-harness/core/window` | то, что главный процесс отдаёт окну: `WINDOW_OWNER`, типы `WindowSnapshot`, `ShownDialog`, `WindowLock`, `WindowTitle`, `DocumentRow`, `DisablePreview` | окно (браузер), без `node:*` |
+| `@cyborg-harness/core/elements` | кастомные элементы `cy-*`; `defineElements`; регистрирует их при импорте; нужен DOM | окно (браузер) |
+
+Точный перечень имён каждой точки входа - в `core/test/public-api.test.ts` (`ENTRIES`): тест падает, если имя добавлено или убрано без правки перечня, если вход написан через `export *`, если из публичной сигнатуры торчит безымянный тип и если JS окна достаёт до `node:*`. Источник входов - `core/src/index.ts`, `index-host.ts`, `index-keys.ts`, `index-ui-shell.ts`, `index-window.ts`. Имя в перечень добавляют осознанно: каждое обещает совместимость.
+
+Что вынесено из публичного (было в общем `index.ts`): `readJson`, `writeJsonAtomic`, `lockWorkspace`, `workspaceKey`, `settingsLayer` и остальное устройство воркспейса, `isRecord`, `errorMessage` и прочие помощники, `WindowLayer`, `DocumentTable`, `DeniedCollapse`, разбор манифеста по частям (`checkArgs`, `viewEntry`, `readPermissions`), граф и реестр контрактов (`resolveGraph`, `ContractRegistry` как значение), `Endpoint`, `runHost` из главного входа (теперь только `/host`). Оболочка вида (`ui-shell`) из главного входа убрана: она нужна окну.
+
+Низкоуровневые `OsGateway` и `PtyTable` оставлены в главном входе ради замеров и тестов приложения (шлюз и pty без хоста): их конструкторы позиционные и обещаны слабее остального, а типы их параметров имён не имеют. Встраивающему приложению они не нужны: шлюз и pty строит `load` по `OsEnvironment`.
 
 Рантайм-зависимостей нет. Единственная связь - peer `@cyborg-harness/contracts` (`^1.0.0`), и только типами: в собранном JS на него ссылок нет.
 
 ## Версии
 
 - Node: `engines.node` `>=24`. Это Node из Electron 45, который использует playground (`process.versions.node` в Electron 45.2.2 - 24.22.2), и Node в CI. Версию Electron в ai-cyborg предстоит сверить до первого релиза.
-- Версия пакета `0.1.0` - до заморозки API (T-03, T-09). Мажор `@cyborg-harness/contracts` совпадает с мажором API плагинов (`PLUGIN_API_VERSION`).
+- Версия пакета `0.1.0` - до заморозки API (T-03); границу публичного API задал T-09. Мажор `@cyborg-harness/contracts` совпадает с мажором API плагинов (`PLUGIN_API_VERSION`).
 - Сборка идёт TypeScript 7 (`typescript7`) с `rewriteRelativeImportExtensions`; цель - ES2022.
 
 ## Минимальный пример
