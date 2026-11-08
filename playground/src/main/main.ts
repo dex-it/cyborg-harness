@@ -15,7 +15,7 @@ import { runGatewaySpike } from './spike-gateway.ts';
 import { resolveDragFile, ViewDrags } from './view-drag.ts';
 import { framesOf, fromWindow, registerViewScheme, senderPlugin, serveViews, viewFrames } from './views.ts';
 import { themeTokens } from '@cyborg-harness/electron';
-import { resolveViewRequest } from './view-files.ts';
+import { resolveViewRequest } from '@cyborg-harness/electron';
 import { ViewTerminals, type TerminalFrame } from './view-terminals.ts';
 import { RecentWorkspaces } from '@cyborg-harness/core';
 import { isRecord } from './guards.ts';

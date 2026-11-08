@@ -8,7 +8,7 @@ import { app, BrowserWindow, ipcMain, type WebFrameMain } from 'electron';
 import type { SpikePing, SpikeReport } from '../shared/spike.ts';
 import { PATH_MIME, viewOrigin } from '@cyborg-harness/electron/window';
 import { pssKb as pss } from './proc-memory.ts';
-import { resolveStaticFile } from './view-files.ts';
+import { resolveStaticFile } from '@cyborg-harness/electron';
 import { framesOf, serveViews } from './views.ts';
 
 export interface SpikeOptions {
