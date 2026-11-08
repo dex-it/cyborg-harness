@@ -20,6 +20,7 @@
 | Спайк хостов плагинов: память на хост, цена вызова, пороги сторожа | [04-verification/spike-hosts.md](04-verification/spike-hosts.md) |
 | Замер шлюза `ctx.os`: цена проверок и канала хоста на горячих путях, проверка бюджета | [04-verification/spike-gateway.md](04-verification/spike-gateway.md) |
 | Замер горячего пути pty: задержка вывода и склейка | [04-verification/spike-pty.md](04-verification/spike-pty.md) |
+| Спайк экрана терминала после `attach`: хвост или снимок на настоящем `claude` | [04-verification/spike-pty-restore.md](04-verification/spike-pty-restore.md) |
 | Проверка на macOS: замеры хостов и фреймов, клавиши, терминал | [04-verification/macos-check.md](04-verification/macos-check.md) |
 | Эпик «Микроядро»: цель, карта, итерации, реестр задач | [05-plans/epic-microkernel.md](05-plans/epic-microkernel.md) |
 | Анализ готовности ядра и инвентарь Cyborg | [research/microkernel-readiness.md](research/microkernel-readiness.md), [research/cyborg-migration-inventory.md](research/cyborg-migration-inventory.md) |
