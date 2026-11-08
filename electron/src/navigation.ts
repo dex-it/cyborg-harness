@@ -1,5 +1,5 @@
 import type { WebContents, WebFrameMain } from 'electron';
-import { pluginOfOrigin, VIEW_SCHEME } from '@cyborg-harness/electron/window';
+import { pluginOfOrigin, VIEW_SCHEME } from './view-protocol.ts';
 
 
 interface Navigation {

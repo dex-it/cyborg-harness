@@ -7,16 +7,14 @@ import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, Notifica
 import { viewOrigin } from '@cyborg-harness/electron/window';
 import { electronOs } from './os-env.ts';
 import { utilityHosts } from './plugin-hosts.ts';
-import { guardNavigation } from './navigation.ts';
 import { PluginsService } from './plugins.ts';
 import { runSpike } from './spike.ts';
 import { runHostsSpike } from './spike-hosts.ts';
 import { runGatewaySpike } from './spike-gateway.ts';
-import { resolveDragFile, ViewDrags } from './view-drag.ts';
 import { framesOf, fromWindow, registerViewScheme, senderPlugin, serveViews, viewFrames } from './views.ts';
 import { themeTokens } from '@cyborg-harness/electron';
 import { resolveViewRequest } from '@cyborg-harness/electron';
-import { ViewTerminals, type TerminalFrame } from './view-terminals.ts';
+import { guardNavigation, resolveDragFile, ViewDrags, ViewTerminals, type TerminalFrame } from '@cyborg-harness/electron';
 import { RecentWorkspaces } from '@cyborg-harness/core';
 import { isRecord } from './guards.ts';
 
