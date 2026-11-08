@@ -28,7 +28,9 @@ export interface LayoutEntry {
 
 /** Сначала `order`, при равенстве id плагина, затем род (вид раньше документа) и имя: порядок не зависит от порядка манифестов. */
 const compare = (a: LayoutEntry, b: LayoutEntry): number =>
-  a.order - b.order || cmp(a.pluginId, b.pluginId) || cmp(a.kind, b.kind) || cmp(a.name, b.name);
+  a.order - b.order || cmp(a.pluginId, b.pluginId) || KIND_RANK[a.kind] - KIND_RANK[b.kind] || cmp(a.name, b.name);
+
+const KIND_RANK = { view: 0, document: 1 } as const satisfies Record<LayoutEntry['kind'], number>;
 
 // Не localeCompare: порядок не должен зависеть от языка и ICU машины.
 const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);

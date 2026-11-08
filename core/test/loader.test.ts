@@ -462,7 +462,7 @@ test('раскладка: по order, при равенстве по id плаг
   await backward.unload();
 });
 
-test('раскладка: вид без размещения - боковая колонка и order 1000, документ - основная область; заголовок доходит до снимка', async () => {
+test('раскладка: вид без размещения - боковая колонка и order 1000, документ - основная область и после вида того же плагина; заголовок доходит до снимка', async () => {
   const k = await kernel(
     { a: quiet, b: quiet },
     {
@@ -472,8 +472,8 @@ test('раскладка: вид без размещения - боковая к
   );
   assert.deepEqual(k.layout, [
     { pluginId: 'a', kind: 'view', name: 'plain', area: 'sidebar', order: 1000 },
-    { pluginId: 'b', kind: 'document', name: 'doc', area: 'main', order: 1000 },
     { pluginId: 'b', kind: 'view', name: 'tree', area: 'sidebar', order: 1000, title: 'Файлы' },
+    { pluginId: 'b', kind: 'document', name: 'doc', area: 'main', order: 1000 },
   ]);
   await k.unload();
 });
