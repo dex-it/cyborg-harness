@@ -24,7 +24,11 @@ export function fileSecrets(file: string, cipher: SecretCipher): SecretStore {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(data, null, 2), { mode: 0o600 });
   };
-  const set = async (key: string, value: string) => write({ ...read(), [key]: (await cipher.encrypt(value)).toString('base64') });
+  // Шифр - до чтения файла: между read и write нет await, и ключ, стёртый deletePrefix или delete во время шифрования, не вернётся из старого снимка.
+  const set = async (key: string, value: string) => {
+    const sealed = (await cipher.encrypt(value)).toString('base64');
+    write({ ...read(), [key]: sealed });
+  };
   return {
     available: () => cipher.available(),
     get: async (key) => {

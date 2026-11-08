@@ -111,6 +111,27 @@ test('таблица документов: removeOf уносит строки о
   assert.equal(changes, 1);
 });
 
+test('таблица документов: removeOf при сбое записи возвращает строки в память, повтор пишет стирание', async () => {
+  let fail = true;
+  const writes: string[][] = [];
+  const saved = [
+    { id: 'a1', pluginId: 'gone', type: 'note', title: 'Заметка' },
+    { id: 'b1', pluginId: 'stay', type: 'note', title: 'Чужая' },
+  ];
+  const table = new DocumentTable({
+    read: () => saved,
+    write: async (list) => {
+      if (fail) throw new Error('диск полон');
+      writes.push(list.map((d) => d.id));
+    },
+  }, () => true);
+  await assert.rejects(table.removeOf('gone'), /диск полон/);
+  assert.deepEqual(table.list('gone').map((d) => d.id), ['a1'], 'строка не стёрта из файла - остаётся и в памяти');
+  fail = false;
+  assert.equal(await table.removeOf('gone'), 1);
+  assert.deepEqual(writes, [['b1']]);
+});
+
 test('манифест: documents - имя типа и только restorable', () => {
   const r = (documents: unknown) => parseManifest({ ...ED, documents });
   const ok = r({ note: { restorable: true }, plain: {} });

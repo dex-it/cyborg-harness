@@ -86,6 +86,20 @@ test('fileSecrets: deletePrefix не требует шифрования ОС и
   await assert.rejects(stat(empty.file), { code: 'ENOENT' });
 });
 
+test('fileSecrets: deletePrefix во время шифрования чужого set - стёртый ключ не возвращается', async () => {
+  await using box = await sandbox();
+  const slow = cipher({ encrypt: async (text) => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    return Buffer.from(`sealed:${text}`).reverse();
+  } });
+  const store = fileSecrets(box.file, slow);
+  await store.set('jira/token', 'x');
+  const pending = store.set('other/token', 'y');
+  assert.equal(await store.deletePrefix('jira/'), 1);
+  await pending;
+  assert.deepEqual(await keysOf(box.file), ['other/token']);
+});
+
 test('fileSecrets: битый файл не стирается молча и не падает на deletePrefix', async () => {
   await using box = await sandbox();
   const store = fileSecrets(box.file, cipher());

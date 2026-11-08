@@ -90,11 +90,18 @@ export class DocumentTable {
 
   /** Плагин удалён: все его строки уходят, и новый плагин с тем же id их не получит; число стёртых. */
   async removeOf(pluginId: string): Promise<number> {
-    const before = this.#docs.length;
+    const gone = this.#docs.filter((d) => d.pluginId === pluginId);
+    if (gone.length === 0) return 0;
     this.#docs = this.#docs.filter((d) => d.pluginId !== pluginId);
-    const removed = before - this.#docs.length;
-    if (removed > 0) await this.#commit();
-    return removed;
+    try {
+      await this.#commit();
+    } catch (error) {
+      // Файл ещё хранит строки: повтор uninstall должен записать их стирание, а не найти пустую память и счесть стёртыми.
+      this.#docs.push(...gone);
+      this.#changed();
+      throw error;
+    }
+    return gone.length;
   }
 
   /** Чужой документ для плагина не существует. */
