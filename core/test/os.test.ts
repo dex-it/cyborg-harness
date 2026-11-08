@@ -249,19 +249,25 @@ test('notify: клик поднимает окно, закрывает увед�
 
   const a = await bell.show('a');
   const b = await bell.show('b');
-  await assert.rejects(bell.show('c'), { code: 'Invalid', message: /живых уведомлений больше 2/ });
   await bell.close(a);
   await bell.close(a);
   assert.equal(shown[1]!.closed, true);
   await contexts.get('mute')!.os.notify!.close(b);
   assert.equal(shown[2]!.closed, false, 'чужой id ничего не закрывает');
   await bell.show('c');
-  shown[2]!.events.closed();
   await bell.show('d');
-  await assert.rejects(bell.show('e'), { code: 'Invalid' }, 'закрытое ОС уведомление место освобождает, а предел держится');
+  assert.deepEqual(shown.slice(2).map((n) => n.closed), [true, false, false], 'на пределе закрывается старейшее, а новое показывается');
+  shown[3]!.events.closed();
+  await bell.show('e');
+  assert.deepEqual(shown.slice(4).map((n) => n.closed), [false, false], 'закрытое ОС уведомление место освобождает');
+  shown[2]!.events.click();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(ran, ['s1'], 'клик по вытесненному не запускает команду');
+  await Promise.all([bell.show('f'), bell.show('g')]);
+  assert.deepEqual(shown.slice(4).map((n) => n.closed), [true, true, false, false], 'параллельные вызовы предел не обходят');
 
   await k.disable('bell');
-  assert.deepEqual(shown.slice(3).map((n) => n.closed), [true, true], 'выгрузка закрывает живые уведомления');
+  assert.deepEqual(shown.slice(6).map((n) => n.closed), [true, true], 'выгрузка закрывает живые уведомления');
   await k.unload();
 });
 

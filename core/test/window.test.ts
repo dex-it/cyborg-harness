@@ -359,6 +359,9 @@ test('заголовок окна: воркспейс, фрагменты по i
   assert.equal(k.window.title, 'team.cyborg.json - main - Проект X - Cyborg');
   await k.run('pin.lock', false);
   assert.equal(k.window.title, 'team.cyborg.json - Cyborg', 'под замком фрагменты других плагинов не видны');
+  await k.run('pin.lock', true);
+  assert.equal(k.window.title, 'Cyborg', 'с hideNotifications имя воркспейса тоже скрыто');
+  assert.equal(snaps.at(-1)?.title, 'Cyborg', 'приложение получает скрытый заголовок');
   await k.run('pin.unlock');
   await win('alpha').setTitle(undefined);
   assert.equal(k.window.title, 'team.cyborg.json - Проект X - Cyborg');

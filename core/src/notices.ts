@@ -80,7 +80,11 @@ export class Notices {
   async show(pluginId: string, request: NoticeRequest): Promise<string> {
     const show = this.#show();
     if (!show) throw new CoreError('Unavailable', 'уведомлений нет в этой среде');
-    if (this.liveOf(pluginId) >= this.#max.live) throw new CoreError('Invalid', `${pluginId}: живых уведомлений больше ${String(this.#max.live)} - закройте прежние`);
+    // Electron не обещает `close` для истёкшего баннера: отказ на пределе навсегда заглушил бы плагин, поэтому уходит старейшее.
+    if (this.liveOf(pluginId) >= this.#max.live) {
+      const oldest = [...this.#live].find(([, n]) => n.pluginId === pluginId);
+      if (oldest) this.#drop(oldest[0]);
+    }
     const id = `n${String(++this.#seq)}`;
     // Место занято до ответа приложения: параллельные show не обойдут предел.
     const live: Live = { pluginId, onClick: request.onClick, closed: false };
