@@ -1,0 +1,20 @@
+{
+  "name": "@cyborg-harness/testing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Тест-кит автора плагина Cyborg Harness: ядро с поддельными pty и секретами в процессе теста и общие наборы тестов контрактов",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": { "node": ">=24" },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md"],
+  "peerDependencies": {
+    "@cyborg-harness/contracts": "^1.0.0",
+    "@cyborg-harness/core": "^0.1.0"
+  }
+}
