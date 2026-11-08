@@ -59,6 +59,8 @@ export type JournalEntry =
   | { readonly pluginId?: undefined; readonly kind: 'key-ignored'; readonly key: string; readonly command: string | null; readonly reason: string }
   /** Сторонний плагин назван в группе plugins.hosts с другими - ядро всё равно дало ему свой хост. */
   | { readonly pluginId: string; readonly kind: 'host-isolated'; readonly group: string; readonly hostId: string }
+  /** Загружен плагин не из поставки (по `bundled`): его код не проверен, а на этапе 1 хост - обычный процесс Node. Состояния плагину запись не меняет. */
+  | { readonly pluginId: string; readonly kind: 'third-party' }
   /** Промис плагина отклонён без обработчика; хост держится, плагину страйк. */
   | { readonly pluginId: string; readonly kind: 'unhandled-rejection'; readonly error: string }
   /** Плагин поставки просит свой хост (`"host": "own"`), а группа plugins.hosts сажает его к соседям: действует группа. */
@@ -522,6 +524,8 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   const hostIds = assignHosts(manifests, options.hosts ?? {}, new Set(options.bundled ?? []), record);
   const hostOf = (pluginId: string): string | undefined => hostIds.get(pluginId);
   const accepted = graph.order.map(manifestOf);
+  // Без `bundled` поставку не от чего отличить: записи нет, как нет и проверки зарезервированных пространств.
+  if (options.bundled) for (const pluginId of graph.order) if (!options.bundled.includes(pluginId)) record({ pluginId, kind: 'third-party' });
   const keys = bindKeys(accepted, new Set(options.bundled ?? []), options.platform ?? process.platform, record);
   applyUserKeys(keys, options.keybindings ?? [], accepted, options.platform ?? process.platform, record);
 

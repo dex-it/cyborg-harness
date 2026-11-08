@@ -6,7 +6,7 @@ import { load, type LoadOptions } from '../src/loader.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
-import { entryLevel, pluginStatuses } from '../src/status.ts';
+import { describeEntry, entryLevel, pluginStatuses } from '../src/status.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 
@@ -360,6 +360,26 @@ test('хосты: из поставки - по группам, сторонни�
 
   const unknown = await kernel({ p: noop, q: noop }, { enabled: ['p', 'q'], manifests: [manifest('p'), manifest('q')] });
   assert.deepEqual([unknown.hostOf('p'), unknown.hostOf('q')], ['p', 'q'], 'без bundled все сторонние');
+  await unknown.unload();
+});
+
+test('журнал: загруженный сторонний плагин получает запись third-party, плагин поставки, выключенный и загрузка без bundled - нет', async () => {
+  const noop: PluginModule = { activate: () => undefined };
+  const ids = ['a', 'x', 'y'];
+  const k = await kernel(Object.fromEntries(ids.map((id) => [id, noop])), {
+    enabled: ['a', 'x'],
+    manifests: ids.map((id) => manifest(id)),
+    bundled: ['a'],
+  });
+  const entries = k.journal.filter((e) => e.kind === 'third-party');
+  assert.deepEqual(entries, [{ pluginId: 'x', kind: 'third-party' }], 'y не включён и не загружается, a из поставки');
+  assert.equal(entryLevel(entries[0]!), 'warn');
+  assert.match(describeEntry(entries[0]!), /сторонний плагин: код не из поставки/);
+  assert.equal(pluginStatuses(k.journal).find((s) => s.id === 'x')?.state, 'active', 'запись состояния плагину не меняет');
+  await k.unload();
+
+  const unknown = await kernel({ p: noop }, { enabled: ['p'], manifests: [manifest('p')] });
+  assert.equal(unknown.journal.filter((e) => e.kind === 'third-party').length, 0, 'без bundled поставку не от чего отличить: записей нет');
   await unknown.unload();
 });
 
