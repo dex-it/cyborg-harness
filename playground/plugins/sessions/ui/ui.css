@@ -54,6 +54,27 @@ header {
   display: none;
 }
 
+#actions cy-button .label,
+#actions cy-button .reply {
+  display: block;
+  max-width: 32em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+#actions cy-button .reply {
+  color: var(--cy-muted);
+  font-family: var(--cy-font-mono);
+  font-size: 0.85em;
+}
+
+#actions cy-button[variant="primary"] .reply {
+  color: inherit;
+  opacity: 0.8;
+}
+
 .screen:focus-within {
   outline: 2px solid var(--cy-accent);
   outline-offset: -1px;
