@@ -214,6 +214,7 @@ test('uninstall: сбой одного шага не останавливает 
   assert.ok(failed?.kind === 'uninstalled');
   assert.match(failed.error ?? '', /секреты: связка ключей занята/);
   assert.equal(entryLevel(failed), 'error');
+  assert.match(describeEntry(failed), /; осталось: .*; не удалось: секреты: связка ключей занята$/);
 
   w.secrets.deletePrefix = deletePrefix;
   const report = await k.uninstall('jira');
