@@ -6,8 +6,15 @@ import path from 'node:path';
 import { inlineHosts } from '@cyborg-harness/core';
 import type { PluginModule } from '@cyborg-harness/core';
 import { WINDOW_OWNER } from '@cyborg-harness/core';
-import type { KeyRow } from '@cyborg-harness/electron/window';
-import { discoverPlugins, PluginsService, readSchemaFile, startPlugins } from './plugins.ts';
+import type { KeyRow } from '../src/snapshot.ts';
+import { discoverPlugins, PluginsService, readSchemaFile, startPlugins } from '../src/plugins.ts';
+
+// Контракт для плагинов-подделок теста: карту контрактов приложения (playground/plugins/contracts.ts) пакет не знает.
+declare module '@cyborg-harness/contracts' {
+  interface Contracts {
+    'demo.echo': { 1: { say(text: string): Promise<string> } };
+  }
+}
 
 function tmp(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'cyborg-plugins-'));

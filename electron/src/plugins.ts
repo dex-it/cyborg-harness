@@ -15,6 +15,7 @@ import {
   type JournalEntry,
   type Kernel,
   type KeyInput,
+  type MigrateWorkspace,
   type OsEnvironment,
   type SpawnHost,
   type SystemEvent,
@@ -25,10 +26,9 @@ import {
   WINDOW_OWNER,
 } from '@cyborg-harness/core';
 import { errorMessage, isRecord } from './guards.ts';
-import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from '@cyborg-harness/electron/window';
-import { viewOrigin } from '@cyborg-harness/electron/window';
-import { migrateLegacyWorkspace } from './legacy-workspace.ts';
-import type { PluginUi } from '@cyborg-harness/electron';
+import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from './snapshot.ts';
+import { viewOrigin } from './view-protocol.ts';
+import type { PluginUi } from './view-files.ts';
 
 const ENTRY_FILES = ['index.mjs', 'index.js', 'index.ts'];
 
@@ -91,6 +91,8 @@ export interface StartOptions {
   readonly userData: string;
   /** Файл воркспейса; по умолчанию `<userData>/workspace.cyborg.json`. */
   readonly workspace?: string;
+  /** Перенос формата старого файла воркспейса при открытии; приложение, у которого такого формата не было, его не задаёт. */
+  readonly migrate?: MigrateWorkspace;
   /** Последний фрагмент заголовка окна. */
   readonly appName?: string;
   readonly builtinDir: string;
@@ -123,7 +125,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     options.onProblem?.(p);
   };
   const file = options.workspace ?? path.join(options.userData, 'workspace.cyborg.json');
-  const opened = await openWorkspace({ file, userFile: path.join(options.userData, 'cyborg.json'), stateDir: path.join(options.userData, 'state'), migrate: migrateLegacyWorkspace });
+  const opened = await openWorkspace({ file, userFile: path.join(options.userData, 'cyborg.json'), stateDir: path.join(options.userData, 'state'), ...(options.migrate !== undefined && { migrate: options.migrate }) });
   if (!opened.ok) throw new Error(`воркспейс ${file} уже открыт процессом ${opened.owner}`);
   const ws = opened.workspace;
   for (const p of ws.problems) report(p);
