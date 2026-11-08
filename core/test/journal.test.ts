@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PluginContext } from '@cyborg-harness/contracts';
-import { appendBounded, DeniedCollapse } from '../src/journal.ts';
+import { appendBounded, DeniedCollapse, DeprecatedCollapse } from '../src/journal.ts';
 import { load, type JournalEntry } from '../src/loader.ts';
 import { describeEntry } from '../src/status.ts';
 import { inlineHosts } from '../src/transports.ts';
@@ -89,4 +89,54 @@ test('журнал: окно не пустило вид на чужой адре
   assert.equal(describeEntry(away), 'отказ окна: переход на https://evil.example/login');
   assert.ok(describeEntry(nav).length < 250, 'адрес вида не обрезан');
   assert.match(describeEntry(nav), /^отказ окна: переход на data:text\/html,x+…$/);
+});
+
+type DeprecatedCall = Extract<JournalEntry, { kind: 'deprecated-call' }>;
+const old = (caller: string, member = 'list', contract = 'test.old', provider = 'prov'): DeprecatedCall => ({ pluginId: caller, kind: 'deprecated-call', provider, contract, member });
+
+test('журнал: вызовы устаревшего члена за окно - первая запись сразу, повторы одной записью с repeats; пара (вызывающий, член) считается отдельно', () => {
+  const out: JournalEntry[] = [];
+  const c = new DeprecatedCollapse((e) => out.push(e), 60_000);
+  for (let i = 0; i < 100; i++) c.record(old('a'));
+  c.record(old('b'));
+  c.record(old('a', 'get'));
+  c.record(old('a', 'list', 'test.other'));
+  assert.equal(out.length, 4, 'по записи на каждую пару при первом вызове');
+  c.flush();
+  assert.equal(out.length, 5);
+  const last = out[4];
+  assert.ok(last?.kind === 'deprecated-call');
+  assert.deepEqual([last.pluginId, last.member, last.repeats], ['a', 'list', 99]);
+  assert.match(describeEntry(last), /ещё 99 раз/);
+});
+
+test('журнал: окно склейки закрывается - следующий вызов пишется заново', async () => {
+  const out: JournalEntry[] = [];
+  const c = new DeprecatedCollapse((e) => out.push(e), 10);
+  c.record(old('a'));
+  c.record(old('a'));
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(out.map((e) => e.kind === 'deprecated-call' ? e.repeats : null), [undefined, 1]);
+  c.record(old('a'));
+  assert.equal(out.length, 3);
+  c.flush();
+});
+
+test('журнал: записей deprecated-call не больше предела, старейшая самого шумного уходит; отказы и записи жизненного цикла остаются', () => {
+  const list: JournalEntry[] = [{ pluginId: 'p', kind: 'activated', hostId: 'h', ms: 1 }, denied('x'), old('quiet')];
+  for (let i = 0; i < 50; i++) appendBounded(list, old('loud', `m${String(i)}`), (e) => e, 10);
+  const calls = list.filter((e) => e.kind === 'deprecated-call');
+  assert.equal(calls.length, 10);
+  assert.ok(calls.some((e) => e.pluginId === 'quiet'), 'тихий не вытеснен шумным');
+  assert.deepEqual(calls.filter((e) => e.pluginId === 'loud').map((e) => e.member), ['m41', 'm42', 'm43', 'm44', 'm45', 'm46', 'm47', 'm48', 'm49']);
+  assert.equal(list.filter((e) => e.kind === 'denied').length, 1, 'пределы отдельные у каждого вида');
+  assert.equal(list.filter((e) => e.kind === 'activated').length, 1);
+});
+
+test('журнал: поток вызовов устаревшего члена не вытесняет отказы, а предел по умолчанию - 1000', () => {
+  const list: JournalEntry[] = [];
+  for (let i = 0; i < 5; i++) appendBounded(list, denied(String(i)), (e) => e);
+  for (let i = 0; i < 3000; i++) appendBounded(list, old('loud', `m${String(i)}`), (e) => e);
+  assert.equal(list.filter((e) => e.kind === 'deprecated-call').length, 1000);
+  assert.equal(list.filter((e) => e.kind === 'denied').length, 5);
 });

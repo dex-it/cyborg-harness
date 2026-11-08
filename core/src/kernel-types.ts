@@ -36,6 +36,18 @@ export type JournalEntry =
       /** Столько таких же отказов склеено за окно после первого. */
       readonly repeats?: number;
     }
+  /**
+   * Плагин `pluginId` вызвал член контракта `contract` поставщика `provider`, помеченный `@deprecated` в его манифесте (`provides.<контракт>.deprecated`).
+   * Пишется после проверок вызова; повторы склеиваются за окно, `repeats` - сколько их было после первой записи.
+   */
+  | {
+      readonly pluginId: string;
+      readonly kind: 'deprecated-call';
+      readonly provider: string;
+      readonly contract: string;
+      readonly member: string;
+      readonly repeats?: number;
+    }
   /** Снят по disable: сам (`by` - он же) или вместе с поставщиком, которого требовал. */
   | { readonly pluginId: string; readonly kind: 'unloaded'; readonly by: string; readonly error?: string; readonly keptPty?: number }
   /** pty без владельца не взят через `attach` за льготное время после падения хоста или активации плагина и завершён. */
