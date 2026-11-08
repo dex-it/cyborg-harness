@@ -81,18 +81,24 @@ async function setup() {
   const work = path.join(root, 'work');
   await mkdir(work, { recursive: true });
   const contexts = new Map<string, PluginContext>();
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => (release = resolve));
   const ran: string[] = [];
   const handle = (ctx: PluginContext, name: string) => ctx.commands.register(name, (...args) => (ran.push(`${name}:${args.map((a) => JSON.stringify(a)).join(',')}`), `ok:${name}`));
   const k = await load({
     apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async (entry) => ({
-      activate: (ctx: PluginContext) => {
+      activate: async (ctx: PluginContext) => {
         contexts.set(entry, ctx);
         if (entry === 'sessions') for (const name of ['sessions.new', 'sessions.pin', 'sessions.actions', 'sessions.open']) handle(ctx, name);
         if (entry === 'lazy') handle(ctx, 'lazy.go');
+        if (entry === 'slow') {
+          await gate;
+          handle(ctx, 'slow.go');
+        }
       },
     })),
-    enabled: ['sessions', 'nosy', 'trusted', 'lazy'],
+    enabled: ['sessions', 'nosy', 'trusted', 'lazy', 'slow'],
     manifests: [
       {
         ...base,
@@ -108,6 +114,7 @@ async function setup() {
       { ...base, id: 'nosy' },
       { ...base, id: 'trusted', permissions: { 'fs.read': [work] } },
       { ...base, id: 'lazy', activation: 'lazy', commands: ['lazy.go'] },
+      { ...base, id: 'slow', activation: 'lazy', commands: ['slow.go'] },
     ],
     os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp') },
   });
@@ -117,7 +124,7 @@ async function setup() {
     await k.unload();
     await rm(root, { recursive: true, force: true });
   };
-  return { k, work, ran, run, denied, [Symbol.asyncDispose]: dispose };
+  return { k, work, ran, run, denied, release, [Symbol.asyncDispose]: dispose };
 }
 
 test('команда с callers по умолчанию: плагин без прав из главной части получает PermissionDenied и запись denied, обработчик не вызван', async () => {
@@ -148,6 +155,11 @@ test('отказ по callers раньше, чем ядро будит спящ�
   assert.equal(s.k.journal.some((e) => e.pluginId === 'lazy' && e.kind === 'activated'), false, 'спящий не разбужен отказанным');
   await assert.rejects(s.run('nosy', 'sessions.new', 42), { code: 'PermissionDenied' }, 'схема не подсказывает чужому форму команды');
   assert.equal(await s.k.run('lazy.go'), 'ok:lazy.go', 'пользователь будит как раньше');
+  const user = s.k.run('slow.go');
+  setTimeout(s.release, 50);
+  await assert.rejects(s.run('nosy', 'slow.go'), { code: 'PermissionDenied' });
+  assert.equal(s.k.journal.some((e) => e.pluginId === 'slow' && e.kind === 'activated'), false, 'исполнитель ещё просыпается: отказ не ждёт конца его активации');
+  assert.equal(await user, 'ok:slow.go');
 });
 
 test('callers: "plugins" - чужая главная часть вызывает, схема аргументов по-прежнему сверяется', async () => {
@@ -173,4 +185,5 @@ test('guard команды: путь вне права вызывающего о
     { pluginId: 'nosy', method: 'sessions.open', reason: 'via-contract' },
   ]);
   assert.equal(await s.k.run('sessions.open', { path: '/etc/passwd' }), 'ok:sessions.open', 'пользователь сам назвал путь: guard о чужих плагинах');
+  assert.equal(await s.run('sessions', 'sessions.open', { path: '/etc/passwd' }), 'ok:sessions.open', 'свой плагин себя guard не проверяет');
 });
