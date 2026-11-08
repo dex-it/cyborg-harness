@@ -131,3 +131,15 @@ test('пространство поставки: встроенный с тем 
   assert.deepEqual([...g.rejected], [['cyborg.x', [{ kind: 'reserved', what: 'id', name: 'cyborg.x', prefix: 'cyborg.' }]]]);
   assert.equal(g.bindings.get('reader')?.get('cyborg.agent'), 'rogue');
 });
+
+test('пространство поставки: префикс закрывает и id без точки (app для app.), и id внутри; соседнее имя не задето', () => {
+  const g = resolveGraph([m('app'), m('app.x'), m('apple')], '1.0.0', { prefixes: ['app.'], bundled: new Set() });
+  assert.deepEqual(
+    [...g.rejected],
+    [
+      ['app', [{ kind: 'reserved', what: 'id', name: 'app', prefix: 'app.' }]],
+      ['app.x', [{ kind: 'reserved', what: 'id', name: 'app.x', prefix: 'app.' }]],
+    ],
+  );
+  assert.deepEqual(g.order, ['apple']);
+});
