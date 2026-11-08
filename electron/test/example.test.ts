@@ -53,7 +53,7 @@ describe('пример из README адаптера', { timeout: 120_000 }, () =
   });
 
   it('esbuild собирает главный процесс, preload, файл хоста и окно; окно без node:*', async () => {
-    const common = { absWorkingDir: work, bundle: true, logLevel: 'silent' as const, write: false };
+    const common = { absWorkingDir: work, bundle: true, logLevel: 'silent' as const, write: false as const };
     const main = await build({ ...common, entryPoints: ['main.ts'], platform: 'node', format: 'cjs', external: ['electron', 'node-pty'] });
     assert.match(main.outputFiles[0]?.text ?? '', /utilityProcess/, 'главный процесс собран вместе с адаптером');
     const preload = await build({ ...common, entryPoints: ['preload.ts'], platform: 'node', format: 'cjs', external: ['electron'] });
