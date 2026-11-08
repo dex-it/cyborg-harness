@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import { constants, watch as watchFs, type Dirent, type Stats } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, ProcessResult, PtyInfo, SecretValue } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
 import { limitsOf, type ResourceLimits } from './limits.ts';
@@ -834,16 +835,18 @@ export class OsGateway {
       };
       let stdout = '';
       let stderr = '';
-      const cap = (s: string, chunk: Buffer) => (s.length < MAX_OUTPUT ? s + chunk.toString('utf8') : s);
-      child.stdout.on('data', (c: Buffer) => (stdout = cap(stdout, c)));
-      child.stderr.on('data', (c: Buffer) => (stderr = cap(stderr, c)));
+      // Символ UTF-8 бывает на границе кусков трубы: декодер держит недочитанные байты до следующего куска.
+      const decoders = { out: new StringDecoder('utf8'), err: new StringDecoder('utf8') };
+      const cap = (s: string, text: string) => (s.length < MAX_OUTPUT ? s + text : s);
+      child.stdout.on('data', (c: Buffer) => (stdout = cap(stdout, decoders.out.write(c))));
+      child.stderr.on('data', (c: Buffer) => (stderr = cap(stderr, decoders.err.write(c))));
       child.once('error', (error) => {
         done();
         reject(new CoreError('Remote', `${program}: ${error.message}`));
       });
       child.once('close', (code, signal) => {
         done();
-        resolve({ code, signal, stdout, stderr });
+        resolve({ code, signal, stdout: cap(stdout, decoders.out.end()), stderr: cap(stderr, decoders.err.end()) });
       });
       child.stdin.end(typeof input === 'string' ? input : undefined);
     });

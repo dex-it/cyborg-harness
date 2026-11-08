@@ -107,6 +107,24 @@ test('process.run: timeoutMs завершает и потомков програ
   }
 });
 
+test('process.run: многобайтный вывод длиннее одного куска возвращается без U+FFFD - и stdout, и stderr', async () => {
+  await using box = await sandbox();
+  const { k, ctx } = await kernel({ a: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp });
+  try {
+    // 'a' сдвигает 'я' (2 байта) на нечётную границу: кусок трубы (64 КиБ) рвёт символ пополам.
+    const text = 'a' + 'я'.repeat(300_000);
+    const script = `const t='a'+'я'.repeat(300000);process.stdout.write(t);process.stderr.write('€'+t)`;
+    const result = await ctx('a').os.process!.run(process.execPath, ['-e', script]);
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout.length, text.length);
+    assert.equal(result.stdout, text, 'stdout');
+    assert.equal(result.stderr, `€${text}`, 'stderr');
+    assert.ok(!result.stdout.includes('\uFFFD') && !result.stderr.includes('\uFFFD'));
+  } finally {
+    await k.unload();
+  }
+});
+
 test('pty: kill бьёт по группе процесса - потомки оболочки агента не остаются сиротами', { skip: !posix && 'группы процессов - POSIX' }, async () => {
   // node-pty делает процесс лидером своей сессии и группы; detached даёт то же без псевдотерминала.
   const leader = spawn('/bin/sh', ['-c', 'sleep 30 & echo $!; wait'], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
