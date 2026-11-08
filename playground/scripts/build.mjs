@@ -29,6 +29,11 @@ const views = readdirSync(join(root, 'plugins'), { withFileTypes: true })
   .flatMap((d) => readdirSync(join(root, 'plugins', d.name, 'ui')).filter((f) => f.endsWith('.ts')).map((f) => join(d.name, 'ui', f)));
 cpSync(join(root, 'plugins'), join(dist, 'plugins'), { recursive: true, filter: (from) => !/[/\\]ui[/\\][^/\\]+\.ts$/.test(from) });
 cpSync(join(root, 'bench'), join(dist, 'bench'), { recursive: true });
-for (const file of views) await build({ ...browser, format: 'esm', entryPoints: [join(root, 'plugins', file)], outfile: join(dist, 'plugins', file.replace(/\.ts$/, '.js')) });
+// Значки Monaco (codicon.ttf) esbuild кладёт рядом с модулем вида; таблицу Monaco собирает в ui.css рядом с ui.js.
+for (const file of views) await build({ ...browser, format: 'esm', loader: { '.ttf': 'file' }, entryPoints: [join(root, 'plugins', file)], outfile: join(dist, 'plugins', file.replace(/\.ts$/, '.js')) });
+// Воркеры Monaco - файлы того же origin, а не blob: (PL-05): каждый - отдельный классический скрипт, у воркера нет общего модуля с видом.
+const monaco = join(root, '..', 'node_modules', 'monaco-editor', 'esm', 'vs');
+const workers = { editor: 'editor/editor.worker.js', json: 'language/json/json.worker.js', css: 'language/css/css.worker.js', html: 'language/html/html.worker.js', ts: 'language/typescript/ts.worker.js' };
+for (const [name, entry] of Object.entries(workers)) await build({ ...browser, entryPoints: [join(monaco, entry)], outfile: join(dist, 'plugins', 'editor', 'ui', 'workers', `${name}.worker.js`) });
 // Вид грузит стили только со своего origin: таблица xterm кладётся рядом с модулем вида sessions.
 cpSync(join(root, '..', 'node_modules', '@xterm', 'xterm', 'css', 'xterm.css'), join(dist, 'plugins', 'sessions', 'ui', 'xterm.css'));
