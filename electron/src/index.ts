@@ -1,5 +1,9 @@
 // Адаптер Electron, часть главного процесса. Явные именованные экспорты: имя в перечне - обещание совместимости.
 export { themeTokens } from './theme.ts';
+export { utilityHosts } from './plugin-hosts.ts';
+export type { UtilityHosts } from './plugin-hosts.ts';
+export { electronOs, fileSecrets } from './os-env.ts';
+export { framesOf, fromWindow, registerViewScheme, senderPlugin, serveViews, viewFrames } from './views.ts';
 export { guardNavigation, navigationAllowed } from './navigation.ts';
 export { resolveDragFile, ViewDrags } from './view-drag.ts';
 export { ViewTerminals } from './view-terminals.ts';

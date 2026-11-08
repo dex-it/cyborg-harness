@@ -5,16 +5,13 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, Notification, powerMonitor, screen, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { viewOrigin } from '@cyborg-harness/electron/window';
-import { electronOs } from './os-env.ts';
-import { utilityHosts } from './plugin-hosts.ts';
 import { PluginsService } from './plugins.ts';
 import { runSpike } from './spike.ts';
 import { runHostsSpike } from './spike-hosts.ts';
 import { runGatewaySpike } from './spike-gateway.ts';
-import { framesOf, fromWindow, registerViewScheme, senderPlugin, serveViews, viewFrames } from './views.ts';
 import { themeTokens } from '@cyborg-harness/electron';
 import { resolveViewRequest } from '@cyborg-harness/electron';
-import { guardNavigation, resolveDragFile, ViewDrags, ViewTerminals, type TerminalFrame } from '@cyborg-harness/electron';
+import { electronOs, framesOf, fromWindow, guardNavigation, registerViewScheme, resolveDragFile, senderPlugin, serveViews, utilityHosts, viewFrames, ViewDrags, ViewTerminals, type TerminalFrame } from '@cyborg-harness/electron';
 import { RecentWorkspaces } from '@cyborg-harness/core';
 import { isRecord } from './guards.ts';
 

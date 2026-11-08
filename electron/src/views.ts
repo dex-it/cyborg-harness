@@ -1,8 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { protocol, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents, type WebFrameMain } from 'electron';
-import { pluginOfOrigin, VIEW_SCHEME } from '@cyborg-harness/electron/window';
-import { VIEW_CSP, type ViewRequest } from '@cyborg-harness/electron';
+import { pluginOfOrigin, VIEW_SCHEME } from './view-protocol.ts';
+import { VIEW_CSP, type ViewRequest } from './view-files.ts';
 
 /** До `app.ready`: standard даёт схеме свой origin на хост, а с ним site isolation по плагинам. */
 export function registerViewScheme(): void {
