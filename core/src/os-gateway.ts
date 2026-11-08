@@ -909,6 +909,7 @@ export class OsGateway {
             method: verb,
             headers,
             signal: abort.signal,
+            local,
             // Проверка на том же резолве, по которому идёт соединение: отдельный `dns.lookup` до запроса мог бы получить другой ответ.
             lookup: local ? real : guardedLookup(real, (address) => (isLocalAddress(address) ? this.#denied(m, method, `адрес ${address} локальный: ${url.host}`) : undefined)),
             ...body,

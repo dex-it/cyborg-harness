@@ -94,7 +94,18 @@ export interface TransportRequest {
   readonly body?: string;
   readonly signal: AbortSignal;
   readonly lookup: net.LookupFunction;
+  /** Локальный адрес этому запросу разрешён: пул соединений у таких запросов свой, см. `pools`. */
+  readonly local: boolean;
 }
+
+/**
+ * Пулы соединений по протоколу и режиму проверки. Соединение, открытое без проверки адреса (хост назван в праве),
+ * не должно обслужить запрос с проверкой, поэтому режимы не делят пул. Простаивающие сокеты агент не держит живыми для процесса.
+ */
+const pools = {
+  http: { checked: new http.Agent({ keepAlive: true }), named: new http.Agent({ keepAlive: true }) },
+  https: { checked: new https.Agent({ keepAlive: true }), named: new https.Agent({ keepAlive: true }) },
+};
 
 /** Статусы без тела: конструктор `Response` отвергает тело при них. */
 const NO_BODY = new Set([101, 204, 205, 304]);
@@ -104,8 +115,7 @@ export function transport(url: URL, init: TransportRequest): Promise<Response> {
   return new Promise((resolve, reject) => {
     const send = url.protocol === 'https:' ? https.request : http.request;
     const headers = { accept: '*/*', 'user-agent': 'node', 'accept-encoding': 'identity', ...Object.fromEntries(Object.entries(init.headers).map(([k, v]) => [k.toLowerCase(), v])) };
-    // Без общего пула: сокет, открытый для одного права, не должен обслужить другое, у которого свои правила резолва.
-    const request = send(url, { method: init.method, headers, signal: init.signal, lookup: init.lookup, agent: false }, (incoming) => {
+    const request = send(url, { method: init.method, headers, signal: init.signal, lookup: init.lookup, agent: pools[url.protocol === 'https:' ? 'https' : 'http'][init.local ? 'named' : 'checked'] }, (incoming) => {
       const out = new Headers();
       for (let i = 0; i + 1 < incoming.rawHeaders.length; i += 2) out.append(incoming.rawHeaders[i] ?? '', incoming.rawHeaders[i + 1] ?? '');
       const status = incoming.statusCode ?? 502;
