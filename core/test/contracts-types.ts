@@ -1,6 +1,6 @@
 // Проверяется компилятором в npm run typecheck: строка под @ts-expect-error обязана не компилироваться.
 import type { PluginModule } from '../src/plugin.ts';
-import type { Remote } from '@cyborg-harness/contracts';
+import type { CoreErrorCode, Remote } from '@cyborg-harness/contracts';
 import type { FilesV1, FilesV2 } from '../examples/contracts.ts';
 
 export const provider: PluginModule = {
@@ -39,5 +39,18 @@ export const consumer: PluginModule = {
     ctx.log(String(n));
     // @ts-expect-error обработчик команды принимает unknown, а не объявленный тип
     ctx.commands.register('x.open', (path: string) => path);
+  },
+};
+
+// Отмена вызова (K-09): код отказа входит в публичный тип, сигнал в options у process.run допустим, а флаг вместо сигнала - нет.
+export const cancelled: CoreErrorCode = 'Cancelled';
+// @ts-expect-error такого кода отказа нет
+export const unknownCode: CoreErrorCode = 'Aborted';
+export const stoppable: PluginModule = {
+  activate(ctx) {
+    const abort = new AbortController();
+    void ctx.os.process?.run('git', ['status'], { signal: abort.signal, timeoutMs: 1000 });
+    // @ts-expect-error сигнал отмены у process.run - AbortSignal, а не флаг
+    void ctx.os.process?.run('git', ['status'], { signal: true });
   },
 };
