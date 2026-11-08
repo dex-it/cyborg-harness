@@ -25,7 +25,7 @@ import {
 } from '../../../core/src/index.ts';
 import { isRecord } from '../../../core/src/manifest.ts';
 import { WINDOW_OWNER, type WindowSnapshot } from '../../../core/src/window-layer.ts';
-import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from '../shared/plugins.ts';
+import type { FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from '../shared/plugins.ts';
 import { viewOrigin } from '../shared/views.ts';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
 import type { PluginUi } from './view-files.ts';
@@ -189,6 +189,9 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     },
     get documents() {
       return kernel.documents;
+    },
+    get layout() {
+      return kernel.layout;
     },
     workspace: ws.file,
     async unload() {
@@ -463,7 +466,6 @@ export class PluginsService {
         commands,
         permissions: manifest ? describePermissions(manifest.permissions) : [],
         ...(manifest && { version: manifest.version }),
-        ...(s.state !== 'disabled' && manifest?.ui && Object.keys(manifest.ui.views).length > 0 && this.views.has(s.id) && { view: `${viewOrigin(s.id)}/` }),
         ...(manifest?.ui?.overlay !== undefined && this.views.has(s.id) && { overlay: `${viewOrigin(s.id)}/?view=overlay` }),
         ...(host !== undefined && { host }),
         ...(pid !== undefined && { pid }),
@@ -475,6 +477,9 @@ export class PluginsService {
         }),
       };
     });
+    // Фрейм вида есть у каждого вида включённого плагина; у снятого окно рисует заглушку на том же месте.
+    const framed = new Set(plugins.filter((p) => p.state !== 'disabled' && this.views.has(p.id)).map((p) => p.id));
+    const layout: LayoutRow[] = (kernel?.layout ?? []).map((e) => ({ ...e, ...(e.kind === 'view' && framed.has(e.pluginId) && { url: `${viewOrigin(e.pluginId)}/?view=${e.name}` }) }));
     const keys: KeyRow[] = (kernel?.keybindings ?? []).map((k) => ({
       key: k.key,
       command: k.command,
@@ -496,6 +501,7 @@ export class PluginsService {
       ...(this.error !== undefined && { error: this.error }),
       problems: [...this.problems],
       plugins,
+      layout,
       keys,
       feed: [...this.feed],
       journal,

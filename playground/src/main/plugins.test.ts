@@ -238,7 +238,7 @@ test('виды: адрес у плагина с ui в манифесте и у �
     log: () => {},
   });
 
-  assert.deepEqual(Object.fromEntries(service.snapshot().plugins.map((p) => [p.id, p.view])), { face: 'cyborg-plugin://face/', voice: undefined });
+  assert.deepEqual(service.snapshot().layout, [{ pluginId: 'face', kind: 'view', name: 'main', area: 'sidebar', order: 1000, url: 'cyborg-plugin://face/?view=main' }]);
   assert.deepEqual(service.uiOf('face'), { dir: path.join(dir, 'face'), views: { main: './ui/ui.js' } });
   assert.equal(service.uiOf('voice'), undefined);
   assert.deepEqual(await service.runFor('face', 'face.hi'), {});
@@ -267,7 +267,8 @@ test('виды: адрес у плагина с ui в манифесте и у �
   assert.deepEqual(await service.callFor('face', 'demo.echo', 1, 'say', ['x']), { error: 'demo.echo: поставщика сейчас нет' });
   assert.deepEqual(await service.disable('face'), {});
   const face = service.snapshot().plugins.find((p) => p.id === 'face');
-  assert.deepEqual([face?.state, face?.view], ['stopped', 'cyborg-plugin://face/'], 'снятому плагину окно рисует заглушку на месте вида');
+  assert.equal(face?.state, 'stopped');
+  assert.deepEqual(service.snapshot().layout, [{ pluginId: 'face', kind: 'view', name: 'main', area: 'sidebar', order: 1000, mark: 'disabled', url: 'cyborg-plugin://face/?view=main' }], 'снятому плагину окно рисует заглушку на месте вида');
   await service.unload();
 });
 
