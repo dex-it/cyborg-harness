@@ -1,6 +1,6 @@
 ---
 id: ADR-CH-0012
-status: proposed
+status: accepted
 date: 2026-11-08
 relates_to: product, cyborg-harness, ADR-CH-0001, ADR-CH-0003, ADR-CH-0004
 origin: derived
