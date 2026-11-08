@@ -5,7 +5,7 @@ import type { KeyRegistration, PluginContext } from '@cyborg-harness/contracts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { load, type JournalEntry, type LoadOptions } from '../src/loader.ts';
 import type { PluginModule } from '../src/plugin.ts';
-import { inlineHosts } from '../src/transports.ts';
+import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { MENU_OWNER, WINDOW_OWNER } from '../src/window-layer.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
@@ -13,6 +13,12 @@ const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, ve
 /** Плагин, который отдаёт тесту свой `ctx`: регистрации клавиш делает тест, когда ему нужно. */
 function harness(table: Record<string, PluginModule>, options: Omit<LoadOptions, 'apiVersion' | 'spawnHost'>) {
   const ctxs = new Map<string, PluginContext>();
+  const handles = new Map<string, HostHandle>();
+  const base = inlineHosts(async (entry) => {
+    const mod = modules[entry];
+    if (!mod) throw new Error(`нет модуля ${entry}`);
+    return mod;
+  });
   const modules = Object.fromEntries(
     Object.entries(table).map(([id, mod]) => [
       id,
@@ -28,11 +34,11 @@ function harness(table: Record<string, PluginModule>, options: Omit<LoadOptions,
   const start = () =>
     load({
       apiVersion: PLUGIN_API_VERSION,
-      spawnHost: inlineHosts(async (entry) => {
-        const mod = modules[entry];
-        if (!mod) throw new Error(`нет модуля ${entry}`);
-        return mod;
-      }),
+      spawnHost: (id) => {
+        const handle = base(id);
+        handles.set(id, handle);
+        return handle;
+      },
       platform: 'linux',
       ...options,
     });
@@ -41,7 +47,7 @@ function harness(table: Record<string, PluginModule>, options: Omit<LoadOptions,
     if (!ctx) throw new Error(`${id} не активирован`);
     return ctx.keys;
   };
-  return { start, keys };
+  return { start, keys, handles };
 }
 
 /** Уведомление хоста о снятии (`notify`) доходит до ядра не мгновенно. */
@@ -221,6 +227,20 @@ test('выгрузка плагина снимает его динамическ
   await k.enable('buttons');
   assert.equal(k.keybinding('F3'), undefined, 'регистрацию заново делает плагин, ядро её не помнит');
   assert.equal((await keys('buttons').register({ key: 'F3', command: 'buttons.plain' })).active, true);
+  await k.unload();
+});
+
+test('падение хоста снимает динамические регистрации плагина без его участия: после возвращения сочетание свободно', async () => {
+  const { start, keys, handles } = harness({ buttons: idle }, { enabled: ['buttons'], manifests: [buttons], watchdog: { interval: 20, timeout: 1000, strikes: 3 } });
+  const k = await start();
+  await keys('buttons').register({ key: 'F3', command: 'buttons.plain' });
+  handles.get('buttons')?.kill();
+  await new Promise((r) => setTimeout(r, 80));
+  await k.idle();
+  assert.ok(k.active.includes('buttons'), 'сторож вернул плагин');
+  assert.equal(k.keybinding('F3'), undefined, 'хост мёртв - слушать некому');
+  const again = await keys('buttons').register({ key: 'F3', command: 'buttons.plain' });
+  assert.equal(again.active, true, 'старая регистрация не держит сочетание');
   await k.unload();
 });
 
