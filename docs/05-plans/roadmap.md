@@ -2,14 +2,14 @@
 level: plan
 feature: cyborg-harness
 status: review
-date: 2026-11-06
+date: 2026-11-08
 origin: derived
 quality-checks: входных записей нет
 ---
 
 # Дорожная карта Cyborg Harness
 
-> План разработки харнеса в этом репозитории: ядро (`core/`), пакет объявлений (`contracts/`) и стенд `playground/`. Цели и этапы задаёт [SAD](../03-architecture/design/sad.md#6-этапы); здесь - что из них сделано и что осталось. Перевод приложения Cyborg на харнес - план репозитория Cyborg, не этого.
+> План разработки харнеса в этом репозитории: ядро (`core/`), пакет объявлений (`contracts/`), адаптер Electron (`electron/`, пакет `@cyborg-harness/electron`) и стенд `playground/` поверх него. Цели и этапы задаёт [SAD](../03-architecture/design/sad.md#6-этапы); здесь - что из них сделано и что осталось. Перевод приложения Cyborg на харнес - план репозитория Cyborg, не этого.
 
 Остаток до состояния «микроядро готово к системе плагинов» разложен по итерациям и задачам в [эпике](epic-microkernel.md) ([#15](https://github.com/dex-it/cyborg-harness/issues/15)).
 
@@ -24,7 +24,7 @@ quality-checks: входных записей нет
 | [3.3](../03-architecture/design/sad.md#33-версии-и-миграции) Версии, `migrate`, схема раздела | `core/src/config.ts`, `core/src/json-schema.ts` | журнал вызовов члена с `@deprecated` |
 | [3.4](../03-architecture/design/sad.md#34-связь-между-плагинами) Реестр контрактов и команд, права через контракт | `core/src/registry.ts`, `core/src/via-contract.ts` | - |
 | [3.5](../03-architecture/design/sad.md#35-изоляция-сбоев-хосты-и-сторож) Хосты и сторож | `core/src/host-runtime.ts`, `core/src/transports.ts`, [замер](../04-verification/spike-hosts.md) | - |
-| [3.6](../03-architecture/design/sad.md#36-ресурсы-дольше-плагина-pty) pty у ядра: `persist`, `attach`, билет вида | `core/src/pty.ts`, `playground/src/main/view-terminals.ts` | проверка на Windows |
+| [3.6](../03-architecture/design/sad.md#36-ресурсы-дольше-плагина-pty) pty у ядра: `persist`, `attach`, билет вида | `core/src/pty.ts`, `electron/src/view-terminals.ts` | проверка на Windows |
 | [3.7](../03-architecture/design/sad.md#37-безопасность-данных-и-контроль-плагинов) `ctx.os`, права словами, хранилище секретов, `$secret`, `granted` в state | `core/src/os-gateway.ts`, `core/src/permissions.ts` | источник секретов `cyborg.secret-source` плагином; удаление плагина со стиранием его данных, секретов и `granted` |
 | [3.8](../03-architecture/design/sad.md#38-изоляция-рендера) `<iframe>` и `mount`, тема, элементы ядра, диалоги, замок, документы, порядок фокуса | `core/src/ui-shell.ts`, `core/src/window-layer.ts`, `core/src/documents.ts`, `core/elements/` | род области и `order` вида в манифесте |
 | [3.9](../03-architecture/design/sad.md#39-системные-клавиши-и-события) Клавиши с переназначением, события окна и системы | `core/src/keys.ts`, `core/test/events.test.ts` | - |

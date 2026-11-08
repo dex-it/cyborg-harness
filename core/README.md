@@ -75,7 +75,7 @@ export default plugin;
 forkHosts({ entry: require.resolve('@cyborg-harness/core/host-entry') });
 ```
 
-Хосты в `utilityProcess` не используют `forkHosts`: приложение запускает свой файл, а он вызывает `runHost` из `@cyborg-harness/core/host` (пример - `playground/src/main/plugin-host.ts`).
+Хосты в `utilityProcess` не используют `forkHosts`: приложение запускает свой файл, а он вызывает `runHost` из `@cyborg-harness/core/host` (пример - `electron/src/host-entry.ts`).
 
 ## Сборка и проверка
 

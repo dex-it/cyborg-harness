@@ -1,7 +1,7 @@
 ---
 feature: 02-extension-contracts
 status: review
-date: 2026-11-05
+date: 2026-11-08
 origin: derived
 quality-checks: входных записей нет
 ---
@@ -43,7 +43,7 @@ quality-checks: входных записей нет
 - **Требование:** ядро знает только роды областей: боковая колонка, основная область с группой документов, панель инструментов, всплывающий слой, слой замка. Плагин объявляет виды и типы документов в манифесте, и каркас окна рисуется по манифестам до кода плагинов. Каждый вид живёт в своём `<iframe>` с origin `cyborg-plugin://<id>/` и CSP; модуль вида экспортирует `mount(root, ctx)` и возвращает `Disposable`. `UiContext` даёт команды, контракты от имени плагина вида, тему, видимость, память вида, диалоги, сочетания своих команд и терминал по билету; `ctx.os` у вида нет. Мост узнаёт плагин по origin фрейма, а не со слов вида. Скрытый вид не размонтируется. Пока хост перезапускается, вид стоит под плашкой без ввода; плагин выключен - на месте вида заглушка с причиной, «Включить снова» и «Журнал». Чужой UI в свой вид не встраивается: плагин зовёт команду или контракт владельца. Документ типа с `restorable` переживает перезапуск окна: данные отдаёт владелец (`ctx.documents.save`), без владельца вкладка показывается недоступной, а не пропадает.
 - **traced from:** BR-CH-001, BR-CH-006.
 - **источник:** [SAD, 3.8](../../03-architecture/design/sad.md#38-изоляция-рендера); `core/src/ui-shell.ts`, `core/src/documents.ts`.
-- **verification:** испытание - `core/test/ui-shell.test.ts`, `core/test/documents.test.ts`, `playground/src/main/view-files.test.ts` («вид: origin называет плагин…»); дымовой тест - «виды во фреймах: свой мост, лента плагина, чужая команда отклонена», «перезапуск хоста: вид под плашкой без ввода…», «окно: заглушка с причиной…», «документы: вкладка сессии в окне…».
+- **verification:** испытание - `core/test/ui-shell.test.ts`, `core/test/documents.test.ts`, `electron/test/view-files.test.ts` («вид: origin называет плагин…»); дымовой тест - «виды во фреймах: свой мост, лента плагина, чужая команда отклонена», «перезапуск хоста: вид под плашкой без ввода…», «окно: заглушка с причиной…», «документы: вкладка сессии в окне…».
 - **класс:** Functions.
 
 ### FR-CH-2006 Слой окна: диалоги и замок
@@ -67,7 +67,7 @@ quality-checks: входных записей нет
 - **Требование:** плагин видит только свой раздел `config` (`ctx.config`) и `state` (`ctx.state`); чужой раздел хост не пишет. `config` - слои пользователя и воркспейса, воркспейс перекрывает; `state` лежит в каталоге приложения по ключу воркспейса. Манифест объявляет версию и схему раздела. Ядро проверяет раздел по схеме - подмножеству JSON Schema, где ключ вне подмножества - ошибка схемы, - до активации и при правке файла извне. Версия раздела ниже версии плагина - ядро до активации вызывает `migrate` и записывает итог; выше - плагин не активируется, данные не трогаются; раздел не по схеме - отказ только этому плагину. Правка файла извне доходит до `ctx.config.onChange`; не прошедшая проверку оставляет прежнее значение. Значений секретов в `config` и `state` нет, только ссылка `$secret`. Документ воркспейса без поля `cyborg` переводит хук приложения `migrate` при открытии; ядро записывает итог один раз и оставляет копию `.v1.bak`.
 - **traced from:** BR-CH-002.
 - **источник:** [SAD, 3.3](../../03-architecture/design/sad.md#33-версии-и-миграции), [SAD, 3.10](../../03-architecture/design/sad.md#310-главный-конфиг-и-состояние); `core/src/config.ts`, `core/src/json-schema.ts`.
-- **verification:** испытание - `core/test/config.test.ts`, `core/test/json-schema.test.ts`, `core/test/loader.test.ts` («откат версии плагина…», «миграция config идёт в хосте…», «схема раздела из манифеста…»), `core/test/workspace.test.ts` («перенос старого формата хуком приложения…», «правка файла извне доходит до ctx.config.onChange…»), `playground/src/main/legacy-workspace.test.ts` («перенос {projects, lastProjectId}…»), `core/test/trust.test.ts` («provide и section.write…»), `playground/src/main/plugins.test.ts` («схема раздела: файл из каталога плагина…»).
+- **verification:** испытание - `core/test/config.test.ts`, `core/test/json-schema.test.ts`, `core/test/loader.test.ts` («откат версии плагина…», «миграция config идёт в хосте…», «схема раздела из манифеста…»), `core/test/workspace.test.ts` («перенос старого формата хуком приложения…», «правка файла извне доходит до ctx.config.onChange…»), `playground/src/main/legacy-workspace.test.ts` («перенос {projects, lastProjectId}…»), `core/test/trust.test.ts` («provide и section.write…»), `electron/test/plugins.test.ts` («схема раздела: файл из каталога плагина…»).
 - **класс:** Functions.
 
 ### FR-CH-2009 Контракт агента `cyborg.agent`
@@ -114,6 +114,6 @@ quality-checks: входных записей нет
 
 - **Требование:** вид плагина - браузерный бандл без Node в `<iframe>` своего origin под CSP: скрипты только `'self'`, стили - `'self'` и инлайн; DOM соседей ему недоступен. Окно и элементы ядра выводят данные плагинов текстом, а не разметкой. Мост выдаётся по origin документа: чужая страница внутри вида моста не получает.
 - **traced from:** BR-CH-005.
-- **источник:** [SAD, 3.8](../../03-architecture/design/sad.md#38-изоляция-рендера); `playground/src/main/view-files.ts`.
-- **verification:** испытание - `playground/src/main/view-files.test.ts` («вид: origin называет плагин, чужая схема и мусор - не вид»), `core/test/plugin-imports.test.ts` (вид без `node:*` и `electron`); дымовой тест - «элементы ядра: определены до mount, стили под CSP вида…»; осмотр - `innerHTML` в `core/` и `playground/src` нет. Статической проверки на `innerHTML` нет.
+- **источник:** [SAD, 3.8](../../03-architecture/design/sad.md#38-изоляция-рендера); `electron/src/view-files.ts`.
+- **verification:** испытание - `electron/test/view-files.test.ts` («вид: origin называет плагин, чужая схема и мусор - не вид»), `core/test/plugin-imports.test.ts` (вид без `node:*` и `electron`); дымовой тест - «элементы ядра: определены до mount, стили под CSP вида…»; осмотр - `innerHTML` в `core/` и `playground/src` нет. Статической проверки на `innerHTML` нет.
 - **класс:** Security.
