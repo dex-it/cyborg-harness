@@ -1,7 +1,7 @@
 ---
 feature: 02-extension-contracts
 status: review
-date: 2026-11-05
+date: 2026-11-08
 origin: derived
 quality-checks: входных записей нет
 ---
@@ -80,10 +80,10 @@ quality-checks: входных записей нет
 
 ### FR-CH-2010 Плагин `agent-claude-code`
 
-- **Требование:** `agent-claude-code` - поставщик `cyborg.agent` для Claude Code. Запуск - `$SHELL -lc 'exec claude --settings "$CYBORG_SETTINGS" "$@"'` по праву `launch`. Хуки `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`, `Notification` пишут JSON в файл сессии в `plugin-data`; `watch` следит за каталогом сессий через `fs.watch` и дочитывает файл через `fs.readSlice`. «Ждёт» после `Stop` - только если ход закончен без фоновой работы и сессия молчит 30 с. `history` - интерактивные сессии каталога и его worktree из `~/.claude/projects`. `resumeId` - `session_id` хука `SessionStart`. Токен сервера MCP передаётся переменной `CYBORG_MCP_TOKEN` и файлом `--mcp-config`, а не в argv.
+- **Требование:** `agent-claude-code` - поставщик `cyborg.agent` для Claude Code. Запуск - `$SHELL -lc 'exec claude --settings "$CYBORG_SETTINGS" "$@"'` по праву `launch`. Хуки `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`, `Notification` пишут JSON в файл сессии в `plugin-data`; `watch` следит за каталогом сессий через `fs.watch` и дочитывает файл через `fs.readSlice`. «Ждёт» после `Stop` - только если ход закончен без фоновой работы и сессия молчит 30 с. `history` - интерактивные сессии каталога и его worktree из `~/.claude/projects`. `resumeId` - `session_id` хука `SessionStart`. Токен сервера MCP передаётся переменной `CYBORG_MCP_TOKEN` и файлом `--mcp-config`, а не в argv. Настройки `--settings` разрешают без вопроса ровно сервер `cyborg` (`permissions.allow: ["mcp__cyborg"]`), режим разрешений не задают и флагов режима не передают; в `--mcp-config` попадает один сервер - `cyborg`. Сервер MCP стороннего плагина по объявлению в манифесте и право «пишет агенту» - **Ещё нет**: форма поля и срок - этап 2 ([SAD, вопрос 17](../../03-architecture/design/sad.md#8-открытые-вопросы)).
 - **traced from:** BR-CH-003.
-- **источник:** [SAD, раздел 5](../../03-architecture/design/sad.md#5-пример-базовая-часть); `playground/plugins/agent-claude-code`.
-- **verification:** испытание - `playground/test/agents.test.ts` («agent-claude-code: запуск…», «… хуки в события контракта…», «… «ждёт» после Stop…», «… история…»); дымовой тест с `CYBORG_SMOKE_CLAUDE=1` - живой `claude` по праву `launch`.
+- **источник:** [SAD, раздел 5](../../03-architecture/design/sad.md#5-пример-базовая-часть), [SAD, 3.7](../../03-architecture/design/sad.md#агент-в-модели-доверия); `playground/plugins/agent-claude-code`.
+- **verification:** испытание - `playground/test/agents.test.ts` («agent-claude-code: запуск…», «… режим разрешений человека не меняется…», «… хуки в события контракта…», «… «ждёт» после Stop…», «… история…», «сторонний плагин: текст и инструменты агенту…»); дымовой тест с `CYBORG_SMOKE_CLAUDE=1` - живой `claude` по праву `launch`.
 - **класс:** Functions.
 
 ### FR-CH-2012 Права в манифесте и этапы изоляции
