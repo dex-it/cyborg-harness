@@ -4,6 +4,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { load, type JournalEntry, type Kernel } from '../src/loader.ts';
 import { isRecord } from '../src/wire.ts';
 import { forkHosts, type SpawnHost } from '../src/transports.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 const manifests = [
   { id: 'files', version: '1.0.0', engines: { cyborg: '^1' }, provides: { 'test.files': '1.0' } },
@@ -12,7 +13,7 @@ const manifests = [
 
 function start(strikes = 3, spawnHost: SpawnHost = forkHosts()): Promise<Kernel> {
   return load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: ['files', 'consumer'],
     manifests,
     hosts: { storage: ['files'], ui: ['consumer'] },
@@ -92,7 +93,7 @@ const shared = [
 
 function startShared(strikes = 3, spawnHost: SpawnHost = forkHosts()): Promise<Kernel> {
   return load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: ['busy', 'calm'],
     manifests: shared,
     hosts: { shared: ['busy', 'calm'] },

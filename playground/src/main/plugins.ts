@@ -12,6 +12,7 @@ import {
   load,
   pluginStatuses,
   openWorkspace,
+  PLUGIN_API_VERSION,
   type JournalEntry,
   type Kernel,
   type KeyInput,
@@ -28,7 +29,6 @@ import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, R
 import { viewOrigin } from '../shared/views.ts';
 import type { PluginUi } from './view-files.ts';
 
-export const PLUGIN_API_VERSION = '1.0.0';
 
 const ENTRY_FILES = ['index.mjs', 'index.js', 'index.ts'];
 
