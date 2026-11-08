@@ -63,7 +63,7 @@ export default plugin;
 ### Проверка плагина вне репозитория
 
 ```sh
-npx cyborg-plugin check path/to/plugin [--declarations ../contracts.ts] [--declarations-package @acme/contracts]
+npx cyborg-plugin check path/to/plugin [--declarations ../contracts.ts] [--declarations-package @acme/contracts]   # команда - в пакете cyborg-plugin (tools/cyborg-plugin), не в ядре
 ```
 
 Код возврата 0 - нарушений нет, 1 - есть, 2 - неверный вызов; нарушения печатаются как `файл:строка: причина`, права плагина - словами. Из кода:
