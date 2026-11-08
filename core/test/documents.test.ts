@@ -99,7 +99,9 @@ test('таблица документов: removeOf уносит строки о
     { id: 'a2', pluginId: 'gone', type: 'note', title: 'Вторая' },
     { id: 'b1', pluginId: 'stay', type: 'note', title: 'Чужая' },
   ];
-  const table = new DocumentTable({ read: () => saved, write: async (list) => void writes.push([...list]) }, () => true, () => void changes++);
+  const table = new DocumentTable({ read: () => saved, write: async (list) => void writes.push([...list]) }, () => true, () => {
+    changes++;
+  });
   assert.equal(await table.removeOf('gone'), 2);
   assert.deepEqual(table.rows(() => true).map((d) => d.id), ['b1']);
   assert.deepEqual(writes.map((w) => w.map((d) => (d as { id: string }).id)), [['b1']]);

@@ -300,6 +300,15 @@ export class PtyTable {
     return kept;
   }
 
+  /** Плагин удалён: уходят все его pty, и оставленные человеком тоже; число живых, которые это завершило. */
+  endAll(pluginId: string): number {
+    const mine = this.#of(pluginId);
+    const live = mine.filter((e) => !e.exit).length;
+    for (const e of mine) this.#end(e);
+    if (mine.some((e) => e.keptAt !== undefined)) this.#keptChanged();
+    return live;
+  }
+
   /** Оставленные человеком процессы выключенных плагинов, в том числе завершившиеся сами. */
   kept(): KeptPty[] {
     return [...this.#entries.values()].flatMap((e) => (e.keptAt === undefined ? [] : [{ ...info(e), pluginId: e.pluginId, keptAt: e.keptAt }]));
