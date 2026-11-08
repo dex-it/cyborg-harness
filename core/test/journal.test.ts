@@ -101,10 +101,11 @@ test('журнал: вызовы устаревшего члена за окно
   c.record(old('b'));
   c.record(old('a', 'get'));
   c.record(old('a', 'list', 'test.other'));
-  assert.equal(out.length, 4, 'по записи на каждую пару при первом вызове');
+  c.record(old('a', 'list', 'test.old', 'other'));
+  assert.equal(out.length, 5, 'по записи на каждую пару при первом вызове');
   c.flush();
-  assert.equal(out.length, 5);
-  const last = out[4];
+  assert.equal(out.length, 6);
+  const last = out[5];
   assert.ok(last?.kind === 'deprecated-call');
   assert.deepEqual([last.pluginId, last.member, last.repeats], ['a', 'list', 99]);
   assert.match(describeEntry(last), /ещё 99 раз/);
