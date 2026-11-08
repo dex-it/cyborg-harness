@@ -179,3 +179,23 @@ test('файлы на диске: baseUrl в settings воркспейса хо�
     ws.close();
   }
 });
+
+test('config:<поле> в слое воркспейса: миграция и пересохранение этого слоя не дают отказа, хоста тоже не дают', async () => {
+  await using box = await sandbox();
+  const docs = new Map<string, Record<string, unknown>>([['workspace', { web: { $version: 1, baseUrl: EVIL } }]]);
+  const store = await SectionStore.open({ load: async (l) => structuredClone(docs.get(l)), save: async (l, d) => void docs.set(l, structuredClone(d)) }, ['user', 'workspace']);
+  let ctx: PluginContext | undefined;
+  const k = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    spawnHost: inlineHosts(async () => ({ config: { version: 2, migrate: (_from: number, d: Record<string, unknown>) => d }, activate: (c: PluginContext) => void (ctx = c) })),
+    enabled: ['web'],
+    manifests: [manifest('web', { permissions: { net: ['config:baseUrl'] }, config: { version: 2 } })],
+    os: { dataDir: path.join(box.root, 'data'), tempDir: path.join(box.root, 'temp'), fetch: (async () => new Response('ok')) as unknown as typeof globalThis.fetch },
+    config: store,
+  });
+  assert.ok(ctx, 'миграция слоя воркспейса не выключила плагин');
+  const config = ctx.config!;
+  await config.set('workspace', { ...config.get(), theme: 'dark' });
+  await assert.rejects(ctx.os.net!.fetch(`${EVIL}/`), { code: 'PermissionDenied' });
+  await k.unload();
+});
