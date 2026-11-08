@@ -749,7 +749,7 @@ function context(
           }),
         );
       },
-      run: (name, ...args) => endpoint.request('run', { name, args }),
+      run: (name, ...args) => endpoint.request('run', { caller: pluginId, name, args }),
     },
     ...(config && { config: trackedSection(config, track) }),
     ...(state && { state: trackedSection(state, track) }),

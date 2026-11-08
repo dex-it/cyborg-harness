@@ -96,7 +96,7 @@ const shared = [
       ['timer', 'late', 'exit', 'focus', 'after', 'reject.timer', 'reject.focus', 'reject.await', 'throw.microtask', 'throw.tick', 'host.throw', 'host.reject', 'host.timer'].map((name) => [`busy.${name}`, name === 'reject.await' ? { args: ['number'] } : {}]),
     ),
   },
-  { id: 'calm', version: '1.0.0', engines: { cyborg: '^1' }, commands: { 'calm.echo': { args: ['any'] }, 'calm.pid': {} } },
+  { id: 'calm', version: '1.0.0', engines: { cyborg: '^1' }, commands: { 'calm.echo': { args: ['any'], callers: 'plugins' }, 'calm.pid': {} } },
 ];
 
 function startShared(strikes = 3, spawnHost: SpawnHost = forkHosts()): Promise<Kernel> {

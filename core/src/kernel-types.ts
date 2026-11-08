@@ -26,13 +26,13 @@ export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'revived' }
   /** `activation: "lazy"`: ждёт первой команды, сочетания, показа вида или потребителя своего контракта. */
   | { readonly pluginId: string; readonly kind: 'waiting' }
-  /** Шлюз `ctx.os` отказал: вызов вне прав манифеста; `reason: 'window'` - окно не пустило вид на чужой адрес. */
+  /** Шлюз `ctx.os` отказал: вызов вне прав манифеста; `reason: 'window'` - окно не пустило вид на чужой адрес; `reason: 'command-callers'` - команда не открыта главным частям других плагинов. */
   | {
       readonly pluginId: string;
       readonly kind: 'denied';
       readonly method: string;
       readonly detail: string;
-      readonly reason?: 'via-contract' | 'window';
+      readonly reason?: 'via-contract' | 'window' | 'command-callers';
       /** Столько таких же отказов склеено за окно после первого. */
       readonly repeats?: number;
     }

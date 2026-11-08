@@ -1,6 +1,7 @@
 import { CoreError } from './errors.ts';
 import type { BridgeEnd, Commands, KernelContext } from './kernel-context.ts';
-import { checkArgs } from './manifest.ts';
+import { checkArgs, type CommandSpec } from './manifest.ts';
+import { guardedValue } from './via-contract.ts';
 import { KERNEL_COMMANDS } from './window-layer.ts';
 
 const isKernelCommand = (name: string): boolean => (Object.values(KERNEL_COMMANDS) as string[]).includes(name);
@@ -9,12 +10,29 @@ const isKernelCommand = (name: string): boolean => (Object.values(KERNEL_COMMAND
 export function createCommands(ctx: KernelContext): Commands {
   const owners = new Map<string, string>();
 
-  async function run(command: string, ...args: unknown[]): Promise<unknown> {
+  /** Чужой главной части команду открывает исполнитель (`callers: "plugins"`); отказ пишется вызывающему, обработчик не вызывается. */
+  function open(caller: string, executor: string, command: string): void {
+    if (caller === executor || ctx.manifestOf(executor).commands[command]?.callers === 'plugins') return;
+    const detail = `${command} - ${executor} не открыл её другим плагинам (callers: "user")`;
+    ctx.record({ pluginId: caller, kind: 'denied', method: command, detail, reason: 'command-callers' });
+    throw new CoreError('PermissionDenied', `${command}: ${executor} не открыл команду другим плагинам`);
+  }
+
+  /** Право вызывающего на аргументы чужой команды, как их объявил исполнитель (`guard`); выполнит команду исполнитель по своим правам. */
+  async function guard(caller: string, command: string, spec: CommandSpec, args: readonly unknown[]): Promise<void> {
+    for (const g of spec.guard ?? []) await ctx.gateway.checkFor(ctx.manifestOf(caller), command, g.right, guardedValue(args, g, command));
+  }
+
+  /** `caller` - плагин, чья главная часть зовёт команду, его назвал канал хоста; без него зовёт пользователь: палитра, клавиши, меню, вид своего плагина. */
+  async function execute(command: string, args: unknown[], caller?: string): Promise<unknown> {
     const { activation, pool } = ctx.parts;
     if (command === KERNEL_COMMANDS.revealWorkspace) return ctx.gateway.revealWorkspace();
     const declares = (id: string) => Object.hasOwn(ctx.manifestOf(id).commands, command);
     if (!owners.has(command)) {
       const sleeper = [...activation.waiting].find(declares);
+      // Отказанный не будит спящего исполнителя: отказ не должен запускать чужой код.
+      const known = sleeper ?? [...activation.activating.keys()].find(declares);
+      if (caller !== undefined && known !== undefined) open(caller, known, command);
       if (sleeper !== undefined) await activation.wake(sleeper);
       else await [...activation.activating].find(([id]) => declares(id))?.[1];
     }
@@ -22,9 +40,13 @@ export function createCommands(ctx: KernelContext): Commands {
     if (!owner) throw new CoreError('CommandNotFound', `команды ${command} нет`);
     const spec = ctx.manifestOf(owner).commands[command];
     if (!spec) throw new CoreError('CommandNotFound', `команда ${command} не объявлена у ${owner}`);
+    if (caller !== undefined) open(caller, owner, command);
     checkArgs(command, spec, args);
+    if (caller !== undefined && caller !== owner) await guard(caller, command, spec, args);
     return pool.call(pool.live(owner), owner, 'command', { pluginId: owner, name: command, args });
   }
+
+  const run = (command: string, ...args: unknown[]) => execute(command, args);
 
   function attach({ mine, onRequest, onNote }: BridgeEnd): void {
     onNote('register', { pluginId: 'string', name: 'string' }, (p) => {
@@ -37,9 +59,10 @@ export function createCommands(ctx: KernelContext): Commands {
       mine(p.pluginId);
       if (owners.get(p.name) === p.pluginId) owners.delete(p.name);
     });
-    onRequest('run', { name: 'string', args: 'array' }, (p) => {
+    onRequest('run', { caller: 'string', name: 'string', args: 'array' }, (p) => {
+      const caller = mine(p.caller).id;
       if (isKernelCommand(p.name)) throw new CoreError('PermissionDenied', `${p.name}: команду ядра зовёт приложение, а не плагин`);
-      return run(p.name, ...p.args);
+      return execute(p.name, p.args, caller);
     });
   }
 
