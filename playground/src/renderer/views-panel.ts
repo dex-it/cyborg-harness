@@ -79,6 +79,8 @@ export class ViewsPanel {
     plaque.setAttribute('role', 'status');
     body.append(frame, plaque);
     figure.append(caption, body);
+    // Новый фрейм показан развёрнутым: без этого ядро считает вид скрытым, и сочетания с `when.visible` молчат до первого «Свернуть»/«Развернуть».
+    void this.port.setViewVisible(row.id, true);
     toggle.addEventListener('click', () => {
       // Свёрнутый вид остаётся в DOM: display:none у обёртки, а не снятие фрейма - так документ плагина не теряет состояние.
       const visible = body.hidden === true;

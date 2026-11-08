@@ -104,7 +104,7 @@ test('ctx.keys.register: недоверенный вход - отказ с ко�
   await bad({ key: 'F2', command: 'other.go' }, 'NotDeclared', 'чужая команда');
   await bad({ key: 'F2', command: 'buttons.press' }, 'Invalid', 'обязательного аргумента нет');
   await bad({ key: 'F2', command: 'buttons.press', args: [1] }, 'Invalid', 'аргумент не того вида');
-  await bad({ key: 'F2', command: 'buttons.plain', args: ['x'.repeat(5000)] }, 'Invalid', 'аргументы больше предела');
+  await bad({ key: 'F2', command: 'buttons.press', args: ['x'.repeat(5000)] }, 'Invalid', 'аргументы больше предела');
   await bad({ key: 'F2', command: 'buttons.plain', when: { focus: true } }, 'Invalid', 'незнакомое условие');
   await bad({ key: 'F2', command: 'buttons.plain', when: { repeat: 'yes' } }, 'Invalid', 'условие не того вида');
   await bad({ key: 'F2', command: 'buttons.plain', when: { input: 'maybe' } }, 'Invalid', 'input вне списка');
@@ -178,7 +178,7 @@ test('два динамических на одно сочетание: перв
   await k.unload();
 });
 
-test('сочетание команды окна динамически занять нельзя, и сочетание меню тоже: Invalid-отказ с названием владельца', async () => {
+test('сочетание команды окна динамически занять нельзя, и сочетание меню тоже: отказ CommandConflict с названием владельца', async () => {
   const { start, keys } = harness({ buttons: idle }, { enabled: ['buttons'], manifests: [buttons], menuKeys: { 'menu.print': 'CmdOrCtrl+P', 'menu.broken': 'Hyper+Q' } });
   const k = await start();
   await assert.rejects(keys('buttons').register({ key: 'F6', command: 'buttons.plain' }), { code: 'CommandConflict', message: /cyborg\.window\.focus-next/ });
@@ -262,7 +262,7 @@ test('откат активации: плагин зарегистрировал
   await k.unload();
 });
 
-test('нажатие спящего (lazy) плагина: сочетание ждёт его пробуждения и не теряется после активации', async () => {
+test('ленивый (lazy) плагин: динамическое сочетание, зарегистрированное после пробуждения, ловится', async () => {
   const { start, keys } = harness({ buttons: idle }, { enabled: ['buttons'], manifests: [{ ...buttons, activation: 'lazy' }] });
   const k = await start();
   assert.equal(k.keybinding('F3'), undefined);

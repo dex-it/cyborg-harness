@@ -65,8 +65,16 @@ function focusKind(target: EventTarget | null): 'text' | 'terminal' | 'other' {
 const inView = location.protocol === `${VIEW_SCHEME}:`;
 const inWindow = location.protocol === 'file:' && window.top === window;
 if (inView || inWindow) {
-  window.addEventListener('focusin', (event) => ipcRenderer.send('input:focus', focusKind(event.composedPath()[0] ?? event.target)), true);
-  window.addEventListener('focusout', () => ipcRenderer.send('input:focus', 'other'), true);
+  window.addEventListener(
+    'focusin',
+    (event) => {
+      const target = event.composedPath()[0] ?? event.target;
+      // Фокус во вложенном фрейме сообщает сам фрейм: элемент <iframe> в родителе - не место ввода.
+      if (!(target instanceof HTMLIFrameElement)) ipcRenderer.send('input:focus', focusKind(target));
+    },
+    true,
+  );
+  window.addEventListener('focusout', () => ipcRenderer.send('input:focus', 'blur'), true);
 }
 if (inView) contextBridge.exposeInMainWorld('cyborgView', view);
 if (inWindow && !location.pathname.endsWith('/spike.html')) contextBridge.exposeInMainWorld('playground', api);

@@ -222,8 +222,17 @@ windowChannel('views:visibility', (arg) => {
   plugins.setViewVisible(arg.id, arg.visible);
 });
 // Фокус ввода сообщают документ окна и виды плагинов: ядро решает по нему, пускать ли сочетание с `when.input` в поле ввода.
+// Фреймы живут в разных процессах, и уход фокуса из старого приходит то раньше, то позже прихода в новый: уход засчитывается, только если фокус ещё у его фрейма.
+let focusFrame = '';
 ipcMain.on('input:focus', (event, kind: unknown) => {
-  if (event.senderFrame === event.sender.mainFrame || senderPlugin(event) !== undefined) plugins.setInputFocus(kind);
+  if (event.senderFrame !== event.sender.mainFrame && senderPlugin(event) === undefined) return;
+  const frame = `${String(event.processId)}:${String(event.frameId)}`;
+  if (kind === 'blur') {
+    if (frame === focusFrame) plugins.setInputFocus('other');
+    return;
+  }
+  focusFrame = frame;
+  plugins.setInputFocus(kind);
 });
 /** Корень файлов, которые виды могут перетаскивать; в Cyborg это проекты, доступные плагину на чтение. */
 let workspace = '';
