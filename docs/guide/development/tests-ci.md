@@ -7,8 +7,8 @@ description: "Какие проверки гоняет репозиторий, �
 
 | Команда | Что проверяет |
 |---|---|
-| `npm run build` | собирает стенд playground в `playground/dist` |
-| `npm run typecheck` | строгие типы ядра, браузерной части элементов `cy-*` и стенда; в том числе файлы, где строка под `@ts-expect-error` обязана не компилироваться |
+| `npm run build` | собирает стенд playground в `playground/dist`; перед ним, `typecheck`, `lint` и `test` сами идут `build:core` (пакет ядра) и `build:electron` (адаптер Electron) |
+| `npm run typecheck` | строгие типы ядра, браузерной части элементов `cy-*`, адаптера Electron и стенда; в том числе файлы, где строка под `@ts-expect-error` обязана не компилироваться |
 | `npm run lint` | ESLint со `strictTypeChecked`, ноль предупреждений |
 | `npm test` | модульные, сценарные и стресс-тесты на встроенном `node:test` |
 | `npm run smoke` | дымовой тест окна по DevTools Protocol |
@@ -23,7 +23,7 @@ description: "Какие проверки гоняет репозиторий, �
 
 ## Тесты
 
-`npm test` запускает файлы `core/test/*.test.ts`, `playground/src/**/*.test.ts` и `playground/test/*.test.ts` с общим сроком 120 секунд на тест. Зависший тест падает под своим именем и не снимает всю задачу.
+`npm test` запускает файлы `core/test/*.test.ts`, `electron/test/*.test.ts`, `playground/src/**/*.test.ts` и `playground/test/*.test.ts` с общим сроком 120 секунд на тест. Зависший тест падает под своим именем и не снимает всю задачу.
 
 | Что покрыто | Где |
 |---|---|
@@ -65,6 +65,7 @@ Workflow `.github/workflows/ci.yml` запускается на каждый pul
 |---|---|---|
 | `npm ci` на Node 24 | да | да |
 | `npm run build`, `typecheck`, `lint`, `npm test` | да | да |
+| Пример адаптера Electron из README собирается (`node --test electron/test/example.test.ts`) | да | да |
 | Дымовой тест | `node playground/scripts/smoke.mjs` | `xvfb-run --auto-servernum node playground/scripts/smoke.mjs --no-sandbox` |
 
 Лимит - 15 минут на каждую ОС, права токена - только чтение. Действия закреплены по SHA коммита, новая сборка той же ветки отменяет прежнюю. Матрица идёт с `fail-fast: false`: падение на одной ОС не прячет результат другой.
