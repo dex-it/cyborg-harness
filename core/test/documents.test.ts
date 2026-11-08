@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PluginContext } from '@cyborg-harness/contracts';
 import { SectionStore, type LayerStore } from '../src/config.ts';
+import { DocumentTable } from '../src/documents.ts';
 import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
 import { inlineHosts } from '../src/transports.ts';
@@ -88,6 +89,24 @@ test('документы: человек закрывает вкладку - в�
   await k.closeDocument(b);
   assert.deepEqual(k.documents, []);
   await k.unload();
+});
+
+test('таблица документов: removeOf уносит строки одного плагина, в том числе без манифеста, и пишет на диск один раз', async () => {
+  const writes: unknown[][] = [];
+  let changes = 0;
+  const saved = [
+    { id: 'a1', pluginId: 'gone', type: 'note', title: 'Заметка' },
+    { id: 'a2', pluginId: 'gone', type: 'note', title: 'Вторая' },
+    { id: 'b1', pluginId: 'stay', type: 'note', title: 'Чужая' },
+  ];
+  const table = new DocumentTable({ read: () => saved, write: async (list) => void writes.push([...list]) }, () => true, () => void changes++);
+  assert.equal(await table.removeOf('gone'), 2);
+  assert.deepEqual(table.rows(() => true).map((d) => d.id), ['b1']);
+  assert.deepEqual(writes.map((w) => w.map((d) => (d as { id: string }).id)), [['b1']]);
+  assert.equal(changes, 1, 'окно перерисовано');
+  assert.equal(await table.removeOf('gone'), 0);
+  assert.equal(writes.length, 1, 'нечего стирать - нечего писать');
+  assert.equal(changes, 1);
 });
 
 test('манифест: documents - имя типа и только restorable', () => {

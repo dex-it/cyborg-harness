@@ -88,6 +88,15 @@ export class DocumentTable {
     return doc;
   }
 
+  /** Плагин удалён: все его строки уходят, и новый плагин с тем же id их не получит; число стёртых. */
+  async removeOf(pluginId: string): Promise<number> {
+    const before = this.#docs.length;
+    this.#docs = this.#docs.filter((d) => d.pluginId !== pluginId);
+    const removed = before - this.#docs.length;
+    if (removed > 0) await this.#commit();
+    return removed;
+  }
+
   /** Чужой документ для плагина не существует. */
   #own(pluginId: string, id: unknown): [number, StoredDocument] {
     const at = this.#docs.findIndex((d) => d.id === id && d.pluginId === pluginId);
