@@ -69,6 +69,18 @@ test('без прав: свои каталоги работают, чужой п
   await k.unload();
 });
 
+test('свой каталог, подменённый ссылкой наружу после первого вызова, область плагина не расширяет', async () => {
+  await using box = await sandbox();
+  await writeFile(path.join(box.outside, 'secret.txt'), 'нельзя');
+  const { k, os } = await kernel({ plain: undefined }, { dataDir: box.data, tempDir: box.temp });
+  const own = os('plain');
+  await own.fs.writeText(path.join(own.paths.data, 'a.txt'), 'a');
+  await rm(own.paths.data, { recursive: true });
+  await symlink(box.outside, own.paths.data);
+  await assert.rejects(own.fs.readText(path.join(own.paths.data, 'secret.txt')), { code: 'PermissionDenied' });
+  await k.unload();
+});
+
 test('fs.read и fs.write: область по праву, симлинк наружу не пускает, .git, защищённые пути и их соседи <файл>.* закрыты', async () => {
   await using box = await sandbox();
   await writeFile(path.join(box.outside, 'secret.txt'), 'нельзя');

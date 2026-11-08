@@ -9,6 +9,7 @@ import { utilityHosts } from './plugin-hosts.ts';
 import { PluginsService } from './plugins.ts';
 import { runSpike } from './spike.ts';
 import { runHostsSpike } from './spike-hosts.ts';
+import { runGatewaySpike } from './spike-gateway.ts';
 import { resolveDragFile, ViewDrags } from './view-drag.ts';
 import { framesOf, fromWindow, registerViewScheme, senderPlugin, serveViews, viewFrames } from './views.ts';
 import { themeTokens } from './theme.ts';
@@ -24,6 +25,7 @@ registerViewScheme();
 /** `--spike=<файл>`: замеры видов во фреймах (SAD, открытый вопрос 11) вместо окна плагинов. */
 const spikeOut = process.argv.find((a) => a.startsWith('--spike='))?.slice('--spike='.length);
 const hostsSpikeOut = process.argv.find((a) => a.startsWith('--spike-hosts='))?.slice('--spike-hosts='.length);
+const gatewaySpikeOut = process.argv.find((a) => a.startsWith('--spike-gateway='))?.slice('--spike-gateway='.length);
 const recent = new RecentWorkspaces(path.join(app.getPath('userData'), 'recent.json'));
 /** `--workspace=<файл>` по SAD §3.1; без флага - последний из «Недавних», без них - `<userData>/workspace.cyborg.json`; `--no-workspace` - окно без воркспейса. */
 const workspaceArg = process.argv.find((a) => a.startsWith('--workspace='))?.slice('--workspace='.length);
@@ -32,7 +34,7 @@ const workspaceFile = process.argv.includes('--no-workspace')
   : workspaceArg !== undefined
     ? path.resolve(workspaceArg)
     : (recent.list()[0] ?? path.join(app.getPath('userData'), 'workspace.cyborg.json'));
-const spiking = spikeOut !== undefined || hostsSpikeOut !== undefined;
+const spiking = spikeOut !== undefined || hostsSpikeOut !== undefined || gatewaySpikeOut !== undefined;
 /** `--safe-mode` (BR-CH-005): манифесты разобраны, код плагинов не запускается; смена воркспейса флаг сохраняет, снимает его только «Выйти из безопасного режима». */
 const SAFE_MODE = '--safe-mode';
 const safeMode = process.argv.includes(SAFE_MODE);
@@ -283,6 +285,10 @@ app.on('window-all-closed', () => {
 });
 
 void app.whenReady().then(() => {
+  if (gatewaySpikeOut !== undefined) {
+    void runGatewaySpike({ out: gatewaySpikeOut, hostEntry: path.join(__dirname, 'plugin-host.mjs'), benchDir: path.join(__dirname, 'bench') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
+    return;
+  }
   if (hostsSpikeOut !== undefined) {
     void runHostsSpike({ out: hostsSpikeOut, hostEntry: path.join(__dirname, 'plugin-host.mjs'), benchDir: path.join(__dirname, 'bench') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
     return;
