@@ -13,8 +13,15 @@ const tsc = path.join(root, 'node_modules', 'typescript7', 'bin', 'tsc');
 
 let work = '';
 let project = '';
-const run = (cmd: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = {}) =>
-  execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
+/** Команда с пределом времени: зависшая npm не должна держать весь `npm test`; при отказе в сообщение идёт её вывод. */
+function run(cmd: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = {}): string {
+  try {
+    return execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env }, timeout: 90_000, killSignal: 'SIGKILL' });
+  } catch (error) {
+    const e = error as { message: string; stdout?: string; stderr?: string };
+    throw new Error(`${cmd} ${args.join(' ')} (cwd ${cwd}): ${e.message}\n--- stdout\n${e.stdout ?? ''}\n--- stderr\n${e.stderr ?? ''}`, { cause: error });
+  }
+}
 
 /** Упаковывает пакет в `work` и возвращает путь архива. */
 function pack(dir: string): string {

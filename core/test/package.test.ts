@@ -105,7 +105,7 @@ describe('собранный пакет (core/dist)', () => {
   });
 
   it('npm pack: в архиве dist, package.json и README, без исходников и тестов', () => {
-    const out = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: core, encoding: 'utf8' });
+    const out = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: core, encoding: 'utf8', timeout: 90_000, killSignal: 'SIGKILL' });
     const [pack] = JSON.parse(out) as [{ files: { path: string }[] }];
     const names = pack.files.map((f) => f.path);
     assert.ok(names.includes('package.json') && names.includes('README.md'), 'нет package.json или README.md');
