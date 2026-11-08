@@ -52,8 +52,11 @@ export interface FileSlice {
 export interface ProcessResult {
   readonly code: number | null;
   readonly signal: string | null;
+  /** Вывод до предела; обрезанный по `truncated` на границе символа. */
   readonly stdout: string;
   readonly stderr: string;
+  /** Вывод `stdout` или `stderr` дошёл до предела (`maxOutputBytes`, по умолчанию 16 МиБ): программа остановлена `SIGTERM`, а в ответе только прочитанное. Для плагина это ошибка («ответ больше N»), а не данные. */
+  readonly truncated: boolean;
 }
 
 export interface ProcessOptions {
@@ -61,7 +64,10 @@ export interface ProcessOptions {
   /** Только имена из `env` правила `process`; база - PATH, HOME, локаль. Значения - данные, а не ссылки `$secret`. */
   readonly env?: Readonly<Record<string, string>>;
   readonly input?: string;
+  /** Срок программы, мс; истёк - `SIGTERM` всей группе, в ответе `signal: 'SIGTERM'`. */
   readonly timeoutMs?: number;
+  /** Предел вывода, байт на `stdout` и на `stderr` отдельно: целое от 1 до 64 МиБ, по умолчанию 16 МиБ. Превышение не ошибка вызова, а `truncated` в ответе. */
+  readonly maxOutputBytes?: number;
 }
 
 export interface HttpRequest {

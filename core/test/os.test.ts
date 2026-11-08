@@ -148,6 +148,42 @@ test('process.run: программа и префикс аргументов и�
   await k.unload();
 });
 
+test('process.run: вывод больше предела - truncated, программа остановлена, прочитанное до предела целое по символам; предел в байтах и по потокам', async () => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ runner: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp, limits: { processOutput: 1000, processOutputMax: 4000 } });
+  const run = (script: string, options?: object) => os('runner').process!.run(process.execPath, ['-e', script], options);
+  const small = await run(`process.stdout.write('я'.repeat(500));process.stderr.write('e')`);
+  assert.deepEqual([small.code, small.truncated, small.stdout.length], [0, false, 500], 'ровно в предел (1000 байт) - не обрезано');
+  const over = await run(`process.stdout.write('я'.repeat(501))`);
+  assert.equal(over.truncated, true, 'предел в байтах, а не в символах: 501 символ по 2 байта');
+  assert.equal(over.stdout, 'я'.repeat(500), 'обрыв на границе символа, без U+FFFD');
+  const odd = await run(`process.stdout.write('a'+'я'.repeat(600))`);
+  assert.deepEqual([odd.truncated, odd.stdout], [true, 'a' + 'я'.repeat(499)], 'половина символа на границе предела отброшена');
+  const err = await run(`process.stderr.write('x'.repeat(2000))`);
+  assert.deepEqual([err.truncated, err.stderr.length, err.stdout], [true, 1000, '']);
+  const endless = await run(`for(;;)process.stdout.write('x'.repeat(65536))`);
+  assert.deepEqual([endless.truncated, endless.signal, endless.stdout.length], [true, 'SIGTERM', 1000], 'бесконечный вывод останавливает программу');
+  const raised = await run(`process.stdout.write('x'.repeat(3000))`, { maxOutputBytes: 3000 });
+  assert.deepEqual([raised.truncated, raised.stdout.length], [false, 3000], 'опция поднимает предел');
+  const lowered = await run(`process.stdout.write('x'.repeat(100))`, { maxOutputBytes: 10 });
+  assert.deepEqual([lowered.truncated, lowered.stdout], [true, 'x'.repeat(10)], 'опция опускает предел');
+  for (const bad of [0, -1, 1.5, 4001, '10', Number.NaN]) await assert.rejects(run('0', { maxOutputBytes: bad }), { code: 'Invalid', message: /maxOutputBytes/ }, String(bad));
+  await k.unload();
+});
+
+test('process.run: предел вывода по умолчанию - 16 МиБ, как и записано в SAD', async () => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ runner: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp });
+  const script = (mib: number) => `const b=Buffer.alloc(1048576,97);for(let i=0;i<${String(mib)};i++)process.stdout.write(b)`;
+  const exact = await os('runner').process!.run(process.execPath, ['-e', script(16)]);
+  assert.deepEqual([exact.truncated, exact.stdout.length], [false, 16 * 1024 * 1024]);
+  const over = await os('runner').process!.run(process.execPath, ['-e', script(17)]);
+  assert.deepEqual([over.truncated, over.stdout.length], [true, 16 * 1024 * 1024]);
+  const big = await os('runner').process!.run(process.execPath, ['-e', script(64)], { maxOutputBytes: 64 * 1024 * 1024 });
+  assert.deepEqual([big.truncated, big.stdout.length], [false, 64 * 1024 * 1024], 'буфер трекеров Cyborg - 64 МиБ - укладывается в потолок');
+  await k.unload();
+});
+
 test('net.fetch: хост из права или из config, переадресация не идёт сама', async () => {
   await using box = await sandbox();
   const calls: string[] = [];

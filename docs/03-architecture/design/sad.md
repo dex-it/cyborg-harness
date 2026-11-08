@@ -2,7 +2,7 @@
 level: design
 feature: cyborg-harness
 status: review
-date: 2026-11-06
+date: 2026-11-08
 origin: derived
 quality-checks: входных записей нет
 ---
@@ -325,6 +325,7 @@ const view = await ctx.terminal.open(ticket);  // data / write / resize, мим�
 | ввод в pty за вызов | 1 МиБ UTF-8 (требование Cyborg) | `PtyTable.write` и `openTerminal().write` - одна проверка для хоста и вида |
 | живых pty у плагина | 32, включая ждущие `attach` | `PtyTable.spawn` |
 | одновременных `process.run` | 16 | шлюз; счёт на поколение плагина - убитая при выгрузке программа место нового не занимает |
+| вывод `process.run` | 16 МиБ на `stdout` и на `stderr`; опция `maxOutputBytes` поднимает до 64 МиБ (буфер трекеров Cyborg), опускает до любого целого; сверх предела - `truncated: true`, программа остановлена `SIGTERM`, в ответе прочитанное до предела на границе символа (K-12) | шлюз, `processOutput` и `processOutputMax` |
 | `fs.readText` | файл до 5 МиБ, крупнее - `fs.readSlice` (значение согласовать с K-12); предел держит само чтение, а не `stat` - файл растёт и после проверки; FIFO и устройства - `Invalid` и для `fs.readSlice` | шлюз |
 | подписок через контракты у потребителя | 256 | `invoke` загрузчика |
 | слушателей `onIdle` у плагина | 64 | `idle.watch` загрузчика; отказ - в журнал хоста, вызов в плагине синхронный |

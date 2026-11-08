@@ -98,7 +98,6 @@ export interface Denial {
   readonly reason?: 'via-contract';
 }
 
-const MAX_OUTPUT = 16 * 1024 * 1024;
 const MAX_BODY = 16 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 30_000;
 const MAX_SLICE = 1024 * 1024;
@@ -808,18 +807,19 @@ export class OsGateway {
     const options = isRecord(args[2]) ? args[2] : {};
     const { file, argv, cwd, env } = await this.#program(m, 'process', method, program, args[1], options);
     const timeout = typeof options.timeoutMs === 'number' ? options.timeoutMs : 0;
+    const maxOutput = options.maxOutputBytes === undefined ? this.#limits.processOutput : int(method, options.maxOutputBytes, 'maxOutputBytes', 1, this.#limits.processOutputMax);
     const runs = this.#runs.get(m.id) ?? { n: 0 };
     if (runs.n >= this.#limits.runs) throw new CoreError('Invalid', `${method}: у ${m.id} уже ${String(runs.n)} программ - дождитесь завершения прежних`);
     this.#runs.set(m.id, runs);
     runs.n++;
     try {
-      return await this.#spawnRun(m.id, program, file, argv, cwd, env, timeout, options.input);
+      return await this.#spawnRun(m.id, program, file, argv, cwd, env, timeout, maxOutput, options.input);
     } finally {
       runs.n--;
     }
   }
 
-  #spawnRun(pluginId: string, program: string, file: string, argv: string[], cwd: string | undefined, env: Record<string, string>, timeout: number, input: unknown): Promise<ProcessResult> {
+  #spawnRun(pluginId: string, program: string, file: string, argv: string[], cwd: string | undefined, env: Record<string, string>, timeout: number, maxOutput: number, input: unknown): Promise<ProcessResult> {
     return new Promise((resolve, reject) => {
       // Своя группа процессов: тайм-аут и выгрузка плагина гасят и то, что программа запустила сама.
       const child = spawn(file, argv, { cwd, env, shell: false, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
@@ -833,20 +833,40 @@ export class OsGateway {
         clearTimeout(timer);
         untrack();
       };
-      let stdout = '';
-      let stderr = '';
-      // Символ UTF-8 бывает на границе кусков трубы: декодер держит недочитанные байты до следующего куска.
-      const decoders = { out: new StringDecoder('utf8'), err: new StringDecoder('utf8') };
-      const cap = (s: string, text: string) => (s.length < MAX_OUTPUT ? s + text : s);
-      child.stdout.on('data', (c: Buffer) => (stdout = cap(stdout, decoders.out.write(c))));
-      child.stderr.on('data', (c: Buffer) => (stderr = cap(stderr, decoders.err.write(c))));
+      let truncated = false;
+      // Предел в байтах и на каждый поток: символ UTF-8 бывает на границе кусков трубы, декодер держит недочитанные байты.
+      const collect = () => {
+        const decoder = new StringDecoder('utf8');
+        let text = '';
+        let bytes = 0;
+        let full = false;
+        return {
+          write: (chunk: Buffer) => {
+            if (full) return;
+            const room = maxOutput - bytes;
+            const part = chunk.length > room ? chunk.subarray(0, room) : chunk;
+            bytes += part.length;
+            text += decoder.write(part);
+            if (part !== chunk) {
+              full = truncated = true;
+              stop('SIGTERM');
+            }
+          },
+          // Оборванный символ на границе предела не дописывается: `end()` дал бы U+FFFD.
+          end: () => text + (full ? '' : decoder.end()),
+        };
+      };
+      const out = collect();
+      const err = collect();
+      child.stdout.on('data', (c: Buffer) => out.write(c));
+      child.stderr.on('data', (c: Buffer) => err.write(c));
       child.once('error', (error) => {
         done();
         reject(new CoreError('Remote', `${program}: ${error.message}`));
       });
       child.once('close', (code, signal) => {
         done();
-        resolve({ code, signal, stdout: cap(stdout, decoders.out.end()), stderr: cap(stderr, decoders.err.end()) });
+        resolve({ code, signal, stdout: out.end(), stderr: err.end(), truncated });
       });
       child.stdin.end(typeof input === 'string' ? input : undefined);
     });

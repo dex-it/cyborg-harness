@@ -11,6 +11,10 @@ export interface ResourceLimits {
   readonly ptyFlushChars: number;
   /** Одновременных `process.run` у плагина. */
   readonly runs: number;
+  /** Байт stdout и stderr `process.run` (каждого) по умолчанию; дальше программа остановлена, ответ - `truncated`. */
+  readonly processOutput: number;
+  /** Потолок опции `maxOutputBytes` у `process.run`; больше - `Invalid`. */
+  readonly processOutputMax: number;
   /** Байт файла для `fs.readText`; крупнее читается частями через `fs.readSlice`. */
   readonly readText: number;
   /** Живых подписок плагина-потребителя через контракты. */
@@ -25,6 +29,8 @@ export const LIMITS: ResourceLimits = {
   ptyFlushMs: 4,
   ptyFlushChars: 64 * 1024,
   runs: 16,
+  processOutput: 16 * 1024 * 1024,
+  processOutputMax: 64 * 1024 * 1024,
   readText: 5 * 1024 * 1024,
   subscriptions: 256,
   idleWatchers: 64,
