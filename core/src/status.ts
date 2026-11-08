@@ -1,7 +1,7 @@
 import type { SectionResult } from './config.ts';
 import type { Rejection } from './graph.ts';
 import { DENIED_WINDOW_MS } from './journal.ts';
-import type { JournalEntry } from './loader.ts';
+import type { JournalEntry } from './kernel-types.ts';
 
 /** Что показать на месте плагина: работает, ждёт перезапуска хоста, выключен (сбоем или человеком) или не включён в настройках. */
 export type PluginState = 'active' | 'waiting' | 'restarting' | 'stopped' | 'disabled';

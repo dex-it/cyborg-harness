@@ -1,4 +1,4 @@
-import type { JournalEntry } from './loader.ts';
+import type { JournalEntry } from './kernel-types.ts';
 
 export const MAX_DENIED = 1000;
 export const DENIED_WINDOW_MS = 5000;
