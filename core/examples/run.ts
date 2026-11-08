@@ -67,6 +67,8 @@ function rejection(r: Rejection): string {
       return `${r.contract}: поставщиков несколько (${r.providers.join(', ')}), а кратность one`;
     case 'cycle':
       return `цикл зависимостей: ${r.members.join(' -> ')}`;
+    case 'reserved':
+      return `${r.what === 'id' ? 'id' : 'контракт'} ${r.name} из пространства поставки ${r.prefix}*, а плагин сторонний`;
   }
 }
 
