@@ -242,7 +242,7 @@ function closing(tokens: readonly Token[], from: number, open: string, close: st
   return -1;
 }
 
-/** `type` перед клаузой - модификатор, а не имя импортируемого по умолчанию (`import type from 'x'`). */
+/** `type` перед клаузой - модификатор, а не имя импортируемого по умолчанию (в `import type from "x"` имя импорта - type). */
 function typeModifier(t: readonly Token[], at: number): boolean {
   if (!isId(t[at], 'type')) return false;
   const next = t[at + 1];
@@ -256,7 +256,7 @@ function elementTypeOnly(element: readonly Token[]): boolean {
   return isId(element[0], 'type') && second !== undefined && (second.kind === 'str' || (second.kind === 'id' && second.text !== 'as'));
 }
 
-/** Все формы: `import`, `export … from`, `import()`, `require`, `import type`, `import('…').T`; вычисляемый путь и неразобранный оператор - отдельными записями. */
+/** Все формы загрузки модуля: статический import и реэкспорт, вызовы import и require, import type, тип-импорт в позиции типа; вычисляемый путь и неразобранный оператор - отдельными записями. */
 export function usesOf(text: string): Use[] {
   const t = tokenize(text);
   const uses: Use[] = [];
@@ -419,7 +419,7 @@ export function declarationProblems(text: string, contracts: string): number[] {
   return found;
 }
 
-/** `import type … from '<contracts>'` целиком, без других форм. */
+/** Оператор - import type из пакета контрактов целиком, без других форм. */
 function typeImportOf(s: readonly Token[], contracts: string): boolean {
   const from = s.findIndex((tok, i) => isId(tok, 'from') && s[i + 1]?.kind === 'str');
   return from > 0 && s[from + 1]?.text === contracts && !s.slice(2, from).some((tok) => isP(tok, '='));

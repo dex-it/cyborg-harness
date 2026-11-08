@@ -75,6 +75,9 @@ const TOP_LEVEL = new Set([
   'config', 'state', 'permissions', 'ui', 'documents', 'host', 'activation', 'lock',
 ]);
 
+/** Ключи верхнего уровня, которые знает разбор; по ним `checkPlugin` сверяет, что каждый новый ключ учтён в проверке файлов. */
+export const MANIFEST_KEYS: ReadonlySet<string> = TOP_LEVEL;
+
 export function isValidId(value: string): boolean {
   return ID.test(value);
 }
