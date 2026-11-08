@@ -2,12 +2,20 @@
   "name": "cyborg-harness",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "contracts",
+    "core"
+  ],
   "description": "Ядро плагинов Cyborg Harness и playground-приложение на Electron для проверки его вживую",
   "main": "playground/dist/main.js",
   "scripts": {
+    "build:core": "node core/scripts/build.mjs",
+    "prebuild": "npm run build:core",
     "build": "node playground/scripts/build.mjs",
     "start": "npm run build && electron .",
+    "pretypecheck": "npm run build:core",
     "typecheck": "node node_modules/typescript7/bin/tsc --noEmit -p core && node node_modules/typescript7/bin/tsc --noEmit -p core/elements && node node_modules/typescript7/bin/tsc --noEmit -p playground",
+    "pretest": "npm run build:core",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-timeout=120000 'core/test/*.test.ts' 'playground/src/**/*.test.ts' 'playground/test/*.test.ts'",
     "demo": "node core/examples/run.ts",
     "smoke": "npm run build && node playground/scripts/smoke.mjs",
@@ -16,6 +24,7 @@
     "spike:gateway": "npm run build && node playground/scripts/spike-gateway.mjs",
     "spike:pty": "node playground/scripts/spike-pty.mjs",
     "spike:pty-restore": "node playground/scripts/spike-pty-restore.mjs",
+    "prelint": "npm run build:core",
     "lint": "eslint --max-warnings 0 .",
     "postinstall": "electron-rebuild -f -w node-pty"
   },
