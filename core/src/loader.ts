@@ -22,7 +22,8 @@ import { DocumentTable, type DocumentRow } from './documents.ts';
 import { guardedValue, guardsOf } from './via-contract.ts';
 import { isRecord, own, parseWire, type Parsed, type WireSpec } from './wire.ts';
 import type { HostHandle, SpawnHost } from './transports.ts';
-import type { KeptPty, TerminalSink, TerminalView } from './pty.ts';
+import type { KeptPty, TerminalChannel, TerminalView } from './pty.ts';
+import { PTY_HOST_ID } from './journal.ts';
 import { KERNEL_COMMANDS, KERNEL_OWNER, WINDOW_COMMANDS, WINDOW_OWNER, WindowLayer, type WindowSnapshot, type WindowTitle } from './window-layer.ts';
 
 export type JournalEntry =
@@ -79,6 +80,8 @@ export type JournalEntry =
       readonly plugins: readonly string[];
       /** Активные плагины других хостов, которые брали контракты снятых. */
       readonly affects: readonly string[];
+      /** Только у pty-хоста (`hostId: 'pty-host'`): плагины, чьи живые pty пропали вместе с ним; они получили `onExit`. */
+      readonly lostPtys?: readonly string[];
     }
   | { readonly pluginId?: undefined; readonly kind: 'host-restart'; readonly hostId: string; readonly plugins: readonly string[] }
   | {
@@ -206,8 +209,8 @@ export interface Kernel {
   idle(): Promise<void>;
   /** Плагин с `activation: "lazy"` нужен сейчас - например, показан его вид; активному или не ленивому ничего не делает. */
   wake(pluginId: string): Promise<void>;
-  /** Вид плагина открывает pty по билету `share()` его главной части; вывод идёт в `sink` мимо хоста. */
-  openTerminal(pluginId: string, ticket: string, sink: TerminalSink): TerminalView;
+  /** Вид плагина открывает pty по билету `share()` его главной части; вывод идёт из pty-хоста в порт `channel` мимо хоста плагина и мимо главного процесса. */
+  openTerminal(pluginId: string, ticket: string, channel: TerminalChannel): Promise<TerminalView>;
   /** Процессы, оставленные человеком при выключении плагинов, пока плагин не вернулся: без показа приложением их не видно до выхода. */
   keptPty(): KeptPty[];
   /** Человек завершил оставленный процесс или убрал завершившийся; чужой или не оставленный id - `NotFound`. */
@@ -429,7 +432,15 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       if (!host || host.down) throw new CoreError('Unavailable', `${id}: хост не работает`);
       return host.endpoint.request('serve.request', params);
     },
-    { expired: (e) => record({ kind: 'pty-expired', ...e }), kept: () => options.onKeptPty?.() },
+    {
+      expired: (e) => record({ kind: 'pty-expired', ...e }),
+      kept: () => options.onKeptPty?.(),
+      watchdog: options.watchdog,
+      // pty-хост - хост ядра, а не плагинов: в журнале он называется как хост, но снятых плагинов у него нет (`plugins` пуст), владельцы потерянных pty - в `lostPtys`.
+      hostDown: ({ reason, plugins }) => record({ kind: 'host-down', hostId: PTY_HOST_ID, reason, culprits: [], plugins: [], affects: [], lostPtys: plugins }),
+      hostRestarted: () => record({ kind: 'host-restart', hostId: PTY_HOST_ID, plugins: [] }),
+      hostAbandoned: (failures) => record({ kind: 'host-abandoned', hostId: PTY_HOST_ID, failures, plugins: [] }),
+    },
   );
 
   const manifests: PluginManifest[] = [];
@@ -1202,7 +1213,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     },
     keysOf: (pluginId) => Object.fromEntries([...keys.values()].filter((k) => k.pluginId === pluginId).map((k) => [k.command, k.key])),
     wake,
-    openTerminal: (pluginId, ticket, sink) => gateway.openTerminal(pluginId, ticket, sink),
+    openTerminal: (pluginId, ticket, channel) => gateway.openTerminal(pluginId, ticket, channel),
     keptPty: () => gateway.keptPty(),
     endKeptPty: (id) => gateway.endKeptPty(id),
     viewState: (pluginId, view) => {
@@ -1293,7 +1304,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
         }
         dropPlugin(pluginId);
       }
-      gateway.releaseAllPty();
+      await gateway.releaseAllPty();
       layer.clear();
       for (const host of [...hosts.values()]) stopHost(host, new CoreError('HostGone', 'ядро выгружено'));
       denials.flush();

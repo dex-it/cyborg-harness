@@ -9,7 +9,8 @@ import { limitsOf, type ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { NotifyLimits, ShowNotice } from './notices.ts';
 import { ANY_PATH, LOGIN_SHELL } from './permissions.ts';
-import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type KeptPty, type PtyExpiry, type TerminalSink, type TerminalView } from './pty.ts';
+import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type KeptPty, type PtyExpiry, type PtyHostEvents, type TerminalChannel, type TerminalView } from './pty.ts';
+import { inlinePtyHost, type PtyWatchdog, type SpawnPtyHost } from './pty-link.ts';
 import { HttpServes, type AskHost } from './serve.ts';
 import type { GuardRight } from './via-contract.ts';
 import { isRecord } from './wire.ts';
@@ -46,8 +47,10 @@ export interface OsEnvironment {
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly fetch?: typeof fetch;
   readonly watch?: typeof watchFs;
-  /** Псевдотерминал; нет - `ctx.os.pty` отвечает `Unavailable`. */
+  /** Псевдотерминал в этом же процессе: ядро запускает над ним pty-хост без изоляции (тесты, замеры). Нет ни `pty`, ни `ptyHost` - `ctx.os.pty` отвечает `Unavailable`. */
   readonly pty?: PtyBackend;
+  /** Отдельный процесс pty-хоста (`utilityProcess` ядра, K-01): держит `node-pty`, хвосты вывода и зрителей; ядро следит за ним сторожем и перезапускает. Сильнее `pty`. */
+  readonly ptyHost?: SpawnPtyHost;
   /** Хвост вывода pty, символов; по умолчанию 256 К. */
   readonly ptyBacklog?: number;
   /** Сколько мс pty с `persist` ждёт `attach` плагина после падения его хоста; по умолчанию 60 000. */
@@ -303,7 +306,7 @@ export class OsGateway {
     manifestOf: (pluginId: string) => PluginManifest | undefined = () => undefined,
     grants?: GrantStore,
     ask: AskHost = () => Promise.reject(new CoreError('Unavailable', 'хоста нет')),
-    ptyEvents: { readonly expired?: (expiry: PtyExpiry) => void; readonly kept?: () => void } = {},
+    ptyEvents: { readonly expired?: (expiry: PtyExpiry) => void; readonly kept?: () => void; readonly watchdog?: Partial<PtyWatchdog> | undefined } & PtyHostEvents = {},
   ) {
     this.#env = env;
     this.#limits = limitsOf(env.limits);
@@ -322,7 +325,8 @@ export class OsGateway {
     this.#push = push;
     this.#deny = deny;
     this.#configOf = configOf;
-    this.#pty = env.pty && new PtyTable(env.pty, push, env.ptyBacklog, undefined, { ...this.#limits, ...(env.ptyOrphanGrace !== undefined && { graceMs: env.ptyOrphanGrace }), ...ptyEvents });
+    const ptyHost = env.ptyHost ?? (env.pty && inlinePtyHost(env.pty));
+    this.#pty = ptyHost && new PtyTable(ptyHost, push, { ...this.#limits, ...(env.ptyBacklog !== undefined && { backlog: env.ptyBacklog }), ...(env.ptyOrphanGrace !== undefined && { graceMs: env.ptyOrphanGrace }), ...ptyEvents });
   }
 
   pathsOf(pluginId: string): { data: string; temp: string; home: string } {
@@ -362,8 +366,9 @@ export class OsGateway {
     await shell.showItemInFolder(file);
   }
 
-  releaseAllPty(): void {
-    this.#pty?.releaseAll();
+  /** Выгрузка ядра: процессы pty завершены, pty-хост остановлен. */
+  async releaseAllPty(): Promise<void> {
+    await this.#pty?.releaseAll();
   }
 
   /** Плагин активирован: с этого момента идёт льготный срок на `attach` его pty без владельца. */
@@ -381,8 +386,8 @@ export class OsGateway {
   }
 
   /** Вид плагина предъявил билет своей главной части; `pluginId` приложение берёт из origin фрейма, а не из слов вида. */
-  openTerminal(pluginId: string, ticket: string, sink: TerminalSink): TerminalView {
-    return this.#ptyTable().openTerminal(pluginId, ticket, sink);
+  openTerminal(pluginId: string, ticket: string, channel: TerminalChannel): Promise<TerminalView> {
+    return this.#ptyTable().openTerminal(pluginId, ticket, channel);
   }
 
   /** Запомнить config плагина как принятый: зовётся при активации и после правки файла извне, но не после записи самого плагина. */
@@ -651,14 +656,14 @@ export class OsGateway {
           if (refused) throw this.#denied(m, method, `${id}: ${refused}`);
         }
         const size = (v: unknown, fallback: number) => (Number.isInteger(v) && (v as number) > 0 && (v as number) <= 1000 ? (v as number) : fallback);
-        return table.spawn(m.id, { program: checked.file, args: checked.argv, ...(checked.cwd !== undefined && { cwd: checked.cwd }), env: checked.env, cols: size(o.cols, 80), rows: size(o.rows, 24), persist: o.persist === true });
+        return await table.spawn(m.id, { program: checked.file, args: checked.argv, ...(checked.cwd !== undefined && { cwd: checked.cwd }), env: checked.env, cols: size(o.cols, 80), rows: size(o.rows, 24), persist: o.persist === true });
       }
       case 'pty.share':
         return this.#ptyTable().share(m.id, str(method, args[0], 'id'));
       case 'pty.list':
         return this.#ptyTable().list(m.id);
       case 'pty.attach':
-        return this.#ptyTable().attach(m.id, str(method, args[0], 'id'));
+        return await this.#ptyTable().attach(m.id, str(method, args[0], 'id'));
       case 'pty.write':
         this.#ptyTable().write(m.id, str(method, args[0], 'id'), str(method, args[1], 'ввод'));
         return undefined;

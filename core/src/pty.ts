@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { PtyExit, PtyInfo } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
 import { LIMITS, type ResourceLimits } from './limits.ts';
+import { BACKLOG_LIMIT } from './pty-tail.ts';
+import { PtyLink, type PtyWatchdog, type SpawnPtyHost } from './pty-link.ts';
 
 /** Процесс в псевдотерминале; форма совпадает с IPty из node-pty, так что адаптер Electron отдаёт его как есть. */
 export interface PtyProcess {
@@ -13,48 +15,52 @@ export interface PtyProcess {
   kill(signal?: string): void;
 }
 
+/** Откуда pty-хост берёт процессы (в нём живёт `node-pty`). Запуск может быть асинхронным: за границей процессов `pid` приходит позже. */
 export interface PtyBackend {
-  spawn(file: string, args: string[], options: { name: string; cwd?: string; env: Record<string, string>; cols: number; rows: number }): PtyProcess;
+  spawn(file: string, args: string[], options: { name: string; cwd?: string; env: Record<string, string>; cols: number; rows: number }): PtyProcess | Promise<PtyProcess>;
 }
 
-/** Что уходит в хост на spawn и attach: описание плюс хвост вывода. */
+/** Что уходит в хост плагина на spawn и attach: описание плюс хвост вывода. */
 export interface PtyWire extends PtyInfo {
   readonly backlog: string;
 }
 
-/** Куда ядро шлёт вывод pty для UI-части: мимо хоста, прямо в документ вида. */
-export interface TerminalSink {
-  data(chunk: string): void;
-  exit(exit: PtyExit): void;
+/**
+ * Канал вида к pty-хосту: вывод идёт из хоста прямо в этот порт, ввод и размер - обратно, главный процесс в потоке не участвует.
+ * Главный процесс создаёт пару портов, отдаёт ядру один конец (`hostEnd`) и второй - фрейму вида.
+ */
+export interface TerminalChannel {
+  /** Конец, который уходит pty-хосту переносом (в Electron - `MessagePortMain`). */
+  readonly hostEnd: unknown;
+  /** Главному процессу канал больше не нужен: pty завершён, вид закрыл порт или pty-хост потерян (`lost` - тогда порт молчит, и о конце вид узнает отсюда). */
+  closed(lost?: PtyExit): void;
 }
 
-/** Терминал, открытый видом по билету: ввод и размер идут в pty без хоста плагина. */
+/** Терминал, открытый видом по билету: описание и хвост; ввод и размер вид шлёт сам в порт. */
 export interface TerminalView extends PtyWire {
-  write(data: string): void;
-  resize(cols: number, rows: number): void;
   close(): void;
 }
+
+/** Код выхода pty, потерянных вместе с pty-хостом: процесса уже нет, настоящий код неизвестен. */
+export const PTY_HOST_LOST: PtyExit = Object.freeze({ code: -1 });
 
 interface Entry {
   readonly id: string;
   readonly pluginId: string;
-  readonly proc: PtyProcess;
+  /** Нет, пока хост не подтвердил запуск. */
+  pid: number | undefined;
   readonly program: string;
   readonly args: readonly string[];
   readonly persist: boolean;
-  cols: number;
-  rows: number;
-  readonly tail: Tail;
+  /** Вывод идёт в хост плагина. */
   attached: boolean;
-  readonly viewers: Set<TerminalSink>;
+  /** Хвост пропал вместе с pty-хостом. */
+  lost: boolean;
+  readonly views: Set<string>;
   exit?: PtyExit;
   orphaned?: ReturnType<typeof setTimeout>;
   /** Оставлен человеком при выключении плагина; снимается, когда плагин вернулся. */
   keptAt: number | undefined;
-  pending: string[];
-  pendingChars: number;
-  flushed: number;
-  timer?: ReturnType<typeof setTimeout> | undefined;
 }
 
 /** pty без владельца завершён по сроку: плагин не вернулся и не сделал `attach`. */
@@ -81,120 +87,114 @@ export interface PtyOrphan {
   readonly kept?: () => void;
 }
 
-export const PTY_SIGNALS = ['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGHUP'] as const;
-
-/** Хвост вывода: куски склеиваются при чтении и изредка при сжатии, а не копией всего хвоста на каждый кусок. */
-export class Tail {
-  readonly #limit: number;
-  #chunks: string[] = [];
-  #size = 0;
-
-  constructor(limit: number) {
-    this.#limit = limit;
-  }
-
-  push(data: string): void {
-    this.#chunks.push(data);
-    this.#size += data.length;
-    let first = this.#chunks[0];
-    while (first !== undefined && this.#chunks.length > 1 && this.#size - first.length >= this.#limit) {
-      this.#chunks.shift();
-      this.#size -= first.length;
-      first = this.#chunks[0];
-    }
-    if (this.#chunks.length > 1024) {
-      const text = this.text();
-      this.#chunks = [text];
-      this.#size = text.length;
-    }
-  }
-
-  text(): string {
-    const all = this.#chunks.join('');
-    return all.length > this.#limit ? all.slice(-this.#limit) : all;
-  }
-
-  take(): string {
-    const text = this.text();
-    this.#chunks = [];
-    this.#size = 0;
-    return text;
-  }
+/** Что случилось с самим pty-хостом: упал или завис (процессы потеряны), поднят снова, перестал подниматься. */
+export interface PtyHostEvents {
+  readonly hostDown?: (down: { readonly reason: 'hang' | 'crash'; /** Плагины, чьи живые pty потеряны. */ readonly plugins: readonly string[] }) => void;
+  readonly hostRestarted?: () => void;
+  readonly hostAbandoned?: (failures: number) => void;
 }
 
-export const BACKLOG_LIMIT = 256 * 1024;
+export interface PtyTableOptions extends Partial<PtyLimits>, PtyOrphan, PtyHostEvents {
+  /** Хвост вывода одного pty, символов. */
+  readonly backlog?: number;
+  /** Жизнь билета `share()`, мс. */
+  readonly ticketTtl?: number;
+  readonly watchdog?: Partial<PtyWatchdog> | undefined;
+}
+
+export const PTY_SIGNALS = ['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGHUP'] as const;
+
+export { BACKLOG_LIMIT, Tail } from './pty-tail.ts';
+
 /** Столько ждёт pty с `persist`, чей хост упал: перезапуск и активация укладываются в секунды, как переподключение в VS Code. */
 export const ORPHAN_GRACE = 60_000;
 
-/** pty всех плагинов: живут в главном процессе, переживают хост, если просили `persist`. */
+/**
+ * pty всех плагинов в главном процессе: права, владельцы, билеты, льготный срок и список оставленных.
+ * Процессы, хвосты и зрители живут в pty-хосте (`PtyHost`), связь с ним - `PtyLink`; сам pty-хост переживает хост плагина, а не ядро.
+ */
 export class PtyTable {
-  readonly #backend: PtyBackend;
+  readonly #link: PtyLink;
   readonly #push: (pluginId: string, method: 'pty.data' | 'pty.exit', params: unknown) => void;
-  readonly #limit: number;
   readonly #ticketTtl: number;
   readonly #grace: number;
   readonly #expired: (expiry: PtyExpiry) => void;
   readonly #keptChanged: () => void;
+  readonly #host: PtyHostEvents;
   readonly #entries = new Map<string, Entry>();
   readonly #tickets = new Map<string, { pluginId: string; id: string; expires: number }>();
+  readonly #views = new Map<string, { entry: Entry; channel: TerminalChannel }>();
   readonly #max: PtyLimits;
   #next = 0;
+  #nextView = 0;
 
-  constructor(backend: PtyBackend, push: (pluginId: string, method: 'pty.data' | 'pty.exit', params: unknown) => void, backlogLimit = BACKLOG_LIMIT, ticketTtl = 30_000, options: Partial<PtyLimits> & PtyOrphan = {}) {
-    this.#backend = backend;
+  constructor(spawnHost: SpawnPtyHost, push: (pluginId: string, method: 'pty.data' | 'pty.exit', params: unknown) => void, options: PtyTableOptions = {}) {
     this.#push = push;
-    this.#limit = backlogLimit;
-    this.#ticketTtl = ticketTtl;
+    this.#ticketTtl = options.ticketTtl ?? 30_000;
     this.#grace = options.graceMs ?? ORPHAN_GRACE;
     this.#expired = options.expired ?? (() => undefined);
     this.#keptChanged = options.kept ?? (() => undefined);
+    this.#host = options;
     this.#max = { ptyInput: options.ptyInput ?? LIMITS.ptyInput, ptys: options.ptys ?? LIMITS.ptys, ptyFlushMs: options.ptyFlushMs ?? LIMITS.ptyFlushMs, ptyFlushChars: options.ptyFlushChars ?? LIMITS.ptyFlushChars };
+    this.#link = new PtyLink(spawnHost, {
+      init: { ...this.#max, backlog: options.backlog ?? BACKLOG_LIMIT },
+      watchdog: options.watchdog,
+      events: {
+        data: (key, data) => {
+          const e = this.#entries.get(key);
+          if (e?.attached) this.#push(e.pluginId, 'pty.data', { pluginId: e.pluginId, id: e.id, data });
+        },
+        exit: (key, exit) => this.#exited(key, exit),
+        viewClosed: (viewId) => this.#viewGone(viewId),
+        lost: (reason) => this.#lost(reason),
+        restarted: () => this.#host.hostRestarted?.(),
+        abandoned: (failures) => this.#host.hostAbandoned?.(failures),
+      },
+    });
   }
 
-  spawn(pluginId: string, o: { program: string; args: string[]; cwd?: string; env: Record<string, string>; cols: number; rows: number; persist: boolean }): PtyWire {
+  async spawn(pluginId: string, o: { program: string; args: string[]; cwd?: string; env: Record<string, string>; cols: number; rows: number; persist: boolean }): Promise<PtyWire> {
     if (this.#of(pluginId).filter((x) => !x.exit).length >= this.#max.ptys) throw new CoreError('Invalid', `${pluginId}: живых pty больше ${String(this.#max.ptys)} - завершите прежние`);
     // Терминал на той стороне - xterm.js вида: TERM и COLORTERM описывают его, а не окно, из которого запустили приложение.
     const env = { COLORTERM: 'truecolor', ...o.env };
-    const proc = this.#backend.spawn(o.program, o.args, { name: 'xterm-256color', ...(o.cwd !== undefined && { cwd: o.cwd }), env, cols: o.cols, rows: o.rows });
-    const e: Entry = { id: `pty-${String(++this.#next)}`, pluginId, proc, program: o.program, args: o.args, persist: o.persist, cols: o.cols, rows: o.rows, tail: new Tail(this.#limit), attached: true, viewers: new Set(), pending: [], pendingChars: 0, flushed: -Infinity, keptAt: undefined };
+    // Запись встаёт в таблицу до ответа хоста: предел живых pty и падение владельца видят и запуск, который ещё в пути.
+    const e: Entry = { id: `pty-${String(++this.#next)}`, pluginId, pid: undefined, program: o.program, args: o.args, persist: o.persist, attached: true, lost: false, views: new Set(), keptAt: undefined };
     this.#entries.set(e.id, e);
-    proc.onData((data) => this.#output(e, data));
-    proc.onExit(({ exitCode, signal }) => {
-      this.#flush(e);
-      const exit: PtyExit = { code: exitCode, ...(signal !== undefined && signal !== 0 && { signal }) };
-      e.exit = exit;
-      for (const v of e.viewers) v.exit(exit);
-      e.viewers.clear();
-      if (e.keptAt !== undefined) this.#keptChanged();
-      if (!e.attached) return;
-      this.#entries.delete(e.id);
-      this.#push(pluginId, 'pty.exit', { pluginId, id: e.id, exit: e.exit });
-    });
-    return { ...info(e), backlog: '' };
+    try {
+      e.pid = await this.#link.spawn({ key: e.id, file: o.program, args: o.args, options: { name: 'xterm-256color', ...(o.cwd !== undefined && { cwd: o.cwd }), env, cols: o.cols, rows: o.rows } });
+    } catch (error) {
+      if (this.#entries.get(e.id) === e) this.#entries.delete(e.id);
+      throw error;
+    }
+    if (this.#entries.get(e.id) !== e) {
+      // Владелец ушёл, пока процесс запускался: он никому не нужен.
+      this.#link.note('end', { key: e.id });
+      throw new CoreError('NotFound', `pty ${e.id}: плагин ${pluginId} ушёл до запуска`);
+    }
+    return { ...info(e as Started), backlog: '' };
   }
 
   list(pluginId: string): PtyInfo[] {
-    return [...this.#entries.values()].filter((e) => e.pluginId === pluginId).map(info);
+    return this.#of(pluginId).filter(started).map(info);
   }
 
-  attach(pluginId: string, id: string): PtyWire {
+  async attach(pluginId: string, id: string): Promise<PtyWire> {
     const e = this.#own(pluginId, id);
-    this.#flush(e);
-    const wire = { ...info(e), backlog: e.tail.text() };
     clearTimeout(e.orphaned);
     if (e.keptAt !== undefined) {
       e.keptAt = undefined;
       this.#keptChanged();
     }
-    if (e.exit) {
+    // Хвост пропал вместе с pty-хостом: спрашивать некого.
+    const remote: { backlog: string; exit?: PtyExit } = e.lost ? { backlog: '', ...(e.exit && { exit: e.exit }) } : await this.#link.attach(id);
+    if (e.exit ?? remote.exit) {
       this.#entries.delete(id);
-      return wire;
+      if (!e.lost) this.#link.note('end', { key: id });
+      return { ...info(e), ...(remote.exit && { exit: remote.exit }), backlog: remote.backlog };
     }
+    if (this.#entries.get(id) !== e) throw new CoreError('NotFound', `pty ${id} завершён`);
     e.attached = true;
-    // Тот же размер SIGWINCH не даёт: шаг в сторону и обратно заставляет TUI перерисовать экран для нового владельца.
-    e.proc.resize(Math.max(1, e.cols - 1), e.rows);
-    e.proc.resize(e.cols, e.rows);
-    return wire;
+    return { ...info(e), backlog: remote.backlog };
   }
 
   /** Билет на один `openTerminal` своего UI; живёт `ticketTtl` мс - забытый в журнале или логе билет быстро протухает. */
@@ -208,50 +208,41 @@ export class PtyTable {
   }
 
   /** Билет гасится при первом предъявлении, даже чужим плагином: второй попытки у перехватчика нет. */
-  openTerminal(pluginId: string, ticket: string, sink: TerminalSink): TerminalView {
+  async openTerminal(pluginId: string, ticket: string, channel: TerminalChannel): Promise<TerminalView> {
     const t = this.#tickets.get(ticket);
     this.#tickets.delete(ticket);
     if (t?.pluginId !== pluginId || t.expires <= Date.now()) throw new CoreError('NotFound', 'билет терминала не найден, просрочен или уже использован');
     const e = this.#live(pluginId, t.id);
-    // Накопленное уходит прежним зрителям до хвоста: в хвосте новому оно уже есть, повтора не будет.
-    this.#flush(e);
-    e.viewers.add(sink);
-    const own = () => {
-      if (!e.viewers.has(sink) || e.exit) throw new CoreError('NotFound', `терминал ${e.id} закрыт`);
-    };
-    return {
-      ...info(e),
-      backlog: e.tail.text(),
-      write: (data) => {
-        own();
-        this.#input(data);
-        e.proc.write(data);
+    const viewId = `view-${String(++this.#nextView)}`;
+    this.#views.set(viewId, { entry: e, channel });
+    e.views.add(viewId);
+    let backlog: string;
+    try {
+      backlog = await this.#link.view(e.id, viewId, channel.hostEnd);
+    } catch (error) {
+      this.#forgetView(viewId);
+      throw error;
+    }
+    return { ...info(e), backlog, close: () => {
+        if (this.#forgetView(viewId)) this.#link.note('closeView', { viewId });
       },
-      resize: (cols, rows) => {
-        own();
-        e.cols = cols;
-        e.rows = rows;
-        e.proc.resize(cols, rows);
-      },
-      close: () => e.viewers.delete(sink),
     };
   }
 
   write(pluginId: string, id: string, data: string): void {
     const e = this.#live(pluginId, id);
     this.#input(data);
-    e.proc.write(data);
+    this.#link.note('write', { key: e.id, data });
   }
 
   resize(pluginId: string, id: string, cols: number, rows: number): void {
     const e = this.#live(pluginId, id);
-    e.cols = cols;
-    e.rows = rows;
-    e.proc.resize(cols, rows);
+    this.#link.note('resize', { key: e.id, cols, rows });
   }
 
   kill(pluginId: string, id: string, signal: string | undefined): void {
-    this.#live(pluginId, id).proc.kill(signal);
+    const e = this.#live(pluginId, id);
+    this.#link.note('kill', { key: e.id, ...(signal !== undefined && { signal }) });
   }
 
   /** Хост плагина упал: `persist` ждут attach не дольше льготного срока, прочие завершаются - их вывод больше некому принять. */
@@ -261,7 +252,7 @@ export class PtyTable {
         this.#end(e);
         continue;
       }
-      e.attached = false;
+      this.#unattach(e);
       this.#orphan(e);
     }
   }
@@ -289,9 +280,9 @@ export class PtyTable {
     for (const e of this.#of(pluginId)) {
       // Выбор человека сильнее срока, взведённого падением хоста.
       clearTimeout(e.orphaned);
-      if (e.exit) this.#entries.delete(e.id);
+      if (e.exit) this.#drop(e);
       else {
-        e.attached = false;
+        this.#unattach(e);
         e.keptAt ??= Date.now();
         kept++;
       }
@@ -302,7 +293,7 @@ export class PtyTable {
 
   /** Оставленные человеком процессы выключенных плагинов, в том числе завершившиеся сами. */
   kept(): KeptPty[] {
-    return [...this.#entries.values()].flatMap((e) => (e.keptAt === undefined ? [] : [{ ...info(e), pluginId: e.pluginId, keptAt: e.keptAt }]));
+    return [...this.#entries.values()].filter(started).flatMap((e) => (e.keptAt === undefined ? [] : [{ ...info(e), pluginId: e.pluginId, keptAt: e.keptAt }]));
   }
 
   /** Человек завершил оставленный процесс или убрал завершившийся. */
@@ -313,19 +304,78 @@ export class PtyTable {
     this.#keptChanged();
   }
 
-  /** Приложение завершается: припаркованные pty выключенных плагинов тоже уходят. */
-  releaseAll(): void {
+  /** Приложение завершается: припаркованные pty выключенных плагинов тоже уходят, потом останавливается pty-хост. */
+  async releaseAll(): Promise<void> {
     for (const e of [...this.#entries.values()]) this.#end(e);
+    await this.#link.stop();
+  }
+
+  #unattach(e: Entry): void {
+    if (!e.attached) return;
+    e.attached = false;
+    this.#link.note('owner', { key: e.id, attached: false });
+  }
+
+  /** Запись уходит из таблицы вместе с хвостом в хосте; процесс не трогается. */
+  #drop(e: Entry): void {
+    this.#entries.delete(e.id);
+    this.#link.note('end', { key: e.id });
   }
 
   #end(e: Entry): void {
     clearTimeout(e.orphaned);
     this.#entries.delete(e.id);
-    clearTimeout(e.timer);
-    e.timer = undefined;
-    e.pending = [];
-    e.pendingChars = 0;
-    if (!e.exit) e.proc.kill();
+    // Зрители узнают о конце от самого процесса: убитый pty пришлёт им `exit` по порту.
+    for (const viewId of [...e.views]) this.#viewGone(viewId);
+    this.#link.note('end', { key: e.id });
+  }
+
+  #exited(key: string, exit: PtyExit): void {
+    const e = this.#entries.get(key);
+    if (!e || e.exit) return;
+    e.exit = exit;
+    for (const viewId of [...e.views]) this.#viewGone(viewId);
+    if (e.keptAt !== undefined) this.#keptChanged();
+    if (!e.attached) return;
+    this.#drop(e);
+    this.#push(e.pluginId, 'pty.exit', { pluginId: e.pluginId, id: e.id, exit });
+  }
+
+  /** Хост упал или завис: процессов в нём больше нет, владельцы узнают об этом как о завершении. */
+  #lost(reason: 'hang' | 'crash'): void {
+    const plugins = new Set<string>();
+    let kept = false;
+    for (const e of [...this.#entries.values()]) {
+      // Запуск в пути отклонится сам: его запрос оборван вместе с хостом.
+      if (e.pid === undefined) continue;
+      e.lost = true;
+      if (e.exit) continue;
+      plugins.add(e.pluginId);
+      e.exit = PTY_HOST_LOST;
+      for (const viewId of [...e.views]) this.#viewGone(viewId, PTY_HOST_LOST);
+      kept ||= e.keptAt !== undefined;
+      if (e.attached) {
+        clearTimeout(e.orphaned);
+        this.#entries.delete(e.id);
+        this.#push(e.pluginId, 'pty.exit', { pluginId: e.pluginId, id: e.id, exit: PTY_HOST_LOST });
+      }
+    }
+    if (kept) this.#keptChanged();
+    this.#host.hostDown?.({ reason, plugins: [...plugins] });
+  }
+
+  #viewGone(viewId: string, lost?: PtyExit): void {
+    const v = this.#views.get(viewId);
+    if (!v || !this.#forgetView(viewId)) return;
+    v.channel.closed(lost);
+  }
+
+  #forgetView(viewId: string): boolean {
+    const v = this.#views.get(viewId);
+    if (!v) return false;
+    this.#views.delete(viewId);
+    v.entry.views.delete(viewId);
+    return true;
   }
 
   #orphan(e: Entry): void {
@@ -349,38 +399,6 @@ export class PtyTable {
     }
   }
 
-  /** Первый кусок после затишья уходит сразу - эхо клавиши не ждёт; поток под нагрузкой уходит пачками раз в `ptyFlushMs`. */
-  #output(e: Entry, data: string): void {
-    const { ptyFlushMs: ms, ptyFlushChars: chars } = this.#max;
-    if (ms === 0) {
-      this.#deliver(e, data);
-      return;
-    }
-    e.pending.push(data);
-    e.pendingChars += data.length;
-    const quiet = performance.now() - e.flushed;
-    if (e.pendingChars >= chars || (e.timer === undefined && quiet >= ms)) this.#flush(e);
-    else e.timer ??= setTimeout(() => this.#flush(e), ms - quiet);
-  }
-
-  #flush(e: Entry): void {
-    clearTimeout(e.timer);
-    e.timer = undefined;
-    if (e.pending.length === 0) return;
-    const data = e.pending.length === 1 ? (e.pending[0] ?? '') : e.pending.join('');
-    e.pending = [];
-    e.pendingChars = 0;
-    e.flushed = performance.now();
-    this.#deliver(e, data);
-  }
-
-  #deliver(e: Entry, data: string): void {
-    // Хвост держится и при живом владельце: после перезапуска хоста им восстанавливается экран, где TUI не перерисует себя сам.
-    e.tail.push(data);
-    if (e.attached) this.#push(e.pluginId, 'pty.data', { pluginId: e.pluginId, id: e.id, data });
-    for (const v of e.viewers) v.data(data);
-  }
-
   #of(pluginId: string): Entry[] {
     return [...this.#entries.values()].filter((e) => e.pluginId === pluginId);
   }
@@ -389,22 +407,26 @@ export class PtyTable {
     return this.#of(pluginId).filter((e) => e.keptAt === undefined);
   }
 
-  #own(pluginId: string, id: string): Entry {
+  #own(pluginId: string, id: string): Started {
     const e = this.#entries.get(id);
     // Чужой id неотличим от несуществующего: список чужих pty плагину не виден.
-    if (e?.pluginId !== pluginId) throw new CoreError('NotFound', `pty ${id} не найден`);
+    if (e?.pluginId !== pluginId || !started(e)) throw new CoreError('NotFound', `pty ${id} не найден`);
     return e;
   }
 
-  #live(pluginId: string, id: string): Entry {
+  #live(pluginId: string, id: string): Started {
     const e = this.#own(pluginId, id);
     if (e.exit) throw new CoreError('NotFound', `pty ${id} завершён`);
     return e;
   }
 }
 
-function info(e: Entry): PtyInfo {
-  return { id: e.id, pid: e.proc.pid, program: e.program, args: e.args, persist: e.persist, ...(e.exit && { exit: e.exit }) };
+type Started = Entry & { pid: number };
+
+const started = (e: Entry): e is Started => e.pid !== undefined;
+
+function info(e: Entry & { pid: number }): PtyInfo {
+  return { id: e.id, pid: e.pid, program: e.program, args: e.args, persist: e.persist, ...(e.exit && { exit: e.exit }) };
 }
 
 const send = (target: number, signal: NodeJS.Signals): boolean => {

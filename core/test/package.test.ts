@@ -50,8 +50,8 @@ describe('package.json ядра', () => {
     assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}), ['@cyborg-harness/contracts']);
   });
 
-  it('точки входа: главный процесс, хост, вход хоста для fork, клавиши, оболочка вида, слой окна и элементы окна (имена в них - public-api.test.ts)', () => {
-    assert.deepEqual(Object.keys(manifest.exports ?? {}), ['.', './host', './host-entry', './keys', './ui-shell', './window', './elements', './package.json']);
+  it('точки входа: главный процесс, хост, вход хоста для fork, pty-хост, клавиши, оболочка вида, слой окна и элементы окна (имена в них - public-api.test.ts)', () => {
+    assert.deepEqual(Object.keys(manifest.exports ?? {}), ['.', './host', './host-entry', './pty-host', './keys', './ui-shell', './window', './elements', './package.json']);
     for (const target of exportTargets()) assert.match(target, /^\.\/dist\/.+\.(js|d\.ts)$/, target);
   });
 });
