@@ -1,7 +1,6 @@
 import { CoreError } from './errors.ts';
 import type { KernelContext } from './kernel-context.ts';
 import type { Kernel } from './kernel-types.ts';
-import { KERNEL_OWNER, WINDOW_OWNER } from './window-layer.ts';
 
 // Адрес задаёт вид: data:-адрес на мегабайты раздул бы журнал и снимок окна.
 const MAX_DENIED_URL = 200;
@@ -9,7 +8,7 @@ const MAX_DENIED_URL = 200;
 /** Публичный `Kernel`: тонкий слой над частями, без своего состояния. */
 export function buildKernel(ctx: KernelContext): Kernel {
   const { parts, keys, active, layer, documents, gateway, known } = ctx;
-  const { pool, lifecycle, activation, contracts, commands, sections, views } = parts;
+  const { pool, lifecycle, activation, contracts, commands, keyRegistry, sections, views } = parts;
 
   return {
     journal: ctx.journal,
@@ -18,12 +17,11 @@ export function buildKernel(ctx: KernelContext): Kernel {
     callAs: (caller, contract, major, member, args) => contracts.callAs(caller, contract, major, member, args),
     manifests: known,
     hostOf: ctx.hostOf,
-    keybindings: [...keys.values()],
-    keybinding(key) {
-      const k = keys.get(key);
-      if (!k || !layer.allows(k.pluginId)) return undefined;
-      return k.pluginId === WINDOW_OWNER || k.pluginId === KERNEL_OWNER || active.includes(k.pluginId) || activation.waiting.has(k.pluginId) || activation.waking.has(k.pluginId) ? k : undefined;
+    get keybindings() {
+      return keyRegistry.rows();
     },
+    keybinding: (key, press) => keyRegistry.lookup(key, press),
+    setViewVisible: (pluginId, visible) => keyRegistry.setVisible(pluginId, visible),
     get window() {
       return layer.snapshot;
     },

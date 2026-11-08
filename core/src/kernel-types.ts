@@ -105,6 +105,8 @@ export interface LoadOptions {
   readonly entry?: ((manifest: PluginManifest) => string) | undefined;
   /** `plugins.hosts`: группа -> плагины; не названный идёт в `builtin` или в свой хост по `host: "own"`. */
   readonly hosts?: Readonly<Record<string, readonly string[]>> | undefined;
+  /** Акселераторы меню приложения: id пункта -> сочетание. Заняты наравне с командами окна: манифест проигрывает с `key-conflict`, динамически занять нельзя. */
+  readonly menuKeys?: Readonly<Record<string, string>> | undefined;
   /** `plugins.keybindings` пользователя: перекрывают манифесты; `command: null` освобождает сочетание для окна. */
   readonly keybindings?: readonly UserKeybinding[] | undefined;
   /** Плагины из поставки Cyborg; только они делят хост. Не названный здесь - сторонний и всегда один в своём хосте. */
@@ -166,10 +168,17 @@ export interface Kernel {
   /** Разобранные манифесты, включённые и нет. */
   readonly manifests: readonly PluginManifest[];
   hostOf(pluginId: string): string | undefined;
-  /** Все сочетания из манифестов принятых плагинов, `key` - под платформу, как его даёт `keyOfInput`. */
+  /** Все сочетания: окна и меню, манифесты принятых плагинов, выбор человека и динамические `ctx.keys.register`; `key` - под платформу, как его даёт `keyOfInput`. */
   readonly keybindings: readonly Keybinding[];
-  /** Синхронно, чтобы главный процесс успел отменить нажатие; владелец не активен - undefined. */
-  keybinding(key: string): Keybinding | undefined;
+  /**
+   * Синхронно, чтобы главный процесс успел отменить нажатие; владелец не активен - undefined.
+   * С `press` проверяются условия: автоповтор не получает никто, кроме динамических с `when.repeat`, а остальные `when` касаются только динамических.
+   * Без `press` условия не проверяются - так спрашивает список сочетаний.
+   * Сочетание меню (`MENU_OWNER`) ядро отдаёт как есть: перехватывать его приложению не надо.
+   */
+  keybinding(key: string, press?: KeyPress): Keybinding | undefined;
+  /** Приложение сообщает, виден ли вид плагина: от этого зависят сочетания с `when.visible`. Признак - состояние окна, выгрузка плагина его не сбрасывает; плагина нет - `Unavailable`. */
+  setViewVisible(pluginId: string, visible: boolean): void;
   /** Выгружает плагин и тех, кто требует его через requires; хост без плагинов гасится, сторож и enable без явной просьбы их не поднимают. `keepPty` - живые pty не завершаются и ждут `attach` вернувшегося плагина. */
   disable(pluginId: string, options?: DisableOptions): Promise<void>;
   /** Что выключение заберёт с собой: плагины по requires и их живые pty - о них приложение спрашивает человека до `disable`. */
@@ -222,10 +231,21 @@ export interface UserKeybinding {
   readonly command: string | null;
 }
 
+/** Что приложение знает о нажатии: ядру это недоступно (`before-input-event` не видит DOM фрейма). */
+export interface KeyPress {
+  readonly repeat?: boolean;
+  /** Фокус: `text` - поле ввода, `terminal` - терминал (он поле ввода не считается), остальное - `other` или не названо. */
+  readonly focus?: 'text' | 'terminal' | 'other';
+}
+
 export interface Keybinding {
   readonly key: string;
   readonly command: string;
   readonly pluginId: string;
+  /** Зарегистрировано `ctx.keys.register`; в манифесте и у человека такого сочетания нет. */
+  readonly dynamic?: true;
+  /** Аргументы команды при нажатии (только динамические). */
+  readonly args?: readonly unknown[];
   /** Привязку задал пользователь в `plugins.keybindings`. */
   readonly user?: true;
   /** Проигравшие в конфликте: то же сочетание у других плагинов. */

@@ -128,7 +128,7 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
   const hostIds = assignHosts(manifests, options.hosts ?? {}, new Set(options.bundled ?? []), record);
   const accepted = graph.order.map(manifestOf);
   const platform = options.platform ?? process.platform;
-  const keys = bindKeys(accepted, new Set(options.bundled ?? []), platform, record);
+  const keys = bindKeys(accepted, new Set(options.bundled ?? []), platform, record, options.menuKeys);
   applyUserKeys(keys, options.keybindings ?? [], accepted, platform, record);
 
   const built: { parts?: Parts } = {};

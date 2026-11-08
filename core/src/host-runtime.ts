@@ -751,6 +751,19 @@ function context(
       },
       run: (name, ...args) => endpoint.request('run', { name, args }),
     },
+    keys: {
+      async register(binding) {
+        const reply = await endpoint.request<{ id: number; active: boolean; winner?: string }>('keys.register', {
+          pluginId,
+          key: binding.key,
+          command: binding.command,
+          args: binding.args ?? [],
+          when: binding.when ?? {},
+        });
+        const registration = track(toDisposable(() => endpoint.notify('keys.unregister', { pluginId, id: reply.id })));
+        return { dispose: () => registration.dispose(), active: reply.active, ...(reply.winner !== undefined && { winner: reply.winner }) };
+      },
+    },
     ...(config && { config: trackedSection(config, track) }),
     ...(state && { state: trackedSection(state, track) }),
   };

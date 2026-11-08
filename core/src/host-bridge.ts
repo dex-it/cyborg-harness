@@ -29,9 +29,10 @@ export function createBridge(ctx: KernelContext): Bridge {
     };
     const end: BridgeEnd = { host, mine, onRequest, onNote };
 
-    const { contracts, commands, idleWatch, sections, osRequests } = ctx.parts;
+    const { contracts, commands, keyRegistry, idleWatch, sections, osRequests } = ctx.parts;
     contracts.attach(end);
     commands.attach(end);
+    keyRegistry.attach(end);
     idleWatch.attach(end);
     sections.attach(end);
     osRequests.attach(end);
