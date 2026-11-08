@@ -39,7 +39,7 @@ description: "Все поля манифеста плагина manifest.json: �
 - `guard` - словарь «член контракта - право и номер аргумента». Права: `fs.read`, `fs.write`, `shell`, `secrets.ref`. Аргумент задаётся номером (`0`) или путём `"0.path"`.
 
 ```jsonc
-"provides": { "cyborg.files": { "version": "1.0", "guard": {
+"provides": { "demo.files": { "version": "1.0", "guard": {
   "read": { "fs.read": 0 },
   "open": { "fs.read": "0.path" }
 } } }

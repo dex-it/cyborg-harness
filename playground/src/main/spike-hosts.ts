@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { load, type JournalEntry, type Kernel, type WatchdogOptions } from '../../../core/src/index.ts';
-import { PLUGIN_API_VERSION } from './plugins.ts';
+import { PLUGIN_API_VERSION } from '../../../core/src/index.ts';
 import { utilityHosts, type UtilityHosts } from './plugin-hosts.ts';
 import { pssKb, rssKb } from './proc-memory.ts';
 

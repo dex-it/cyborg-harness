@@ -2,6 +2,6 @@
   "id": "files",
   "version": "2.0.0",
   "engines": { "cyborg": "^1" },
-  "provides": { "cyborg.files": ["1.4", "2.0"] },
+  "provides": { "demo.files": ["1.4", "2.0"] },
   "config": { "version": 1 }
 }
