@@ -14,6 +14,7 @@ import { NEXT_ACTIONS_PROMPT } from '../plugins/next-actions/index.ts';
 import { collectTools } from '../plugins/sessions/mcp.ts';
 import { projectDirName } from '../plugins/agent-claude-code/history.ts';
 import { ISOLATION_PROMPT } from '../plugins/session-isolation/index.ts';
+import { PLUGIN_API_VERSION } from '../../core/src/api-version.ts';
 
 const PLUGINS = path.join(import.meta.dirname, '..', 'plugins');
 const PROVIDERS = ['agent-claude-code', 'agent-shell'];
@@ -43,7 +44,7 @@ async function setup(store?: LayerStore, extra: readonly string[] = []) {
   const backend = fakePty();
   let probe: PluginContext | undefined;
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: [...PROVIDERS, ...extra, 'session-isolation', 'sessions', 'probe'],
     manifests: [...PROVIDERS, ...extra, 'session-isolation', 'sessions'].map(manifestOf).concat({ id: 'probe', version: '1.0.0', engines: { cyborg: '^1' }, consumes: { 'cyborg.agent': '^1' } }),
     entry: (m) => (m.id === 'probe' ? 'probe' : path.join(PLUGINS, m.id, 'index.ts')),

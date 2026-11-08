@@ -81,7 +81,7 @@ export const scenarios: readonly Scenario[] = [
   {
     name: 'conflict',
     title: 'Два поставщика кратности one',
-    point: 'lock-alt тоже отдаёт cyborg.lock: sessions не может выбрать и не активируется, оба поставщика живы',
+    point: 'lock-alt тоже отдаёт demo.lock: sessions не может выбрать и не активируется, оба поставщика живы',
     enabled: [...base, 'lock-alt'],
     config: oldConfig,
     state: sessionsState,

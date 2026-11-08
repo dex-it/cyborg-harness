@@ -9,6 +9,7 @@ import { load } from '../src/loader.ts';
 import { PtyTable, type TerminalSink } from '../src/pty.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { fakePty } from './fake-pty.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 const spawnOpts = { program: 'sh', args: [] as string[], env: {}, cols: 80, rows: 24, persist: true };
 
@@ -129,7 +130,7 @@ async function kernelWithPty(plugins: Record<string, (ctx: PluginContext) => voi
     },
   }));
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: Object.keys(plugins),
     manifests: Object.keys(plugins).map((id) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, permissions: { pty: [{ program: 'sh', args: [] }] } })),
     os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), env: { PATH: '/usr/bin' }, pty: backend },

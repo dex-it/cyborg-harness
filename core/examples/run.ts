@@ -1,9 +1,8 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
-import { CoreError, errorMessage, forkHosts, isRecord, load, parseManifest, SectionStore, type ContractGraph, type JournalEntry, type LayerStore, type Rejection } from '../src/index.ts';
+import { CoreError, errorMessage, forkHosts, isRecord, load, parseManifest, PLUGIN_API_VERSION, SectionStore, type ContractGraph, type JournalEntry, type LayerStore, type Rejection } from '../src/index.ts';
 import { scenarios, type Documents, type Scenario } from './scenarios.ts';
 
-const API_VERSION = '1.0.0';
 const pluginsDir = new URL('./plugins/', import.meta.url);
 
 const tty = process.stdout.isTTY;
@@ -186,7 +185,7 @@ async function runScenario(s: Scenario): Promise<void> {
   const early: JournalEntry[] = [];
   let activationStarted = false;
   const kernel = await load({
-    apiVersion: API_VERSION,
+    apiVersion: PLUGIN_API_VERSION,
     enabled: s.enabled,
     manifests: raw,
     spawnHost: forkHosts(),
