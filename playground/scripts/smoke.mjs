@@ -1,7 +1,7 @@
 // Дымовой тест собранного playground по DevTools Protocol; нужен дисплей (на Linux - xvfb-run ... --no-sandbox).
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -11,6 +11,17 @@ const TIMEOUT_MS = 20_000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (text) => console.log(`smoke: ${text}`);
 const userData = mkdtempSync(join(tmpdir(), 'cyborg-playground-smoke-'));
+
+// Перезапуск приложения из окна smoke не отслеживает: relaunch и quit подменены, проверяются аргументы нового запуска.
+// quit подменён на один вызов: before-quit сам зовёт app.quit, и вечная подмена не дала бы закрыть приложение в конце.
+const STUB_RELAUNCH = `(() => {
+  const { app, dialog } = process.mainModule.require('electron');
+  globalThis.smokeRelaunch = undefined;
+  app.relaunch = (options) => { globalThis.smokeRelaunch = options.args; };
+  const quit = app.quit;
+  app.quit = () => { app.quit = quit; };
+  dialog.showMessageBox = async () => ({ response: 0 });
+})()`;
 
 async function waitFor(what, probe, timeout = TIMEOUT_MS) {
   const deadline = Date.now() + timeout;
@@ -27,9 +38,17 @@ async function waitFor(what, probe, timeout = TIMEOUT_MS) {
   throw new Error(`не дождались: ${what}${last instanceof Error ? ` (${last.message})` : ''}`);
 }
 
+const liveClaude = process.env.CYBORG_SMOKE_CLAUDE === '1';
+// Без живого claude оболочка входа находит подставной (fake-claude.mjs): профиль человека с его PATH в smoke не нужен.
+const fakeBin = join(userData, 'fake-bin');
+mkdirSync(fakeBin);
+writeFileSync(join(fakeBin, 'claude'), `#!/bin/sh\nexec '${process.execPath}' '${join(repo, 'playground', 'scripts', 'fake-claude.mjs')}' "$@"\n`, { mode: 0o755 });
+writeFileSync(join(fakeBin, 'login-shell'), `#!/bin/sh\nPATH='${fakeBin}':"$PATH"; export PATH\nif [ "$1" = -lc ]; then shift; exec /bin/sh -c "$@"; fi\nexec /bin/sh "$@"\n`, { mode: 0o755 });
+
 // --inspect=0 - инспектор главного процесса: нажатие оттуда идёт через before-input-event, как с клавиатуры.
 const app = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${userData}`, '--remote-debugging-port=0', ...electronArgs], {
   stdio: ['ignore', 'ignore', 'pipe'],
+  env: liveClaude ? process.env : { ...process.env, SHELL: join(fakeBin, 'login-shell') },
 });
 let stderr = '';
 app.stderr.on('data', (d) => (stderr += d));
@@ -256,6 +275,12 @@ async function main() {
   assert.equal(await inView('echo', 'location.protocol'), 'cyborg-plugin:', 'фрейм вида ушёл со своего адреса');
   await type('echo на-месте-$((2*21))');
   await waitFor('вид после отказа работает', async () => /на-месте-42/.test(await screen()));
+  // CSP окна пропускает data: во фрейм, поэтому решает только will-frame-navigate: переход отклонён, вид остаётся.
+  await inView('echo', "location.href = 'data:text/html,%3Cb%3Ex%3C/b%3E'; true");
+  await waitFor('переход фрейма вида на data: отклонён и записан в журнал echo', () =>
+    lines().some((l) => l.includes('"pluginId":"echo","kind":"denied","method":"navigate"') && l.includes('data:text/html')),
+  );
+  assert.equal(await inView('echo', 'location.protocol'), 'cyborg-plugin:', 'фрейм вида ушёл на data:');
   const windowUrl = await ev('location.href');
   await ev("location.href = 'https://example.com/'; true");
   await sleep(500);
@@ -285,8 +310,11 @@ async function main() {
     assert.equal(await choose('keep'), true);
     await waitFor('echo выгружен, процесс оставлен', async () => (await state('echo')) === 'stopped' && /оставлено: 1/.test(await text('#plugins-journal')));
     assert.equal(await alive(sh), true, 'оставленный процесс завершён');
+    const kept = () => text('#plugins-list [data-plugin="echo"] .plugin-kept');
+    await waitFor('строка echo показывает оставленный процесс', async () => (await kept()).includes(`/bin/sh - pid ${sh}`));
     assert.equal(await load(), true);
     await waitFor('вернувшийся echo подхватил тот же процесс', async () => (await state('echo')) === 'active' && (await inView('echo', "document.getElementById('term-state').textContent")) === `pty ${sh}` && /после-72/.test(await screen()));
+    assert.equal(await kept(), '', 'подхваченный процесс остался в списке оставленных');
     await type('echo снова-$((9*9))');
     await waitFor('терминал ожил', async () => /снова-81/.test(await screen()));
     assert.equal(await button('echo', 'Выгрузить'), true);
@@ -295,7 +323,16 @@ async function main() {
     await waitFor('процесс echo завершён', async () => (await state('echo')) === 'stopped' && !(await alive(sh)));
     assert.equal(await load(), true);
     await waitFor('echo с новым терминалом', async () => (await state('echo')) === 'active' && /^pty \d+$/.test(await inView('echo', "document.getElementById('term-state').textContent")));
-    log('выключение спрашивает о pty: оставленный процесс ждёт плагин, завершённый уходит');
+    const sh2 = /^pty (\d+)$/.exec(await inView('echo', "document.getElementById('term-state').textContent"))[1];
+    assert.equal(await button('echo', 'Выгрузить'), true);
+    await waitFor('третий вопрос', async () => (await ask()).includes(`pid ${sh2}`));
+    assert.equal(await choose('keep'), true);
+    await waitFor('второй процесс оставлен', async () => (await kept()).includes(`pid ${sh2}`));
+    assert.equal(await ev(`(() => { const b = document.querySelector('#plugins-list [data-plugin="echo"] .kept-row button'); b?.click(); return !!b; })()`), true);
+    await waitFor('человек завершил оставленный процесс из строки плагина', async () => !(await alive(sh2)) && (await kept()) === '');
+    assert.equal(await load(), true);
+    await waitFor('echo снова активен', async () => (await state('echo')) === 'active' && /^pty \d+$/.test(await inView('echo', "document.getElementById('term-state').textContent")));
+    log('выключение спрашивает о pty: оставленный процесс виден в строке плагина и ждёт его, завершённый уходит, оставленный завершается человеком');
   }
   log('падение и зависание хоста: сторож перезапускает');
 
@@ -415,7 +452,7 @@ async function main() {
   log('документы: вкладка сессии в окне, «Закрыть» уводит onClose владельцу и завершает его сессию');
 
   // Живой claude нужен с входом в аккаунт и сетью: шаг по CYBORG_SMOKE_CLAUDE=1, в CI его нет.
-  if (process.env.CYBORG_SMOKE_CLAUDE === '1') {
+  if (liveClaude) {
     assert.match(await agentButtons(), /claude-code\+/, 'CYBORG_SMOKE_CLAUDE=1, а claude не найден в PATH оболочки входа');
     await inView('sessions', "document.querySelector('#agents cy-button[data-agent=\"claude-code\"]').click()");
     const screen = () => sessionScreen();
@@ -437,7 +474,29 @@ async function main() {
     await ev("document.querySelector('#documents-list .document-row button').click()");
     await waitFor('сессия claude закрыта', async () => (await docRows()) === '' && /вышла/.test(await inView('sessions', "document.getElementById('session-state').textContent")));
     log(`живой claude: оболочка входа по праву launch поставщика, ${reached}; вкладка закрывает сессию`);
-  } else log('живой claude пропущен: CYBORG_SMOKE_CLAUDE не задан');
+  } else {
+    await inView('sessions', "document.querySelector('#agents cy-button[data-agent=\"claude-code\"]').click()");
+    await waitFor('подставной claude запущен', async () => /fake claude: готов/.test(await sessionScreen()));
+    // Подписка на файл событий начинается с его конца: хук до неё не дошёл бы.
+    await sleep(500);
+    const say = (text) => inView('sessions', `(() => { const l = document.getElementById('line'); l.value = ${JSON.stringify(text)}; l.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); })()`);
+    const action = () => inView('sessions', "(() => { const b = document.querySelector('#actions cy-button'); const r = b?.querySelector('.reply'); return b && !b.closest('[hidden]') && r.getBoundingClientRect().height > 0 ? `${b.querySelector('.label').textContent}/${r.textContent}/${b.getAttribute('variant') === 'primary' ? 'отправит' : 'в строку'}` : ''; })()");
+    const received = async () => (await sessionScreen()).split('получено: smoke-reply').length - 1;
+    await say('go');
+    await waitFor('ход кончился: кнопка с репликой второй строкой отправляет сразу', async () => (await action()) === 'Продолжить/smoke-reply/отправит');
+    await inView('sessions', "document.querySelector('#actions cy-button').click()");
+    await waitFor('реплика кнопки ушла агенту с Enter', async () => (await received()) === 1);
+    await say('ask');
+    await waitFor('агент спрашивает: кнопка ставит реплику в строку', async () => (await action()) === 'Продолжить/smoke-reply/в строку' && /просит разрешение/.test(await sessionScreen()));
+    await inView('sessions', "document.querySelector('#actions cy-button').click()");
+    assert.equal(await inView('sessions', "document.getElementById('line').value"), 'smoke-reply', 'реплика не встала в строку ввода');
+    await sleep(300);
+    assert.equal(await received(), 1, 'кнопка ответила на вопрос агента за человека');
+    await waitFor('вкладка сессии подставного claude в панели «Документы»', async () => (await docRows()) === 'sessions · session:true');
+    await ev("document.querySelector('#documents-list .document-row button').click()");
+    await waitFor('сессия подставного claude закрыта', async () => (await docRows()) === '');
+    log('кнопки агента: реплика на кнопке второй строкой; Enter за человека - только после конца хода, при вопросе агента реплика встаёт в строку ввода');
+  }
 
   assert.equal(await button('flaky', 'Журнал'), true, 'у flaky нет кнопки «Журнал»');
   assert.equal(await text('#plugins-journal-title'), 'Журнал: flaky');
@@ -460,7 +519,56 @@ async function main() {
   assert.ok(recent.some((f) => f.endsWith('workspace.cyborg.json')), 'открытый воркспейс не попал в «Недавние»');
   log('воркспейс: замок с pid, второй запуск отдаёт фокус первому и уходит, открытый - в «Недавних»');
 
+  await main(STUB_RELAUNCH);
+  assert.equal(await ev("document.getElementById('safe-mode').hidden"), true, 'плашка безопасного режима без флага');
+  await ev("document.getElementById('safe-mode-enter').click()");
+  const relaunched = await waitFor('перезапуск в безопасном режиме', () => main('globalThis.smokeRelaunch'));
+  assert.ok(relaunched.includes('--safe-mode'), `перезапуск без --safe-mode: ${relaunched.join(' ')}`);
+  log('безопасный режим: пункт окна перезапускает приложение с --safe-mode');
+
   await bareWindow();
+  await safeWindow();
+}
+
+/** Безопасный режим: свой userData, сторонний плагин с замком на старте; код плагинов не запускается, окно не закрыто. */
+async function safeWindow() {
+  const dir = mkdtempSync(join(tmpdir(), 'cyborg-playground-safe-'));
+  const locker = join(dir, 'plugins', 'locker');
+  mkdirSync(join(locker, 'ui'), { recursive: true });
+  writeFileSync(join(locker, 'manifest.json'), JSON.stringify({ id: 'locker', version: '1.0.0', engines: { cyborg: '^1' }, permissions: { 'ui.lock': true }, ui: { overlay: './ui/lock.js' }, lock: { onStart: true } }));
+  writeFileSync(join(locker, 'index.js'), 'export default { activate() {} };\n');
+  writeFileSync(join(locker, 'ui', 'lock.js'), 'export default { mount() {} };\n');
+  writeFileSync(join(dir, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['echo', 'pin-lock', 'locker'] } }));
+  const safe = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${dir}`, '--remote-debugging-port=0', '--safe-mode', ...electronArgs], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let err = '';
+  safe.stderr.on('data', (d) => (err += d));
+  try {
+    const port = await waitFor('порт DevTools окна в безопасном режиме', () => /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//.exec(err)?.[1]);
+    const page = await waitFor('окно в безопасном режиме', async () => (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page'));
+    const ev = await connect(page.webSocketDebuggerUrl);
+    const main = await connect(await waitFor('инспектор главного процесса', () => /Debugger listening on (ws:\/\/\S+)/.exec(err)?.[1]));
+    await waitFor('сводка безопасного режима', async () => /^Безопасный режим:/.test(await ev("document.getElementById('plugins-summary').textContent")));
+    assert.equal(await ev("!document.getElementById('safe-mode').hidden && document.getElementById('safe-mode-enter').hidden"), true, 'нет плашки безопасного режима');
+    const rows = await ev("[...document.querySelectorAll('#plugins-list [data-plugin]:not([data-state=\"disabled\"])')].map((r) => `${r.dataset.plugin}:${r.dataset.state}:${r.querySelector('.plugin-reason')?.textContent}`)");
+    assert.deepEqual(rows.sort(), ['echo', 'locker', 'pin-lock'].map((id) => `${id}:stopped:безопасный режим: код плагинов не запускается`));
+    const journal = err.split('\n').filter((l) => l.startsWith('[plugins] {'));
+    assert.deepEqual(journal.filter((l) => /"kind":"safe-mode"/.test(l)).length, 3, 'не у каждого плагина запись safe-mode');
+    assert.ok(!journal.some((l) => /"kind":"(activated|failed)"/.test(l)), 'в безопасном режиме поднялся хост');
+    assert.equal(await ev("document.body.dataset.locked !== 'true' && document.getElementById('lock-layer').hidden"), true, 'lock.onStart закрыл окно в безопасном режиме');
+    await ev("[...document.querySelectorAll('#plugins-list [data-plugin=\"echo\"] button')].find((b) => b.textContent === 'Включить снова').click()");
+    const refusal = await waitFor('отказ «Включить» в безопасном режиме', () => ev("document.querySelector('#plugins-list [data-plugin=\"echo\"] .plugin-error')?.textContent"));
+    assert.match(refusal, /безопасный режим/);
+    await main(STUB_RELAUNCH);
+    await ev("document.getElementById('safe-mode-exit').click()");
+    const relaunched = await waitFor('перезапуск без безопасного режима', () => main('globalThis.smokeRelaunch'));
+    assert.ok(!relaunched.includes('--safe-mode'), `выход из безопасного режима оставил флаг: ${relaunched.join(' ')}`);
+    log(`безопасный режим: хосты не подняты, lock.onStart не закрыл окно, «Включить» - отказ (${refusal}), выход перезапускает без флага`);
+  } finally {
+    safe.kill('SIGTERM');
+    await Promise.race([new Promise((r) => safe.once('exit', r)), sleep(8000)]);
+    if (safe.exitCode === null) safe.kill('SIGKILL');
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 /** Окно без воркспейса: свой userData, плагины не грузятся, «Недавние» - кнопками. */

@@ -8,6 +8,7 @@ const api = {
   enablePlugin: (id: string): Promise<Reply> => ipcRenderer.invoke('plugins:enable', id),
   disablePlugin: (id: string, keepPty = false): Promise<Reply> => ipcRenderer.invoke('plugins:disable', { id, keepPty }),
   disablePreview: (id: string): Promise<Reply> => ipcRenderer.invoke('plugins:disable-preview', id),
+  endKeptPty: (id: string): Promise<Reply> => ipcRenderer.invoke('plugins:end-kept-pty', id),
   crashHost: (id: string): Promise<Reply> => ipcRenderer.invoke('plugins:crash', id),
   hangHost: (id: string): Promise<Reply> => ipcRenderer.invoke('plugins:hang', id),
   runCommand: (command: string): Promise<Reply> => ipcRenderer.invoke('plugins:run', command),
@@ -17,6 +18,7 @@ const api = {
   answerDialog: (id: number, choice: string | undefined): Promise<Reply> => ipcRenderer.invoke('window:answer', { id, choice }),
   closeDocument: (id: string): Promise<Reply> => ipcRenderer.invoke('documents:close', id),
   openWorkspace: (file?: string): Promise<Reply> => ipcRenderer.invoke('workspace:open', file),
+  setSafeMode: (on: boolean): Promise<Reply> => ipcRenderer.invoke('app:safe-mode', on),
 };
 
 export type PlaygroundApi = typeof api;

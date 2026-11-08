@@ -5,6 +5,7 @@ import { appendBounded, DeniedCollapse } from '../src/journal.ts';
 import { load, type JournalEntry } from '../src/loader.ts';
 import { describeEntry } from '../src/status.ts';
 import { inlineHosts } from '../src/transports.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 const denied = (detail: string): JournalEntry => ({ pluginId: 'p', kind: 'denied', method: 'fs.readText', detail });
 
@@ -47,7 +48,7 @@ test('журнал: одинаковые отказы за окно - перва
 test('журнал: плагин в цикле из 20 000 отказов не раздувает журнал ядра', async () => {
   let ctx!: PluginContext;
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async () => ({ activate: (c: PluginContext) => void (ctx = c) })),
     enabled: ['p'],
     manifests: [{ id: 'p', version: '1.0.0', engines: { cyborg: '^1' } }],

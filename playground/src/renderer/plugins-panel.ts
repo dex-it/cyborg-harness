@@ -1,7 +1,7 @@
 // Окно playground: плагины с кнопками над ядром, сочетания клавиш, лента сообщений плагинов и журнал ядра (SAD §3.2, §3.5).
 
 import { keyOfInput } from '../../../core/src/keys.ts';
-import type { FeedLine, KeyRow, PluginRow, PluginsSnapshot, Reply } from '../shared/plugins.ts';
+import type { FeedLine, KeptPtyRow, KeyRow, PluginRow, PluginsSnapshot, Reply } from '../shared/plugins.ts';
 import type { DisablePreview } from '../../../core/src/loader.ts';
 import { byId, el } from './dom.ts';
 import { ViewsPanel } from './views-panel.ts';
@@ -15,6 +15,7 @@ export interface PluginsPort {
   enablePlugin(id: string): Promise<Reply>;
   disablePlugin(id: string, keepPty?: boolean): Promise<Reply>;
   disablePreview(id: string): Promise<Reply>;
+  endKeptPty(id: string): Promise<Reply>;
   crashHost(id: string): Promise<Reply>;
   hangHost(id: string): Promise<Reply>;
   runCommand(command: string): Promise<Reply>;
@@ -24,6 +25,8 @@ export interface PluginsPort {
   closeDocument(id: string): Promise<Reply>;
   /** Без файла - системный диалог выбора; смена воркспейса перезапускает приложение. */
   openWorkspace(file?: string): Promise<Reply>;
+  /** Перезапуск приложения с флагом `--safe-mode` или без него. */
+  setSafeMode(on: boolean): Promise<Reply>;
   onWindowCommand(listener: (command: string) => void): void;
 }
 
@@ -37,6 +40,8 @@ export class PluginsPanel {
   private readonly documentsEl = byId('documents-list', HTMLElement);
   private readonly workspaceEl = byId('workspace-current', HTMLElement);
   private readonly recentEl = byId('workspace-recent', HTMLElement);
+  private readonly safeModeEl = byId('safe-mode', HTMLElement);
+  private readonly safeModeEnter = byId('safe-mode-enter', HTMLButtonElement);
   private readonly feedEl = byId('feed', HTMLElement);
   private readonly journalTitle = byId('plugins-journal-title', HTMLElement);
   private readonly journalAll = byId('plugins-journal-all', HTMLButtonElement);
@@ -63,6 +68,8 @@ export class PluginsPanel {
     }, { id: 'sessions', root: byId('main-view', HTMLElement) });
     this.journalAll.addEventListener('click', () => this.showJournal(null));
     byId('workspace-open', HTMLButtonElement).addEventListener('click', () => void port.openWorkspace());
+    this.safeModeEnter.addEventListener('click', () => void port.setSafeMode(true));
+    byId('safe-mode-exit', HTMLButtonElement).addEventListener('click', () => void port.setSafeMode(false));
     port.onPluginsChanged(() => void this.refresh());
     port.onWindowCommand((command) => {
       if (command === 'cyborg.window.focus-next') moveFocus(1);
@@ -106,6 +113,8 @@ export class PluginsPanel {
     this.summaryEl.textContent = summary(snapshot);
     this.problemsEl.textContent = snapshot.problems.length ? `Не дошло до ядра:\n${snapshot.problems.join('\n')}` : '';
     this.problemsEl.hidden = snapshot.problems.length === 0;
+    this.safeModeEl.hidden = !snapshot.safeMode;
+    this.safeModeEnter.hidden = snapshot.safeMode || snapshot.phase === 'no-workspace';
     this.listEl.replaceChildren(...sortedPlugins(snapshot.plugins).map((row) => this.row(row, snapshot.canHang)));
     this.keysEl.replaceChildren(...(snapshot.keys.length ? snapshot.keys.map((row) => this.keyRow(row)) : [this.emptyKeys()]));
     const { current, recent } = snapshot.workspace;
@@ -135,6 +144,7 @@ export class PluginsPanel {
       list.append(...row.permissions.map((p) => el('li', '', p)));
       item.append(list);
     }
+    if (row.kept) item.append(this.keptList(row.id, row.kept));
     const error = this.errors.get(row.id);
     if (error) {
       const line = el('p', 'plugin-error', error);
@@ -145,6 +155,41 @@ export class PluginsPanel {
     bar.append(...actionsFor(row, canHang).map((button) => this.button(row.id, button)));
     item.append(bar);
     return item;
+  }
+
+  /** SAD 3.6: оставленный процесс ждёт без срока, поэтому человек видит его и может завершить сам. */
+  private keptList(pluginId: string, kept: readonly KeptPtyRow[]): HTMLElement {
+    const box = el('div', 'plugin-kept');
+    box.append(el('p', '', 'Оставлены работать до возвращения плагина:'));
+    const list = el('ul', 'pty-list');
+    list.setAttribute('aria-label', `Оставленные процессы ${pluginId}`);
+    for (const p of kept) {
+      const item = el('li', 'kept-row');
+      item.dataset.pty = p.id;
+      const state = p.exitCode === undefined ? `pid ${String(p.pid)}, с ${clock(p.keptAt)}` : `завершился, код ${String(p.exitCode)}`;
+      const end = el('button', '', p.exitCode === undefined ? 'Завершить' : 'Убрать') as HTMLButtonElement;
+      end.type = 'button';
+      end.setAttribute('aria-label', `${end.textContent} ${p.command} (${pluginId})`);
+      end.disabled = this.busy.has(pluginId);
+      end.addEventListener('click', () => void this.endKept(pluginId, p.id));
+      item.append(el('span', '', `${p.command} - ${state} `), end);
+      list.append(item);
+    }
+    box.append(list);
+    return box;
+  }
+
+  private async endKept(pluginId: string, id: string): Promise<void> {
+    this.busy.add(pluginId);
+    this.errors.delete(pluginId);
+    this.render();
+    try {
+      const reply = await this.port.endKeptPty(id);
+      if (reply.error) this.errors.set(pluginId, reply.error);
+    } finally {
+      this.busy.delete(pluginId);
+    }
+    await this.refresh();
   }
 
   private button(id: string, spec: ActionButton): HTMLButtonElement {

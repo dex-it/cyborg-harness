@@ -5,6 +5,7 @@ import type { Subscription } from '@cyborg-harness/contracts';
 import { load, type LoadOptions } from '../src/loader.ts';
 import type { PluginContext, PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 const settle = async () => {
@@ -44,7 +45,7 @@ async function start(extra: Partial<LoadOptions> = {}) {
     },
   };
   const kernel = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: ['ticker', 'user'],
     manifests: [manifest('ticker', { provides: { 'test.ticker': '1.0' }, commands: ['ticker.count'] }), manifest('user', { optional: { 'test.ticker': '^1' } })],
     hosts: { t: ['ticker'], u: ['user'] },
@@ -128,7 +129,7 @@ test('метод без подписки в ответ: колбэк живёт 
   const seen: number[] = [];
   let ctx: PluginContext | undefined;
   const kernel = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: ['each', 'user'],
     manifests: [manifest('each', { provides: { 'test.ticker': '1.0' } }), manifest('user', { requires: { 'test.ticker': '^1' } })],
     hosts: { e: ['each'], u: ['user'] },
@@ -162,5 +163,18 @@ test('метод без подписки в ответ: колбэк живёт 
   await api.tick(2);
   await settle();
   assert.deepEqual(seen, [1], 'синхронный вызов до ответа дошёл, поздний - нет');
+  await kernel.unload();
+});
+
+test('предел подписок потребителя: сверх предела - Invalid, снятая подписка освобождает место', async () => {
+  const { kernel, api, listen } = await start({ limits: { subscriptions: 2 } });
+  const a = await listen('a');
+  await listen('b');
+  await assert.rejects(listen('c'), { code: 'Invalid', message: /подписок через контракты больше 2/ });
+  assert.equal(await api.listeners(), 2, 'отказ не дошёл до поставщика');
+  a.dispose();
+  await settle();
+  await listen('c');
+  assert.equal(await api.listeners(), 2);
   await kernel.unload();
 });

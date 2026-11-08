@@ -39,7 +39,7 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
   // Документы прошлого запуска: ядро их сохранило, поднимает сессию человек - агент мог за это время пропасть.
   const previous = el('cy-list', { id: 'previous', hidden: true });
   previous.setAttribute('aria-label', 'Сессии прошлого запуска');
-  // Кнопки предлагает агент вызовом инструмента suggest_actions; человек нажимает - реплика уходит в сессию.
+  // Кнопки предлагает агент вызовом инструмента suggest_actions; человек нажимает - реплика уходит в сессию или встаёт в строку ввода.
   const suggested = el('div', { id: 'actions', className: 'agents', hidden: true });
   const sheet = (href: string) => el('link', { rel: 'stylesheet', href: new URL(href, import.meta.url).href });
   root.append(sheet('./xterm.css'), sheet('./ui.css'), header, previous, screen, suggested, line);
@@ -61,13 +61,17 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
     if (shown) fit.fit();
   });
   resized.observe(screen);
-  const showActions = (list: readonly SessionAction[]) => {
+  const showActions = (list: readonly SessionAction[], ready: boolean) => {
     suggested.replaceChildren(
       ...list.map((a) => {
-        const b = el('cy-button', { textContent: a.label, title: a.text });
+        // Подпись и реплику задаёт агент: Enter за человека - только в ожидание новой реплики, не в вопрос агента.
+        const sends = a.submit === true && ready;
+        const b = el('cy-button', { title: sends ? `Отправить: ${a.text}` : `В строку ввода: ${a.text}` });
+        if (sends) b.setAttribute('variant', 'primary');
+        b.append(el('span', { className: 'label', textContent: a.label }), el('span', { className: 'reply', textContent: a.text }));
         b.addEventListener('click', () => {
           if (!term) return;
-          if (a.submit) {
+          if (sends) {
             void term.write(`${a.text}\r`).catch(failed);
             xterm.focus();
             return;
@@ -83,13 +87,13 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
   const poll = async (ticket: string, generation: number) => {
     let since = -1;
     while (generation === polling) {
-      const answer = (await ctx.commands.run('sessions.actions', ticket, since)) as { version: number; actions: SessionAction[] } | null;
+      const answer = (await ctx.commands.run('sessions.actions', ticket, since)) as { version: number; actions: SessionAction[]; ready: boolean } | null;
       if (generation !== polling) return;
       if (!answer) break;
       since = answer.version;
-      showActions(answer.actions);
+      showActions(answer.actions, answer.ready);
     }
-    showActions([]);
+    showActions([], false);
   };
   const open = async (title: string, command: string, arg: string) => {
     const ticket = await ctx.commands.run(command, arg);
@@ -98,8 +102,10 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
     const opened = await ctx.terminal.open(ticket);
     term = opened;
     const generation = ++polling;
+    // Кнопки прежней сессии не должны писать в новую, пока она не ответила своими.
+    showActions([], false);
     void poll(ticket, generation).catch(() => {
-      if (generation === polling) showActions([]);
+      if (generation === polling) showActions([], false);
     });
     if (!shown) {
       shown = true;

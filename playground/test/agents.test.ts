@@ -11,9 +11,11 @@ import { inlineHosts } from '../../core/src/transports.ts';
 import { fakePty } from '../../core/test/fake-pty.ts';
 import { claudeArgs, LAUNCH_SCRIPT, waitAfterStop } from '../plugins/agent-claude-code/index.ts';
 import { NEXT_ACTIONS_PROMPT } from '../plugins/next-actions/index.ts';
+import { readyAfter } from '../plugins/sessions/index.ts';
 import { collectTools } from '../plugins/sessions/mcp.ts';
 import { projectDirName } from '../plugins/agent-claude-code/history.ts';
 import { ISOLATION_PROMPT } from '../plugins/session-isolation/index.ts';
+import { PLUGIN_API_VERSION } from '../../core/src/api-version.ts';
 
 const PLUGINS = path.join(import.meta.dirname, '..', 'plugins');
 const PROVIDERS = ['agent-claude-code', 'agent-shell'];
@@ -43,7 +45,7 @@ async function setup(store?: LayerStore, extra: readonly string[] = []) {
   const backend = fakePty();
   let probe: PluginContext | undefined;
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: [...PROVIDERS, ...extra, 'session-isolation', 'sessions', 'probe'],
     manifests: [...PROVIDERS, ...extra, 'session-isolation', 'sessions'].map(manifestOf).concat({ id: 'probe', version: '1.0.0', engines: { cyborg: '^1' }, consumes: { 'cyborg.agent': '^1' } }),
     entry: (m) => (m.id === 'probe' ? 'probe' : path.join(PLUGINS, m.id, 'index.ts')),
@@ -310,14 +312,14 @@ test('sessions + next-actions: агент зовёт инструмент по M
   const listed = (await rpc('tools/list', {})).body?.result?.tools as { name: string }[];
   assert.deepEqual(listed.map((t) => t.name), ['suggest_actions']);
 
-  assert.deepEqual(await s.k.run('sessions.actions', ticket, -1), { version: 0, actions: [] });
+  assert.deepEqual(await s.k.run('sessions.actions', ticket, -1), { version: 0, actions: [], ready: false });
   const waiting = s.k.run('sessions.actions', ticket, 0);
   const call = await rpc('tools/call', {
     name: 'suggest_actions',
     arguments: { actions: [{ label: 'Слей', text: 'слей\u001b[2J', submit: true }, { label: 'x'.repeat(60), text: 'поправь тест' }, { label: '', text: 'без подписи' }] },
   });
   assert.equal(call.body?.result?.isError, false);
-  assert.deepEqual(await waiting, { version: 1, actions: [{ label: 'Слей', text: 'слей [2J', submit: true }, { label: 'x'.repeat(40), text: 'поправь тест' }] }, 'ожидание проснулось; управляющие символы и длина срезаны');
+  assert.deepEqual(await waiting, { version: 1, actions: [{ label: 'Слей', text: 'слей [2J', submit: true }, { label: 'x'.repeat(40), text: 'поправь тест' }], ready: false }, 'ожидание проснулось; управляющие символы и длина срезаны');
   assert.equal((await rpc('tools/call', { name: 'nope', arguments: {} })).body?.error?.code, -32602);
   const bad = await rpc('tools/call', { name: 'suggest_actions', arguments: {} });
   assert.equal(bad.body?.result?.isError, true, 'ошибка инструмента - ответ агенту, кнопки прежние');
@@ -334,6 +336,44 @@ test('sessions + next-actions: агент зовёт инструмент по M
   assert.equal(await s.k.run('sessions.actions', ticket, 2), null);
   assert.equal((await rpc('ping', {})).status, 401, 'токен вышедшей сессии не действует');
   await waitFor('ended убрал конфиг с токеном', () => stat(configFile).then(() => false, () => true));
+});
+
+test('sessions: агент ждёт новой реплики - после конца хода без фоновой работы и до начала нового; вопрос агента это снимает', () => {
+  const run = (events: AgentEvent[]) => {
+    let ready = false;
+    let turnOver = false;
+    return events.map((e) => {
+      ready = readyAfter(e, ready, turnOver);
+      turnOver = e.type === 'turnEnd' && !e.background;
+      return ready;
+    });
+  };
+  const turnEnd: AgentEvent = { type: 'turnEnd', background: false };
+  const asks: AgentEvent = { type: 'waiting', reason: 'Просит разрешение' };
+  assert.deepEqual(run([asks, turnEnd]), [false, true], 'вопрос до конца хода не готовит, конец хода готовит');
+  assert.deepEqual(run([turnEnd, { type: 'waiting', reason: 'Ход завершён, ждёт ответа' }, { type: 'activity' }, { type: 'cwd', cwd: '/w' }]), [true, true, true, true], '«ждёт ответа» сразу после хода и простой без инструмента готовность не снимают');
+  assert.deepEqual(run([turnEnd, { type: 'activity', tool: 'Bash' }, asks]), [true, false, false], 'агент взялся за инструмент и спросил');
+  assert.deepEqual(run([turnEnd, { type: 'activity' }, asks]), [true, true, false], 'вопрос не сразу после хода снимает готовность');
+  assert.deepEqual(run([turnEnd, { type: 'prompt' }]), [true, false]);
+  assert.deepEqual(run([{ type: 'turnEnd', background: true }, asks]), [false, false], 'фоновая работа: агент может спросить сам');
+});
+
+test('sessions: готовность агента приходит виду с кнопками и будит долгий опрос', async () => {
+  await using s = await setup(undefined, ['next-actions']);
+  const ticket = (await s.k.run('sessions.new', 'agent-claude-code')) as string;
+  const events = s.backend.procs.at(-1)!.options.env.CYBORG_EVENTS!;
+  const hook = (event: Record<string, unknown>) => appendFile(events, `${JSON.stringify(event)}\n`);
+  const ready = async (since: number) => (await s.k.run('sessions.actions', ticket, since)) as { version: number; ready: boolean };
+  const start = await ready(-1);
+  assert.equal(start.ready, false);
+  // Подписка на файл событий начинается с его конца: строка до неё не дойдёт.
+  await new Promise((r) => setTimeout(r, 300));
+  const woke = ready(start.version);
+  await hook({ hook_event_name: 'Stop' });
+  assert.deepEqual(await woke, { version: start.version + 1, actions: [], ready: true });
+  await hook({ hook_event_name: 'PostToolUse', tool_name: 'Bash' });
+  await hook({ hook_event_name: 'Notification', notification_type: 'permission_prompt' });
+  await waitFor('вопрос агента снял готовность', async () => !(await ready(-1)).ready);
 });
 
 test('sessions: инструменты поставщиков - по id плагина, повтор имени и чужое имя отброшены, упавший не мешает', async () => {

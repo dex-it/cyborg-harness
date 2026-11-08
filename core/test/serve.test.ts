@@ -8,6 +8,7 @@ import type { PluginContext, ServeRequest, ServeResponse } from '@cyborg-harness
 import { load } from '../src/loader.ts';
 import { HttpServes, MAX_REQUEST_BODY, MAX_SERVERS } from '../src/serve.ts';
 import { inlineHosts } from '../src/transports.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 interface Reply {
   status: number;
@@ -46,7 +47,7 @@ async function kernel(permissions: Record<string, unknown>) {
   const root = await mkdtemp(path.join(tmpdir(), 'cyborg-serve-'));
   let ctx: PluginContext | undefined;
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async () => ({
       activate: (c: PluginContext) => {
         ctx = c;

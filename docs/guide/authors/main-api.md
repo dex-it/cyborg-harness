@@ -82,9 +82,9 @@ ctx.commands.register('acme.open', async (path) => {
 | `pty` | `pty` | `spawn`, `list`, `attach`; процесс держит ядро |
 | `net` | `net` | `fetch` на перечисленные хосты |
 | `env` | `env` | `get(name)` для перечисленных переменных |
-| `notify` | `notify` | Системное уведомление |
+| `notify` | `notify` | `show(title, body?, { onClick })` - уведомление с командой на клик, `close(id)` |
 | `clipboard` | `clipboard` | Чтение и запись буфера по списку |
-| `shell` | `shell` | `openPath`, `openExternal`; исполняемый файл не открывается |
+| `shell` | `shell` | `openPath`, `openExternal`; исполняемый файл не открывается, а где плагин пишет сам - только документ |
 | `serve` | `serve` | `http(handler)` - сервер на `127.0.0.1` для программ этого компьютера |
 | `security` | `security.roots` | `setRoots(paths)` - корни проектов |
 | `ui` | `ui.lock` | `lock()` - закрыть окно своим экраном |
@@ -98,6 +98,8 @@ ctx.commands.register('acme.open', async (path) => {
 ## События окна и системы
 
 `ctx.window.onFocusChange`, `ctx.system.onSuspend`, `onResume`, `onScreenLock`, `onIdle(seconds, listener)` (один раз на каждый простой, после активности срабатывает снова) и `onBeforeQuit` (ядро ждёт асинхронного слушателя не дольше бюджета приложения). Слушатель, бросивший исключение, пишет в журнал и не мешает соседям.
+
+`ctx.window.setTitle(segment)` ставит фрагмент плагина в заголовок окна, права не нужно. Фрагмент до 80 символов, переводы строк и невидимые знаки ядро заменяет пробелом, `undefined` или пустая строка фрагмент снимает. Выгрузка плагина снимает его фрагмент.
 
 ## Дальше
 

@@ -11,6 +11,7 @@ import { guardNavigation } from './navigation.ts';
 import { PluginsService } from './plugins.ts';
 import { runSpike } from './spike.ts';
 import { runHostsSpike } from './spike-hosts.ts';
+import { runGatewaySpike } from './spike-gateway.ts';
 import { resolveDragFile, ViewDrags } from './view-drag.ts';
 import { framesOf, fromWindow, registerViewScheme, senderPlugin, serveViews, viewFrames } from './views.ts';
 import { themeTokens } from './theme.ts';
@@ -26,6 +27,7 @@ registerViewScheme();
 /** `--spike=<файл>`: замеры видов во фреймах (SAD, открытый вопрос 11) вместо окна плагинов. */
 const spikeOut = process.argv.find((a) => a.startsWith('--spike='))?.slice('--spike='.length);
 const hostsSpikeOut = process.argv.find((a) => a.startsWith('--spike-hosts='))?.slice('--spike-hosts='.length);
+const gatewaySpikeOut = process.argv.find((a) => a.startsWith('--spike-gateway='))?.slice('--spike-gateway='.length);
 const recent = new RecentWorkspaces(path.join(app.getPath('userData'), 'recent.json'));
 /** `--workspace=<файл>` по SAD §3.1; без флага - последний из «Недавних», без них - `<userData>/workspace.cyborg.json`; `--no-workspace` - окно без воркспейса. */
 const workspaceArg = process.argv.find((a) => a.startsWith('--workspace='))?.slice('--workspace='.length);
@@ -34,10 +36,13 @@ const workspaceFile = process.argv.includes('--no-workspace')
   : workspaceArg !== undefined
     ? path.resolve(workspaceArg)
     : (recent.list()[0] ?? path.join(app.getPath('userData'), 'workspace.cyborg.json'));
-const spiking = spikeOut !== undefined || hostsSpikeOut !== undefined;
+const spiking = spikeOut !== undefined || hostsSpikeOut !== undefined || gatewaySpikeOut !== undefined;
+/** `--safe-mode` (BR-CH-005): манифесты разобраны, код плагинов не запускается; смена воркспейса флаг сохраняет, снимает его только «Выйти из безопасного режима». */
+const SAFE_MODE = '--safe-mode';
+const safeMode = process.argv.includes(SAFE_MODE);
 
 // Один экземпляр - один воркспейс - одно окно: второй запуск с любым воркспейсом поднимает открытое окно, а не второе ядро.
-if (!spiking && !app.requestSingleInstanceLock({ workspace: workspaceFile ?? null })) app.exit(0);
+if (!spiking && !app.requestSingleInstanceLock({ workspace: workspaceFile ?? null, safeMode })) app.exit(0);
 
 /** Первый запуск: alice и bob делят хост c - видно, как падение одного процесса снимает обоих, а чат в хосте b живёт. */
 const DEFAULT_CONFIG = {
@@ -59,11 +64,13 @@ function showWindow(): void {
 const notices = new Set<Notification>();
 
 app.on('second-instance', (_event, _argv, _cwd, data) => {
-  const asked = (data as { workspace?: unknown } | null)?.workspace;
+  const asked = data as { workspace?: unknown; safeMode?: unknown } | null;
   showWindow();
-  if (asked !== workspaceFile && Notification.isSupported()) {
-    new Notification({ title: 'Cyborg Playground', body: `Открыт воркспейс ${workspaceFile ?? 'нет'}; другой открывается из окна - «Недавние» или «Открыть…».` }).show();
-  }
+  if (!Notification.isSupported()) return;
+  const say = (body: string) => new Notification({ title: 'Cyborg Playground', body }).show();
+  if (asked?.workspace !== workspaceFile) say(`Открыт воркспейс ${workspaceFile ?? 'нет'}; другой открывается из окна - «Недавние» или «Открыть…».`);
+  // Запрошенный режим вторым запуском не применяется: ядро решает про него один раз, до первого хоста.
+  if ((asked?.safeMode === true) !== safeMode) say(safeMode ? 'Безопасный режим уже включён; выйти из него можно пунктом окна «Выйти из безопасного режима».' : 'Безопасный режим не включён: закройте приложение или выберите в окне «Перезапустить в безопасном режиме».');
 });
 const plugins = new PluginsService({
   windowCommand: (command) => {
@@ -88,6 +95,9 @@ const plugins = new PluginsService({
   log: (pluginId, line) => {
     if (win && !win.isDestroyed()) for (const frame of framesOf(win.webContents, viewOrigin(pluginId))) frame.send('view:log', line);
   },
+  title: (title) => {
+    if (win && !win.isDestroyed()) win.setTitle(title);
+  },
 });
 
 function windowChannel(channel: string, handler: (arg: unknown) => unknown): void {
@@ -101,12 +111,14 @@ windowChannel('plugins:snapshot', () => plugins.snapshot());
 windowChannel('plugins:enable', (id) => plugins.enable(id));
 windowChannel('plugins:disable', (arg) => (isRecord(arg) ? plugins.disable(arg.id, arg.keepPty) : plugins.disable(arg)));
 windowChannel('plugins:disable-preview', (id) => plugins.disablePreview(id));
+windowChannel('plugins:end-kept-pty', (id) => plugins.endKeptPty(id));
 windowChannel('plugins:crash', (id) => plugins.crash(id));
 windowChannel('plugins:hang', (id) => plugins.hang(id));
 windowChannel('plugins:run', (command) => plugins.run(command));
 windowChannel('window:answer', (arg) => plugins.answerDialog(arg));
 windowChannel('documents:close', (id) => plugins.closeDocument(id));
 windowChannel('workspace:open', (file) => openWorkspace(file));
+windowChannel('app:safe-mode', (on) => switchSafeMode(on));
 
 const realOf = (file: string) => {
   try {
@@ -134,15 +146,29 @@ async function openWorkspace(arg: unknown): Promise<void> {
     throw new Error('воркспейса нет в «Недавних»');
   }
   if (file === undefined || (workspaceFile !== undefined && realOf(file) === realOf(workspaceFile))) return;
-  const live = plugins.livePty;
-  if (live > 0) {
-    const message = { type: 'question' as const, buttons: ['Открыть', 'Отмена'], defaultId: 1, cancelId: 1, message: `Открыть ${path.basename(file)}?`, detail: `Живых процессов плагинов: ${String(live)}. Они завершатся вместе с воркспейсом.` };
-    const answer = win ? await dialog.showMessageBox(win, message) : await dialog.showMessageBox(message);
-    if (answer.response !== 0) return;
-  }
+  if (!(await livePtyAgreed('Открыть', `Открыть ${path.basename(file)}?`))) return;
   const keep = process.argv.slice(1).filter((a) => a !== '--no-workspace' && !a.startsWith('--workspace='));
   app.relaunch({ args: [...keep, `--workspace=${file}`] });
   app.quit();
+}
+
+/** Перезапуск, а не переключение на ходу: ядро решает про безопасный режим один раз, до первого хоста. */
+async function switchSafeMode(on: unknown): Promise<void> {
+  if (typeof on !== 'boolean') throw new Error('ожидается true или false');
+  if (on === safeMode) return;
+  if (!(await livePtyAgreed('Перезапустить', on ? 'Перезапустить в безопасном режиме?' : 'Выйти из безопасного режима?'))) return;
+  const keep = process.argv.slice(1).filter((a) => a !== SAFE_MODE);
+  app.relaunch({ args: on ? [...keep, SAFE_MODE] : keep });
+  app.quit();
+}
+
+/** Перезапуск завершает живые pty плагинов: без них вопроса нет. */
+async function livePtyAgreed(action: string, question: string): Promise<boolean> {
+  const live = plugins.livePty;
+  if (live === 0) return true;
+  const message = { type: 'question' as const, buttons: [action, 'Отмена'], defaultId: 1, cancelId: 1, message: question, detail: `Живых процессов плагинов: ${String(live)}. Они завершатся при перезапуске.` };
+  const answer = win ? await dialog.showMessageBox(win, message) : await dialog.showMessageBox(message);
+  return answer.response === 0;
 }
 ipcMain.handle('view:dialog', (event, view: unknown, spec: unknown) => {
   const pluginId = senderPlugin(event);
@@ -234,6 +260,8 @@ function createWindow(): void {
     title: `Cyborg Playground - ${workspaceFile === undefined ? 'без воркспейса' : path.basename(workspaceFile)}`,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegrationInSubFrames: true },
   });
+  // Заголовок собирает ядро; `<title>` страницы его бы затёр.
+  win.on('page-title-updated', (event) => event.preventDefault());
   const page = path.join(__dirname, 'renderer', 'index.html');
   guardNavigation(win.webContents, pathToFileURL(page).href, (pluginId, url) => plugins.viewDenied(pluginId, url));
   void win.loadFile(page);
@@ -262,6 +290,10 @@ app.on('window-all-closed', () => {
 });
 
 void app.whenReady().then(() => {
+  if (gatewaySpikeOut !== undefined) {
+    void runGatewaySpike({ out: gatewaySpikeOut, hostEntry: path.join(__dirname, 'plugin-host.mjs'), benchDir: path.join(__dirname, 'bench') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
+    return;
+  }
   if (hostsSpikeOut !== undefined) {
     void runHostsSpike({ out: hostsSpikeOut, hostEntry: path.join(__dirname, 'plugin-host.mjs'), benchDir: path.join(__dirname, 'bench') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
     return;
@@ -299,11 +331,12 @@ void app.whenReady().then(() => {
   void plugins.start({
     userData,
     workspace: workspaceFile,
+    safeMode,
     builtinDir: path.join(__dirname, 'plugins'),
     spawnHost: hosts.spawn,
     pidOf: hosts.pidOf,
     idleSeconds: () => powerMonitor.getSystemIdleTime(),
-    os: electronOs({ userData, roots: () => [workspace], protectedPaths: [workspaceFile, `${workspaceFile}.lock`] }),
+    os: electronOs({ userData, roots: () => [workspace], protectedPaths: [workspaceFile, `${workspaceFile}.lock`], workspaceFile, raiseWindow: showWindow }),
     // Короче, чем в Cyborg: зависание по кнопке «Повесить хост» видно через пару секунд.
     watchdog: { interval: 500, timeout: 2500 },
     // eslint-disable-next-line no-console -- журнал ядра в главном процессе - это stderr приложения
