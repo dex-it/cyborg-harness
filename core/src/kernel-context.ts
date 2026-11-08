@@ -4,7 +4,6 @@ import type { DocumentTable } from './documents.ts';
 import type { CoreError } from './errors.ts';
 import type { ContractGraph } from './graph.ts';
 import type { SectionInput, SystemEvent } from './host-runtime.ts';
-import type { DeniedCollapse } from './journal.ts';
 import type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Keybinding, LoadOptions } from './kernel-types.ts';
 import type { ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
@@ -187,7 +186,8 @@ export interface KernelContext {
   readonly options: LoadOptions;
   readonly journal: JournalEntry[];
   readonly record: (entry: JournalEntry) => void;
-  readonly denials: DeniedCollapse;
+  /** Закрывает окна склейки повторов (`denied`, `deprecated-call`): счёт не теряется при выгрузке. */
+  readonly flushRepeats: () => void;
   /** Включённые в `plugins.enabled` при запуске. */
   readonly enabled: ReadonlySet<string>;
   readonly watchdog: { readonly interval: number; readonly timeout: number; readonly strikes: number; readonly window: number };
