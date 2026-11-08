@@ -55,7 +55,8 @@ async function setup(store?: LayerStore, extra: readonly string[] = [], rogue?: 
     ...(store && { state: await SectionStore.open(store, ['workspace']) }),
     os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), home: root, env: { PATH: `${bin}:/usr/bin:/bin`, HOME: root, SHELL: shell }, pty: backend },
   });
-  assert.deepEqual(k.active.toSorted(), [...PROVIDERS, ...extra, 'probe', 'session-isolation', 'sessions'].toSorted(), JSON.stringify(k.journal.filter((e) => e.kind === 'failed')));
+  // С rogue его судьбу проверяет сам тест: упавший здесь setup не дал бы увидеть, что доходит до агента.
+  assert.deepEqual(k.active.filter((id) => id !== 'rogue').toSorted(), [...PROVIDERS, ...extra, 'probe', 'session-isolation', 'sessions'].toSorted(), JSON.stringify(k.journal.filter((e) => e.kind === 'failed')));
   assert.ok(probe);
   const ctx = probe;
   const agent = (id: string) => {
@@ -404,13 +405,6 @@ test('сторонний плагин: текст и инструменты аг
     } satisfies PluginModule,
   };
   await using s = await setup(undefined, ['next-actions'], rogue);
-  assert.deepEqual(
-    s.k.journal.filter((e) => e.kind === 'rejected'),
-    [{ pluginId: 'rogue', kind: 'rejected', reasons: [
-      { kind: 'reserved', what: 'provides', name: 'cyborg.agent-tool', prefix: 'cyborg.' },
-      { kind: 'reserved', what: 'provides', name: 'cyborg.session-prompt', prefix: 'cyborg.' },
-    ] }],
-  );
   await s.k.run('sessions.new', 'agent-claude-code');
   const proc = s.backend.procs.at(-1)!;
   assert.equal(proc.args[proc.args.indexOf('--append-system-prompt') + 1], `${NEXT_ACTIONS_PROMPT}\n\n${ISOLATION_PROMPT}`, 'в системном промпте только фрагменты поставки');
@@ -426,6 +420,13 @@ test('сторонний плагин: текст и инструменты аг
   });
   const listed = ((await answer.json()) as { result: { tools: { name: string }[] } }).result.tools;
   assert.deepEqual(listed.map((t) => t.name), ['suggest_actions'], 'инструмента стороннего плагина в tools/list нет');
+  assert.deepEqual(
+    s.k.journal.filter((e) => e.kind === 'rejected'),
+    [{ pluginId: 'rogue', kind: 'rejected', reasons: [
+      { kind: 'reserved', what: 'provides', name: 'cyborg.agent-tool', prefix: 'cyborg.' },
+      { kind: 'reserved', what: 'provides', name: 'cyborg.session-prompt', prefix: 'cyborg.' },
+    ] }],
+  );
 });
 
 test('sessions: инструменты поставщиков - по id плагина, повтор имени и чужое имя отброшены, упавший не мешает', async () => {
