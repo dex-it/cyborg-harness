@@ -38,6 +38,8 @@ export interface PluginManifest {
   readonly provides: Readonly<Record<string, readonly string[]>>;
   /** Контракт -> член -> право вызывающего на аргумент: ядро проверит его до передачи вызова (`via-contract`). */
   readonly guards?: Readonly<Record<string, MemberGuards>>;
+  /** Контракт -> члены с пометкой `@deprecated` (для всех мажорных версий поставщика): их вызовы ядро пишет в журнал (`deprecated-call`). */
+  readonly deprecated?: Readonly<Record<string, readonly string[]>>;
   /** Кратность one, без поставщика плагин не активируется. */
   readonly requires: Readonly<Record<string, string>>;
   /** Кратность one, без поставщика плагин работает. */
@@ -96,7 +98,7 @@ export function parseManifest(raw: unknown, apiVersion?: string): ManifestResult
   const engines = isRecord(raw.engines) ? raw.engines.cyborg : undefined;
   if (typeof engines !== 'string' || !isValidRange(engines)) errors.push(`engines.cyborg: ожидается диапазон, получено ${show(engines)}`);
 
-  const { provides, guards } = readProvides(raw.provides, errors);
+  const { provides, guards, deprecated } = readProvides(raw.provides, errors);
   const requires = readRanges('requires', raw.requires, errors);
   const optional = readRanges('optional', raw.optional, errors);
   const consumes = readRanges('consumes', raw.consumes, errors);
@@ -137,6 +139,7 @@ export function parseManifest(raw: unknown, apiVersion?: string): ManifestResult
       engines: { cyborg: engines },
       provides,
       ...(guards && { guards }),
+      ...(deprecated && { deprecated }),
       requires,
       optional,
       consumes,
