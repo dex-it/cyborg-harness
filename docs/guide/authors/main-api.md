@@ -56,7 +56,7 @@ ctx.commands.register('acme.open', async (path) => {
 });
 ```
 
-Результат команды - данные, которые переживают `structuredClone`. `ctx.commands.run` вызывает любую зарегистрированную команду по имени; отказ приходит исключением с полем `code` (`CommandNotFound`, `Invalid`, `PermissionDenied`).
+Результат команды - данные, которые переживают `structuredClone`. `ctx.commands.run` вызывает зарегистрированную команду по имени: свою или чужую, если её исполнитель открыл плагинам (`callers: "plugins"`, [Контракты и команды](/features/contracts/#кому-открыта-команда)); отказ приходит исключением с полем `code` (`CommandNotFound`, `Invalid`, `PermissionDenied`).
 
 ## Разделы config и state
 
