@@ -14,7 +14,7 @@ import { runHostsSpike } from './spike-hosts.ts';
 import { runGatewaySpike } from './spike-gateway.ts';
 import { resolveDragFile, ViewDrags } from './view-drag.ts';
 import { framesOf, fromWindow, registerViewScheme, senderPlugin, serveViews, viewFrames } from './views.ts';
-import { themeTokens } from './theme.ts';
+import { themeTokens } from '@cyborg-harness/electron';
 import { resolveViewRequest } from './view-files.ts';
 import { ViewTerminals, type TerminalFrame } from './view-terminals.ts';
 import { RecentWorkspaces } from '@cyborg-harness/core';

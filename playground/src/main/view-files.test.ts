@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pluginOfOrigin, viewOrigin } from '@cyborg-harness/electron/window';
-import { themeTokens } from './theme.ts';
+import { themeTokens } from '@cyborg-harness/electron';
 import { resolveStaticFile, resolveViewRequest, type PluginUi } from './view-files.ts';
 
 // Граница каталога считается по настоящим путям: файлы должны существовать, а tmpdir на macOS - симлинк.
