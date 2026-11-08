@@ -69,6 +69,12 @@ function slow() {
   };
 }
 
+const first = (s: ReturnType<typeof slow>): AbortSignal => {
+  const signal = s.seen[0];
+  assert.ok(signal, 'обработчик не вызван');
+  return signal;
+};
+
 test('отмена: обработчик получает сигнал, вызывающий - отказ Cancelled, поздний ответ отбрасывается', async () => {
   const [a, b] = pair();
   const s = slow();
@@ -76,13 +82,13 @@ test('отмена: обработчик получает сигнал, вызы
   const abort = new AbortController();
   const pending = a.request('work', null, abort.signal);
   await later();
-  assert.equal(s.seen[0]?.aborted, false);
+  assert.equal(first(s).aborted, false);
   abort.abort();
   await assert.rejects(pending, { code: 'Cancelled' });
   await later();
   await later();
-  assert.equal(s.seen[0]?.aborted, true);
-  assert.equal((s.seen[0]?.reason as CoreError).code, 'Cancelled');
+  assert.equal(first(s).aborted, true);
+  assert.equal((first(s).reason as CoreError).code, 'Cancelled');
   s.finish();
   await later();
   b.handle('ping', () => 'pong');
@@ -92,7 +98,7 @@ test('отмена: обработчик получает сигнал, вызы
 test('отмена: уже отменённый сигнал запроса не шлёт, причина-CoreError доходит как есть', async () => {
   const [a, b] = pair();
   let calls = 0;
-  b.handle('work', () => void calls++);
+  b.handle('work', () => { calls++; });
   await assert.rejects(a.request('work', null, AbortSignal.abort()), { code: 'Cancelled' });
   await assert.rejects(a.request('work', null, AbortSignal.abort(new CoreError('Timeout', 'срок'))), { code: 'Timeout', message: 'срок' });
   await later();
@@ -142,10 +148,10 @@ test('cancel с неизвестным номером или не числом �
   await later();
   for (const id of [999, -1, 1.5, '7', null, undefined]) listeners[0]?.({ t: 'cancel', id });
   await later();
-  assert.equal(s.seen[0]?.aborted, false);
+  assert.equal(first(s).aborted, false);
   listeners[0]?.({ t: 'cancel', id: 7 });
   await later();
-  assert.equal(s.seen[0]?.aborted, true);
+  assert.equal(first(s).aborted, true);
   assert.deepEqual(sent, [{ t: 'res', id: 7, ok: false, e: { code: 'Cancelled', message: 'запрос отменён' } }]);
   s.finish();
   await later();
@@ -159,6 +165,6 @@ test('close обрывает работу обработчиков: сигнал
   a.request('work', null).catch(() => undefined);
   await later();
   b.close(new CoreError('HostGone', 'упал'));
-  assert.equal(s.seen[0]?.aborted, true);
-  assert.equal((s.seen[0]?.reason as CoreError).code, 'HostGone');
+  assert.equal(first(s).aborted, true);
+  assert.equal((first(s).reason as CoreError).code, 'HostGone');
 });

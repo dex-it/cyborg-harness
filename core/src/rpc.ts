@@ -12,7 +12,8 @@ type Message =
   | { readonly t: 'res'; readonly id: number; readonly ok: true; readonly v: unknown }
   | { readonly t: 'res'; readonly id: number; readonly ok: false; readonly e: WireError }
   | { readonly t: 'note'; readonly m: string; readonly p: unknown }
-  | { readonly t: 'cancel'; readonly id: number };
+  /** `reason` - причина отказа ядра (например `Timeout`), если это она; иначе поставщик увидит `Cancelled`. */
+  | { readonly t: 'cancel'; readonly id: number; readonly reason?: WireError };
 
 function readMessage(raw: unknown): Message | undefined {
   if (!isRecord(raw)) return undefined;
@@ -83,18 +84,7 @@ export class Endpoint {
     if (signal?.aborted) return Promise.reject(cancelError(signal));
     const id = this.#next++;
     return new Promise<T>((resolve, reject) => {
-      const onAbort = () => {
-        if (!this.#pending.delete(id)) return;
-        this.#cancelled.set(id, discard);
-        try {
-          this.#send({ t: 'cancel', id }, 'cancel');
-        } catch {
-          // Канал не принял отмену: собеседник доработает сам, ответ мы всё равно отбросим.
-        }
-        reject(cancelError(signal as AbortSignal));
-      };
-      signal?.addEventListener('abort', onAbort, { once: true });
-      const unlisten = () => signal?.removeEventListener('abort', onAbort);
+      const unlisten = signal ? this.#onAbort(id, signal, reject, discard) : () => undefined;
       this.#pending.set(id, { resolve, reject, owner: this.#owner?.current(), unlisten });
       try {
         this.#send({ t: 'req', id, m: method, p: params }, `${method}: аргументы`);
@@ -104,6 +94,23 @@ export class Endpoint {
         reject(error instanceof Error ? error : new CoreError('Remote', String(error)));
       }
     });
+  }
+
+  /** Отмена ждущего запроса: отказ вызывающему сразу, собеседнику `cancel`; ответ, что придёт позже, достаётся `discard`. */
+  #onAbort(id: number, signal: AbortSignal, reject: (error: unknown) => void, discard: ((value: unknown) => void) | undefined): () => void {
+    const onAbort = () => {
+      if (!this.#pending.delete(id)) return;
+      this.#cancelled.set(id, discard);
+      try {
+        const reason = signal.reason as unknown;
+        this.#send({ t: 'cancel', id, ...(reason instanceof CoreError && { reason: toWire(reason) }) }, 'cancel');
+      } catch {
+        // Канал не принял отмену: собеседник доработает сам, ответ мы всё равно отбросим.
+      }
+      reject(cancelError(signal));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    return () => signal.removeEventListener('abort', onAbort);
   }
 
   notify(method: string, params: unknown): void {
@@ -142,7 +149,7 @@ export class Endpoint {
       const controller = this.#serving.get(message.id);
       if (!controller) return;
       this.#serving.delete(message.id);
-      const reason = new CoreError('Cancelled', 'запрос отменён');
+      const reason = message.reason === undefined ? new CoreError('Cancelled', 'запрос отменён') : fromWire(message.reason);
       controller.abort(reason);
       // Ответ сразу: ждущий отмены снимает запись, а то, что обработчик вернёт позже, уже никому не нужно.
       this.#reply({ t: 'res', id: message.id, ok: false, e: toWire(reason) }, 'cancel');

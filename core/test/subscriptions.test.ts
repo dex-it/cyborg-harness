@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { setImmediate as tick } from 'node:timers/promises';
+import { setImmediate as tick, setTimeout as sleep } from 'node:timers/promises';
 import type { Subscription } from '@cyborg-harness/contracts';
 import { load, type LoadOptions } from '../src/loader.ts';
 import type { PluginContext, PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
+import { startCancel } from './fixtures/cancel.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 const settle = async () => {
@@ -176,5 +177,36 @@ test('предел подписок потребителя: сверх пред�
   await settle();
   await listen('c');
   assert.equal(await api.listeners(), 2);
+  await kernel.unload();
+});
+
+test('отменённый вызов с колбэком: подписка снята, место в пределе свободно, у поставщика слушателей нет', async () => {
+  const { kernel, api, log, listeners } = await startCancel({ limits: { subscriptions: 1 } });
+  const abort = new AbortController();
+  const call = api.watch(() => undefined, abort.signal);
+  await tick();
+  abort.abort();
+  await assert.rejects(call, { code: 'Cancelled' });
+  await sleep(120);
+  assert.deepEqual(log, ['watch:aborted'], 'поставщик увидел отмену к концу своей работы');
+  assert.equal(listeners.size, 0, 'то, что поставщик успел открыть после отмены, снято');
+  const sub = await api.watch(() => undefined);
+  assert.equal(listeners.size, 1, 'при пределе 1 место освободилось: вторая подписка прошла');
+  sub.dispose();
+  await settle();
+  assert.equal(listeners.size, 0);
+  await kernel.unload();
+});
+
+test('callTimeout во время открытия подписки: Timeout, подписка снята, место свободно', async () => {
+  const { kernel, api, listeners, held } = await startCancel({ limits: { subscriptions: 1 }, callTimeout: 20 });
+  held.watchMs = 80;
+  await assert.rejects(api.watch(() => undefined, new AbortController().signal), { code: 'Timeout' });
+  await sleep(200);
+  assert.equal(listeners.size, 0);
+  held.watchMs = 0;
+  const sub = await api.watch(() => undefined);
+  assert.equal(listeners.size, 1);
+  sub.dispose();
   await kernel.unload();
 });

@@ -102,3 +102,25 @@ test('serve: клиент оборвал тело запроса - сервер 
     serves.forget('p');
   }
 });
+
+test('cancel: собеседник отменяет только свои запросы, номера чужих запросов и не числа игнорируются' , async () => {
+  const toA: ((m: unknown) => void)[] = [];
+  const sent: unknown[] = [];
+  const a = new Endpoint({ post: (m) => void sent.push(m), onMessage: (l) => void toA.push(l) });
+  // a ждёт ответа на свой запрос номер 1 и сам исполняет запрос номер 5 собеседника
+  let released: (() => void) | undefined;
+  let aborted: boolean | undefined;
+  a.handle('serve', (_p: unknown, signal: AbortSignal) => new Promise((resolve) => { released = () => { aborted = signal.aborted; resolve('ok'); }; }));
+  const mine = a.request('mine', null).then(() => 'выполнен', (e: unknown) => e);
+  toA[0]?.({ t: 'req', id: 5, m: 'serve', p: null });
+  await new Promise((r) => setImmediate(r));
+  // собеседник шлёт cancel с номером запроса, который ждёт сам a (1): a его не отдавал, значит, и отменять нечего
+  for (const id of [1, 2, 6, 5.5, -5, Number.NaN, Infinity]) toA[0]?.({ t: 'cancel', id });
+  for (const id of ['5', null, undefined, {}, [5]]) toA[0]?.({ t: 'cancel', id });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(await Promise.race([mine, new Promise((r) => setTimeout(() => r('ждёт'), 50))]), 'ждёт', 'собственный запрос a не отменён чужим cancel');
+  released?.();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(aborted, false, 'запрос 5 исполнялся до конца: cancel с чужим номером его не коснулся');
+  assert.deepEqual(sent.filter((m) => (m as { t: string }).t === 'res'), [{ t: 'res', id: 5, ok: true, v: 'ok' }]);
+});

@@ -1,3 +1,4 @@
+import { splitSignal, withSignal } from './cancel.ts';
 import { CoreError } from './errors.ts';
 import type { BridgeEnd, Commands, KernelContext } from './kernel-context.ts';
 import { checkArgs } from './manifest.ts';
@@ -9,8 +10,11 @@ const isKernelCommand = (name: string): boolean => (Object.values(KERNEL_COMMAND
 export function createCommands(ctx: KernelContext): Commands {
   const owners = new Map<string, string>();
 
-  async function run(command: string, ...args: unknown[]): Promise<unknown> {
+  async function run(command: string, ...given: unknown[]): Promise<unknown> {
     const { activation, pool } = ctx.parts;
+    // Сигнал отмены - последний аргумент: схема манифеста его не видит, владельцу он едет меткой (cancel.ts).
+    const { args: wire, signal } = splitSignal(given);
+    const args = signal ? wire.slice(0, -1) : wire;
     if (command === KERNEL_COMMANDS.revealWorkspace) return ctx.gateway.revealWorkspace();
     const declares = (id: string) => Object.hasOwn(ctx.manifestOf(id).commands, command);
     if (!owners.has(command)) {
@@ -23,7 +27,7 @@ export function createCommands(ctx: KernelContext): Commands {
     const spec = ctx.manifestOf(owner).commands[command];
     if (!spec) throw new CoreError('CommandNotFound', `команда ${command} не объявлена у ${owner}`);
     checkArgs(command, spec, args);
-    return pool.call(pool.live(owner), owner, 'command', { pluginId: owner, name: command, args });
+    return pool.call(pool.live(owner), owner, 'command', { pluginId: owner, name: command, args: wire }, undefined, signal);
   }
 
   function attach({ mine, onRequest, onNote }: BridgeEnd): void {
@@ -37,9 +41,9 @@ export function createCommands(ctx: KernelContext): Commands {
       mine(p.pluginId);
       if (owners.get(p.name) === p.pluginId) owners.delete(p.name);
     });
-    onRequest('run', { name: 'string', args: 'array' }, (p) => {
+    onRequest('run', { name: 'string', args: 'array' }, (p, signal) => {
       if (isKernelCommand(p.name)) throw new CoreError('PermissionDenied', `${p.name}: команду ядра зовёт приложение, а не плагин`);
-      return run(p.name, ...p.args);
+      return run(p.name, ...withSignal(p.args, signal));
     });
   }
 
