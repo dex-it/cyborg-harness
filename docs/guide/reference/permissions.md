@@ -9,7 +9,7 @@ description: "Перечень прав плагина в манифесте: ф
 
 | Право | Значение | Что открывает в `ctx.os` |
 |---|---|---|
-| `fs.read` | Список областей путей | Чтение файлов, каталогов, `stat`, `readSlice`, `watch` |
+| `fs.read` | Список областей путей | Чтение файлов, каталогов, `stat`, `realpath`, `readSlice`, `watch` |
 | `fs.write` | Список областей и `workspace.git` | `writeText`, `mkdir`, `remove` |
 | `shell` | Области путей и схемы URL | `shell.openPath` по путям, `shell.openExternal` по схемам |
 | `process` | Список программ | `process.run` |

@@ -347,6 +347,29 @@ test('NotFound: нет файла, каталога или программы - 
   await k.unload();
 });
 
+test('fs.realpath: настоящий путь внутри области - ссылки раскрыты; нет пути - NotFound; ссылка наружу и чужой путь - PermissionDenied с записью в журнале', async () => {
+  await using box = await sandbox();
+  await mkdir(path.join(box.work, 'real'));
+  await writeFile(path.join(box.work, 'real', 'a.txt'), 'x');
+  await symlink(path.join(box.work, 'real'), path.join(box.work, 'alias'));
+  await symlink(box.outside, path.join(box.work, 'escape'));
+  const { k, os, denied } = await kernel({ reader: { 'fs.read': [box.work] }, plain: undefined }, { dataDir: box.data, tempDir: box.temp });
+  const fs = os('reader').fs;
+  assert.equal(await fs.realpath(path.join(box.work, 'alias', 'a.txt')), path.join(box.work, 'real', 'a.txt'), 'ссылка раскрыта: так ключ ~/.claude.json совпадает с каталогом проекта');
+  assert.equal(await fs.realpath(path.join(box.work, 'real', '..', 'real')), path.join(box.work, 'real'));
+  assert.equal(await fs.realpath(box.work), box.work);
+  await assert.rejects(fs.realpath(path.join(box.work, 'gone')), { code: 'NotFound' });
+  await assert.rejects(fs.realpath(path.join(box.work, 'escape')), { code: 'PermissionDenied' }, 'ссылка наружу области');
+  await assert.rejects(fs.realpath(box.outside), { code: 'PermissionDenied' });
+  await assert.rejects(fs.realpath('relative'), { code: 'PermissionDenied' });
+  await assert.rejects(os('plain').fs.realpath(path.join(box.work, 'real')), { code: 'PermissionDenied' }, 'без fs.read - только свои каталоги');
+  const own = os('plain').paths.data;
+  await os('plain').fs.mkdir(path.join(own, 'd'));
+  assert.equal(await os('plain').fs.realpath(path.join(own, 'd')), path.join(own, 'd'), 'свой каталог доступен без права');
+  assert.deepEqual(denied(), ['reader:fs.realpath', 'reader:fs.realpath', 'reader:fs.realpath', 'plain:fs.realpath']);
+  await k.unload();
+});
+
 test('fs.readSlice: кусок по байтам, символ UTF-8 не рвётся, пределы и права', async () => {
   await using box = await sandbox();
   const file = path.join(box.work, 'log.jsonl');

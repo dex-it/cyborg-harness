@@ -145,7 +145,7 @@ async function readAtMost(method: string, handle: fs.FileHandle, size: number, m
   }
 }
 
-const READS = new Set(['fs.readText', 'fs.readSlice', 'fs.list', 'fs.stat', 'fs.watch']);
+const READS = new Set(['fs.readText', 'fs.readSlice', 'fs.list', 'fs.stat', 'fs.watch', 'fs.realpath']);
 
 /** Чтение несуществующего: плагин различает «нет» и «ошибка» по коду, а не по тексту ОС. До этой точки путь уже проверен областью, поэтому чужой путь отвечает `PermissionDenied`, а не `NotFound`. */
 function missing(method: string, error: unknown): unknown {
@@ -619,6 +619,11 @@ export class OsGateway {
         const file = await this.#checkPath(m, method, args[0], false);
         const s = await fs.stat(file);
         return { kind: s.isFile() ? 'file' : s.isDirectory() ? 'dir' : 'other', size: s.size, mtimeMs: s.mtimeMs } satisfies FileStat;
+      }
+      case 'fs.realpath': {
+        await this.#ownDirs(m.id);
+        // Путь уже после realpath и внутри области; ссылка наружу отказана раньше, поэтому ответ областью ограничен.
+        return fs.realpath(await this.#checkPath(m, method, args[0], false));
       }
       case 'fs.writeText': {
         await this.#ownDirs(m.id);

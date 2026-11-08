@@ -77,7 +77,7 @@ ctx.commands.register('acme.open', async (path) => {
 
 | Член | Право в манифесте | Что даёт |
 |---|---|---|
-| `fs` вне своих каталогов | `fs.read`, `fs.write` | Чтение, запись, `list`, `stat`, `readSlice`, `watch`, `mkdir`, `remove` |
+| `fs` вне своих каталогов | `fs.read`, `fs.write` | Чтение, запись, `list`, `stat`, `realpath`, `readSlice`, `watch`, `mkdir`, `remove` |
 | `process` | `process` | `run(program, args, options)` для перечисленных программ |
 | `pty` | `pty` | `spawn`, `list`, `attach`; процесс держит ядро |
 | `net` | `net` | `fetch` на перечисленные хосты |

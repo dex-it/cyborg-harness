@@ -106,11 +106,13 @@ export interface HttpServer {
   dispose(): void;
 }
 
-/** Файлы: без права - только свои каталоги `paths`; чтение шире - по `fs.read`, запись - по `fs.write`. Путь вне области - `PermissionDenied`, никогда `NotFound`; нет файла или каталога внутри области в `readText`, `readSlice`, `list`, `stat`, `watch` - `NotFound` (проверка существования - `stat` и ловля `NotFound`). */
+/** Файлы: без права - только свои каталоги `paths`; чтение шире - по `fs.read`, запись - по `fs.write`. Путь вне области - `PermissionDenied`, никогда `NotFound`; нет файла или каталога внутри области в `readText`, `readSlice`, `list`, `stat`, `watch`, `realpath` - `NotFound` (проверка существования - `stat` и ловля `NotFound`). */
 export interface OsFs {
   readText(path: string): Promise<string>;
   list(dir: string): Promise<DirEntry[]>;
   stat(path: string): Promise<FileStat>;
+  /** Настоящий путь: ссылки раскрыты, как `realpath` ОС. Нужен, чтобы сверять пути по имени (ключи `~/.claude.json`, корни проектов): `/tmp/x` и `/private/tmp/x` - один каталог. Ссылка наружу области - `PermissionDenied`, нет пути - `NotFound`. */
+  realpath(path: string): Promise<string>;
   /** Кусок файла с байта `offset`, от 4 байт до 1 МиБ: длинный журнал читается частями, а не целиком. */
   readSlice(path: string, offset: number, maxBytes: number): Promise<FileSlice>;
   /** Изменения файла или каталога по праву чтения; у каталога - имена изменённых, события склеиваются за 50 мс. Ядро закрыло наблюдение само (ошибка ОС, путь ушёл из прав) - `onClose` с причиной. */
