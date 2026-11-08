@@ -83,7 +83,7 @@ quality-checks: входных записей нет
 - **Требование:** безопасный режим выключает все плагины без исключений: хосты не запускаются, каждый плагин получает запись `safe-mode`, замок `lock.onStart` не ставится, включить плагин нельзя (`Unavailable`). Окно и управление плагинами работают.
 - **traced from:** BR-CH-005.
 - **источник:** [SAD, 3.2](../../03-architecture/design/sad.md#32-загрузка-плагинов); bb 5.4 (`safe-mode`).
-- **verification:** испытание - `core/test/loader.test.ts` («безопасный режим не запускает хосты»), `core/test/window.test.ts` («lock.onStart: … безопасный…»). Ещё нет: флага запуска в безопасном режиме у playground; режим включает опция `safeMode` загрузчика ядра.
+- **verification:** испытание - `core/test/loader.test.ts` («безопасный режим не запускает хосты»), `core/test/window.test.ts` («lock.onStart: … безопасный…»); приложение - `playground/scripts/smoke.mjs` (запуск с `--safe-mode`: записи `safe-mode`, хосты не подняты, окно не закрыто `lock.onStart`, «Включить» - отказ; пункты окна перезапускают с флагом и без него).
 - **класс:** Functions.
 
 ### FR-CH-1010 Журнал и окно «Плагины Cyborg»

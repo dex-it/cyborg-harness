@@ -111,6 +111,8 @@ export interface StartOptions {
   readonly onDocuments?: () => void;
   /** `plugins.enabled` из файла применён. */
   readonly onEnabled?: () => void;
+  /** Безопасный режим: манифесты разобраны, хосты не запускаются, «Включить» отвечает `Unavailable`. */
+  readonly safeMode?: boolean;
 }
 
 export async function startPlugins(options: StartOptions): Promise<Kernel & { readonly workspace: string }> {
@@ -151,6 +153,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     os: options.os,
     platform: options.platform,
     idleSeconds: options.idleSeconds,
+    safeMode: options.safeMode,
     onWindow: () => options.onWindow?.(),
     onDocuments: () => options.onDocuments?.(),
     onLog: (id, message) => {
@@ -220,6 +223,7 @@ export class PluginsService {
   private workspace: WorkspaceInfo = { current: null, recent: [] };
   private error: string | undefined;
   private pidOf: ServiceOptions['pidOf'];
+  private safeMode = false;
   private readonly entries: { at: number; entry: JournalEntry }[] = [];
   private readonly problems: string[] = [];
   private readonly feed: FeedLine[] = [];
@@ -254,6 +258,7 @@ export class PluginsService {
 
   async start(options: ServiceOptions): Promise<void> {
     this.pidOf = options.pidOf;
+    this.safeMode = options.safeMode === true;
     try {
       this.kernel = await startPlugins({
         ...options,
@@ -428,7 +433,8 @@ export class PluginsService {
       return {
         id: s.id,
         state: s.state,
-        revivable: s.revivable && kernel !== undefined,
+        // В безопасном режиме кнопка остаётся: её отказ объясняет, почему плагин не работает.
+        revivable: (s.revivable || s.cause?.kind === 'safe-mode') && kernel !== undefined,
         unloaded: s.cause?.kind === 'unloaded' && s.cause.by === s.id,
         commands,
         permissions: manifest ? describePermissions(manifest.permissions) : [],
@@ -457,6 +463,7 @@ export class PluginsService {
     }));
     return {
       phase: this.phase,
+      safeMode: this.safeMode,
       ...(this.error !== undefined && { error: this.error }),
       problems: [...this.problems],
       plugins,
