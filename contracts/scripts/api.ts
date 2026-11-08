@@ -33,8 +33,8 @@ export function parseSnapshot(text: string): Snapshot {
   return { version: match[1], body: rest.startsWith(NOTE) ? rest.slice(NOTE.length) : rest };
 }
 
-export function readSnapshot(): Snapshot {
-  return parseSnapshot(fs.readFileSync(SNAPSHOT_FILE, 'utf8'));
+export function readSnapshot(file = SNAPSHOT_FILE): Snapshot {
+  return parseSnapshot(fs.readFileSync(file, 'utf8'));
 }
 
 /** Версия с суффиксом (`1.0.0-dev`) - линия разработки ещё не выпущенного пакета: её API меняется свободно, правило повышения действует после первого выпуска. */
@@ -50,8 +50,8 @@ function lower(a: string, b: string): boolean {
 }
 
 /** Снимок в репозитории против собранных деклараций `dir` и версии пакета. */
-export function checkSnapshot(dir: string, packageVersion: string): string[] {
-  const snapshot = readSnapshot();
+export function checkSnapshot(dir: string, packageVersion: string, file = SNAPSHOT_FILE): string[] {
+  const snapshot = readSnapshot(file);
   const problems: string[] = [];
   if (snapshot.version !== packageVersion) problems.push(`снимок снят для версии ${snapshot.version}, а в package.json ${packageVersion}: обновите снимок (npm run snapshot:contracts)`);
   if (snapshot.body !== normalizeDeclarations(dir)) problems.push(`декларации пакета изменены, а снимок ${snapshot.version} - нет: повысьте версию пакета, запишите изменение в CHANGELOG.md и обновите снимок (npm run snapshot:contracts)`);

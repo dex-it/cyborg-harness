@@ -3,43 +3,64 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { checkSnapshot, compareWithBase, normalizeDeclarations, parseSnapshot, readSnapshot, renderSnapshot, SNAPSHOT_FILE } from './api.ts';
+import type { Snapshot } from './api.ts';
 import { buildDeclarations } from './build.ts';
 
 // `node scripts/check-api.ts [--base <ref>]` - проверка снимка (и версии против снимка в ветке назначения `ref`); `--update` - переписать снимок по собранным декларациям.
 const contracts = path.resolve(import.meta.dirname, '..');
-const args = process.argv.slice(2);
-const baseRef = args.includes('--base') ? args[args.indexOf('--base') + 1] : undefined;
-const pkg = JSON.parse(fs.readFileSync(path.join(contracts, 'package.json'), 'utf8')) as { version: string };
 
-const out = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'cyborg-contracts-api-'));
-try {
-  buildDeclarations(out);
-  if (args.includes('--update')) {
-    fs.writeFileSync(SNAPSHOT_FILE, renderSnapshot(pkg.version, normalizeDeclarations(out)));
-    process.stdout.write(`api-snapshot.txt обновлён для версии ${pkg.version}\n`);
-  } else {
-    const problems = checkSnapshot(out, pkg.version);
+export interface CheckOptions {
+  /** Файл снимка; по умолчанию снимок пакета. */
+  readonly snapshotFile?: string;
+  /** Каталог внутри репозитория, откуда читается снимок ветки назначения. */
+  readonly gitDir?: string;
+}
+
+export interface CheckResult {
+  readonly code: number;
+  readonly out: string;
+  readonly err: string;
+}
+
+/** Разбор `args` и проверка; ошибка настройки (нет ссылки, неизвестная ссылка) - исключение, а не «замечание»: молча пропустить сравнение значило бы отключить проверку. */
+export function main(args: readonly string[], options: CheckOptions = {}): CheckResult {
+  const snapshotFile = options.snapshotFile ?? SNAPSHOT_FILE;
+  const gitDir = options.gitDir ?? contracts;
+  const pkg = JSON.parse(fs.readFileSync(path.join(contracts, 'package.json'), 'utf8')) as { version: string };
+  const out = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'cyborg-contracts-api-'));
+  try {
+    buildDeclarations(out);
+    if (args.includes('--update')) {
+      fs.writeFileSync(snapshotFile, renderSnapshot(pkg.version, normalizeDeclarations(out)));
+      return { code: 0, out: `api-snapshot.txt обновлён для версии ${pkg.version}\n`, err: '' };
+    }
+    const problems = checkSnapshot(out, pkg.version, snapshotFile);
+    let said = '';
+    const baseRef = args.includes('--base') ? args[args.indexOf('--base') + 1] : undefined;
     if (args.includes('--base')) {
       if (!baseRef) throw new Error('--base требует ссылку git, например origin/master');
-      const run = (...a: string[]): string => execFileSync('git', a, { cwd: contracts, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-      // Неизвестная ссылка - ошибка настройки CI, а не «снимка нет»: молча пропустить сравнение значило бы отключить проверку.
+      const run = (...a: string[]): string => execFileSync('git', a, { cwd: gitDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
       run('rev-parse', '--verify', `${baseRef}^{commit}`);
-      let base;
+      let base: Snapshot | undefined;
       try {
-        run('cat-file', '-e', `${baseRef}:contracts/api-snapshot.txt`);
-        base = parseSnapshot(run('show', `${baseRef}:contracts/api-snapshot.txt`));
+        const file = `${baseRef}:contracts/api-snapshot.txt`;
+        run('cat-file', '-e', file);
+        base = parseSnapshot(run('show', file));
       } catch {
-        process.stdout.write(`в ${baseRef} снимка нет: сравнивать не с чем\n`);
+        said = `в ${baseRef} снимка нет: сравнивать не с чем\n`;
       }
-      problems.push(...compareWithBase(base, readSnapshot()));
+      problems.push(...compareWithBase(base, readSnapshot(snapshotFile)));
     }
-    if (problems.length > 0) {
-      process.stderr.write(problems.map((p) => `ошибка: ${p}\n`).join(''));
-      process.exitCode = 1;
-    } else {
-      process.stdout.write(`публичные декларации совпадают со снимком ${pkg.version}${baseRef ? `, версия согласована с ${baseRef}` : ''}\n`);
-    }
+    if (problems.length > 0) return { code: 1, out: said, err: problems.map((p) => `ошибка: ${p}\n`).join('') };
+    return { code: 0, out: `${said}публичные декларации совпадают со снимком ${pkg.version}${baseRef ? `, версия согласована с ${baseRef}` : ''}\n`, err: '' };
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true });
   }
-} finally {
-  fs.rmSync(out, { recursive: true, force: true });
+}
+
+if (process.argv[1] === import.meta.filename) {
+  const result = main(process.argv.slice(2));
+  process.stdout.write(result.out);
+  process.stderr.write(result.err);
+  process.exitCode = result.code;
 }
