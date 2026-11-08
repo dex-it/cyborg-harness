@@ -136,6 +136,8 @@ function journalLine(e: JournalEntry): string {
       return `${yellow('⌨')} plugins.keybindings: ${e.key} -> ${String(e.command)} не применено: ${e.reason}`;
     case 'host-isolated':
       return `${yellow('◌')} ${id} сторонний: группа ${e.group} не действует, свой хост ${e.hostId}`;
+    case 'host-own-grouped':
+      return `${yellow('◌')} ${id} просит свой хост, но группа ${e.group} сажает его к ${e.neighbours.join(', ')}`;
   }
 }
 

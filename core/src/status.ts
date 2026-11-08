@@ -50,7 +50,9 @@ export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[]
         case 'denied':
         case 'unhandled-rejection':
         case 'pty-expired':
-          // Ни конфликт сочетаний, ни отказ шлюза, ни удержанное хостом отклонение, ни завершённый по сроку pty о работе плагина ничего не говорят: плагин работает как обычно.
+        case 'host-isolated':
+        case 'host-own-grouped':
+          // Ни конфликт сочетаний, ни отказ шлюза, ни удержанное хостом отклонение, ни завершённый по сроку pty, ни выбор хоста о работе плагина ничего не говорят: плагин работает как обычно.
           break;
         case 'host-restart':
           // Причиной остаётся падение: «перезапуск» без «почему» человеку ничего не говорит.
@@ -146,6 +148,8 @@ export function describeEntry(e: JournalEntry): string {
       return `сторонний плагин не делит хост: группа ${e.group} из plugins.hosts не действует, работает в своём хосте ${e.hostId}`;
     case 'unhandled-rejection':
       return `необработанное отклонение промиса: ${e.error}`;
+    case 'host-own-grouped':
+      return `манифест просит свой хост, но группа ${e.group} из plugins.hosts сажает его к ${list(e.neighbours)}: его зависание перезапустит и их`;
     case 'switched-off':
       return `выключен, сбоев подряд: ${e.strikes}` + (e.affects.length ? `; его контракты брали: ${list(e.affects)}` : '');
     case 'host-down': {
@@ -186,6 +190,7 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
     case 'unhandled-rejection':
     case 'host-down':
     case 'host-isolated':
+    case 'host-own-grouped':
       return 'warn';
     default:
       return 'error';

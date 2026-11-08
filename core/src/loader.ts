@@ -61,6 +61,8 @@ export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'host-isolated'; readonly group: string; readonly hostId: string }
   /** Промис плагина отклонён без обработчика; хост держится, плагину страйк. */
   | { readonly pluginId: string; readonly kind: 'unhandled-rejection'; readonly error: string }
+  /** Плагин поставки просит свой хост (`"host": "own"`), а группа plugins.hosts сажает его к соседям: действует группа. */
+  | { readonly pluginId: string; readonly kind: 'host-own-grouped'; readonly group: string; readonly neighbours: readonly string[] }
   | {
       readonly pluginId: string;
       readonly kind: 'switched-off';
@@ -306,6 +308,13 @@ function assignHosts(
     result.set(m.id, own);
     const group = groupOf(m.id);
     if (group?.[1].some((id) => id !== m.id && loaded.has(id))) record({ pluginId: m.id, kind: 'host-isolated', group: group[0], hostId: own });
+  }
+  // Соседи считаются после выселения сторонних: тот, кто ушёл из группы в свой хост, зависанием её не заденет.
+  for (const m of manifests) {
+    const group = groupOf(m.id);
+    if (!bundled.has(m.id) || m.host !== 'own' || !group) continue;
+    const neighbours = manifests.filter((other) => other.id !== m.id && result.get(other.id) === group[0]).map((other) => other.id);
+    if (neighbours.length > 0) record({ pluginId: m.id, kind: 'host-own-grouped', group: group[0], neighbours });
   }
   return result;
 }
