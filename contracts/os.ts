@@ -117,6 +117,7 @@ export interface OsFs {
   readSlice(path: string, offset: number, maxBytes: number): Promise<FileSlice>;
   /** Изменения файла или каталога по праву чтения; у каталога - имена изменённых, события склеиваются за 50 мс. Ядро закрыло наблюдение само (ошибка ОС, путь ушёл из прав) - `onClose` с причиной. */
   watch(path: string, listener: (names: readonly string[]) => void, onClose?: (reason: string) => void): Promise<Disposable>;
+  /** Атомарно: текст пишется во временный файл рядом (`<файл>.<hex>.tmp`) и переименовывается, читатель и оборванная запись видят прежний файл или новый целиком; режим существующего файла сохраняется. Без `fsync`: падение процесса не страшно, потеря питания - не гарантия. Наблюдатель каталога видит имя временного файла. Не обычный файл (каталог, ссылка, FIFO) - `Invalid`. */
   writeText(path: string, text: string): Promise<void>;
   mkdir(path: string): Promise<void>;
   remove(path: string): Promise<void>;

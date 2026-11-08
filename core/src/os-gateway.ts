@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import { constants, watch as watchFs, type Dirent, type Stats } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, ProcessResult, PtyInfo, SecretValue } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
@@ -142,6 +143,32 @@ async function readAtMost(method: string, handle: fs.FileHandle, size: number, m
     chunks.push(chunk.subarray(0, bytesRead));
     total += bytesRead;
     if (total > max) throw new CoreError('Invalid', `${method}: файл больше ${String(max)} байт - читайте частями через fs.readSlice`);
+  }
+}
+
+/** Запись через соседний временный файл и `rename`: читатель и оборванная запись видят прежний файл или новый целиком, а не пустой или недописанный. Режим существующего файла сохраняется. Без `fsync`: он не вошёл бы в бюджет шлюза (1 мс на p99), так что защита от падения процесса, а не питания. */
+async function writeAtomic(method: string, file: string, text: string): Promise<void> {
+  const old = await fs.lstat(file).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  });
+  if (old !== undefined && !old.isFile()) throw new CoreError('Invalid', `${method}: не обычный файл: ${file}`);
+  const mode = old === undefined ? 0o644 : old.mode & 0o777;
+  // Имя `<файл>.<n>.tmp`: соседи защищённого файла закрыты для плагинов (`sibling`), в том числе временный файл его записи.
+  const temp = `${file}.${randomBytes(6).toString('hex')}.tmp`;
+  const handle = await fs.open(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
+  try {
+    try {
+      await handle.writeFile(text, 'utf8');
+      // mode у open урезан umask, а у существующего файла режим должен остаться как был.
+      if (old !== undefined) await handle.chmod(mode);
+    } finally {
+      await handle.close();
+    }
+    await fs.rename(temp, file);
+  } catch (error) {
+    await fs.rm(temp, { force: true });
+    throw error;
   }
 }
 
@@ -628,13 +655,7 @@ export class OsGateway {
       case 'fs.writeText': {
         await this.#ownDirs(m.id);
         const file = await this.#checkPath(m, method, args[0], true);
-        const text = str(method, args[1], 'текст');
-        const handle = await fs.open(file, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o644);
-        try {
-          await handle.writeFile(text, 'utf8');
-        } finally {
-          await handle.close();
-        }
+        await writeAtomic(method, file, str(method, args[1], 'текст'));
         return undefined;
       }
       case 'fs.mkdir': {

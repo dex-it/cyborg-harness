@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFile, chmod, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, PluginOs } from '@cyborg-harness/contracts';
@@ -367,6 +367,39 @@ test('fs.realpath: настоящий путь внутри области - с�
   await os('plain').fs.mkdir(path.join(own, 'd'));
   assert.equal(await os('plain').fs.realpath(path.join(own, 'd')), path.join(own, 'd'), 'свой каталог доступен без права');
   assert.deepEqual(denied(), ['reader:fs.realpath', 'reader:fs.realpath', 'reader:fs.realpath', 'plain:fs.realpath']);
+  await k.unload();
+});
+
+test('fs.writeText атомарна: читатель видит прежний или новый файл целиком, режим сохраняется, временных файлов не остаётся, не обычный файл - Invalid', { skip: process.platform === 'win32' && 'режимы POSIX' }, async () => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ writer: { 'fs.read': [box.work], 'fs.write': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  const fs = os('writer').fs;
+  const file = path.join(box.work, 'state.json');
+  const a = 'a'.repeat(3 * 1024 * 1024);
+  const b = 'я'.repeat(1024 * 1024);
+  await fs.writeText(file, a);
+  await chmod(file, 0o600);
+  const run = { writing: true };
+  const seen = new Set<string>();
+  const reader = (async () => {
+    while (run.writing) {
+      const text = await fs.readText(file);
+      seen.add(text === a ? 'a' : text === b ? 'b' : `порча:${String(text.length)}`);
+    }
+  })();
+  for (let i = 0; i < 30; i++) await fs.writeText(file, i % 2 === 0 ? b : a);
+  run.writing = false;
+  await reader;
+  assert.deepEqual([...seen].filter((v) => v.startsWith('порча')), [], 'читатель не видит пустой или недописанный файл');
+  assert.equal((await stat(file)).mode & 0o777, 0o600, 'режим существующего файла сохранён');
+  assert.deepEqual((await fs.list(box.work)).map((e) => e.name), ['state.json'], 'временный файл убран');
+  await fs.writeText(path.join(box.work, 'new.txt'), 'новый');
+  assert.equal(await readFile(path.join(box.work, 'new.txt'), 'utf8'), 'новый');
+  await mkdir(path.join(box.work, 'dir'));
+  await assert.rejects(fs.writeText(path.join(box.work, 'dir'), 'x'), { code: 'Invalid', message: /не обычный файл/ });
+  await symlink(path.join(box.work, 'gone'), path.join(box.work, 'dangling'));
+  await assert.rejects(fs.writeText(path.join(box.work, 'dangling'), 'x'), { code: 'Invalid', message: /не обычный файл/ }, 'висячая ссылка не заменяется файлом');
+  assert.deepEqual((await fs.list(box.work)).map((e) => e.name).sort(), ['dangling', 'dir', 'new.txt', 'state.json']);
   await k.unload();
 });
 

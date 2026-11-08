@@ -89,7 +89,7 @@ export interface Contracts {
 
 Путь только абсолютный, проверяется после `realpath`: симлинк наружу области не выводит, файл воркспейса, данные приложения, каталоги других плагинов и запись в `.git` без `workspace.git` закрыты. `shell.openPath` исполняемый файл не открывает. Программа из `process` и `pty` получает только базовое окружение (PATH, HOME, локаль) и переменные, названные в `env` её правила.
 
-Файлы: `fs.readText`, `list`, `stat`, `realpath`, `readSlice`, `watch` читают, `writeText`, `mkdir`, `remove` пишут. Нет файла внутри области чтения - `NotFound` (его же `process.run` отвечает, если программы нет), вне области - `PermissionDenied`; проверка существования - `stat` и ловля `NotFound`. `realpath(path)` раскрывает ссылки и нужен, чтобы сверять пути по имени: `/tmp/x` и `/private/tmp/x` - один каталог.
+Файлы: `fs.readText`, `list`, `stat`, `realpath`, `readSlice`, `watch` читают, `writeText`, `mkdir`, `remove` пишут. Нет файла внутри области чтения - `NotFound` (его же `process.run` отвечает, если программы нет), вне области - `PermissionDenied`; проверка существования - `stat` и ловля `NotFound`. `writeText` атомарна (временный файл рядом и `rename`; режим сохраняется; не обычный файл - `Invalid`). `realpath(path)` раскрывает ссылки и нужен, чтобы сверять пути по имени: `/tmp/x` и `/private/tmp/x` - один каталог.
 
 pty держит ядро: `ctx.os.pty.spawn({ program, args, cwd, env, cols, rows, persist })` отдаёт ручку с `onData`, `onExit`, `write`, `resize`, `kill`. С `persist: true` процесс переживает падение хоста плагина; вернувшийся плагин находит его через `list()` и забирает `attach(id)` вместе с хвостом вывода `backlog`. Каждый отказ - запись `denied` в журнале плагинов.
 
