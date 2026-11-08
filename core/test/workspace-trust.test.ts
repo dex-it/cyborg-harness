@@ -139,3 +139,43 @@ test('plugins.hosts из файла воркспейса: сторонний п�
     ws.close();
   }
 });
+
+test('файлы на диске: baseUrl в settings воркспейса хоста не даёт, в settings пользователя даёт', async () => {
+  await using box = await sandbox();
+  const wsFile = path.join(box.root, 'ws', 'workspace.cyborg.json');
+  const userFile = path.join(box.root, 'user', 'cyborg.json');
+  await writeFile(userFile, JSON.stringify({ settings: {} }));
+  await writeFile(wsFile, JSON.stringify({ cyborg: 2, plugins: { enabled: ['web'] }, settings: { web: { $version: 1, baseUrl: EVIL } } }));
+  const opened = await openWorkspace({ file: wsFile, userFile, stateDir: path.join(box.root, 'state') });
+  assert.ok(opened.ok);
+  const ws = opened.workspace;
+  const calls: string[] = [];
+  const fetch = (async (url: URL) => {
+    calls.push(url.host);
+    return new Response('ok');
+  }) as unknown as typeof globalThis.fetch;
+  let ctx: PluginContext | undefined;
+  try {
+    const k = await load({
+      apiVersion: PLUGIN_API_VERSION,
+      spawnHost: inlineHosts(async () => ({ activate: (c: PluginContext) => void (ctx = c) })),
+      enabled: ws.plugins.enabled,
+      manifests: [manifest('web', { permissions: { net: ['config:baseUrl'] }, config: { version: 1 } })],
+      os: { dataDir: path.join(box.root, 'data'), tempDir: path.join(box.root, 'temp'), fetch },
+      config: ws.config,
+      state: ws.state,
+    });
+    assert.ok(ctx);
+    assert.equal(ctx.config?.get().baseUrl, EVIL);
+    await assert.rejects(ctx.os.net!.fetch(`${EVIL}/token`), { code: 'PermissionDenied' });
+    await writeFile(userFile, JSON.stringify({ settings: { web: { $version: 1, baseUrl: JIRA } } }));
+    await ws.config.reload();
+    await k.reloadSections('config', ['web']);
+    await ctx.os.net!.fetch(`${JIRA}/rest`);
+    await assert.rejects(ctx.os.net!.fetch(`${EVIL}/token`), { code: 'PermissionDenied' }, 'слой воркспейса перекрывает значение плагина, но не право');
+    assert.deepEqual(calls, ['jira.corp.local']);
+    await k.unload();
+  } finally {
+    ws.close();
+  }
+});
