@@ -13,6 +13,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(core, 'package.json'), 'ut
   type?: string;
   engines?: { node?: string };
   exports?: Record<string, string | Record<string, string>>;
+  bin?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   files?: string[];
   [key: string]: unknown;
@@ -50,8 +51,8 @@ describe('package.json ядра', () => {
     assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}), ['@cyborg-harness/contracts']);
   });
 
-  it('точки входа: главный процесс, хост, вход хоста для fork, оболочка вида и элементы окна', () => {
-    assert.deepEqual(Object.keys(manifest.exports ?? {}), ['.', './host', './host-entry', './keys', './ui-shell', './elements', './package.json']);
+  it('точки входа: главный процесс, хост, вход хоста для fork, оболочка вида, проверка плагина и элементы окна', () => {
+    assert.deepEqual(Object.keys(manifest.exports ?? {}), ['.', './host', './host-entry', './keys', './ui-shell', './plugin-check', './elements', './package.json']);
     for (const target of exportTargets()) assert.match(target, /^\.\/dist\/.+\.(js|d\.ts)$/, target);
   });
 });
@@ -84,7 +85,8 @@ describe('собранный пакет (core/dist)', () => {
   it('JS и .d.ts без .ts-расширений в импортах и без чужих зависимостей', () => {
     const code = files.filter((f) => f.endsWith('.js') || f.endsWith('.d.ts'));
     assert.ok(code.length > 30, `файлов в dist: ${code.length}`);
-    const specs = /(?:from|import)\s*\(?\s*'([^']+)'/g;
+    // Слова from и import в кавычках (разбор импортов плагина сравнивает токены с ними) оператором не считаются.
+    const specs = /(?<![\w'"])(?:from|import)\s*\(?\s*'([^']+)'/g;
     for (const file of code) {
       const text = fs.readFileSync(file, 'utf8');
       for (const m of text.matchAll(specs)) {
@@ -99,9 +101,18 @@ describe('собранный пакет (core/dist)', () => {
   });
 
   it('импорты контрактов в собранном JS только типовые: рантайм-связи с пакетом контрактов нет', () => {
+    // Имя пакета в строке допустимо (проверка плагина сверяет с ним импорты плагина); связь - только `import` и `require`.
+    const link = /(?:from\s*|import\s*\(?\s*|require\s*\(\s*)['"]@cyborg-harness\/contracts['"]/;
     for (const file of files.filter((f) => f.endsWith('.js'))) {
-      assert.ok(!fs.readFileSync(file, 'utf8').includes('@cyborg-harness/contracts'), path.relative(core, file));
+      assert.doesNotMatch(fs.readFileSync(file, 'utf8'), link, path.relative(core, file));
     }
+  });
+
+  it('bin cyborg-plugin: цель есть в сборке, первая строка - shebang Node', () => {
+    assert.deepEqual(manifest.bin, { 'cyborg-plugin': './dist/src/plugin-cli-bin.js' });
+    const target = path.join(core, 'dist', 'src', 'plugin-cli-bin.js');
+    assert.ok(fs.existsSync(target), 'нет цели bin - запусти `npm run build:core`');
+    assert.equal(fs.readFileSync(target, 'utf8').split('\n')[0], '#!/usr/bin/env node');
   });
 
   it('npm pack: в архиве dist, package.json и README, без исходников и тестов', () => {
