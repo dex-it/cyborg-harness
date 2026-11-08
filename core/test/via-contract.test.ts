@@ -162,7 +162,7 @@ test('via-contract: файл из области записи вызывающе
   }
 });
 
-/** files отдаёт test.guarded; size и read помечены @deprecated, open - нет; read ещё и под guard. */
+// files отдаёт test.guarded; size и read помечены в манифесте как устаревшие, open - нет; read и open ещё и под guard.
 async function deprecatedSetup() {
   const root = await mkdtemp(path.join(tmpdir(), 'cyborg-deprecated-'));
   const work = path.join(root, 'work');
