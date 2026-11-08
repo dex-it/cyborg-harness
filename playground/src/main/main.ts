@@ -38,7 +38,7 @@ const SAFE_MODE = '--safe-mode';
 const safeMode = process.argv.includes(SAFE_MODE);
 
 // Один экземпляр - один воркспейс - одно окно: второй запуск с любым воркспейсом поднимает открытое окно, а не второе ядро.
-if (!spiking && !app.requestSingleInstanceLock({ workspace: workspaceFile ?? null })) app.exit(0);
+if (!spiking && !app.requestSingleInstanceLock({ workspace: workspaceFile ?? null, safeMode })) app.exit(0);
 
 /** Первый запуск: alice и bob делят хост c - видно, как падение одного процесса снимает обоих, а чат в хосте b живёт. */
 const DEFAULT_CONFIG = {
@@ -60,11 +60,13 @@ function showWindow(): void {
 const notices = new Set<Notification>();
 
 app.on('second-instance', (_event, _argv, _cwd, data) => {
-  const asked = (data as { workspace?: unknown } | null)?.workspace;
+  const asked = data as { workspace?: unknown; safeMode?: unknown } | null;
   showWindow();
-  if (asked !== workspaceFile && Notification.isSupported()) {
-    new Notification({ title: 'Cyborg Playground', body: `Открыт воркспейс ${workspaceFile ?? 'нет'}; другой открывается из окна - «Недавние» или «Открыть…».` }).show();
-  }
+  if (!Notification.isSupported()) return;
+  const say = (body: string) => new Notification({ title: 'Cyborg Playground', body }).show();
+  if (asked?.workspace !== workspaceFile) say(`Открыт воркспейс ${workspaceFile ?? 'нет'}; другой открывается из окна - «Недавние» или «Открыть…».`);
+  // Запрошенный режим вторым запуском не применяется: ядро решает про него один раз, до первого хоста.
+  if ((asked?.safeMode === true) !== safeMode) say(safeMode ? 'Безопасный режим уже включён; выйти из него можно пунктом окна «Выйти из безопасного режима».' : 'Безопасный режим не включён: закройте приложение или выберите в окне «Перезапустить в безопасном режиме».');
 });
 const plugins = new PluginsService({
   windowCommand: (command) => {
