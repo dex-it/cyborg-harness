@@ -399,7 +399,8 @@ async function main() {
   await press('F6');
   await waitFor('F6: фокус на первой панели', async () => /pane-plugins/.test(await focusedArea()));
   await press('F6');
-  await waitFor('F6: скрытые вкладки пропущены, следом вид сессии', async () => (await focusedArea()) === 'вид sessions');
+  // Порядок обхода - порядок окна: панель инструментов основной области (вид bar плагина panels) стоит над основной областью.
+  await waitFor('F6: скрытые вкладки пропущены, следом первый вид окна - панель инструментов', async () => (await focusedArea()) === 'вид panels');
   await press('Shift+F6');
   await press('Shift+F6');
   await waitFor('Shift+F6 с первой панели - на последний вид', async () => /^вид /.test(await focusedArea()));
