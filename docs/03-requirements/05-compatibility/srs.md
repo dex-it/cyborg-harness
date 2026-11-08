@@ -34,26 +34,26 @@ quality-checks: входных записей нет
 
 ### FR-CH-2008 Разделы `config` и `state`
 
-- **Требование:** плагин видит только свой раздел `config` (`ctx.config`) и `state` (`ctx.state`); чужой раздел хост не пишет. `config` - слои пользователя и воркспейса, воркспейс перекрывает; `state` лежит в каталоге приложения по ключу воркспейса. Манифест объявляет версию и схему раздела. Ядро проверяет раздел по схеме - подмножеству JSON Schema, где ключ вне подмножества - ошибка схемы, - до активации и при правке файла извне. Версия раздела ниже версии плагина - ядро до активации вызывает `migrate` и записывает итог (сбой `migrate` - FR-CH-5007); выше - плагин не активируется, данные не трогаются, причина в журнале; раздел не по схеме - отказ только этому плагину. Правка файла извне доходит до `ctx.config.onChange`; не прошедшая проверку оставляет прежнее значение. Значений секретов в `config` и `state` нет, только ссылка `$secret`. Старый формат воркспейса `{projects, lastProjectId}` ядро переводит один раз с копией `.v1.bak` (поля вне списка переноса - FR-CH-5009).
+- **Требование:** плагин видит только свой раздел `config` (`ctx.config`) и `state` (`ctx.state`); чужой раздел хост не пишет. `config` - слои пользователя и воркспейса, воркспейс перекрывает; `state` лежит в каталоге приложения по ключу воркспейса. Манифест объявляет версию и схему раздела. Ядро проверяет раздел по схеме - подмножеству JSON Schema, где ключ вне подмножества - ошибка схемы, - до активации и при правке файла извне. Версия раздела ниже версии плагина - ядро до активации вызывает `migrate` и записывает итог (сбой `migrate` - FR-CH-5007); выше - плагин не активируется, данные не трогаются, причина в журнале; раздел не по схеме - отказ только этому плагину. Правка файла извне доходит до `ctx.config.onChange`; не прошедшая проверку оставляет прежнее значение. Значений секретов в `config` и `state` нет, только ссылка `$secret`. Документ воркспейса без поля `cyborg` переводит хук приложения `migrate` при открытии; ядро записывает итог один раз и оставляет копию `.v1.bak` (поля вне списка переноса - FR-CH-5009).
 - **traced from:** BR-CH-002; `user-after-upgrade`, шаги 4-5, расширения 1а, 4а, 5а.
 - **источник:** [SAD, 3.3](../../04-architecture/design/sad.md#33-версии-и-миграции), [SAD, 3.10](../../04-architecture/design/sad.md#310-главный-конфиг-и-состояние); `core/src/config.ts`, `core/src/json-schema.ts`.
-- **verification:** испытание - `core/test/config.test.ts`, `core/test/json-schema.test.ts`, `core/test/loader.test.ts` («откат версии плагина…», «миграция config идёт в хосте…», «схема раздела из манифеста…»), `core/test/workspace.test.ts` («перенос {projects, lastProjectId}…», «правка файла извне доходит до ctx.config.onChange…»), `core/test/trust.test.ts` («provide и section.write…»), `playground/src/main/plugins.test.ts` («схема раздела: файл из каталога плагина…»).
+- **verification:** испытание - `core/test/config.test.ts`, `core/test/json-schema.test.ts`, `core/test/loader.test.ts` («откат версии плагина…», «миграция config идёт в хосте…», «схема раздела из манифеста…»), `core/test/workspace.test.ts` («перенос старого формата хуком приложения…», «правка файла извне доходит до ctx.config.onChange…»), `playground/src/main/legacy-workspace.test.ts` («перенос {projects, lastProjectId}…»), `core/test/trust.test.ts` («provide и section.write…»), `playground/src/main/plugins.test.ts` («схема раздела: файл из каталога плагина…»).
 - **класс:** Functions.
 
 ### FR-CH-5001 Одно место версии API
 
 - **Требование:** версия API плагинов определена в одном месте; ядро, приложение и проверка плагина вне репозитория берут её оттуда, второго литерала версии в исходниках нет.
 - **traced from:** BR-CH-008; `plugin-survives-core-upgrade`, шаг 3.
-- **источник:** задача T-03 (#51, PR #72); [дорожная карта, раздел 6](../../06-plans/roadmap.md#6-совместимость-и-версии), «Пробелы»; сейчас литералы: `PLUGIN_API_VERSION` в `playground/src/main/plugins.ts`, `API_VERSION` в `core/examples/run.ts`, `version` в `contracts/package.json`.
-- **verification:** Ещё нет: T-03 (PR #72). Анализ - тест в CI ищет в исходниках второй литерал версии API и падает на нём. Связь версии API с версиями пакетов - вопрос 5.
+- **источник:** задача T-03 (#51, PR #72); `core/src/api-version.ts` (`PLUGIN_API_VERSION`).
+- **verification:** испытание - `core/test/api-version.test.ts` («мажор PLUGIN_API_VERSION равен мажору @cyborg-harness/contracts»); осмотр - литерал версии только в `core/src/api-version.ts`. Ещё нет: теста, который ищет второй литерал версии API в исходниках. Связь версии API с версиями пакетов - вопрос 5.
 - **класс:** Maintainability.
 
 ### FR-CH-5002 Демо-контракты вне боевого пакета
 
 - **Требование:** пакет `@cyborg-harness/contracts` содержит только контракты, на которые действуют гарантии FR-CH-1012; демо-контракты примеров лежат вне него и в снимок API (FR-CH-5003) не попадают.
 - **traced from:** BR-CH-008; `plugin-survives-core-upgrade`, расширение 4а.
-- **источник:** задача T-03 (#51, PR #72); [дорожная карта, раздел 6](../../06-plans/roadmap.md#6-совместимость-и-версии), «Пробелы»: «демо-контракты лежат в боевом пакете»; карта `Contracts` в `contracts/index.ts`.
-- **verification:** Ещё нет: T-03 (PR #72). Анализ - тест сверяет ключи карты `Contracts` с перечнем поставляемых контрактов.
+- **источник:** задача T-03 (#51, PR #72); карта `Contracts` в `contracts/index.ts`, демо-контракты `demo.*` - `core/examples/contracts.ts`.
+- **verification:** осмотр - в `contracts/index.ts` нет демо-контрактов, они дополняют карту из `core/examples/contracts.ts`. Ещё нет: теста, который сверяет ключи карты `Contracts` с перечнем поставляемых контрактов.
 - **класс:** Compatibility.
 
 ### FR-CH-5003 Снимок публичного API
@@ -108,8 +108,8 @@ quality-checks: входных записей нет
 
 - **Требование:** при переводе старого формата воркспейса `{projects, lastProjectId}` поля верхнего уровня, которых нет в списке переноса, остаются в переведённом файле; копия `<файл>.v1.bak` хранит прежний файл без изменений; повторное открытие перевод не повторяет.
 - **traced from:** BR-CH-002; `user-after-upgrade`, расширение 1а.
-- **источник:** [SAD, 3.10](../../04-architecture/design/sad.md#310-главный-конфиг-и-состояние); задача PL-06 (#28); [инвентарь Cyborg, пилот P6](../../research/cyborg-migration-inventory.md); `core/src/workspace.ts` (`migrateLegacy`).
-- **verification:** испытание - `core/test/workspace.test.ts` («перенос {projects, lastProjectId}: …копия старого файла» - копия и отсутствие повтора). Ещё нет: теста с полями вне списка (`commands`, неизвестные); переноса ключей `localStorage` Cyborg в `state` (PL-06, вопрос 10).
+- **источник:** [SAD, 3.10](../../04-architecture/design/sad.md#310-главный-конфиг-и-состояние); задача PL-06 (#28); [инвентарь Cyborg, пилот P6](../../research/cyborg-migration-inventory.md); хук приложения `playground/src/main/legacy-workspace.ts` (`migrateLegacyWorkspace`), механизм копии и однократности - `core/src/workspace.ts`.
+- **verification:** испытание - `playground/src/main/legacy-workspace.test.ts` («перенос {projects, lastProjectId}: …копия старого файла»), `core/test/workspace.test.ts` («перенос старого формата хуком приложения: копия .v1.bak, … повтор не идёт»). Ещё нет: теста с полями вне списка (`commands`, неизвестные); переноса ключей `localStorage` Cyborg в `state` (PL-06, вопрос 10).
 - **класс:** Reliability.
 
 ### FR-CH-5010 Удаление плагина стирает его разделы
