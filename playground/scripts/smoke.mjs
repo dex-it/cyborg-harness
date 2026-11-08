@@ -1,9 +1,10 @@
 // Дымовой тест собранного playground по DevTools Protocol; нужен дисплей (на Linux - xvfb-run ... --no-sandbox).
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { workspaceKey } from '@cyborg-harness/core';
 
 const repo = resolve(import.meta.dirname, '..', '..');
 const electronArgs = process.argv.slice(2);
@@ -519,6 +520,8 @@ async function main() {
   assert.ok(recent.some((f) => f.endsWith('workspace.cyborg.json')), 'открытый воркспейс не попал в «Недавние»');
   log('воркспейс: замок с pid, второй запуск отдаёт фокус первому и уходит, открытый - в «Недавних»');
 
+  await sharedUserData({ ev, main, state });
+
   await main(STUB_RELAUNCH);
   assert.equal(await ev("document.getElementById('safe-mode').hidden"), true, 'плашка безопасного режима без флага');
   await ev("document.getElementById('safe-mode-enter').click()");
@@ -528,6 +531,110 @@ async function main() {
 
   await bareWindow();
   await safeWindow();
+}
+
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const lockPid = (file) => {
+  try {
+    return JSON.parse(readFileSync(`${file}.lock`, 'utf8')).pid;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * K-20, проверка P9: два процесса, два воркспейса, один userData. Первый процесс - основной экземпляр smoke (воркспейс по умолчанию),
+ * второй поднимается рядом с `--workspace=<другой файл>`; третий открывается из окна первого действием «в новом окне».
+ */
+async function sharedUserData({ ev, main, state }) {
+  const dir = mkdtempSync(join(tmpdir(), 'cyborg-playground-two-'));
+  const fileA = join(userData, 'workspace.cyborg.json');
+  const fileB = join(dir, 'b.cyborg.json');
+  const fileC = join(dir, 'c.cyborg.json');
+  writeFileSync(fileB, '{}');
+  writeFileSync(fileC, '{}');
+  const env = liveClaude ? process.env : { ...process.env, SHELL: join(fakeBin, 'login-shell') };
+  const launch = (file, extra = []) => {
+    const child = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${userData}`, '--remote-debugging-port=0', `--workspace=${file}`, ...extra, ...electronArgs], { stdio: ['ignore', 'ignore', 'pipe'], env });
+    child.out = '';
+    child.stderr.on('data', (d) => (child.out += d));
+    return child;
+  };
+  const second = launch(fileB);
+  let third;
+  try {
+    const port = await waitFor('порт DevTools второго процесса', () => /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//.exec(second.out)?.[1]);
+    const page = await waitFor('окно второго процесса', async () => (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page'));
+    const evB = await connect(page.webSocketDebuggerUrl);
+    const mainB = await connect(await waitFor('инспектор главного процесса второго', () => /Debugger listening on (ws:\/\/\S+)/.exec(second.out)?.[1]));
+    const stateB = (id) => evB(`document.querySelector('#plugins-list [data-plugin=${JSON.stringify(id)}]')?.dataset.state ?? ''`);
+    await waitFor('плагины второго воркспейса запущены', async () => (await stateB('echo')) === 'active');
+    assert.equal(await state('echo'), 'active', 'первый процесс остановился от появления второго');
+    assert.match(await evB("document.getElementById('workspace-current').textContent"), /b\.cyborg\.json$/, 'второе окно открыло не свой воркспейс');
+    assert.match(await ev("document.getElementById('workspace-current').textContent"), /workspace\.cyborg\.json$/, 'первое окно сменило воркспейс');
+
+    const pidA = lockPid(fileA);
+    const pidB = lockPid(fileB);
+    assert.ok(Number.isInteger(pidA) && Number.isInteger(pidB) && pidA !== pidB, `у процессов нет своих замков: ${String(pidA)}, ${String(pidB)}`);
+    assert.ok(alive(pidA) && alive(pidB), 'замок держит несуществующий процесс');
+
+    // Сессия Chromium и localStorage по воркспейсу.
+    const sessionOf = (m) => m("process.mainModule.require('electron').app.getPath('sessionData')");
+    const sessionA = await sessionOf(main);
+    const sessionB = await sessionOf(mainB);
+    assert.ok(sessionA.endsWith(join('workspaces', workspaceKey(fileA))), `сессия первого: ${sessionA}`);
+    assert.ok(sessionB.endsWith(join('workspaces', workspaceKey(fileB))), `сессия второго: ${sessionB}`);
+    assert.notEqual(sessionA, sessionB);
+    await ev("localStorage.setItem('k20', 'A')");
+    await evB("localStorage.setItem('k20', 'B')");
+    assert.deepEqual([await ev("localStorage.getItem('k20')"), await evB("localStorage.getItem('k20')")], ['A', 'B'], 'localStorage двух процессов смешался');
+
+    // State по ключу воркспейса: чужого файла у процесса нет.
+    const stateFiles = existsSync(join(userData, 'state')) ? readdirSync(join(userData, 'state')) : [];
+    const keys = [workspaceKey(fileA), workspaceKey(fileB)].map((k) => `${k}.json`);
+    assert.ok(stateFiles.every((f) => keys.includes(f)), `в state чужие файлы: ${stateFiles.join(',')}`);
+
+    // «Недавние»: оба воркспейса записаны, ничья запись не потеряна.
+    // Второй процесс записывает себя в «Недавние», когда воркспейс открылся: ждём запись, а потом сверяем обе.
+    const recentNow = () => JSON.parse(readFileSync(join(userData, 'recent.json'), 'utf8')).recent.map((f) => realpathSync(f));
+    const recent = await waitFor('«Недавние» с обоими воркспейсами', () => (recentNow().includes(realpathSync(fileB)) ? recentNow() : undefined));
+    assert.ok(recent.includes(realpathSync(fileA)), `«Недавние» потеряли воркспейс первого: ${recent.join(', ')}`);
+    log('два процесса, два воркспейса, один userData: свои замки, свои сессии Chromium и localStorage, «Недавние» с обоими');
+
+    // Повторный запуск воркспейса B: поднимает окно владельца и сам завершается.
+    const again = launch(fileB);
+    const code = await Promise.race([new Promise((r) => again.once('exit', r)), sleep(15000).then(() => 'висит')]);
+    if (code === 'висит') again.kill('SIGKILL');
+    assert.equal(code, 0, 'повторный запуск воркспейса не ушёл сам');
+    assert.equal(second.exitCode, null, 'владелец воркспейса закрылся от повторного запуска');
+    assert.equal(lockPid(fileB), pidB, 'замок владельца сменился');
+    assert.equal(await stateB('echo'), 'active');
+    log('повторный запуск того же воркспейса: окно владельца поднято, новый процесс завершился, замок за владельцем');
+
+    // «Открыть в новом окне» из первого окна: третий процесс, первые два живы.
+    writeFileSync(join(userData, 'recent.json'), JSON.stringify({ recent: [...recent, realpathSync(fileC)] }));
+    const opened = await ev(`window.playground.openWorkspaceInNewWindow(${JSON.stringify(realpathSync(fileC))})`);
+    assert.ok(!opened?.error, `открытие в новом окне отказало: ${JSON.stringify(opened)}`);
+    const pidC = await waitFor('замок третьего воркспейса', () => lockPid(fileC));
+    third = pidC;
+    assert.ok(![pidA, pidB].includes(pidC) && alive(pidC), `третий процесс не отдельный: ${String(pidC)}`);
+    assert.ok(alive(pidA) && alive(pidB), 'открытие в новом окне закрыло прежние процессы');
+    assert.equal(await state('echo'), 'active');
+    log('«Открыть в новом окне»: воркспейс в отдельном процессе, прежние окна остались');
+  } finally {
+    if (third !== undefined && alive(third)) process.kill(third, 'SIGTERM');
+    second.kill('SIGTERM');
+    await Promise.race([new Promise((r) => second.once('exit', r)), sleep(8000)]);
+    if (second.exitCode === null) second.kill('SIGKILL');
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 /** Безопасный режим: свой userData, сторонний плагин с замком на старте; код плагинов не запускается, окно не закрыто. */
@@ -586,7 +693,7 @@ async function bareWindow() {
     const ev = await connect(page.webSocketDebuggerUrl);
     await waitFor('надпись «Воркспейс не открыт»', async () => /Воркспейс не открыт:/.test(await ev("document.getElementById('plugins-summary').textContent")));
     assert.equal(await ev("document.getElementById('workspace-current').textContent"), 'Воркспейс не открыт');
-    assert.deepEqual(await ev("[...document.querySelectorAll('#workspace-recent button')].map((b) => b.title)"), [other], 'пропавший файл в «Недавних»');
+    assert.deepEqual(await ev("[...document.querySelectorAll('#workspace-recent .workspace-recent-item')].map((b) => b.title)"), [other], 'пропавший файл в «Недавних»');
     assert.equal(await ev("document.querySelectorAll('#plugins-list [data-plugin]').length"), 0, 'плагины загрузились без воркспейса');
     log('окно без воркспейса: плагины не грузятся, «Недавние» без пропавших файлов');
   } finally {
