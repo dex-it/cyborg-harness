@@ -18,6 +18,7 @@
 | Решения ADR-CH; где они расходятся с SAD, действует SAD ([раздел 7](03-architecture/design/sad.md#7-расхождения-с-первой-редакцией-пакета)) | [03-architecture/adr/](03-architecture/adr/) |
 | Спайк UI во фреймах: память, задержка, мост, клавиши, перетаскивание | [04-verification/spike-iframe-ui.md](04-verification/spike-iframe-ui.md) |
 | Спайк хостов плагинов: память на хост, цена вызова, пороги сторожа | [04-verification/spike-hosts.md](04-verification/spike-hosts.md) |
+| Замер горячего пути pty: задержка вывода и склейка | [04-verification/spike-pty.md](04-verification/spike-pty.md) |
 | Проверка на macOS: замеры хостов и фреймов, клавиши, терминал | [04-verification/macos-check.md](04-verification/macos-check.md) |
 | Эпик «Микроядро»: цель, карта, итерации, реестр задач | [05-plans/epic-microkernel.md](05-plans/epic-microkernel.md) |
 | Анализ готовности ядра и инвентарь Cyborg | [research/microkernel-readiness.md](research/microkernel-readiness.md), [research/cyborg-migration-inventory.md](research/cyborg-migration-inventory.md) |

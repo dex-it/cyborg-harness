@@ -3,6 +3,7 @@ export * from './config.ts';
 export * from './disposable.ts';
 export * from './errors.ts';
 export * from './graph.ts';
+export * from './limits.ts';
 export * from './loader.ts';
 export * from './manifest.ts';
 export * from './registry.ts';

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, ProcessResult, PtyInfo, SecretValue } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
+import { limitsOf, type ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { NotifyLimits, ShowNotice } from './notices.ts';
 import { ANY_PATH, LOGIN_SHELL } from './permissions.ts';
@@ -49,6 +50,8 @@ export interface OsEnvironment {
   readonly pty?: PtyBackend;
   /** Хвост вывода pty, символов; по умолчанию 256 К. */
   readonly ptyBacklog?: number;
+  /** Пределы ресурсов плагина поверх `LIMITS`; загрузчик кладёт сюда `LoadOptions.limits`. */
+  readonly limits?: Partial<ResourceLimits> | undefined;
   /** Открыть программой ОС; путь и URL шлюз уже проверил. */
   readonly shell?: { openPath(path: string): Promise<void>; openExternal(url: string): Promise<void>; showItemInFolder?(path: string): void | Promise<void> };
   /** Файл воркспейса: его показывает в файловом менеджере команда ядра, а не плагин. */
@@ -110,6 +113,34 @@ function utf8End(buf: Buffer, n: number): number {
     return i + len > n ? i : n;
   }
   return n;
+}
+
+/** Обычный файл без ссылки в последнем компоненте; O_NONBLOCK - FIFO не повесит поток пула в ожидании писателя. */
+async function openFile(method: string, file: string): Promise<{ handle: fs.FileHandle; size: number }> {
+  const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  const st = await handle.stat().catch(async (error: unknown) => {
+    await handle.close();
+    throw error;
+  });
+  if (!st.isFile()) {
+    await handle.close();
+    throw new CoreError('Invalid', `${method}: не обычный файл: ${file}`);
+  }
+  return { handle, size: st.size };
+}
+
+/** Размер из stat - только подсказка: файл растёт и после проверки, поэтому предел держит само чтение. */
+async function readAtMost(method: string, handle: fs.FileHandle, size: number, max: number): Promise<string> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for (;;) {
+    const chunk = Buffer.allocUnsafe(Math.min(Math.max(size + 1 - total, 64 * 1024), max + 1 - total));
+    const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+    if (bytesRead === 0) return Buffer.concat(chunks, total).toString('utf8');
+    chunks.push(chunk.subarray(0, bytesRead));
+    total += bytesRead;
+    if (total > max) throw new CoreError('Invalid', `${method}: файл больше ${String(max)} байт - читайте частями через fs.readSlice`);
+  }
 }
 
 const int = (method: string, v: unknown, name: string, min: number, max: number): number => {
@@ -255,6 +286,9 @@ export class OsGateway {
   readonly #grants: GrantStore | undefined;
   #grantWrites: Promise<unknown> = Promise.resolve();
   readonly #serves: HttpServes;
+  readonly #limits: ResourceLimits;
+  // Счёт на поколение плагина: убитая при выгрузке программа закрывается позже, место уже у нового поколения.
+  readonly #runs = new Map<string, { n: number }>();
 
   constructor(
     env: OsEnvironment,
@@ -266,6 +300,7 @@ export class OsGateway {
     ask: AskHost = () => Promise.reject(new CoreError('Unavailable', 'хоста нет')),
   ) {
     this.#env = env;
+    this.#limits = limitsOf(env.limits);
     this.#serves = new HttpServes(ask);
     this.#grants = grants;
     const saved = grants?.read();
@@ -281,7 +316,7 @@ export class OsGateway {
     this.#push = push;
     this.#deny = deny;
     this.#configOf = configOf;
-    this.#pty = env.pty && new PtyTable(env.pty, push, env.ptyBacklog);
+    this.#pty = env.pty && new PtyTable(env.pty, push, env.ptyBacklog, undefined, this.#limits);
   }
 
   pathsOf(pluginId: string): { data: string; temp: string; home: string } {
@@ -299,6 +334,7 @@ export class OsGateway {
     for (const [key, close] of this.#watches) if (key.startsWith(`${pluginId}\0`)) close();
     for (const cancel of this.#pending.get(pluginId) ?? []) cancel();
     this.#pending.delete(pluginId);
+    this.#runs.delete(pluginId);
     this.#serves.forget(pluginId);
     if (pty === 'park') return this.#pty?.park(pluginId) ?? 0;
     if (pty === 'detach') this.#pty?.detach(pluginId);
@@ -443,9 +479,11 @@ export class OsGateway {
         await this.#ownDirs(m.id);
         const file = await this.#checkPath(m, method, args[0], false);
         // O_NOFOLLOW: путь уже без ссылок, подменённый на ссылку последний компонент не откроется.
-        const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+        const { handle, size } = await openFile(method, file);
         try {
-          return await handle.readFile('utf8');
+          const max = this.#limits.readText;
+          if (size > max) throw new CoreError('Invalid', `${method}: файл больше ${String(max)} байт - читайте частями через fs.readSlice`);
+          return await readAtMost(method, handle, size, max);
         } finally {
           await handle.close();
         }
@@ -455,9 +493,8 @@ export class OsGateway {
         const file = await this.#checkPath(m, method, args[0], false);
         const offset = int(method, args[1], 'offset', 0, Number.MAX_SAFE_INTEGER);
         const max = int(method, args[2], 'maxBytes', 4, MAX_SLICE);
-        const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+        const { handle, size } = await openFile(method, file);
         try {
-          const size = (await handle.stat()).size;
           const buf = Buffer.alloc(Math.min(max, Math.max(0, size - offset)));
           const { bytesRead } = await handle.read(buf, 0, buf.length, offset);
           const end = offset + bytesRead >= size ? bytesRead : utf8End(buf, bytesRead);
@@ -729,6 +766,18 @@ export class OsGateway {
     const options = isRecord(args[2]) ? args[2] : {};
     const { file, argv, cwd, env } = await this.#program(m, 'process', method, program, args[1], options);
     const timeout = typeof options.timeoutMs === 'number' ? options.timeoutMs : 0;
+    const runs = this.#runs.get(m.id) ?? { n: 0 };
+    if (runs.n >= this.#limits.runs) throw new CoreError('Invalid', `${method}: у ${m.id} уже ${String(runs.n)} программ - дождитесь завершения прежних`);
+    this.#runs.set(m.id, runs);
+    runs.n++;
+    try {
+      return await this.#spawnRun(m.id, program, file, argv, cwd, env, timeout, options.input);
+    } finally {
+      runs.n--;
+    }
+  }
+
+  #spawnRun(pluginId: string, program: string, file: string, argv: string[], cwd: string | undefined, env: Record<string, string>, timeout: number, input: unknown): Promise<ProcessResult> {
     return new Promise((resolve, reject) => {
       // Своя группа процессов: тайм-аут и выгрузка плагина гасят и то, что программа запустила сама.
       const child = spawn(file, argv, { cwd, env, shell: false, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
@@ -737,7 +786,7 @@ export class OsGateway {
         if (child.pid !== undefined) killGroup(child.pid, signal);
       };
       const timer = timeout > 0 ? setTimeout(() => stop('SIGTERM'), timeout) : undefined;
-      const untrack = this.#track(m.id, () => stop('SIGKILL'));
+      const untrack = this.#track(pluginId, () => stop('SIGKILL'));
       const done = () => {
         clearTimeout(timer);
         untrack();
@@ -755,7 +804,7 @@ export class OsGateway {
         done();
         resolve({ code, signal, stdout, stderr });
       });
-      child.stdin.end(typeof options.input === 'string' ? options.input : undefined);
+      child.stdin.end(typeof input === 'string' ? input : undefined);
     });
   }
 

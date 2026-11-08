@@ -7,6 +7,7 @@ import { VERSION_KEY, type SectionResult, type SectionStore } from './config.ts'
 import type { Disposable } from './disposable.ts';
 import { appendBounded, DeniedCollapse } from './journal.ts';
 import { CoreError, errorMessage, ignore } from './errors.ts';
+import { limitsOf, type ResourceLimits } from './limits.ts';
 import { compileSchema } from './json-schema.ts';
 import { providesMatching, resolveGraph, type ContractGraph, type Rejection } from './graph.ts';
 import { CALLBACK, handleKey, marker, SUBSCRIPTION, type ActivateResult, type ContractDescriptor, type SectionInput, type SystemEvent } from './host-runtime.ts';
@@ -129,6 +130,8 @@ export interface LoadOptions {
   readonly callTimeout?: number | undefined;
   /** Среда шлюза `ctx.os`; по умолчанию каталоги плагинов во временном каталоге ОС, без секретов, уведомлений и буфера обмена. */
   readonly os?: OsEnvironment | undefined;
+  /** Пределы ресурсов плагина поверх `LIMITS` и `os.limits`. */
+  readonly limits?: Partial<ResourceLimits> | undefined;
   /** Под какую ОС раскрыть `CmdOrCtrl`; по умолчанию текущая. */
   readonly platform?: string | undefined;
   /** Секунды простоя пользователя по ОС; без него `onIdle` не срабатывает. */
@@ -371,7 +374,8 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   const activationTimeout = options.activationTimeout ?? 10_000;
   const callTimeout = options.callTimeout ?? 10 * 60_000;
   const layer = new WindowLayer((snapshot) => options.onWindow?.(snapshot), options.windowTitle);
-  const osEnv = options.os ?? defaultOs();
+  const limits = limitsOf(options.os?.limits, options.limits);
+  const osEnv: OsEnvironment = { ...(options.os ?? defaultOs()), limits };
   const notices = new Notices(
     () => {
       const show = osEnv.notify;
@@ -675,6 +679,8 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       if (!callbacks.some((id) => id !== undefined)) return callHost(target, pluginId, 'call', { pluginId, contract, version, member, args: p.args }, callTimeout);
       if (callbacks.some((id) => id !== undefined && typeof id !== 'string')) throw new CoreError('Invalid', 'invoke: номер колбэка не строка');
 
+      const held = [...subscriptions.values()].filter((s) => s.consumer === p.caller).length;
+      if (held >= limits.subscriptions) throw new CoreError('Invalid', `${p.caller}: подписок через контракты больше ${String(limits.subscriptions)} - снимите прежние`);
       const subscription = ++subscriptionSeq;
       subscriptions.set(subscription, { consumer: p.caller, consumerHost: host, provider: pluginId, providerHost: target, callbacks: callbacks as (string | undefined)[] });
       const args = p.args.map((arg, i) => (callbacks[i] === undefined ? arg : { [CALLBACK]: i }));
@@ -714,6 +720,9 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       mine(p.pluginId);
       if (!p.id.startsWith(`${p.pluginId}#`)) throw new CoreError('Invalid', `idle.watch: ${p.id} не у ${p.pluginId}`);
       if (!(p.seconds > 0)) throw new CoreError('Invalid', `idle.watch: ${String(p.seconds)} секунд`);
+      if (!idleWatchers.has(p.id) && [...idleWatchers.values()].filter((w) => w.pluginId === p.pluginId).length >= limits.idleWatchers) {
+        throw new CoreError('Invalid', `idle.watch: у ${p.pluginId} слушателей onIdle больше ${String(limits.idleWatchers)}`);
+      }
       idleWatchers.set(p.id, { host, pluginId: p.pluginId, seconds: p.seconds, fired: false });
       syncIdleTimer();
     });

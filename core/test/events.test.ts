@@ -197,6 +197,29 @@ test('activation lazy: ждёт; будит команда, сочетание, 
   await k.unload();
 });
 
+test('предел слушателей onIdle: сверх предела ядро отказывает с причиной в журнале, снятый слушатель освобождает место', async () => {
+  let idle = 0;
+  let ctx: PluginContext | undefined;
+  const k = await start({ lock: { activate: (c) => void (ctx = c) } }, { manifests: [manifest('lock')], idlePoll: 5, idleSeconds: () => idle, limits: { idleWatchers: 2 } });
+  const fired: string[] = [];
+  const first = ctx!.system.onIdle(10, () => fired.push('a'));
+  ctx!.system.onIdle(10, () => fired.push('b'));
+  ctx!.system.onIdle(10, () => fired.push('c'));
+  await settle();
+  assert.ok(k.logs.some((l) => l.includes('слушателей onIdle больше 2')), k.logs.join('\n'));
+  idle = 20;
+  await settle();
+  assert.deepEqual(fired.toSorted(), ['a', 'b']);
+  first.dispose();
+  ctx!.system.onIdle(10, () => fired.push('d'));
+  idle = 0;
+  await settle();
+  idle = 20;
+  await settle();
+  assert.deepEqual(fired.toSorted(), ['a', 'b', 'b', 'd']);
+  await k.unload();
+});
+
 test('клик по уведомлению, пока хост перезапускается, доходит до команды вернувшегося плагина; падение хоста уведомление не закрывает', async () => {
   const clicks: NoticeEvents[] = [];
   const ran: unknown[] = [];
