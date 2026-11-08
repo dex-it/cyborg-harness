@@ -24,6 +24,8 @@ export interface PluginsPort {
   closeDocument(id: string): Promise<Reply>;
   /** Без файла - системный диалог выбора; смена воркспейса перезапускает приложение. */
   openWorkspace(file?: string): Promise<Reply>;
+  /** Воркспейс в отдельном процессе с тем же `userData`; это окно остаётся. */
+  openWorkspaceInNewWindow(file: string): Promise<Reply>;
   /** Перезапуск приложения с флагом `--safe-mode` или без него. */
   setSafeMode(on: boolean): Promise<Reply>;
   onWindowCommand(listener: (command: string) => void): void;
@@ -245,7 +247,11 @@ export class PluginsPanel {
     open.title = file;
     open.setAttribute('aria-label', `Открыть воркспейс ${file}`);
     open.addEventListener('click', () => void this.port.openWorkspace(file));
-    item.append(open);
+    const beside = el('button', 'workspace-recent-new', 'в новом окне') as HTMLButtonElement;
+    beside.type = 'button';
+    beside.setAttribute('aria-label', `Открыть воркспейс ${file} в новом окне`);
+    beside.addEventListener('click', () => void this.port.openWorkspaceInNewWindow(file));
+    item.append(open, beside);
     return item;
   }
 

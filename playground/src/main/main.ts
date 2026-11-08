@@ -5,12 +5,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, Notification, powerMonitor } from 'electron';
-import { RecentWorkspaces } from '@cyborg-harness/core';
+import { RecentWorkspaces, withFileLock } from '@cyborg-harness/core';
 import {
   alertNotification,
   bindWindow,
   electronOs,
   guardNavigation,
+  isolateSession,
   PluginsService,
   quitAfterPlugins,
   registerViewChannels,
@@ -20,13 +21,13 @@ import {
   restarts,
   serveViews,
   showWindow,
-  singleInstance,
   utilityHosts,
   watchPower,
   watchTheme,
   windowChannel,
   windowEvents,
   workspaceInfo,
+  workspaceInstance,
 } from '@cyborg-harness/electron';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
 import { runSpike } from './spike.ts';
@@ -57,19 +58,24 @@ const safeMode = process.argv.includes('--safe-mode');
 
 let win: BrowserWindow | undefined;
 
-// Один экземпляр - один воркспейс - одно окно: второй запуск с любым воркспейсом поднимает открытое окно, а не второе ядро.
-const sole =
-  spiking ||
-  singleInstance({ workspace: workspaceFile ?? null, safeMode }, (data) => {
-    const asked = data as { workspace?: unknown; safeMode?: unknown } | null;
-    showWindow(win);
-    if (!Notification.isSupported()) return;
-    const say = (body: string) => alertNotification(APP_NAME, body, () => showWindow(win));
-    if (asked?.workspace !== workspaceFile) say(`Открыт воркспейс ${workspaceFile ?? 'нет'}; другой открывается из окна - «Недавние» или «Открыть…».`);
-    // Запрошенный режим вторым запуском не применяется: ядро решает про него один раз, до первого хоста.
-    if ((asked?.safeMode === true) !== safeMode) say(safeMode ? 'Безопасный режим уже включён; выйти из него можно пунктом окна «Выйти из безопасного режима».' : 'Безопасный режим не включён: закройте приложение или выберите в окне «Перезапустить в безопасном режиме».');
-  });
-if (!sole) app.exit(0);
+// Сессия Chromium этого воркспейса лежит в своём каталоге внутри userData: два процесса не делят localStorage и кэш.
+isolateSession(app.getPath('userData'), workspaceFile);
+
+/**
+ * Экземпляров несколько, воркспейс у каждого свой (K-20, SAD 3.1): второй запуск того же воркспейса поднимает его окно и уходит,
+ * другой воркспейс с тем же userData открывается своим процессом. Вернуть прежнюю модель «один процесс на весь userData» -
+ * заменить вызов на `singleInstance(...)` адаптера; общие файлы userData остаются под замками.
+ */
+const owner = spiking
+  ? Promise.resolve(true)
+  : workspaceInstance(app.getPath('userData'), workspaceFile, { safeMode }, (data) => {
+      const asked = data as { safeMode?: unknown } | null;
+      showWindow(win);
+      if (!Notification.isSupported()) return;
+      const say = (body: string) => alertNotification(APP_NAME, body, () => showWindow(win));
+      // Запрошенный режим вторым запуском не применяется: ядро решает про него один раз, до первого хоста.
+      if ((asked?.safeMode === true) !== safeMode) say(safeMode ? 'Безопасный режим уже включён; выйти из него можно пунктом окна «Выйти из безопасного режима».' : 'Безопасный режим не включён: закройте приложение или выберите в окне «Перезапустить в безопасном режиме».');
+    });
 
 /** Первый запуск: alice и bob делят хост c - видно, как падение одного процесса снимает обоих, а чат в хосте b живёт. */
 const DEFAULT_CONFIG = {
@@ -89,6 +95,7 @@ registerViewChannels({ plugins, dragRoot: () => workspace });
 // Смена воркспейса и безопасного режима - перезапуск приложения; каналы окна для них - дело приложения (меню, кнопки).
 const control = restarts({ plugins, window: () => win, recent, workspaceFile, safeMode });
 windowChannel('workspace:open', (file) => control.openWorkspace(file));
+windowChannel('workspace:open-new', (file) => control.openWorkspaceInNewWindow(file));
 windowChannel('app:safe-mode', (on) => control.switchSafeMode(on));
 
 const showWorkspace = () => plugins.setWorkspace(workspaceInfo(workspaceFile, recent));
@@ -115,7 +122,7 @@ app.on('window-all-closed', () => {
   if (!spiking) app.quit();
 });
 
-void app.whenReady().then(() => {
+const start = () => {
   if (gatewaySpikeOut !== undefined) {
     void runGatewaySpike({ out: gatewaySpikeOut, hostEntry: path.join(__dirname, 'plugin-host.mjs'), benchDir: path.join(__dirname, 'bench') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
     return;
@@ -136,10 +143,13 @@ void app.whenReady().then(() => {
   watchTheme(() => win);
   const userData = app.getPath('userData');
   const config = path.join(userData, 'cyborg.json');
-  if (!fs.existsSync(config)) {
-    fs.mkdirSync(userData, { recursive: true });
-    fs.writeFileSync(config, JSON.stringify(DEFAULT_CONFIG, null, 2));
-  }
+  // Два процесса на пустом userData: файл появляется целиком (rename) и один раз (под замком), иначе второй прочтёт полфайла.
+  withFileLock(config, () => {
+    if (fs.existsSync(config)) return;
+    const tmp = `${config}.${String(process.pid)}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(DEFAULT_CONFIG, null, 2));
+    fs.renameSync(tmp, config);
+  });
   createWindow();
   watchPower(plugins);
   showWorkspace();
@@ -169,4 +179,10 @@ void app.whenReady().then(() => {
     recent.add(workspaceFile);
     showWorkspace();
   });
+};
+
+void owner.then((sole) => {
+  // Воркспейс уже открыт другим процессом: ему передан запрос, этому пора выйти.
+  if (sole) void app.whenReady().then(start);
+  else app.exit(0);
 });

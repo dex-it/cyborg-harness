@@ -1,0 +1,40 @@
+// Несколько экземпляров приложения с общим `userData` (K-20): чистые части, без Electron. Подключение к `app` - в window.ts и restarts.ts.
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { workspaceKey } from '@cyborg-harness/core';
+import type { RestartFlags } from './restarts.ts';
+
+/** Каталог сессии окна без воркспейса (и префикс его ключа экземпляра): такое окно в `userData` одно. */
+export const NO_WORKSPACE_KEY = 'no-workspace';
+
+/**
+ * Ключ, по которому процессы узнают друг друга. Воркспейс - его `workspaceKey` (тот же `realpath`, что у замка и `state`), где бы ни лежал `userData`:
+ * замок воркспейса общий для приложений. Окно без воркспейса - ключ своего `userData`: окна без воркспейса двух приложений друг друга не касаются.
+ */
+export const instanceKey = (workspaceFile: string | undefined, userData: string): string =>
+  workspaceFile === undefined ? `${NO_WORKSPACE_KEY}-${createHash('sha256').update(realOf(userData)).digest('hex').slice(0, 12)}` : workspaceKey(workspaceFile);
+
+const realOf = (dir: string): string => {
+  try {
+    return fs.realpathSync(dir);
+  } catch {
+    return path.resolve(dir);
+  }
+};
+
+/**
+ * Каталог сессии Chromium (localStorage, IndexedDB, кэш, cookies) этого воркспейса: `<userData>/workspaces/<ключ>`.
+ * Два процесса на одном каталоге сессии борются за замки LevelDB; `userData` остаётся общим для файлов приложения.
+ * Назначается через `app.setPath('sessionData', …)` до готовности приложения.
+ */
+export const sessionDataDir = (userData: string, workspaceFile: string | undefined): string => path.join(userData, 'workspaces', workspaceFile === undefined ? NO_WORKSPACE_KEY : workspaceKey(workspaceFile));
+
+// Порты отладки принадлежат процессу: второй с тем же портом не поднялся бы.
+const PER_PROCESS = [/^--inspect(?:-brk|-port)?(?:=|$)/, /^--remote-debugging-(?:port|pipe)(?:=|$)/];
+
+/** Аргументы процесса «в новом окне»: текущие без флагов воркспейса и отладки, плюс `--workspace=<файл>`. */
+export function newWindowArgs(argv: readonly string[], file: string, flags: RestartFlags): string[] {
+  const keep = argv.filter((a) => a !== flags.noWorkspace && !a.startsWith(flags.workspace) && !PER_PROCESS.some((re) => re.test(a)));
+  return [...keep, `${flags.workspace}${file}`];
+}

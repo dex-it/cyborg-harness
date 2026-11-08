@@ -21,6 +21,7 @@ export function windowApi(): WindowApi {
     answerDialog: (id: number, choice: string | undefined): Promise<Reply> => ipcRenderer.invoke('window:answer', { id, choice }),
     closeDocument: (id: string): Promise<Reply> => ipcRenderer.invoke('documents:close', id),
     openWorkspace: (file?: string): Promise<Reply> => ipcRenderer.invoke('workspace:open', file),
+    openWorkspaceInNewWindow: (file: string): Promise<Reply> => ipcRenderer.invoke('workspace:open-new', file),
     setSafeMode: (on: boolean): Promise<Reply> => ipcRenderer.invoke('app:safe-mode', on),
   };
 }

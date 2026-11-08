@@ -1,5 +1,7 @@
-// Окно и приложение: события ядра -> окно, окно и ОС -> ядро, одиночный экземпляр. Раскладку окна и меню делает приложение.
+// Окно и приложение: события ядра -> окно, окно и ОС -> ядро, экземпляры приложения. Раскладку окна и меню делает приложение.
 import { app, nativeTheme, Notification, powerMonitor, type BrowserWindow } from 'electron';
+import { claimInstance } from '@cyborg-harness/core';
+import { instanceKey, sessionDataDir } from './instances.ts';
 import type { PluginsEvents, PluginsService } from './plugins.ts';
 import { themeTokens } from './theme.ts';
 import { viewOrigin } from './view-protocol.ts';
@@ -84,7 +86,28 @@ export function watchTheme(getWindow: () => BrowserWindow | undefined): void {
 }
 
 /**
- * Один экземпляр приложения: `false` - замок держит другой процесс, текущему пора выйти. `data` уходит первому экземпляру,
+ * Один экземпляр на воркспейс, процессов может быть несколько (K-20, SAD 3.1): `false` - воркспейс уже открыт другим процессом,
+ * ему передан `data`, текущему пора выйти. `true` - процесс владелец: он слушает адрес воркспейса и зовёт `onSecond(data)`, когда
+ * второй запуск того же воркспейса просит поднять окно. Другой воркспейс с тем же `userData` не мешает. Окно без воркспейса
+ * (`workspaceFile` не задан) в `userData` одно. Вызывать до готовности приложения; адрес отдаётся при выходе.
+ */
+export async function workspaceInstance(userData: string, workspaceFile: string | undefined, data: Record<string, unknown>, onSecond: (data: unknown) => void): Promise<boolean> {
+  const claim = await claimInstance(instanceKey(workspaceFile, userData), data, onSecond);
+  if (claim.kind !== 'owner') return false;
+  app.once('will-quit', () => claim.close());
+  return true;
+}
+
+/**
+ * Сессия Chromium этого воркспейса в своём каталоге внутри `userData` (`sessionData`): localStorage, IndexedDB и кэш двух процессов
+ * не смешиваются и не спорят за замки. Вызывать до готовности приложения, когда воркспейс уже известен.
+ */
+export function isolateSession(userData: string, workspaceFile: string | undefined): void {
+  app.setPath('sessionData', sessionDataDir(userData, workspaceFile));
+}
+
+/**
+ * Один экземпляр приложения на весь `userData`: `false` - замок держит другой процесс, текущему пора выйти. `data` уходит первому экземпляру,
  * когда второй запущен; что ответить человеку, решает приложение.
  */
 export function singleInstance(data: Record<string, unknown>, onSecond: (data: unknown) => void): boolean {
