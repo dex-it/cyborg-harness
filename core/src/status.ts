@@ -127,8 +127,10 @@ export function describeEntry(e: JournalEntry): string {
       return 'ждёт первой команды, показа вида или потребителя';
     case 'revived':
       return 'включён снова';
-    case 'denied':
-      return e.repeats ? `отказ ctx.os: ${e.detail} - ещё ${String(e.repeats)} раз за ${String(DENIED_WINDOW_MS / 1000)} с` : `отказ ctx.os: ${e.detail}`;
+    case 'denied': {
+      const what = `${e.reason === 'window' ? 'отказ окна' : 'отказ ctx.os'}: ${e.detail}`;
+      return e.repeats ? `${what} - ещё ${String(e.repeats)} раз за ${String(DENIED_WINDOW_MS / 1000)} с` : what;
+    }
     case 'pty-expired':
       return `терминал ${e.id} (${e.program}) завершён: плагин не подхватил его за ${String(e.graceMs / 1000)} с`;
     case 'unloaded': {

@@ -416,6 +416,11 @@ export class PluginsService {
     }
   }
 
+  /** Окно не пустило вид на чужой адрес. */
+  viewDenied(pluginId: string, url: string): void {
+    this.kernel?.viewDenied(pluginId, url);
+  }
+
   /** Есть ли у плагина вида поставщик контракта; права те же, что у главной части: только requires и optional манифеста. */
   contractFor(pluginId: string, contract: unknown, major: unknown): Reply {
     if (typeof contract !== 'string' || typeof major !== 'number') return { error: 'контракт: ожидаются имя и мажорная версия' };
