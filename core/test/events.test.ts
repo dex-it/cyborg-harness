@@ -16,6 +16,14 @@ import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 const settle = () => sleep(20);
 
+async function until(cond: () => boolean, ms: number, what: string): Promise<void> {
+  for (const end = Date.now() + ms; Date.now() < end; ) {
+    if (cond()) return;
+    await sleep(20);
+  }
+  assert.fail(`${what}: не дождались за ${String(ms)} мс`);
+}
+
 function start(table: Record<string, PluginModule>, options: Omit<LoadOptions, 'apiVersion' | 'spawnHost' | 'enabled'> & { enabled?: string[] }) {
   const logs: string[] = [];
   return load({
@@ -51,7 +59,8 @@ test('события окна и ОС: доходят до плагинов вс
   k.emit({ kind: 'suspend' });
   k.emit({ kind: 'resume' });
   k.emit({ kind: 'screen-lock' });
-  await settle();
+  // На занятом раннере CI 20 мс не хватало журналу упавшего слушателя: ждём факта, а не срока.
+  await until(() => seen.length >= 7 && k.logs.some((l) => l.startsWith('a: слушатель suspend упал')), 2000, 'события и запись об упавшем слушателе');
   assert.deepEqual(seen.sort(), ['a:focus:false', 'a:lock', 'a:resume', 'b:focus:false', 'b:lock', 'b:resume', 'b:suspend']);
   assert.ok(k.logs.some((l) => l.startsWith('a: слушатель suspend упал: сломан')), k.logs.join('\n'));
   assert.throws(() => k.emit({ kind: 'reboot' } as never), { code: 'Invalid' });
@@ -59,6 +68,7 @@ test('события окна и ОС: доходят до плагинов вс
   await k.disable('a');
   seen.length = 0;
   k.emit({ kind: 'focus', focused: true });
+  await until(() => seen.includes('b:focus:true'), 2000, 'фокус у оставшегося плагина');
   await settle();
   assert.deepEqual(seen, ['b:focus:true']);
   await k.unload();

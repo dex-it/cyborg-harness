@@ -30,7 +30,6 @@ import { viewOrigin } from '../shared/views.ts';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
 import type { PluginUi } from './view-files.ts';
 
-
 const ENTRY_FILES = ['index.mjs', 'index.js', 'index.ts'];
 
 export interface Discovered {
