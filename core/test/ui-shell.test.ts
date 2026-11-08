@@ -6,6 +6,7 @@ import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { connectView, mountModule, type TerminalEvent, type ViewBridge } from '../src/ui-shell.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 function fakeBridge(tokens: ThemeTokens) {
   const calls: unknown[][] = [];
@@ -157,7 +158,7 @@ test('ядро: память вида в разделе $views state воркс�
   const store: LayerStore = { load: async () => structuredClone(doc), save: async (_layer, next) => void (doc = structuredClone(next)) };
   const state = await SectionStore.open(store, ['workspace']);
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async () => ({ activate: () => undefined })),
     enabled: ['own'],
     manifests: [{ id: 'own', version: '1.0.0', engines: { cyborg: '^1' }, ui: { views: { main: './ui.js', side: './side.js' } } }],

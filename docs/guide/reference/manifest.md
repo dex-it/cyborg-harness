@@ -12,7 +12,7 @@ description: "Все поля манифеста плагина manifest.json: �
 | Поле | Тип | Обязательно | Ограничения |
 |---|---|---|---|
 | `$schema` | строка | нет | Для редактора, ядро его игнорирует |
-| `id` | строка | да | Шаблон `[a-z][a-z0-9-]*`, части через точку допустимы (`pin-lock`, `cyborg.files`). Идентификаторы `cyborg` и `cyborg.window` заняты командами окна |
+| `id` | строка | да | Шаблон `[a-z][a-z0-9-]*`, части через точку допустимы (`pin-lock`, `cyborg.files`). Идентификаторы `cyborg`, `cyborg.window` и `cyborg.workspace` заняты командами окна и ядра |
 | `version` | строка | да | Версия плагина `x.y.z` |
 | `engines.cyborg` | строка | да | Диапазон версий API плагинов, например `^1` |
 | `provides` | объект | нет | Контракт - версия, список версий или `{ version, guard }` |
@@ -39,7 +39,7 @@ description: "Все поля манифеста плагина manifest.json: �
 - `guard` - словарь «член контракта - право и номер аргумента». Права: `fs.read`, `fs.write`, `shell`, `secrets.ref`. Аргумент задаётся номером (`0`) или путём `"0.path"`.
 
 ```jsonc
-"provides": { "cyborg.files": { "version": "1.0", "guard": {
+"provides": { "demo.files": { "version": "1.0", "guard": {
   "read": { "fs.read": 0 },
   "open": { "fs.read": "0.path" }
 } } }

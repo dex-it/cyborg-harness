@@ -12,6 +12,7 @@ import {
   load,
   pluginStatuses,
   openWorkspace,
+  PLUGIN_API_VERSION,
   type JournalEntry,
   type Kernel,
   type KeyInput,
@@ -23,12 +24,12 @@ import {
   type WatchdogOptions,
 } from '../../../core/src/index.ts';
 import { isRecord } from '../../../core/src/manifest.ts';
-import { WINDOW_OWNER } from '../../../core/src/window-layer.ts';
+import { WINDOW_OWNER, type WindowSnapshot } from '../../../core/src/window-layer.ts';
 import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from '../shared/plugins.ts';
 import { viewOrigin } from '../shared/views.ts';
+import { migrateLegacyWorkspace } from './legacy-workspace.ts';
 import type { PluginUi } from './view-files.ts';
 
-export const PLUGIN_API_VERSION = '1.0.0';
 
 const ENTRY_FILES = ['index.mjs', 'index.js', 'index.ts'];
 
@@ -91,6 +92,8 @@ export interface StartOptions {
   readonly userData: string;
   /** Файл воркспейса; по умолчанию `<userData>/workspace.cyborg.json`. */
   readonly workspace?: string;
+  /** Последний фрагмент заголовка окна. */
+  readonly appName?: string;
   readonly builtinDir: string;
   readonly spawnHost: SpawnHost;
   readonly log: (line: string) => void;
@@ -106,10 +109,13 @@ export interface StartOptions {
   /** Что не дошло до ядра; по умолчанию - в log. */
   readonly onProblem?: (problem: string) => void;
   readonly onDiscovered?: (found: Discovered) => void;
-  readonly onWindow?: () => void;
+  readonly onWindow?: (snapshot: WindowSnapshot) => void;
   readonly onDocuments?: () => void;
+  readonly onKeptPty?: () => void;
   /** `plugins.enabled` из файла применён. */
   readonly onEnabled?: () => void;
+  /** Безопасный режим: манифесты разобраны, хосты не запускаются, «Включить» отвечает `Unavailable`. */
+  readonly safeMode?: boolean;
 }
 
 export async function startPlugins(options: StartOptions): Promise<Kernel & { readonly workspace: string }> {
@@ -118,7 +124,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     options.onProblem?.(p);
   };
   const file = options.workspace ?? path.join(options.userData, 'workspace.cyborg.json');
-  const opened = await openWorkspace({ file, userFile: path.join(options.userData, 'cyborg.json'), stateDir: path.join(options.userData, 'state') });
+  const opened = await openWorkspace({ file, userFile: path.join(options.userData, 'cyborg.json'), stateDir: path.join(options.userData, 'state'), migrate: migrateLegacyWorkspace });
   if (!opened.ok) throw new Error(`воркспейс ${file} уже открыт процессом ${opened.owner}`);
   const ws = opened.workspace;
   for (const p of ws.problems) report(p);
@@ -135,6 +141,8 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     keybindings: ws.plugins.keybindings,
     // Признак поставки - каталог установки, а не манифест: сторонний автор пишет в манифест что угодно.
     bundled: [...found.origins].filter(([, dir]) => dir === options.builtinDir).map(([id]) => id),
+    // ADR-CH-0002 п. 6: cyborg.* - пространство поставки; чужой поставщик cyborg.agent сделал бы встроенного потребителя ambiguous.
+    reservedPrefixes: ['cyborg.'],
     spawnHost: options.spawnHost,
     entry: (m) => found.entries.get(m.id) ?? m.id,
     config: ws.config,
@@ -148,8 +156,11 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     os: options.os,
     platform: options.platform,
     idleSeconds: options.idleSeconds,
-    onWindow: () => options.onWindow?.(),
+    windowTitle: { workspace: path.basename(file), app: options.appName ?? 'Cyborg Playground' },
+    safeMode: options.safeMode,
+    onWindow: (snapshot) => options.onWindow?.(snapshot),
     onDocuments: () => options.onDocuments?.(),
+    onKeptPty: () => options.onKeptPty?.(),
     onLog: (id, message) => {
       options.log(`[plugins] ${id}: ${message}`);
       options.onLog?.(id, message);
@@ -199,11 +210,13 @@ export interface PluginsEvents {
   alert(title: string, body: string): void;
   /** Сообщение плагина: его вид получает строку сразу, без снимка. */
   log?(pluginId: string, line: FeedLine): void;
+  /** Заголовок окна от ядра: воркспейс, фрагменты плагинов, приложение. */
+  title?(title: string): void;
   /** Команда окна (`WINDOW_COMMANDS`): исполняет окно, а не плагин. */
   windowCommand?(command: string): void;
 }
 
-export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProblem' | 'onLog' | 'onDiscovered' | 'onWindow' | 'onDocuments'> {
+export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProblem' | 'onLog' | 'onDiscovered' | 'onWindow' | 'onDocuments' | 'onKeptPty'> {
   /** Процесс хоста для «Уронить» и «Повесить»; у хостов в том же процессе его нет. */
   readonly pidOf?: (hostId: string) => number | undefined;
 }
@@ -217,6 +230,8 @@ export class PluginsService {
   private workspace: WorkspaceInfo = { current: null, recent: [] };
   private error: string | undefined;
   private pidOf: ServiceOptions['pidOf'];
+  private title: string | undefined;
+  private safeMode = false;
   private readonly entries: { at: number; entry: JournalEntry }[] = [];
   private readonly problems: string[] = [];
   private readonly feed: FeedLine[] = [];
@@ -229,6 +244,12 @@ export class PluginsService {
   constructor(events: PluginsEvents, now: () => number = Date.now) {
     this.events = events;
     this.now = now;
+  }
+
+  private showTitle(title: string): void {
+    if (title === this.title) return;
+    this.title = title;
+    this.events.title?.(title);
   }
 
   setWorkspace(info: WorkspaceInfo): void {
@@ -251,6 +272,7 @@ export class PluginsService {
 
   async start(options: ServiceOptions): Promise<void> {
     this.pidOf = options.pidOf;
+    this.safeMode = options.safeMode === true;
     try {
       this.kernel = await startPlugins({
         ...options,
@@ -260,14 +282,19 @@ export class PluginsService {
           this.events.changed();
         },
         onDiscovered: (found) => (this.views = found.views),
-        onWindow: () => this.events.changed(),
+        onWindow: (snapshot) => {
+          this.showTitle(snapshot.title);
+          this.events.changed();
+        },
         onDocuments: () => this.events.changed(),
+        onKeptPty: () => this.events.changed(),
         onLog: (pluginId, text) => {
           const line = this.say({ kind: 'log', subject: pluginId, text });
           this.events.log?.(pluginId, line);
         },
       });
       this.phase = 'ready';
+      this.showTitle(this.kernel.window.title);
     } catch (error) {
       this.phase = 'failed';
       this.error = errorMessage(error);
@@ -415,6 +442,7 @@ export class PluginsService {
   snapshot(): PluginsSnapshot {
     const kernel = this.kernel;
     const manifests = new Map(kernel?.manifests.map((m) => [m.id, m]));
+    const kept = kernel?.keptPty() ?? [];
     const plugins: PluginRow[] = pluginStatuses(this.entries.map((e) => e.entry)).map((s) => {
       const manifest = manifests.get(s.id);
       const host = s.state === 'disabled' ? undefined : kernel?.hostOf(s.id);
@@ -425,7 +453,8 @@ export class PluginsService {
       return {
         id: s.id,
         state: s.state,
-        revivable: s.revivable && kernel !== undefined,
+        // В безопасном режиме кнопка остаётся: её отказ объясняет, почему плагин не работает.
+        revivable: (s.revivable || s.cause?.kind === 'safe-mode') && kernel !== undefined,
         unloaded: s.cause?.kind === 'unloaded' && s.cause.by === s.id,
         commands,
         permissions: manifest ? describePermissions(manifest.permissions) : [],
@@ -435,6 +464,11 @@ export class PluginsService {
         ...(host !== undefined && { host }),
         ...(pid !== undefined && { pid }),
         ...(s.cause && s.state !== 'active' && { reason: describeEntry(s.cause) }),
+        ...(kept.some((p) => p.pluginId === s.id) && {
+          kept: kept
+            .filter((p) => p.pluginId === s.id)
+            .map((p) => ({ id: p.id, pid: p.pid, command: [p.program, ...p.args].join(' '), keptAt: p.keptAt, ...(p.exit && { exitCode: p.exit.code }) })),
+        }),
       };
     });
     const keys: KeyRow[] = (kernel?.keybindings ?? []).map((k) => ({
@@ -454,6 +488,7 @@ export class PluginsService {
     }));
     return {
       phase: this.phase,
+      safeMode: this.safeMode,
       ...(this.error !== undefined && { error: this.error }),
       problems: [...this.problems],
       plugins,
@@ -461,7 +496,7 @@ export class PluginsService {
       feed: [...this.feed],
       journal,
       canHang: process.platform !== 'win32' && this.pidOf !== undefined,
-      window: kernel?.window ?? { queued: 0, locks: [] },
+      window: kernel?.window ?? { title: '', queued: 0, locks: [] },
       documents: kernel?.documents ?? [],
       workspace: this.workspace,
     };
@@ -499,6 +534,11 @@ export class PluginsService {
   /** Что заберёт выключение: окно спрашивает человека, только если есть живые pty. */
   disablePreview(id: unknown): Promise<Reply> {
     return this.act(id, 'нет id плагина', async (kernel, pluginId) => kernel.disablePreview(pluginId));
+  }
+
+  /** Человек завершил оставленный процесс выключенного плагина или убрал завершившийся. */
+  endKeptPty(id: unknown): Promise<Reply> {
+    return this.act(id, 'нет id процесса', async (kernel, ptyId) => kernel.endKeptPty(ptyId));
   }
 
   /** «Загрузить» и «Включить снова» - одно действие ядра. */

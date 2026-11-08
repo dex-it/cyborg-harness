@@ -32,4 +32,5 @@ export interface Guarded {
   read(path: string): Promise<string>;
   open(spec: { path: string }): Promise<string>;
   size(path: string): Promise<number>;
+  reveal?(path: string): Promise<void>;
 }
