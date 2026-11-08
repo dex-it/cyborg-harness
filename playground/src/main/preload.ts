@@ -1,7 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { ThemeTokens } from '@cyborg-harness/contracts';
 import type { FeedLine, PluginsSnapshot, Reply } from '../shared/plugins.ts';
-import { VIEW_SCHEME, type SpikeBridge, type SpikePing, type SpikeReport, type TerminalEvent, type ViewBridge } from '../shared/views.ts';
+import type { SpikeBridge, SpikePing, SpikeReport } from '../shared/spike.ts';
+import { VIEW_SCHEME, type TerminalEvent, type ViewBridge } from '../shared/views.ts';
 
 const api = {
   pluginsSnapshot: (): Promise<PluginsSnapshot> => ipcRenderer.invoke('plugins:snapshot'),
