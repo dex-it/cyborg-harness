@@ -6,7 +6,7 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { PluginContext, PtyHandle } from '@cyborg-harness/contracts';
 import { load } from '../src/loader.ts';
-import { PtyTable, type TerminalSink } from '../src/pty.ts';
+import { PtyTable, type PtyExpiry, type TerminalSink } from '../src/pty.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { fakePty } from './fake-pty.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
@@ -198,6 +198,63 @@ test('stress-pty: плагин spawn-ит pty и не подписывается
   h.onData((c) => void (got += c.length));
   // 12.8 МБ вывода без подписчика; ядро держит хвост 256 КБ (SAD 3.6) - хост не вправе держать больше этого.
   assert.ok(got <= 256 * 1024 + 64 * 1024, `хост накопил ${String(got)} символов до первой подписки`);
+});
+
+test('сирота: pty с persist без attach завершается по сроку; attach, release и park срок снимают', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const backend = fakePty();
+  const expired: PtyExpiry[] = [];
+  const table = new PtyTable(backend, () => undefined, 1000, 30_000, { graceMs: 1000, expired: (e) => void expired.push(e) });
+  const [lost, back] = ['lost', 'back', 'released', 'parked', 'gone'].map((p) => table.spawn(p, { ...spawnOpts, program: p }));
+  for (const p of ['lost', 'back', 'released', 'parked', 'gone']) table.detach(p);
+  table.attach('back', back!.id);
+  table.release('released');
+  table.park('parked');
+  backend.procs[4]!.exit(0);
+
+  t.mock.timers.tick(999);
+  assert.equal(backend.procs[0]!.killed, undefined, 'срок ещё не вышел');
+  t.mock.timers.tick(1);
+  assert.equal(backend.procs[0]!.killed, 'SIGHUP');
+  assert.deepEqual(table.list('lost'), []);
+  assert.deepEqual(expired, [{ pluginId: 'lost', id: lost!.id, program: 'lost', graceMs: 1000 }], 'вернувшийся, снятый, оставленный и сам завершившийся не в журнале');
+  assert.equal(backend.procs[1]!.killed, undefined);
+  assert.equal(table.list('back').length, 1);
+  assert.equal(backend.procs[3]!.killed, undefined, 'оставленный человеком ждёт без срока');
+  assert.deepEqual(table.list('gone'), [], 'запись завершившегося сироты убрана сроком');
+});
+
+test('оставленный: release и detach его не трогают; claim вернувшегося плагина даёт срок на attach; endKept - только оставленным', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const backend = fakePty();
+  const expired: PtyExpiry[] = [];
+  let changes = 0;
+  const table = new PtyTable(backend, () => undefined, 1000, 30_000, { graceMs: 1000, expired: (e) => void expired.push(e), kept: () => {
+      changes++;
+    },
+  });
+  const [taken, done, lost] = ['taken', 'done', 'lost'].map((program) => table.spawn('p', { ...spawnOpts, program }));
+  const other = table.spawn('other', spawnOpts);
+  assert.equal(table.park('p'), 3);
+  table.release('p');
+  table.detach('p');
+  t.mock.timers.tick(10_000);
+  assert.deepEqual(backend.procs.map((p) => p.killed), [undefined, undefined, undefined, undefined], 'оставленный завершён без человека');
+  assert.deepEqual(table.kept().map((k) => k.id), [taken!.id, done!.id, lost!.id]);
+
+  backend.procs[1]!.exit(0);
+  assert.deepEqual(table.kept()[1]?.exit, { code: 0 }, 'завершившийся сам остаётся в списке с выходом');
+  assert.throws(() => table.endKept(other.id), { code: 'NotFound' });
+  const before = changes;
+  table.claim('p');
+  assert.deepEqual(table.kept(), []);
+  assert.ok(changes > before);
+  table.attach('p', taken!.id);
+  t.mock.timers.tick(1000);
+  assert.equal(backend.procs[0]!.killed, undefined, 'взятый после возврата живёт');
+  assert.equal(backend.procs[2]!.killed, 'SIGHUP');
+  assert.deepEqual(expired, [{ pluginId: 'p', id: lost!.id, program: 'lost', graceMs: 1000 }], 'сам завершившийся в журнал не попадает');
+  assert.deepEqual(table.list('p').map((p) => p.id), [taken!.id]);
 });
 
 test('stress-pty: 10 000 мелких кусков - хосту и зрителю уходят десятки пачек, порядок и содержимое целы, накопленное не повторяется в хвосте, exit после последнего data', async () => {

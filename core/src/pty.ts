@@ -48,13 +48,38 @@ interface Entry {
   attached: boolean;
   readonly viewers: Set<TerminalSink>;
   exit?: PtyExit;
+  orphaned?: ReturnType<typeof setTimeout>;
+  /** Оставлен человеком при выключении плагина; снимается, когда плагин вернулся. */
+  keptAt: number | undefined;
   pending: string[];
   pendingChars: number;
   flushed: number;
   timer?: ReturnType<typeof setTimeout> | undefined;
 }
 
+/** pty без владельца завершён по сроку: плагин не вернулся и не сделал `attach`. */
+export interface PtyExpiry {
+  readonly pluginId: string;
+  readonly id: string;
+  readonly program: string;
+  readonly graceMs: number;
+}
+
+/** Оставленный человеком процесс выключенного плагина: ждёт без срока, пока плагин не вернётся. */
+export interface KeptPty extends PtyInfo {
+  readonly pluginId: string;
+  /** Когда оставлен, мс от эпохи. */
+  readonly keptAt: number;
+}
+
 export type PtyLimits = Pick<ResourceLimits, 'ptyInput' | 'ptys' | 'ptyFlushMs' | 'ptyFlushChars'>;
+
+/** Льготный срок pty без владельца и уведомления приложению: срок вышел, список оставленных поменялся. */
+export interface PtyOrphan {
+  readonly graceMs?: number;
+  readonly expired?: (expiry: PtyExpiry) => void;
+  readonly kept?: () => void;
+}
 
 export const PTY_SIGNALS = ['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGHUP'] as const;
 
@@ -98,6 +123,8 @@ export class Tail {
 }
 
 export const BACKLOG_LIMIT = 256 * 1024;
+/** Столько ждёт pty с `persist`, чей хост упал: перезапуск и активация укладываются в секунды, как переподключение в VS Code. */
+export const ORPHAN_GRACE = 60_000;
 
 /** pty всех плагинов: живут в главном процессе, переживают хост, если просили `persist`. */
 export class PtyTable {
@@ -105,17 +132,23 @@ export class PtyTable {
   readonly #push: (pluginId: string, method: 'pty.data' | 'pty.exit', params: unknown) => void;
   readonly #limit: number;
   readonly #ticketTtl: number;
+  readonly #grace: number;
+  readonly #expired: (expiry: PtyExpiry) => void;
+  readonly #keptChanged: () => void;
   readonly #entries = new Map<string, Entry>();
   readonly #tickets = new Map<string, { pluginId: string; id: string; expires: number }>();
   readonly #max: PtyLimits;
   #next = 0;
 
-  constructor(backend: PtyBackend, push: (pluginId: string, method: 'pty.data' | 'pty.exit', params: unknown) => void, backlogLimit = BACKLOG_LIMIT, ticketTtl = 30_000, limits: Partial<PtyLimits> = {}) {
+  constructor(backend: PtyBackend, push: (pluginId: string, method: 'pty.data' | 'pty.exit', params: unknown) => void, backlogLimit = BACKLOG_LIMIT, ticketTtl = 30_000, options: Partial<PtyLimits> & PtyOrphan = {}) {
     this.#backend = backend;
     this.#push = push;
     this.#limit = backlogLimit;
     this.#ticketTtl = ticketTtl;
-    this.#max = { ptyInput: limits.ptyInput ?? LIMITS.ptyInput, ptys: limits.ptys ?? LIMITS.ptys, ptyFlushMs: limits.ptyFlushMs ?? LIMITS.ptyFlushMs, ptyFlushChars: limits.ptyFlushChars ?? LIMITS.ptyFlushChars };
+    this.#grace = options.graceMs ?? ORPHAN_GRACE;
+    this.#expired = options.expired ?? (() => undefined);
+    this.#keptChanged = options.kept ?? (() => undefined);
+    this.#max = { ptyInput: options.ptyInput ?? LIMITS.ptyInput, ptys: options.ptys ?? LIMITS.ptys, ptyFlushMs: options.ptyFlushMs ?? LIMITS.ptyFlushMs, ptyFlushChars: options.ptyFlushChars ?? LIMITS.ptyFlushChars };
   }
 
   spawn(pluginId: string, o: { program: string; args: string[]; cwd?: string; env: Record<string, string>; cols: number; rows: number; persist: boolean }): PtyWire {
@@ -123,7 +156,7 @@ export class PtyTable {
     // Терминал на той стороне - xterm.js вида: TERM и COLORTERM описывают его, а не окно, из которого запустили приложение.
     const env = { COLORTERM: 'truecolor', ...o.env };
     const proc = this.#backend.spawn(o.program, o.args, { name: 'xterm-256color', ...(o.cwd !== undefined && { cwd: o.cwd }), env, cols: o.cols, rows: o.rows });
-    const e: Entry = { id: `pty-${String(++this.#next)}`, pluginId, proc, program: o.program, args: o.args, persist: o.persist, cols: o.cols, rows: o.rows, tail: new Tail(this.#limit), attached: true, viewers: new Set(), pending: [], pendingChars: 0, flushed: -Infinity };
+    const e: Entry = { id: `pty-${String(++this.#next)}`, pluginId, proc, program: o.program, args: o.args, persist: o.persist, cols: o.cols, rows: o.rows, tail: new Tail(this.#limit), attached: true, viewers: new Set(), pending: [], pendingChars: 0, flushed: -Infinity, keptAt: undefined };
     this.#entries.set(e.id, e);
     proc.onData((data) => this.#output(e, data));
     proc.onExit(({ exitCode, signal }) => {
@@ -132,6 +165,7 @@ export class PtyTable {
       e.exit = exit;
       for (const v of e.viewers) v.exit(exit);
       e.viewers.clear();
+      if (e.keptAt !== undefined) this.#keptChanged();
       if (!e.attached) return;
       this.#entries.delete(e.id);
       this.#push(pluginId, 'pty.exit', { pluginId, id: e.id, exit: e.exit });
@@ -147,6 +181,11 @@ export class PtyTable {
     const e = this.#own(pluginId, id);
     this.#flush(e);
     const wire = { ...info(e), backlog: e.tail.text() };
+    clearTimeout(e.orphaned);
+    if (e.keptAt !== undefined) {
+      e.keptAt = undefined;
+      this.#keptChanged();
+    }
     if (e.exit) {
       this.#entries.delete(id);
       return wire;
@@ -215,30 +254,63 @@ export class PtyTable {
     this.#live(pluginId, id).proc.kill(signal);
   }
 
-  /** Хост плагина упал: `persist` ждут attach, прочие завершаются - их вывод больше некому принять. */
+  /** Хост плагина упал: `persist` ждут attach не дольше льготного срока, прочие завершаются - их вывод больше некому принять. */
   detach(pluginId: string): void {
-    for (const e of this.#of(pluginId)) {
-      if (e.persist && !e.exit) e.attached = false;
-      else this.#end(e);
+    for (const e of this.#unkept(pluginId)) {
+      if (!e.persist || e.exit) {
+        this.#end(e);
+        continue;
+      }
+      e.attached = false;
+      this.#orphan(e);
     }
   }
 
-  /** Плагин выключен, выгружен или не вернётся после падения хоста. */
-  release(pluginId: string): void {
-    for (const e of this.#of(pluginId)) this.#end(e);
+  /** Плагин активирован: его pty без владельца, оставленные человеком тоже, ждут attach не дольше льготного срока. */
+  claim(pluginId: string): void {
+    let unkept = false;
+    for (const e of this.#of(pluginId)) {
+      if (e.attached) continue;
+      unkept ||= e.keptAt !== undefined;
+      e.keptAt = undefined;
+      this.#orphan(e);
+    }
+    if (unkept) this.#keptChanged();
   }
 
-  /** Человек выключил плагин и оставил его процессы: живые ждут attach, как `persist` после падения хоста; число оставленных. */
+  /** Плагин выключен, выгружен или не вернётся после падения хоста; оставленные человеком ждут дальше. */
+  release(pluginId: string): void {
+    for (const e of this.#unkept(pluginId)) this.#end(e);
+  }
+
+  /** Человек выключил плагин и оставил его процессы: живые ждут без срока, пока плагин не вернётся; число оставленных. */
   park(pluginId: string): number {
     let kept = 0;
     for (const e of this.#of(pluginId)) {
+      // Выбор человека сильнее срока, взведённого падением хоста.
+      clearTimeout(e.orphaned);
       if (e.exit) this.#entries.delete(e.id);
       else {
         e.attached = false;
+        e.keptAt ??= Date.now();
         kept++;
       }
     }
+    if (kept > 0) this.#keptChanged();
     return kept;
+  }
+
+  /** Оставленные человеком процессы выключенных плагинов, в том числе завершившиеся сами. */
+  kept(): KeptPty[] {
+    return [...this.#entries.values()].flatMap((e) => (e.keptAt === undefined ? [] : [{ ...info(e), pluginId: e.pluginId, keptAt: e.keptAt }]));
+  }
+
+  /** Человек завершил оставленный процесс или убрал завершившийся. */
+  endKept(id: string): void {
+    const e = this.#entries.get(id);
+    if (e?.keptAt === undefined) throw new CoreError('NotFound', `оставленного pty ${id} нет`);
+    this.#end(e);
+    this.#keptChanged();
   }
 
   /** Приложение завершается: припаркованные pty выключенных плагинов тоже уходят. */
@@ -247,12 +319,26 @@ export class PtyTable {
   }
 
   #end(e: Entry): void {
+    clearTimeout(e.orphaned);
     this.#entries.delete(e.id);
     clearTimeout(e.timer);
     e.timer = undefined;
     e.pending = [];
     e.pendingChars = 0;
     if (!e.exit) e.proc.kill();
+  }
+
+  #orphan(e: Entry): void {
+    clearTimeout(e.orphaned);
+    e.orphaned = setTimeout(() => {
+      if (e.attached || this.#entries.get(e.id) !== e) return;
+      // Завершившийся сам процесс сроком не убит: запись просто уходит.
+      const alive = !e.exit;
+      this.#end(e);
+      if (alive) this.#expired({ pluginId: e.pluginId, id: e.id, program: e.program, graceMs: this.#grace });
+    }, this.#grace);
+    // Ждущий срока pty не держит процесс приложения: выход из него и так завершит все.
+    e.orphaned.unref();
   }
 
   #input(data: string): void {
@@ -297,6 +383,10 @@ export class PtyTable {
 
   #of(pluginId: string): Entry[] {
     return [...this.#entries.values()].filter((e) => e.pluginId === pluginId);
+  }
+
+  #unkept(pluginId: string): Entry[] {
+    return this.#of(pluginId).filter((e) => e.keptAt === undefined);
   }
 
   #own(pluginId: string, id: string): Entry {

@@ -18,7 +18,7 @@ export * from './keys.ts';
 export * from './permissions.ts';
 export * from './os-gateway.ts';
 export * from './notices.ts';
-export type { PtyBackend, PtyProcess, TerminalSink, TerminalView } from './pty.ts';
+export type { KeptPty, PtyBackend, PtyProcess, TerminalSink, TerminalView } from './pty.ts';
 export { groupKilled } from './pty.ts';
 export type { SystemEvent } from './host-runtime.ts';
 export * from './workspace.ts';

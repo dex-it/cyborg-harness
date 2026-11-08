@@ -171,6 +171,7 @@ export interface OsPty {
   spawn(options: PtySpawnOptions): Promise<PtyHandle>;
   /** Только свои pty. */
   list(): Promise<PtyInfo[]>;
+  /** Свой pty без владельца: после перезапуска хоста или «Оставить работать». Брать при активации: с неё идёт льготный срок ядра, после него процесс завершён и ответ - `NotFound`. */
   attach(id: string): Promise<PtyHandle>;
 }
 

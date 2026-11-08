@@ -277,8 +277,11 @@ async function main() {
     assert.equal(await choose('keep'), true);
     await waitFor('echo выгружен, процесс оставлен', async () => (await state('echo')) === 'stopped' && /оставлено: 1/.test(await text('#plugins-journal')));
     assert.equal(await alive(sh), true, 'оставленный процесс завершён');
+    const kept = () => text('#plugins-list [data-plugin="echo"] .plugin-kept');
+    await waitFor('строка echo показывает оставленный процесс', async () => (await kept()).includes(`/bin/sh - pid ${sh}`));
     assert.equal(await load(), true);
     await waitFor('вернувшийся echo подхватил тот же процесс', async () => (await state('echo')) === 'active' && (await inView('echo', "document.getElementById('term-state').textContent")) === `pty ${sh}` && /после-72/.test(await screen()));
+    assert.equal(await kept(), '', 'подхваченный процесс остался в списке оставленных');
     await type('echo снова-$((9*9))');
     await waitFor('терминал ожил', async () => /снова-81/.test(await screen()));
     assert.equal(await button('echo', 'Выгрузить'), true);
@@ -287,7 +290,16 @@ async function main() {
     await waitFor('процесс echo завершён', async () => (await state('echo')) === 'stopped' && !(await alive(sh)));
     assert.equal(await load(), true);
     await waitFor('echo с новым терминалом', async () => (await state('echo')) === 'active' && /^pty \d+$/.test(await inView('echo', "document.getElementById('term-state').textContent")));
-    log('выключение спрашивает о pty: оставленный процесс ждёт плагин, завершённый уходит');
+    const sh2 = /^pty (\d+)$/.exec(await inView('echo', "document.getElementById('term-state').textContent"))[1];
+    assert.equal(await button('echo', 'Выгрузить'), true);
+    await waitFor('третий вопрос', async () => (await ask()).includes(`pid ${sh2}`));
+    assert.equal(await choose('keep'), true);
+    await waitFor('второй процесс оставлен', async () => (await kept()).includes(`pid ${sh2}`));
+    assert.equal(await ev(`(() => { const b = document.querySelector('#plugins-list [data-plugin="echo"] .kept-row button'); b?.click(); return !!b; })()`), true);
+    await waitFor('человек завершил оставленный процесс из строки плагина', async () => !(await alive(sh2)) && (await kept()) === '');
+    assert.equal(await load(), true);
+    await waitFor('echo снова активен', async () => (await state('echo')) === 'active' && /^pty \d+$/.test(await inView('echo', "document.getElementById('term-state').textContent")));
+    log('выключение спрашивает о pty: оставленный процесс виден в строке плагина и ждёт его, завершённый уходит, оставленный завершается человеком');
   }
   log('падение и зависание хоста: сторож перезапускает');
 

@@ -111,6 +111,7 @@ export interface StartOptions {
   readonly onDiscovered?: (found: Discovered) => void;
   readonly onWindow?: (snapshot: WindowSnapshot) => void;
   readonly onDocuments?: () => void;
+  readonly onKeptPty?: () => void;
   /** `plugins.enabled` из файла применён. */
   readonly onEnabled?: () => void;
   /** Безопасный режим: манифесты разобраны, хосты не запускаются, «Включить» отвечает `Unavailable`. */
@@ -159,6 +160,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     safeMode: options.safeMode,
     onWindow: (snapshot) => options.onWindow?.(snapshot),
     onDocuments: () => options.onDocuments?.(),
+    onKeptPty: () => options.onKeptPty?.(),
     onLog: (id, message) => {
       options.log(`[plugins] ${id}: ${message}`);
       options.onLog?.(id, message);
@@ -214,7 +216,7 @@ export interface PluginsEvents {
   windowCommand?(command: string): void;
 }
 
-export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProblem' | 'onLog' | 'onDiscovered' | 'onWindow' | 'onDocuments'> {
+export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProblem' | 'onLog' | 'onDiscovered' | 'onWindow' | 'onDocuments' | 'onKeptPty'> {
   /** Процесс хоста для «Уронить» и «Повесить»; у хостов в том же процессе его нет. */
   readonly pidOf?: (hostId: string) => number | undefined;
 }
@@ -285,6 +287,7 @@ export class PluginsService {
           this.events.changed();
         },
         onDocuments: () => this.events.changed(),
+        onKeptPty: () => this.events.changed(),
         onLog: (pluginId, text) => {
           const line = this.say({ kind: 'log', subject: pluginId, text });
           this.events.log?.(pluginId, line);
@@ -439,6 +442,7 @@ export class PluginsService {
   snapshot(): PluginsSnapshot {
     const kernel = this.kernel;
     const manifests = new Map(kernel?.manifests.map((m) => [m.id, m]));
+    const kept = kernel?.keptPty() ?? [];
     const plugins: PluginRow[] = pluginStatuses(this.entries.map((e) => e.entry)).map((s) => {
       const manifest = manifests.get(s.id);
       const host = s.state === 'disabled' ? undefined : kernel?.hostOf(s.id);
@@ -460,6 +464,11 @@ export class PluginsService {
         ...(host !== undefined && { host }),
         ...(pid !== undefined && { pid }),
         ...(s.cause && s.state !== 'active' && { reason: describeEntry(s.cause) }),
+        ...(kept.some((p) => p.pluginId === s.id) && {
+          kept: kept
+            .filter((p) => p.pluginId === s.id)
+            .map((p) => ({ id: p.id, pid: p.pid, command: [p.program, ...p.args].join(' '), keptAt: p.keptAt, ...(p.exit && { exitCode: p.exit.code }) })),
+        }),
       };
     });
     const keys: KeyRow[] = (kernel?.keybindings ?? []).map((k) => ({
@@ -525,6 +534,11 @@ export class PluginsService {
   /** Что заберёт выключение: окно спрашивает человека, только если есть живые pty. */
   disablePreview(id: unknown): Promise<Reply> {
     return this.act(id, 'нет id плагина', async (kernel, pluginId) => kernel.disablePreview(pluginId));
+  }
+
+  /** Человек завершил оставленный процесс выключенного плагина или убрал завершившийся. */
+  endKeptPty(id: unknown): Promise<Reply> {
+    return this.act(id, 'нет id процесса', async (kernel, ptyId) => kernel.endKeptPty(ptyId));
   }
 
   /** «Загрузить» и «Включить снова» - одно действие ядра. */

@@ -49,7 +49,8 @@ export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[]
         case 'key-ignored':
         case 'denied':
         case 'unhandled-rejection':
-          // Ни конфликт сочетаний, ни отказ шлюза, ни отклонение, которое хост удержал, о работе плагина ничего не говорят: плагин работает как обычно.
+        case 'pty-expired':
+          // Ни конфликт сочетаний, ни отказ шлюза, ни удержанное хостом отклонение, ни завершённый по сроку pty о работе плагина ничего не говорят: плагин работает как обычно.
           break;
         case 'host-restart':
           // Причиной остаётся падение: «перезапуск» без «почему» человеку ничего не говорит.
@@ -128,6 +129,8 @@ export function describeEntry(e: JournalEntry): string {
       return 'включён снова';
     case 'denied':
       return e.repeats ? `отказ ctx.os: ${e.detail} - ещё ${String(e.repeats)} раз за ${String(DENIED_WINDOW_MS / 1000)} с` : `отказ ctx.os: ${e.detail}`;
+    case 'pty-expired':
+      return `терминал ${e.id} (${e.program}) завершён: плагин не подхватил его за ${String(e.graceMs / 1000)} с`;
     case 'unloaded': {
       const base = e.by === e.pluginId ? 'выгружен' : `выгружен вместе с ${e.by}: требует его контракт`;
       const what = e.keptPty ? `${base}; процессов в терминале оставлено: ${String(e.keptPty)}` : base;
@@ -169,6 +172,7 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
     case 'key-conflict':
     case 'key-ignored':
     case 'denied':
+    case 'pty-expired':
       return 'warn';
     case 'deactivated':
       return e.error ? 'warn' : 'info';

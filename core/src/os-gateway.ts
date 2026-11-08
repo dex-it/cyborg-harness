@@ -9,7 +9,7 @@ import { limitsOf, type ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { NotifyLimits, ShowNotice } from './notices.ts';
 import { ANY_PATH, LOGIN_SHELL } from './permissions.ts';
-import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type TerminalSink, type TerminalView } from './pty.ts';
+import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type KeptPty, type PtyExpiry, type TerminalSink, type TerminalView } from './pty.ts';
 import { HttpServes, type AskHost } from './serve.ts';
 import type { GuardRight } from './via-contract.ts';
 import { isRecord } from './wire.ts';
@@ -50,6 +50,8 @@ export interface OsEnvironment {
   readonly pty?: PtyBackend;
   /** Хвост вывода pty, символов; по умолчанию 256 К. */
   readonly ptyBacklog?: number;
+  /** Сколько мс pty с `persist` ждёт `attach` плагина после падения его хоста; по умолчанию 60 000. */
+  readonly ptyOrphanGrace?: number;
   /** Пределы ресурсов плагина поверх `LIMITS`; загрузчик кладёт сюда `LoadOptions.limits`. */
   readonly limits?: Partial<ResourceLimits> | undefined;
   /** Открыть программой ОС; путь и URL шлюз уже проверил. */
@@ -301,6 +303,7 @@ export class OsGateway {
     manifestOf: (pluginId: string) => PluginManifest | undefined = () => undefined,
     grants?: GrantStore,
     ask: AskHost = () => Promise.reject(new CoreError('Unavailable', 'хоста нет')),
+    ptyEvents: { readonly expired?: (expiry: PtyExpiry) => void; readonly kept?: () => void } = {},
   ) {
     this.#env = env;
     this.#limits = limitsOf(env.limits);
@@ -319,7 +322,7 @@ export class OsGateway {
     this.#push = push;
     this.#deny = deny;
     this.#configOf = configOf;
-    this.#pty = env.pty && new PtyTable(env.pty, push, env.ptyBacklog, undefined, this.#limits);
+    this.#pty = env.pty && new PtyTable(env.pty, push, env.ptyBacklog, undefined, { ...this.#limits, ...(env.ptyOrphanGrace !== undefined && { graceMs: env.ptyOrphanGrace }), ...ptyEvents });
   }
 
   pathsOf(pluginId: string): { data: string; temp: string; home: string } {
@@ -361,6 +364,20 @@ export class OsGateway {
 
   releaseAllPty(): void {
     this.#pty?.releaseAll();
+  }
+
+  /** Плагин активирован: с этого момента идёт льготный срок на `attach` его pty без владельца. */
+  claimPty(pluginId: string): void {
+    this.#pty?.claim(pluginId);
+  }
+
+  keptPty(): KeptPty[] {
+    return this.#pty?.kept() ?? [];
+  }
+
+  endKeptPty(id: string): void {
+    if (!this.#pty) throw new CoreError('NotFound', `оставленного pty ${id} нет`);
+    this.#pty.endKept(id);
   }
 
   /** Вид плагина предъявил билет своей главной части; `pluginId` приложение берёт из origin фрейма, а не из слов вида. */
