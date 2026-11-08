@@ -126,13 +126,13 @@ export interface LoadOptions {
   readonly callTimeout?: number | undefined;
   /** Среда шлюза `ctx.os`; по умолчанию каталоги плагинов во временном каталоге ОС, без секретов, уведомлений и буфера обмена. */
   readonly os?: OsEnvironment | undefined;
-  /** Граф решён, код плагинов ещё не запускался. */
   /** Под какую ОС раскрыть `CmdOrCtrl`; по умолчанию текущая. */
   readonly platform?: string | undefined;
   /** Секунды простоя пользователя по ОС; без него `onIdle` не срабатывает. */
   readonly idleSeconds?: (() => number) | undefined;
   /** Как часто спрашивать `idleSeconds`, пока есть подписчики, мс. */
   readonly idlePoll?: number | undefined;
+  /** Граф решён, код плагинов ещё не запускался. */
   readonly onGraph?: ((graph: ContractGraph) => Promise<void> | undefined) | undefined;
   readonly onJournal?: ((entry: JournalEntry) => void) | undefined;
   readonly onLog?: ((pluginId: string, message: string) => void) | undefined;
