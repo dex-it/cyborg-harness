@@ -20,7 +20,7 @@ describe('каналы IPC: preload и главный процесс', () => {
 
   it('каждому invoke и send из preload есть обработчик в главном процессе или он назван каналом приложения', () => {
     const asked = unique(names(preload, /ipcRenderer\.(?:invoke|send)\('([^']+)'/g));
-    const handled = unique([...names(main, /(?:ipcMain\.(?:handle|on)|windowChannel|terminalChannel)\('([^']+)'/g), ...APP_CHANNELS]);
+    const handled = unique([...names(main, /(?:ipcMain\.(?:handle|on)|windowChannel|viewChannel|terminalChannel)\('([^']+)'/g), ...APP_CHANNELS]);
     assert.ok(asked.length >= 25, `каналов в preload: ${String(asked.length)}`);
     assert.deepEqual(
       asked.filter((c) => !handled.includes(c)),
@@ -31,7 +31,7 @@ describe('каналы IPC: preload и главный процесс', () => {
 
   it('у каждого обработчика главного процесса есть тот, кто его просит', () => {
     const asked = unique(names(preload, /ipcRenderer\.(?:invoke|send)\('([^']+)'/g));
-    const handled = unique(names(main, /(?:ipcMain\.(?:handle|on)|windowChannel|terminalChannel)\('([^']+)'/g));
+    const handled = unique(names(main, /(?:ipcMain\.(?:handle|on)|windowChannel|viewChannel|terminalChannel)\('([^']+)'/g));
     assert.deepEqual(
       handled.filter((c) => !asked.includes(c)),
       [],

@@ -2,19 +2,24 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { protocol, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents, type WebFrameMain } from 'electron';
 import { pluginOfOrigin, VIEW_SCHEME } from './view-protocol.ts';
-import { VIEW_CSP, type ViewRequest } from './view-files.ts';
+import { cspOf, type ViewCsp, type ViewRequest } from './view-files.ts';
 
 /** До `app.ready`: standard даёт схеме свой origin на хост, а с ним site isolation по плагинам. */
 export function registerViewScheme(): void {
   protocol.registerSchemesAsPrivileged([{ scheme: VIEW_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 }
 
+export interface ServeViewsOptions {
+  /** CSP ответов: по умолчанию `VIEW_CSP`. Функция получает плагина из адреса запроса (строгая CSP по плагину или группе, K-05). */
+  readonly csp?: ViewCsp;
+}
+
 /** `shellDir` - каталог собранной оболочки вида (shell.js, shell.css). */
-export function serveViews(resolve: (url: string) => ViewRequest | undefined, shellDir: string): void {
+export function serveViews(resolve: (url: string) => ViewRequest | undefined, shellDir: string, options: ServeViewsOptions = {}): void {
   protocol.handle(VIEW_SCHEME, async (request) => {
     const found = resolve(request.url);
     if (!found) return new Response('нет такого файла вида', { status: 404 });
-    const headers = { 'content-type': found.kind === 'shell' ? 'text/html; charset=utf-8' : found.type, 'content-security-policy': VIEW_CSP };
+    const headers = { 'content-type': found.kind === 'shell' ? 'text/html; charset=utf-8' : found.type, 'content-security-policy': cspOf(options.csp, request.url) };
     if (found.kind === 'shell') return new Response(found.html, { headers });
     try {
       const file = found.kind === 'core' ? path.join(shellDir, found.name) : found.file;

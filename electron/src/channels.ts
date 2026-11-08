@@ -16,6 +16,17 @@ export function windowChannel(channel: string, handler: (arg: unknown) => unknow
   });
 }
 
+/**
+ * Канал, который принимает вид плагина: плагин берётся из origin фрейма-отправителя, а не из аргументов, поэтому чужой вид
+ * чужого плагина не вызовет. Не вид (окно, чужая страница) получает `notView`. Точка расширения для каналов приложения (K-13).
+ */
+export function viewChannel(channel: string, handler: (pluginId: string, ...args: unknown[]) => unknown, notView: unknown = { error: 'не вид плагина' }): void {
+  ipcMain.handle(channel, (event: IpcMainInvokeEvent, ...args: unknown[]) => {
+    const pluginId = senderPlugin(event);
+    return pluginId === undefined ? notView : handler(pluginId, ...args);
+  });
+}
+
 export interface WindowChannelsOptions {
   readonly plugins: PluginsService;
   /** Окно приложения; пока его нет, `views:visibility` ничего не делает. */
@@ -63,38 +74,14 @@ export interface ViewChannelsOptions {
 
 /** Каналы видов: плагин всегда берётся из origin фрейма-отправителя, а не из аргументов. */
 export function registerViewChannels({ plugins, dragRoot }: ViewChannelsOptions): void {
-  ipcMain.handle('view:dialog', (event, view: unknown, spec: unknown) => {
-    const pluginId = senderPlugin(event);
-    return pluginId === undefined ? { error: 'не вид плагина' } : plugins.dialogFor(pluginId, view, spec);
-  });
-  ipcMain.handle('view:keys', (event) => {
-    const pluginId = senderPlugin(event);
-    return pluginId === undefined ? {} : plugins.keysFor(pluginId);
-  });
-  ipcMain.handle('view:logs', (event) => {
-    const pluginId = senderPlugin(event);
-    return pluginId === undefined ? [] : plugins.logsOf(pluginId);
-  });
-  ipcMain.handle('view:run', (event, command: unknown, args: unknown) => {
-    const pluginId = senderPlugin(event);
-    return pluginId === undefined ? { error: 'не вид плагина' } : plugins.runFor(pluginId, command, args);
-  });
-  ipcMain.handle('view:contract', (event, contract: unknown, major: unknown) => {
-    const pluginId = senderPlugin(event);
-    return pluginId === undefined ? { error: 'не вид плагина' } : plugins.contractFor(pluginId, contract, major);
-  });
-  ipcMain.handle('view:call', (event, contract: unknown, major: unknown, method: unknown, args: unknown) => {
-    const pluginId = senderPlugin(event);
-    return pluginId === undefined ? { error: 'не вид плагина' } : plugins.callFor(pluginId, contract, major, method, args);
-  });
-  ipcMain.handle('view:state', (event, view: unknown) => {
-    const pluginId = senderPlugin(event);
-    return pluginId === undefined ? { error: 'не вид плагина' } : plugins.viewStateFor(pluginId, view);
-  });
-  ipcMain.handle('view:state:set', (event, view: unknown, value: unknown) => {
-    const pluginId = senderPlugin(event);
-    return pluginId === undefined ? { error: 'не вид плагина' } : plugins.setViewStateFor(pluginId, view, value);
-  });
+  viewChannel('view:dialog', (pluginId, view, spec) => plugins.dialogFor(pluginId, view, spec));
+  viewChannel('view:keys', (pluginId) => plugins.keysFor(pluginId), {});
+  viewChannel('view:logs', (pluginId) => plugins.logsOf(pluginId), []);
+  viewChannel('view:run', (pluginId, command, args) => plugins.runFor(pluginId, command, args));
+  viewChannel('view:contract', (pluginId, contract, major) => plugins.contractFor(pluginId, contract, major));
+  viewChannel('view:call', (pluginId, contract, major, method, args) => plugins.callFor(pluginId, contract, major, method, args));
+  viewChannel('view:state', (pluginId, view) => plugins.viewStateFor(pluginId, view));
+  viewChannel('view:state:set', (pluginId, view, value) => plugins.setViewStateFor(pluginId, view, value));
   const terminals = new ViewTerminals((pluginId, ticket, sink) => plugins.openTerminal(pluginId, ticket, sink));
   const terminalChannel = (channel: string, handler: (frame: TerminalFrame, pluginId: string, ...args: unknown[]) => unknown): void => {
     ipcMain.handle(channel, (event: IpcMainInvokeEvent, ...args: unknown[]) => {

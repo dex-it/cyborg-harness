@@ -59,7 +59,17 @@ function showNotification(title: string, body: string | undefined, events: Notic
   };
 }
 
-export function electronOs(options: { userData: string; roots: () => readonly string[]; protectedPaths: readonly string[]; workspaceFile?: string; raiseWindow: () => void }): OsEnvironment {
+export interface ElectronOsOptions {
+  readonly userData: string;
+  readonly roots: () => readonly string[];
+  readonly protectedPaths: readonly string[];
+  readonly workspaceFile?: string;
+  readonly raiseWindow: () => void;
+  /** Откуда берутся pty: по умолчанию `node-pty` в главном процессе; отдельный pty-хост ядра (K-01) подставляется здесь. */
+  readonly pty?: OsEnvironment['pty'];
+}
+
+export function electronOs(options: ElectronOsOptions): OsEnvironment {
   return {
     dataDir: path.join(options.userData, 'plugin-data'),
     tempDir: path.join(options.userData, 'plugin-temp'),
@@ -87,6 +97,6 @@ export function electronOs(options: { userData: string; roots: () => readonly st
         return result.canceled ? [] : result.filePaths;
       },
     },
-    pty: { spawn: (file, args, o) => groupKilled(nodePty.spawn(file, args, o)) },
+    pty: options.pty ?? { spawn: (file, args, o) => groupKilled(nodePty.spawn(file, args, o)) },
   };
 }

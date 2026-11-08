@@ -31,6 +31,9 @@ export type ViewRequest =
   | { readonly kind: 'core'; readonly name: keyof typeof SHELL_FILES; readonly type: string }
   | { readonly kind: 'file'; readonly file: string; readonly type: string };
 
+/** CSP ответов вида: строка на всех, функция по плагину из адреса запроса (строгая CSP по плагину или группе, K-05). */
+export type ViewCsp = string | ((pluginId: string | undefined) => string);
+
 const attr = (value: string) => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
 /** Страница-оболочка: модуль плагина подключает скрипт ядра, а не своя разметка - так `mount` получает готовый `UiContext`. */
@@ -110,4 +113,10 @@ export function resolveViewRequest(url: string, uiOf: (pluginId: string) => Plug
     return { kind: 'core', name: known, type: SHELL_FILES[known] };
   }
   return fileIn(ui.dir, parsed.pathname);
+}
+
+/** CSP ответа на запрос: без настройки - `VIEW_CSP`. */
+export function cspOf(csp: ViewCsp | undefined, url: string): string {
+  if (typeof csp === 'string') return csp;
+  return csp ? csp(parse(url)?.id) : VIEW_CSP;
 }

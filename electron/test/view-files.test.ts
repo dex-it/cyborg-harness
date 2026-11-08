@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pluginOfOrigin, viewOrigin } from '../src/view-protocol.ts';
 import { themeTokens } from '../src/theme.ts';
-import { resolveStaticFile, resolveViewRequest, type PluginUi } from '../src/view-files.ts';
+import { cspOf, resolveStaticFile, resolveViewRequest, VIEW_CSP, type PluginUi } from '../src/view-files.ts';
 
 // Граница каталога считается по настоящим путям: файлы должны существовать, а tmpdir на macOS - симлинк.
 const base = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-view-files-')));
@@ -60,4 +60,14 @@ test('тема: одинаковый набор токенов у светлой
   assert.ok(Object.keys(light).every((k) => k.startsWith('--cy-')));
   assert.deepEqual([light['--cy-scheme'], dark['--cy-scheme']], ['light', 'dark']);
   assert.notEqual(light['--cy-bg'], dark['--cy-bg']);
+});
+
+test('CSP ответа: без настройки - строгая по умолчанию, строка - на все виды, функция - по плагину из адреса', () => {
+  assert.equal(cspOf(undefined, 'cyborg-plugin://alice/'), VIEW_CSP);
+  assert.equal(cspOf("default-src 'none'", 'cyborg-plugin://alice/'), "default-src 'none'");
+  const seen: (string | undefined)[] = [];
+  const csp = cspOf((id) => (seen.push(id), id === 'alice' ? 'для alice' : 'для остальных'), 'cyborg-plugin://alice/x.js');
+  assert.equal(csp, 'для alice');
+  assert.equal(cspOf((id) => String(id), 'file:///etc/passwd'), 'undefined', 'не вид плагина - плагина нет');
+  assert.deepEqual(seen, ['alice']);
 });
