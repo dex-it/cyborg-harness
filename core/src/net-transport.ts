@@ -78,7 +78,7 @@ export function guardedLookup(real: Lookup, refuse: (address: string) => Error |
         return;
       }
       // Один недопустимый адрес в ответе - отказ целиком: иначе соединение выбрало бы его из списка.
-      const refusal = addresses.map((a) => refuse(a.address)).find((e) => e !== undefined);
+      const refusal = addresses.reduce<Error | undefined>((found, a) => found ?? refuse(a.address), undefined);
       const first = addresses[0];
       if (refusal) callback(refusal, '', 0);
       else if (options.all) callback(null, addresses);
