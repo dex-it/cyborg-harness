@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { BrowserWindow, clipboard, dialog, Notification, safeStorage, shell } from 'electron';
 import * as nodePty from 'node-pty';
-import { groupKilled, type OsEnvironment, type SecretStore } from '../../../core/src/index.ts';
+import { groupKilled, type NoticeEvents, type NoticeHandle, type OsEnvironment, type SecretStore } from '../../../core/src/index.ts';
 
 /** Секреты в файле, каждое значение зашифровано safeStorage; без шифрования ОС хранилище недоступно, а не открыто. */
 export function fileSecrets(file: string): SecretStore {
@@ -34,7 +34,32 @@ export function fileSecrets(file: string): SecretStore {
   };
 }
 
-export function electronOs(options: { userData: string; roots: () => readonly string[]; protectedPaths: readonly string[]; workspaceFile?: string }): OsEnvironment {
+// Без ссылки сборщик мусора забирает Notification, и клик по нему уже ничего не вызывает.
+const shown = new Set<Notification>();
+
+function showNotification(title: string, body: string | undefined, events: NoticeEvents): NoticeHandle | undefined {
+  if (!Notification.isSupported()) return undefined;
+  const notification = new Notification({ title, ...(body !== undefined && { body }) });
+  const gone = () => {
+    if (shown.delete(notification)) events.closed();
+  };
+  notification.on('click', () => {
+    shown.delete(notification);
+    events.click();
+  });
+  notification.on('close', gone);
+  notification.on('failed', gone);
+  shown.add(notification);
+  notification.show();
+  return {
+    close: () => {
+      shown.delete(notification);
+      notification.close();
+    },
+  };
+}
+
+export function electronOs(options: { userData: string; roots: () => readonly string[]; protectedPaths: readonly string[]; workspaceFile?: string; raiseWindow: () => void }): OsEnvironment {
   return {
     dataDir: path.join(options.userData, 'plugin-data'),
     tempDir: path.join(options.userData, 'plugin-temp'),
@@ -43,7 +68,8 @@ export function electronOs(options: { userData: string; roots: () => readonly st
     ...(options.workspaceFile !== undefined && { workspaceFile: options.workspaceFile }),
     roots: options.roots,
     secrets: fileSecrets(path.join(options.userData, 'secrets.json')),
-    notify: (title, body) => new Notification({ title, ...(body !== undefined && { body }) }).show(),
+    notify: showNotification,
+    raiseWindow: options.raiseWindow,
     clipboard: { readText: () => clipboard.readText(), writeText: (text) => clipboard.writeText(text) },
     shell: {
       openPath: async (p) => {

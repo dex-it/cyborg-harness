@@ -24,7 +24,7 @@ import {
   type WatchdogOptions,
 } from '../../../core/src/index.ts';
 import { isRecord } from '../../../core/src/manifest.ts';
-import { WINDOW_OWNER } from '../../../core/src/window-layer.ts';
+import { WINDOW_OWNER, type WindowSnapshot } from '../../../core/src/window-layer.ts';
 import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from '../shared/plugins.ts';
 import { viewOrigin } from '../shared/views.ts';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
@@ -92,6 +92,8 @@ export interface StartOptions {
   readonly userData: string;
   /** Файл воркспейса; по умолчанию `<userData>/workspace.cyborg.json`. */
   readonly workspace?: string;
+  /** Последний фрагмент заголовка окна. */
+  readonly appName?: string;
   readonly builtinDir: string;
   readonly spawnHost: SpawnHost;
   readonly log: (line: string) => void;
@@ -107,7 +109,7 @@ export interface StartOptions {
   /** Что не дошло до ядра; по умолчанию - в log. */
   readonly onProblem?: (problem: string) => void;
   readonly onDiscovered?: (found: Discovered) => void;
-  readonly onWindow?: () => void;
+  readonly onWindow?: (snapshot: WindowSnapshot) => void;
   readonly onDocuments?: () => void;
   /** `plugins.enabled` из файла применён. */
   readonly onEnabled?: () => void;
@@ -153,8 +155,9 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     os: options.os,
     platform: options.platform,
     idleSeconds: options.idleSeconds,
+    windowTitle: { workspace: path.basename(file), app: options.appName ?? 'Cyborg Playground' },
     safeMode: options.safeMode,
-    onWindow: () => options.onWindow?.(),
+    onWindow: (snapshot) => options.onWindow?.(snapshot),
     onDocuments: () => options.onDocuments?.(),
     onLog: (id, message) => {
       options.log(`[plugins] ${id}: ${message}`);
@@ -205,6 +208,8 @@ export interface PluginsEvents {
   alert(title: string, body: string): void;
   /** Сообщение плагина: его вид получает строку сразу, без снимка. */
   log?(pluginId: string, line: FeedLine): void;
+  /** Заголовок окна от ядра: воркспейс, фрагменты плагинов, приложение. */
+  title?(title: string): void;
   /** Команда окна (`WINDOW_COMMANDS`): исполняет окно, а не плагин. */
   windowCommand?(command: string): void;
 }
@@ -223,6 +228,7 @@ export class PluginsService {
   private workspace: WorkspaceInfo = { current: null, recent: [] };
   private error: string | undefined;
   private pidOf: ServiceOptions['pidOf'];
+  private title: string | undefined;
   private safeMode = false;
   private readonly entries: { at: number; entry: JournalEntry }[] = [];
   private readonly problems: string[] = [];
@@ -236,6 +242,12 @@ export class PluginsService {
   constructor(events: PluginsEvents, now: () => number = Date.now) {
     this.events = events;
     this.now = now;
+  }
+
+  private showTitle(title: string): void {
+    if (title === this.title) return;
+    this.title = title;
+    this.events.title?.(title);
   }
 
   setWorkspace(info: WorkspaceInfo): void {
@@ -268,7 +280,10 @@ export class PluginsService {
           this.events.changed();
         },
         onDiscovered: (found) => (this.views = found.views),
-        onWindow: () => this.events.changed(),
+        onWindow: (snapshot) => {
+          this.showTitle(snapshot.title);
+          this.events.changed();
+        },
         onDocuments: () => this.events.changed(),
         onLog: (pluginId, text) => {
           const line = this.say({ kind: 'log', subject: pluginId, text });
@@ -276,6 +291,7 @@ export class PluginsService {
         },
       });
       this.phase = 'ready';
+      this.showTitle(this.kernel.window.title);
     } catch (error) {
       this.phase = 'failed';
       this.error = errorMessage(error);
@@ -471,7 +487,7 @@ export class PluginsService {
       feed: [...this.feed],
       journal,
       canHang: process.platform !== 'win32' && this.pidOf !== undefined,
-      window: kernel?.window ?? { queued: 0, locks: [] },
+      window: kernel?.window ?? { title: '', queued: 0, locks: [] },
       documents: kernel?.documents ?? [],
       workspace: this.workspace,
     };

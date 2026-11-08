@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, ProcessResult, PtyInfo, SecretValue } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
+import type { NotifyLimits, ShowNotice } from './notices.ts';
 import { ANY_PATH, LOGIN_SHELL } from './permissions.ts';
 import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type TerminalSink, type TerminalView } from './pty.ts';
 import { HttpServes, type AskHost } from './serve.ts';
@@ -34,7 +35,12 @@ export interface OsEnvironment {
   /** Корни проектов от приложения; к ним добавляются корни плагинов с правом `security.roots`. */
   readonly roots?: () => readonly string[];
   readonly secrets?: SecretStore;
-  readonly notify?: (title: string, body: string | undefined) => void | Promise<void>;
+  /** Системное уведомление; дескриптор нужен для `ctx.os.notify.close`, события - для клика и учёта живых. */
+  readonly notify?: ShowNotice;
+  /** Пределы уведомлений; по умолчанию `NOTIFY_LIMITS`. */
+  readonly notifyLimits?: NotifyLimits;
+  /** Поднять и сфокусировать окно приложения: так начинается клик по уведомлению. */
+  readonly raiseWindow?: () => void;
   readonly clipboard?: { readText(): string | Promise<string>; writeText(text: string): void | Promise<void> };
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly fetch?: typeof fetch;
@@ -602,12 +608,6 @@ export class OsGateway {
         const name = str(method, args[0], 'имя');
         if (!p.env?.includes(name)) throw this.#denied(m, method, `переменная ${name} не в env`);
         return (this.#env.env ?? process.env)[name];
-      }
-      case 'notify.show': {
-        if (!p.notify) throw this.#denied(m, method, 'нет права notify');
-        if (!this.#env.notify) throw new CoreError('Unavailable', 'уведомлений нет в этой среде');
-        await this.#env.notify(str(method, args[0], 'заголовок'), typeof args[1] === 'string' ? args[1] : undefined);
-        return undefined;
       }
       case 'clipboard.readText':
       case 'clipboard.writeText': {
