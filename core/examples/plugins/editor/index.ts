@@ -2,10 +2,10 @@ import type { PluginModule } from '@cyborg-harness/contracts';
 
 const plugin: PluginModule = {
   activate(ctx) {
-    const files = ctx.contracts.get('cyborg.files', 2);
-    if (!files) throw new Error('cyborg.files в requires, но его нет');
-    ctx.log('беру cyborg.files второй мажорной версии');
-    ctx.contracts.provide('cyborg.tab', '1.0', {
+    const files = ctx.contracts.get('demo.files', 2);
+    if (!files) throw new Error('demo.files в requires, но его нет');
+    ctx.log('беру demo.files второй мажорной версии');
+    ctx.contracts.provide('demo.tab', '1.0', {
       kind: 'редактор',
       open: async (path: string) => {
         const file = await files.readText(path);

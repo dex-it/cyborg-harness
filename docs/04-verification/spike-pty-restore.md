@@ -23,7 +23,7 @@
 
 ## Как мерили
 
-- **Скрипт** - `playground/scripts/spike-pty-restore.mjs`, запуск - `npm run spike:pty`. Флаги:
+- **Скрипт** - `playground/scripts/spike-pty-restore.mjs`, запуск - `npm run spike:pty-restore`. Флаги:
   - `--only=а,б2` - выбрать сценарии;
   - `--mode=inline|fullscreen` - выбрать режим TUI;
   - `--json=путь` - записать отчёт;
@@ -150,8 +150,8 @@
 
 ```sh
 npm ci
-npm run spike:pty                          # все сценарии, оба режима, около 4 минут
-npm run spike:pty -- --only=б2 --screens   # с экранами непрошедших
+npm run spike:pty-restore                          # все сценарии, оба режима, около 4 минут
+npm run spike:pty-restore -- --only=б2 --screens   # с экранами непрошедших
 ```
 
 Нужен `claude` со входом в аккаунт и сеть. Каталог репозитория должен быть для `claude` доверенным: иначе `claude` покажет вопрос о доверии, и сценарии не дождутся приглашения.

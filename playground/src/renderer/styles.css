@@ -266,6 +266,21 @@ button:focus-visible {
   white-space: pre-wrap;
 }
 
+.safe-mode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--modified);
+  background: var(--bg-side);
+}
+
+.safe-mode[hidden] {
+  display: none;
+}
+
 .plugins-list {
   display: flex;
   flex-direction: column;
@@ -347,6 +362,15 @@ button:focus-visible {
   padding-left: 16px;
   color: var(--fg-dim);
   font-size: 12px;
+}
+
+.plugin-kept {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.plugin-kept p {
+  margin: 0;
 }
 
 .plugin-error {

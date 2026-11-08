@@ -11,7 +11,7 @@ const plugin: PluginModule = {
     const { minutes, pin } = ctx.config.get();
     ctx.log(`блокирую после ${String(minutes)} мин простоя`);
 
-    ctx.contracts.provide('cyborg.lock', '1.0', { isLocked: async () => locked });
+    ctx.contracts.provide('demo.lock', '1.0', { isLocked: async () => locked });
     ctx.commands.register('pin-lock.lock', () => {
       locked = true;
       return 'заблокировано';

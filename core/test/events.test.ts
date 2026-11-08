@@ -1,12 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type { PluginContext } from '@cyborg-harness/contracts';
 import { load, type LoadOptions } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { pluginStatuses } from '../src/status.ts';
-import { inlineHosts } from '../src/transports.ts';
+import type { NoticeEvents } from '../src/notices.ts';
+import { inlineHosts, type HostHandle } from '../src/transports.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 const settle = () => sleep(20);
@@ -14,7 +19,7 @@ const settle = () => sleep(20);
 function start(table: Record<string, PluginModule>, options: Omit<LoadOptions, 'apiVersion' | 'spawnHost' | 'enabled'> & { enabled?: string[] }) {
   const logs: string[] = [];
   return load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: options.enabled ?? Object.keys(table),
     spawnHost: inlineHosts(async (entry) => {
       const mod = table[entry];
@@ -189,5 +194,77 @@ test('activation lazy: ждёт; будит команда, сочетание, 
 
   const bad = parseManifest(manifest('x', { activation: 'eager' }));
   assert.ok(!bad.ok && bad.errors.some((e) => e.startsWith('activation:')));
+  await k.unload();
+});
+
+test('предел слушателей onIdle: сверх предела ядро отказывает с причиной в журнале, снятый слушатель освобождает место', async () => {
+  let idle = 0;
+  let ctx: PluginContext | undefined;
+  const k = await start({ lock: { activate: (c) => void (ctx = c) } }, { manifests: [manifest('lock')], idlePoll: 5, idleSeconds: () => idle, limits: { idleWatchers: 2 } });
+  const fired: string[] = [];
+  const first = ctx!.system.onIdle(10, () => fired.push('a'));
+  ctx!.system.onIdle(10, () => fired.push('b'));
+  ctx!.system.onIdle(10, () => fired.push('c'));
+  await settle();
+  assert.ok(k.logs.some((l) => l.includes('слушателей onIdle больше 2')), k.logs.join('\n'));
+  idle = 20;
+  await settle();
+  assert.deepEqual(fired.toSorted(), ['a', 'b']);
+  first.dispose();
+  ctx!.system.onIdle(10, () => fired.push('d'));
+  idle = 0;
+  await settle();
+  idle = 20;
+  await settle();
+  assert.deepEqual(fired.toSorted(), ['a', 'b', 'b', 'd']);
+  await k.unload();
+});
+
+test('клик по уведомлению, пока хост перезапускается, доходит до команды вернувшегося плагина; падение хоста уведомление не закрывает', async () => {
+  const clicks: NoticeEvents[] = [];
+  const ran: unknown[] = [];
+  let closed = 0;
+  const handles = new Map<string, HostHandle>();
+  let ctx: PluginContext | undefined;
+  const base = inlineHosts(async () => ({
+    activate(c: PluginContext) {
+      ctx = c;
+      c.commands.register('bell.open', (session) => void ran.push(session));
+      return undefined;
+    },
+  }));
+  const dir = mkdtempSync(path.join(tmpdir(), 'cyborg-notify-'));
+  const k = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['bell'],
+    manifests: [manifest('bell', { commands: { 'bell.open': { args: ['string'] } }, permissions: { notify: true } })],
+    spawnHost: (id) => {
+      const h = base(id);
+      handles.set(id, h);
+      return h;
+    },
+    os: {
+      dataDir: dir,
+      tempDir: dir,
+      notify: (_title, _body, events) => {
+        clicks.push(events);
+        return {
+          close: () => {
+            closed++;
+          },
+        };
+      },
+    },
+    watchdog: { interval: 20, timeout: 1000, strikes: 3 },
+  });
+  await ctx!.os.notify!.show('Сессия ждёт', undefined, { onClick: { command: 'bell.open', args: ['s1'] } });
+  const before = ctx;
+  handles.get(k.hostOf('bell')!)!.kill();
+  assert.equal(closed, 0, 'падение хоста уведомление не закрывает');
+  clicks[0]!.click();
+  for (let i = 0; i < 200 && ran.length === 0; i++) await sleep(5);
+  assert.notEqual(ctx, before, 'плагин поднят заново');
+  assert.deepEqual(ran, ['s1']);
+  assert.equal(closed, 1);
   await k.unload();
 });
