@@ -2,8 +2,8 @@
   "id": "projects",
   "version": "2.0.0",
   "engines": { "cyborg": "^1" },
-  "provides": { "cyborg.projects": "1.0" },
-  "requires": { "cyborg.files": "^1" },
+  "provides": { "demo.projects": "1.0" },
+  "requires": { "demo.files": "^1" },
   "commands": ["projects.current"],
   "config": { "version": 2 }
 }

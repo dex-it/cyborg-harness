@@ -1,5 +1,5 @@
 import { mkdtempSync } from 'node:fs';
-import type { PtyInfo } from '@cyborg-harness/contracts';
+import type { NotifyClick, PtyInfo } from '@cyborg-harness/contracts';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -16,13 +16,14 @@ import { checkArgs, parseManifest, viewEntry, type PluginManifest } from './mani
 import { ContractRegistry } from './registry.ts';
 import { Endpoint } from './rpc.ts';
 import { satisfies } from './semver.ts';
+import { Notices, parseNotice } from './notices.ts';
 import { OsGateway, type OsEnvironment } from './os-gateway.ts';
 import { DocumentTable, type DocumentRow } from './documents.ts';
 import { guardedValue, guardsOf } from './via-contract.ts';
 import { isRecord, own, parseWire, type Parsed, type WireSpec } from './wire.ts';
 import type { HostHandle, SpawnHost } from './transports.ts';
 import type { TerminalSink, TerminalView } from './pty.ts';
-import { WINDOW_COMMANDS, WINDOW_OWNER, WindowLayer, type WindowSnapshot } from './window-layer.ts';
+import { KERNEL_COMMANDS, KERNEL_OWNER, WINDOW_COMMANDS, WINDOW_OWNER, WindowLayer, type WindowSnapshot, type WindowTitle } from './window-layer.ts';
 
 export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'invalid'; readonly errors: readonly string[] }
@@ -115,6 +116,8 @@ export interface LoadOptions {
   readonly keybindings?: readonly UserKeybinding[] | undefined;
   /** Плагины из поставки Cyborg; только они делят хост. Не названный здесь - сторонний и всегда один в своём хосте. */
   readonly bundled?: readonly string[] | undefined;
+  /** Префиксы пространств поставки (`app.`): сторонний плагин с таким `id` или `provides` отвергается до графа. Без `bundled` проверка выключена - поставку не от чего отличить. */
+  readonly reservedPrefixes?: readonly string[] | undefined;
   readonly config?: SectionStore | undefined;
   readonly state?: SectionStore | undefined;
   /** Разобранный JSON файла схемы раздела (`config.schema`, `state.schema`) из каталога плагина; бросок - отказ разделу. */
@@ -129,16 +132,18 @@ export interface LoadOptions {
   readonly os?: OsEnvironment | undefined;
   /** Пределы ресурсов плагина поверх `LIMITS` и `os.limits`. */
   readonly limits?: Partial<ResourceLimits> | undefined;
-  /** Граф решён, код плагинов ещё не запускался. */
   /** Под какую ОС раскрыть `CmdOrCtrl`; по умолчанию текущая. */
   readonly platform?: string | undefined;
   /** Секунды простоя пользователя по ОС; без него `onIdle` не срабатывает. */
   readonly idleSeconds?: (() => number) | undefined;
   /** Как часто спрашивать `idleSeconds`, пока есть подписчики, мс. */
   readonly idlePoll?: number | undefined;
+  /** Граф решён, код плагинов ещё не запускался. */
   readonly onGraph?: ((graph: ContractGraph) => Promise<void> | undefined) | undefined;
   readonly onJournal?: ((entry: JournalEntry) => void) | undefined;
   readonly onLog?: ((pluginId: string, message: string) => void) | undefined;
+  /** Из чего ядро собирает заголовок окна вокруг фрагментов плагинов. */
+  readonly windowTitle?: WindowTitle | undefined;
   /** Диалог на экране, очередь и замки поменялись: приложение перерисовывает слой окна. */
   readonly onWindow?: ((snapshot: WindowSnapshot) => void) | undefined;
   /** Документ открыт, переименован или закрыт: приложение перерисовывает вкладки по `kernel.documents`. */
@@ -291,6 +296,8 @@ function assignHosts(
   return result;
 }
 
+const isKernelCommand = (name: string): boolean => (Object.values(KERNEL_COMMANDS) as string[]).includes(name);
+
 // Встроенный побеждает сторонний, между равными - первый по id: исход не зависит от порядка каталогов на диске.
 function bindKeys(
   manifests: readonly PluginManifest[],
@@ -319,7 +326,7 @@ function bindKeys(
 
 /** Выбор пользователя сильнее манифестов: конфликт он уже разрешил, поэтому вытесненные - в shadowed без записи о конфликте. */
 function applyUserKeys(table: Map<string, Keybinding>, user: readonly UserKeybinding[], manifests: readonly PluginManifest[], platform: string, record: (entry: JournalEntry) => void): void {
-  const ownerOf = new Map([...Object.keys(WINDOW_COMMANDS).map((c) => [c, WINDOW_OWNER] as const), ...manifests.flatMap((m) => Object.keys(m.commands).map((c) => [c, m.id] as const))]);
+  const ownerOf = new Map([...Object.keys(WINDOW_COMMANDS).map((c) => [c, WINDOW_OWNER] as const), ...Object.values(KERNEL_COMMANDS).map((c) => [c, KERNEL_OWNER] as const), ...manifests.flatMap((m) => Object.keys(m.commands).map((c) => [c, m.id] as const))]);
   for (const u of user) {
     const normalized = normalizeKey(u.key);
     if (normalized === undefined) {
@@ -366,13 +373,20 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   const watchdog = { interval: 1000, timeout: 5000, strikes: 3, window: 10 * 60_000, ...options.watchdog };
   const activationTimeout = options.activationTimeout ?? 10_000;
   const callTimeout = options.callTimeout ?? 10 * 60_000;
-  const layer = new WindowLayer((snapshot) => options.onWindow?.(snapshot));
+  const layer = new WindowLayer((snapshot) => options.onWindow?.(snapshot), options.windowTitle);
   const limits = limitsOf(options.os?.limits, options.limits);
   const osEnv: OsEnvironment = { ...(options.os ?? defaultOs()), limits };
-  const notify = osEnv.notify;
+  const notices = new Notices(
+    () => {
+      const show = osEnv.notify;
+      // Под замком с hideNotifications текст уведомления виден на заблокированном экране ОС - уходит без него.
+      return show && ((title, body, events) => (layer.hideNotifications ? show('Cyborg', 'новое событие', events) : show(title, body, events)));
+    },
+    (pluginId, click) => clickNotice(pluginId, click),
+    osEnv.notifyLimits,
+  );
   const gateway = new OsGateway(
-    // Под замком с hideNotifications текст уведомления виден на заблокированном экране ОС - уходит без него.
-    notify ? { ...osEnv, notify: (title, body) => (layer.hideNotifications ? notify('Cyborg', 'новое событие') : notify(title, body)) } : osEnv,
+    osEnv,
     (d) => record({ pluginId: d.pluginId, kind: 'denied', method: d.method, detail: d.detail, ...(d.reason && { reason: d.reason }) }),
     (id) => Object.assign({}, ...(options.config?.raw(id) ?? []).map(([, data]) => (isRecord(data) ? data : {}))) as Record<string, unknown>,
     (id, method, params) => {
@@ -435,7 +449,8 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     () => options.onDocuments?.(),
   );
 
-  const graph = resolveGraph(manifests, options.apiVersion);
+  const reserved = options.bundled && options.reservedPrefixes ? { prefixes: options.reservedPrefixes, bundled: new Set(options.bundled) } : undefined;
+  const graph = resolveGraph(manifests, options.apiVersion, reserved);
   for (const [pluginId, reasons] of graph.rejected) record({ pluginId, kind: 'rejected', reasons });
   await options.onGraph?.(graph);
 
@@ -570,6 +585,12 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     }
   }
 
+  /** Падение хоста (`detach`) уведомления не закрывает: клик дойдёт до вернувшегося плагина. */
+  function forgetOs(pluginId: string, pty: 'release' | 'detach' | 'park' = 'release'): number {
+    if (pty !== 'detach') notices.forget(pluginId);
+    return gateway.forget(pluginId, pty);
+  }
+
   function dropPlugin(pluginId: string, pty: 'release' | 'detach' | 'park' = 'release'): number {
     for (const [id, w] of [...idleWatchers]) if (w.pluginId === pluginId) idleWatchers.delete(id);
     syncIdleTimer();
@@ -577,7 +598,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     const given = [...descriptors.values()].flat().filter((d) => d.pluginId === pluginId);
     for (const d of given) dropProvided(d.pluginId, d.contract, d.version);
     for (const [name, owner] of [...commandOwners]) if (owner === pluginId) commandOwners.delete(name);
-    const kept = gateway.forget(pluginId, pty);
+    const kept = forgetOs(pluginId, pty);
     layer.forget(pluginId);
     const i = active.indexOf(pluginId);
     if (i >= 0) active.splice(i, 1);
@@ -691,7 +712,10 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       if (s.consumerHost !== host || s.consumer !== p.caller) throw new CoreError('Unavailable', `подписка ${p.subscription} не у ${p.caller}`);
       release(p.subscription);
     });
-    onRequest('run', { name: 'string', args: 'array' }, (p) => run(p.name, ...p.args));
+    onRequest('run', { name: 'string', args: 'array' }, (p) => {
+      if (isKernelCommand(p.name)) throw new CoreError('PermissionDenied', `${p.name}: команду ядра зовёт приложение, а не плагин`);
+      return run(p.name, ...p.args);
+    });
     onNote('idle.watch', { pluginId: 'string', id: 'string', seconds: 'number' }, (p) => {
       mine(p.pluginId);
       if (!p.id.startsWith(`${p.pluginId}#`)) throw new CoreError('Invalid', `idle.watch: ${p.id} не у ${p.pluginId}`);
@@ -727,6 +751,11 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       const m = mine(p.pluginId);
       if (p.method === 'ui.lock' || p.method === 'ui.unlock') {
         lockCall(m, p.method, p.args);
+        return undefined;
+      }
+      if (p.method === 'notify.show' || p.method === 'notify.close') return notifyCall(m, p.method, p.args);
+      if (p.method === 'window.title') {
+        layer.setTitle(m.id, p.args[0]);
         return undefined;
       }
       // Системный диалог встал бы поверх экрана замка.
@@ -801,14 +830,14 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       const failures = bump(hostFailures, host.id);
       if (failures >= watchdog.strikes) {
         record({ kind: 'host-abandoned', hostId: host.id, failures, plugins: victims });
-        for (const id of victims) gateway.forget(id);
+        for (const id of victims) forgetOs(id);
         return;
       }
     }
 
     const again = graph.order.filter((id) => hostOf(id) === host.id && !switchedOff.has(id) && !userOff.has(id) && (victims.includes(id) || culprits.includes(id) || halfway.includes(id)));
     // pty с persist ждут только тех, кто вернётся; выключенному сторожем их некому забрать.
-    for (const id of victims) if (!again.includes(id)) gateway.forget(id);
+    for (const id of victims) if (!again.includes(id)) forgetOs(id);
     if (again.length === 0) return;
     enqueue(async () => {
       if (unloading) return;
@@ -816,7 +845,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       for (const id of again) {
         // Человек мог выключить плагин, пока перезапуск ждал очереди: сторож его не поднимает.
         if (userOff.has(id) || switchedOff.has(id)) {
-          gateway.forget(id);
+          forgetOs(id);
           continue;
         }
         await activate(id);
@@ -890,7 +919,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     try {
       host = hosts.get(hostId) ?? startHost(hostId);
     } catch (error) {
-      gateway.forget(pluginId);
+      forgetOs(pluginId);
       record({ pluginId, kind: 'failed', hostId, error: `хост не запустился: ${errorMessage(error)}` });
       return;
     }
@@ -922,6 +951,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   }
 
   async function run(command: string, ...args: unknown[]): Promise<unknown> {
+    if (command === KERNEL_COMMANDS.revealWorkspace) return gateway.revealWorkspace();
     const declares = (id: string) => Object.hasOwn(manifestOf(id).commands, command);
     if (!commandOwners.has(command)) {
       const sleeper = [...waiting].find(declares);
@@ -934,6 +964,34 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     if (!spec) throw new CoreError('CommandNotFound', `команда ${command} не объявлена у ${owner}`);
     checkArgs(command, spec, args);
     return callHost(liveHost(owner), owner, 'command', { pluginId: owner, name: command, args });
+  }
+
+  async function notifyCall(m: PluginManifest, method: string, args: readonly unknown[]): Promise<string | undefined> {
+    if (m.permissions.notify !== true) {
+      record({ pluginId: m.id, kind: 'denied', method, detail: 'нет права notify' });
+      throw new CoreError('PermissionDenied', `${m.id}: ${method} - нет права notify`);
+    }
+    if (method === 'notify.close') {
+      notices.close(m.id, args[0]);
+      return undefined;
+    }
+    const request = parseNotice(args, notices.limits);
+    const click = request.onClick;
+    if (click) {
+      const spec = Object.hasOwn(m.commands, click.command) ? m.commands[click.command] : undefined;
+      if (!spec) throw new CoreError('CommandNotFound', `${m.id}: notify.show - команда ${click.command} не объявлена в манифесте`);
+      checkArgs(click.command, spec, click.args ?? []);
+    }
+    return notices.show(m.id, request);
+  }
+
+  function clickNotice(pluginId: string, click: NotifyClick): void {
+    osEnv.raiseWindow?.();
+    // Под чужим замком окно поднимается, а команда не идёт: как и сочетание этого плагина.
+    if (!layer.allows(pluginId)) return;
+    const go = () => run(click.command, ...(click.args ?? []));
+    // Хост перезапускается: команда появится, когда плагин снова поднимется.
+    (commandOwners.has(click.command) ? go() : idle().then(go)).catch((error: unknown) => options.onLog?.(pluginId, `клик по уведомлению: ${errorMessage(error)}`));
   }
 
   function lockCall(m: PluginManifest, method: string, args: readonly unknown[]): undefined {
@@ -1074,7 +1132,7 @@ export async function load(options: LoadOptions): Promise<Kernel> {
     keybinding(key) {
       const k = keys.get(key);
       if (!k || !layer.allows(k.pluginId)) return undefined;
-      return k.pluginId === WINDOW_OWNER || active.includes(k.pluginId) || waiting.has(k.pluginId) || waking.has(k.pluginId) ? k : undefined;
+      return k.pluginId === WINDOW_OWNER || k.pluginId === KERNEL_OWNER || active.includes(k.pluginId) || waiting.has(k.pluginId) || waking.has(k.pluginId) ? k : undefined;
     },
     get window() {
       return layer.snapshot;

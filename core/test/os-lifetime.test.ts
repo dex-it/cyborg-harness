@@ -13,6 +13,7 @@ import type { OsEnvironment } from '../src/os-gateway.ts';
 import { groupKilled, type PtyProcess } from '../src/pty.ts';
 import { inlineHosts } from '../src/transports.ts';
 import type { TestFiles } from './fixtures/contracts.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 const posix = process.platform !== 'win32';
 
@@ -43,7 +44,7 @@ async function sandbox() {
 async function kernel(plugins: Record<string, unknown>, env: Partial<OsEnvironment> & Pick<OsEnvironment, 'dataDir' | 'tempDir'>, limits?: LoadOptions['limits']) {
   const contexts = new Map<string, PluginContext>();
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async (entry) => ({ activate: (ctx: PluginContext) => void contexts.set(entry, ctx) })),
     enabled: Object.keys(plugins),
     manifests: Object.entries(plugins).map(([id, permissions]) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, permissions })),
@@ -189,7 +190,7 @@ test('вызов контракта: зависший поставщик - по�
   let consumer!: PluginContext;
   const files: TestFiles = { read: () => new Promise<string>(() => undefined) };
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     callTimeout: 150,
     spawnHost: inlineHosts(async (entry) =>
       entry === 'slow' ? { activate: (ctx: PluginContext) => void ctx.contracts.provide('test.files', '1.0', files) } : { activate: (ctx: PluginContext) => void (consumer = ctx) },

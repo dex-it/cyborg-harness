@@ -59,7 +59,6 @@ export interface OsPaths {
   readonly home: string;
 }
 
-/** `ctx.os` по правам манифеста: нет права - нет члена; проверяет всё равно шлюз ядра, здесь только форма. */
 /** Слушатели pty в хосте; вывод, пришедший до первого onData, копится - иначе первые байты ушли бы мимо подписки. */
 class HostPtys {
   readonly #items = new Map<string, { data: Set<(c: string) => void>; exit: Set<(e: PtyExit) => void>; early: Tail; exited?: PtyExit }>();
@@ -275,6 +274,7 @@ class HostSystem {
   }
 }
 
+/** `ctx.os` по правам манифеста: нет права - нет члена; проверяет всё равно шлюз ядра, здесь только форма. */
 function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths: OsPaths, ptys: HostPtys, watches: HostWatches, serves: HostServes): PluginOs {
   const call =
     <R>(method: string) =>
@@ -314,7 +314,7 @@ function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths:
     ...(p.net && { net: Object.freeze({ fetch: call('net.fetch') }) }),
     ...(p.serve && { serve: Object.freeze({ http: (handler: (request: ServeRequest) => ServeResponse | Promise<ServeResponse>) => serves.open(endpoint, pluginId, handler) }) }),
     ...(p.env && { env: Object.freeze({ get: call('env.get') }) }),
-    ...(p.notify && { notify: Object.freeze({ show: call('notify.show') }) }),
+    ...(p.notify && { notify: Object.freeze({ show: call<string>('notify.show'), close: call<undefined>('notify.close') }) }),
     ...(clipboard && { clipboard: Object.freeze(clipboard) }),
     ...(p['security.roots'] && { security: Object.freeze({ setRoots: call('security.setRoots') }) }),
     ...(shell && { shell: Object.freeze(shell) }),
@@ -644,7 +644,10 @@ function context(
     log: (message) => endpoint.notify('log', { pluginId, message }),
     os: osOf(endpoint, pluginId, manifest.permissions, paths, ptys, watches, serves),
     secrets: { resolve: (ref) => endpoint.request<SecretValue>('os', { pluginId, method: 'secrets.resolve', args: [ref] }) },
-    window: Object.freeze({ onFocusChange: (listener: (focused: boolean) => void) => track(system.on(pluginId, 'focus', (focused) => listener(focused === true))) }),
+    window: Object.freeze({
+      onFocusChange: (listener: (focused: boolean) => void) => track(system.on(pluginId, 'focus', (focused) => listener(focused === true))),
+      setTitle: (segment: string | undefined) => endpoint.request<undefined>('os', { pluginId, method: 'window.title', args: segment === undefined ? [] : [segment] }),
+    }),
     documents: Object.freeze({
       list: () => endpoint.request<DocumentInfo[]>('documents', { pluginId, method: 'list', args: [] }),
       open: (type: string, init: DocumentInit) => endpoint.request<string>('documents', { pluginId, method: 'open', args: [type, init] }),

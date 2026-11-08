@@ -58,7 +58,6 @@ export type PtyLimits = Pick<ResourceLimits, 'ptyInput' | 'ptys' | 'ptyFlushMs' 
 
 export const PTY_SIGNALS = ['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGHUP'] as const;
 
-/** pty всех плагинов: живут в главном процессе, переживают хост, если просили `persist`. */
 /** Хвост вывода: куски склеиваются при чтении и изредка при сжатии, а не копией всего хвоста на каждый кусок. */
 export class Tail {
   readonly #limit: number;
@@ -100,6 +99,7 @@ export class Tail {
 
 export const BACKLOG_LIMIT = 256 * 1024;
 
+/** pty всех плагинов: живут в главном процессе, переживают хост, если просили `persist`. */
 export class PtyTable {
   readonly #backend: PtyBackend;
   readonly #push: (pluginId: string, method: 'pty.data' | 'pty.exit', params: unknown) => void;

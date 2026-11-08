@@ -14,6 +14,7 @@
 | BRD и фичи: ядро и загрузчик, контракты расширения | [01-product/](01-product/brd.md) |
 | Сценарии: обновление, сбой плагина, автор плагина, автор встроенного плагина, второй агент, установка стороннего плагина | [02-use-cases/](02-use-cases/README.md) |
 | SAD - архитектура: цели ядра, взаимодействие плагинов, базовая часть как пример, этапы, открытые вопросы, риски | [03-architecture/design/sad.md](03-architecture/design/sad.md) |
+| Модель угроз: активы, нарушители, границы доверия, угрозы со статусом и задачами | [03-architecture/design/threat-model.md](03-architecture/design/threat-model.md) |
 | Решения ADR-CH; где они расходятся с SAD, действует SAD ([раздел 7](03-architecture/design/sad.md#7-расхождения-с-первой-редакцией-пакета)) | [03-architecture/adr/](03-architecture/adr/) |
 | Спайк UI во фреймах: память, задержка, мост, клавиши, перетаскивание | [04-verification/spike-iframe-ui.md](04-verification/spike-iframe-ui.md) |
 | Спайк хостов плагинов: память на хост, цена вызова, пороги сторожа | [04-verification/spike-hosts.md](04-verification/spike-hosts.md) |

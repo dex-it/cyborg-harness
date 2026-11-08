@@ -98,7 +98,7 @@
 | Провайдер трекера | Плагин-интеграция; настройки трекеров - через `cyborg.project-settings` |
 | Definition, Provider, Consumer | Контракт, поставщик, потребитель |
 | Возможность (capability) | Право |
-| `experimental_` | Семантическая версия контракта и `@deprecated` ([ADR-CH-0002](03-architecture/adr/ADR-CH-0002-manifest-and-compatibility.md)) |
+| `experimental_` | Не заводится: нестабильное ломает мажорная версия контракта, переход - `@deprecated` ([ADR-CH-0002](03-architecture/adr/ADR-CH-0002-manifest-and-compatibility.md), D-10 [журнала решений](01-product/01-plugin-host/decision-log.md)) |
 | Храповик | Статическая проверка импортов плагинов `core/test/plugin-imports.test.ts` |
 | Блок `cyborg` в `package.json` | Манифест JSON в каталоге плагина |
 | Безопасный режим «только ядро и встроенные» | Безопасный режим выключает все плагины |

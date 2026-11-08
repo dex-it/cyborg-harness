@@ -5,12 +5,13 @@ import { toDisposable } from '../src/disposable.ts';
 import { load, type LoadOptions } from '../src/loader.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 
 function kernel(table: Record<string, PluginModule>, options: Omit<LoadOptions, 'apiVersion' | 'spawnHost'>) {
   return load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async (entry) => {
       const mod = table[entry];
       if (!mod) throw new Error(`нет модуля ${entry}`);
@@ -152,7 +153,7 @@ test('битый манифест невключённого плагина - di
 test('манифест с полем новой версии API - в журнале причина версия, а не поле', async () => {
   const k = await kernel({}, { enabled: ['next', 'typo'], manifests: [manifest('next', { engines: { cyborg: '^1.3' }, layout: {} }), manifest('typo', { keybinding: [] })] });
   assert.deepEqual(k.journal, [
-    { pluginId: 'next', kind: 'invalid', errors: ['engines.cyborg: нужен API Cyborg ^1.3, есть 1.0.0'] },
+    { pluginId: 'next', kind: 'invalid', errors: [`engines.cyborg: нужен API Cyborg ^1.3, есть ${PLUGIN_API_VERSION}`] },
     { pluginId: 'typo', kind: 'invalid', errors: ['keybinding: незнакомое поле манифеста'] },
   ]);
 });
@@ -182,7 +183,7 @@ test('хуки: граф до кода, журнал по ходу, лог с id
 test('безопасный режим не запускает хосты', async () => {
   let spawned = false;
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: ['a'],
     manifests: [manifest('a')],
     safeMode: true,
@@ -241,7 +242,7 @@ test('хост упал без виновника: журнал называет
     },
   }));
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: ['editor', 'tabs'],
     manifests: [manifest('editor', { provides: { 'test.tab': '1.0' } }), manifest('tabs', { consumes: { 'test.tab': '^1' } })],
     hosts: { one: ['editor'], two: ['tabs'] },
@@ -277,7 +278,7 @@ test('«Включить снова»: не поднявшийся плагин 
       : { activate: () => {} },
   );
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: ['flaky', 'user'],
     manifests: [manifest('flaky', { provides: { 'test.flaky': '1.0' }, commands: ['flaky.hang'] }), manifest('user', { requires: { 'test.flaky': '^1' } })],
     hosts: { one: ['flaky'], two: ['user'] },
@@ -307,6 +308,26 @@ test('«Включить снова»: не поднявшийся плагин 
     ['flaky', 'user'],
   );
   await k.unload();
+});
+
+test('пространство поставки: отказ стороннему поставщику идёт в журнал, без bundled проверки нет', async () => {
+  const noop: PluginModule = { activate: () => undefined };
+  const table = { claude: noop, rogue: noop, sessions: noop };
+  const options = {
+    enabled: Object.keys(table),
+    manifests: [manifest('claude', { provides: { 'cyborg.agent': '1.0' } }), manifest('rogue', { provides: { 'cyborg.agent': '1.0' } }), manifest('sessions', { requires: { 'cyborg.agent': '^1' } })],
+    reservedPrefixes: ['cyborg.'],
+  };
+  const k = await kernel(table, { ...options, bundled: ['claude', 'sessions'] });
+  assert.deepEqual(k.active, ['claude', 'sessions']);
+  assert.deepEqual(
+    k.journal.filter((e) => e.kind === 'rejected'),
+    [{ pluginId: 'rogue', kind: 'rejected', reasons: [{ kind: 'reserved', what: 'provides', name: 'cyborg.agent', prefix: 'cyborg.' }] }],
+  );
+  await k.unload();
+  const open = await kernel(table, options);
+  assert.deepEqual(open.active, ['claude', 'rogue']);
+  await open.unload();
 });
 
 test('хосты: из поставки - по группам, сторонний всегда один в своём хосте', async () => {

@@ -1,13 +1,14 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
-import { constants, watch as watchFs, type Dirent } from 'node:fs';
+import { constants, watch as watchFs, type Dirent, type Stats } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, ProcessResult, PtyInfo, SecretValue } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
 import { limitsOf, type ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
-import { LOGIN_SHELL } from './permissions.ts';
+import type { NotifyLimits, ShowNotice } from './notices.ts';
+import { ANY_PATH, LOGIN_SHELL } from './permissions.ts';
 import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type TerminalSink, type TerminalView } from './pty.ts';
 import { HttpServes, type AskHost } from './serve.ts';
 import type { GuardRight } from './via-contract.ts';
@@ -28,14 +29,19 @@ export interface OsEnvironment {
   readonly tempDir: string;
   /** Домашний каталог: `~` в правах и `paths.home`; по умолчанию - домашний каталог ОС. */
   readonly home?: string;
-  /** Закрыты всегда: файл воркспейса, его замок, файл пользователя. */
+  /** Закрыты всегда вместе с соседями `<файл>.*`: файл воркспейса, его замок, файл пользователя. */
   readonly protectedPaths?: readonly string[];
   /** Каталог данных приложения: закрыт целиком, кроме своих каталогов плагина и корней проектов от приложения. */
   readonly appDir?: string;
   /** Корни проектов от приложения; к ним добавляются корни плагинов с правом `security.roots`. */
   readonly roots?: () => readonly string[];
   readonly secrets?: SecretStore;
-  readonly notify?: (title: string, body: string | undefined) => void | Promise<void>;
+  /** Системное уведомление; дескриптор нужен для `ctx.os.notify.close`, события - для клика и учёта живых. */
+  readonly notify?: ShowNotice;
+  /** Пределы уведомлений; по умолчанию `NOTIFY_LIMITS`. */
+  readonly notifyLimits?: NotifyLimits;
+  /** Поднять и сфокусировать окно приложения: так начинается клик по уведомлению. */
+  readonly raiseWindow?: () => void;
   readonly clipboard?: { readText(): string | Promise<string>; writeText(text: string): void | Promise<void> };
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly fetch?: typeof fetch;
@@ -47,7 +53,9 @@ export interface OsEnvironment {
   /** Пределы ресурсов плагина поверх `LIMITS`; загрузчик кладёт сюда `LoadOptions.limits`. */
   readonly limits?: Partial<ResourceLimits> | undefined;
   /** Открыть программой ОС; путь и URL шлюз уже проверил. */
-  readonly shell?: { openPath(path: string): Promise<void>; openExternal(url: string): Promise<void> };
+  readonly shell?: { openPath(path: string): Promise<void>; openExternal(url: string): Promise<void>; showItemInFolder?(path: string): void | Promise<void> };
+  /** Файл воркспейса: его показывает в файловом менеджере команда ядра, а не плагин. */
+  readonly workspaceFile?: string;
   /** Системный выбор файла; ответ - выбранные пути, отмена - пустой список. */
   readonly dialog?: { open(options: OpenDialogOptions): Promise<readonly string[]> };
 }
@@ -64,12 +72,19 @@ interface Area {
   readonly root: string;
   readonly segs: readonly string[];
   readonly git: boolean;
+  /** Область `any`: файл в ней мог положить кто угодно, не только человек. */
+  readonly any?: boolean;
 }
 
 // Открыть такой файл - запустить его: это право `process`, а не `shell`.
 // PATHEXT и список высокого риска Windows, пакеты и ярлыки macOS, установщики и скрипты Linux: всё, что система откроет запуском.
 const EXECUTABLE =
   /\.(exe|bat|cmd|com|pif|scr|ps1|ps1xml|psc1|psm1|msi|msp|mst|msc|msix|appx|appinstaller|application|appref-ms|gadget|lnk|url|scf|settingcontent-ms|library-ms|reg|inf|ins|isp|chm|hta|cpl|xll|xbap|diagcab|vsix|vb|vbs|vbe|js|jse|mjs|cjs|ws|wsf|wsh|jar|py|pyw|pl|rb|iso|img|vhd|vhdx|app|bundle|prefpane|workflow|action|scpt|applescript|terminal|fileloc|inetloc|webloc|command|tool|sh|bash|zsh|csh|ksh|fish|desktop|appimage|run|bin|deb|rpm|snap|flatpakref|pkg|mpkg|dmg)$/i;
+
+// Файл в области своей записи плагин мог создать сам, а запретительный список не бывает полным: там открывается только документ.
+// HTML и SVG не здесь: браузер выполнит их скрипт и сходит в сеть в обход права `net`.
+const DOCUMENT =
+  /\.(txt|text|md|markdown|log|csv|tsv|json|pdf|rtf|odt|ods|odp|docx|xlsx|pptx|epub|png|jpe?g|gif|webp|bmp|tiff?|avif|heic|mp3|wav|ogg|oga|flac|m4a|opus|mp4|m4v|webm|mkv|mov|ogv)$/i;
 
 export interface Denial {
   readonly pluginId: string;
@@ -137,6 +152,8 @@ const int = (method: string, v: unknown, name: string, min: number, max: number)
 const BASE_ENV = /^(PATH|HOME|USER|LOGNAME|SHELL|TERM|TMPDIR|LANG|LC_[A-Z]+|SystemRoot|SYSTEMROOT|ComSpec|PATHEXT|USERPROFILE|APPDATA|LOCALAPPDATA|TEMP|TMP|WINDIR)$/;
 
 const inside = (dir: string, target: string) => target === dir || target.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);
+/** Сосед `<файл>.<что угодно>` несёт содержимое защищённого файла: копия `.corrupt-<время>`, `.v1.bak`, временный файл атомарной записи. */
+const sibling = (file: string, target: string) => path.dirname(target) === path.dirname(file) && path.basename(target).startsWith(`${path.basename(file)}.`);
 
 async function real(p: string): Promise<string> {
   try {
@@ -330,6 +347,14 @@ export class OsGateway {
     return (this.#pty?.list(pluginId) ?? []).filter((p) => !p.exit);
   }
 
+  /** Команда ядра, не плагина: файл воркспейса защищён от плагинов, а показать его человеку можно. */
+  async revealWorkspace(): Promise<void> {
+    const file = this.#env.workspaceFile;
+    const shell = this.#env.shell;
+    if (file === undefined || shell?.showItemInFolder === undefined) throw new CoreError('Unavailable', 'показа файла воркспейса нет в этой среде');
+    await shell.showItemInFolder(file);
+  }
+
   releaseAllPty(): void {
     this.#pty?.releaseAll();
   }
@@ -360,6 +385,7 @@ export class OsGateway {
       if (area === 'workspace' || area === 'workspace.git') out.push(...workspace().map((r) => plain(r, area === 'workspace.git')));
       else if (area === 'granted') out.push(...[...(this.#granted.get(m.id) ?? [])].map((g) => plain(g)));
       else if (area === 'plugin-data' || area === 'plugin-temp') out.push(...(right === 'shell' ? [plain(area === 'plugin-data' ? own.data : own.temp)] : []));
+      else if (area === ANY_PATH && right === 'shell') out.push(plain(path.parse(process.cwd()).root).then((a) => ({ ...a, any: true })));
       else if (area.startsWith('/') || area.startsWith('~')) out.push(this.#maskArea(area));
     }
     return Promise.all(out);
@@ -393,7 +419,7 @@ export class OsGateway {
     for (const p of this.#env.protectedPaths ?? []) {
       const protectedPath = await real(p);
       // Предок защищённого пути закрыт только для записи: удаление или перезапись каталога унесли бы и его.
-      if (inside(protectedPath, target) || (write && inside(target, protectedPath))) throw this.#denied(m, method, `защищённый путь: ${given}`, reason);
+      if (inside(protectedPath, target) || (write && inside(target, protectedPath)) || sibling(protectedPath, target)) throw this.#denied(m, method, `защищённый путь: ${given}`, reason);
     }
     const gitOk = matched.some((a) => a.git);
     // От корня области, а не от каталога под маску: `*` совпадает и с самим `.git`, и путь внутри него был бы без сегмента `.git`.
@@ -405,7 +431,13 @@ export class OsGateway {
   /** `via-contract`: право вызывающего на аргумент чужого члена контракта; поставщик потом выполнит вызов по своим правам. */
   async checkFor(m: PluginManifest, method: string, right: GuardRight, value: string): Promise<void> {
     if (right !== 'secrets.ref') {
-      await this.#checkPath(m, method, value, right === 'fs.write', right, 'via-contract');
+      const target = await this.#checkPath(m, method, value, right === 'fs.write', right, 'via-contract');
+      // Иначе вызывающий запишет файл и попросит открыть его поставщика, который туда не пишет.
+      if (right !== 'shell') return;
+      const st = await fs.stat(target).catch(() => undefined);
+      // Пропавший путь вызывающий успел бы создать, пока вызов идёт к поставщику.
+      if (st === undefined) throw new CoreError('NotFound', `${method}: нет ${value}`);
+      await this.#checkOpen(m, method, target, st, value, 'via-contract');
       return;
     }
     if (!this.refAllowed(m, value)) throw this.#denied(m, method, `ссылка вне secrets.ref: ${value}`, 'via-contract');
@@ -422,6 +454,16 @@ export class OsGateway {
     const write = this.#grantWrites.then(() => store.write(Object.fromEntries([...this.#granted].map(([id, set]) => [id, [...set]]))));
     this.#grantWrites = write.catch(() => undefined);
     return write;
+  }
+
+  /** Программой ОС открывается не программа; файл, который мог подготовить не человек, - только документ. */
+  async #checkOpen(m: PluginManifest, method: string, target: string, st: Stats, given: string, reason?: 'via-contract'): Promise<void> {
+    if (EXECUTABLE.test(target) || (st.isFile() && (st.mode & 0o111) !== 0)) throw this.#denied(m, method, `исполняемый файл: ${given}`, reason);
+    const document = st.isFile() && DOCUMENT.test(target);
+    const writable = (await this.#areas(m, 'fs.write')).some((a) => areaDir(a, target) !== undefined);
+    if (writable && !document) throw this.#denied(m, method, `в области своей записи открывается только документ: ${given}`, reason);
+    const named = (await this.#areas(m, 'shell')).some((a) => a.any !== true && areaDir(a, target) !== undefined);
+    if (!named && st.isFile() && !document) throw this.#denied(m, method, `вне названных областей открывается только документ или каталог: ${given}`, reason);
   }
 
   async #ownDirs(pluginId: string): Promise<void> {
@@ -604,12 +646,6 @@ export class OsGateway {
         if (!p.env?.includes(name)) throw this.#denied(m, method, `переменная ${name} не в env`);
         return (this.#env.env ?? process.env)[name];
       }
-      case 'notify.show': {
-        if (!p.notify) throw this.#denied(m, method, 'нет права notify');
-        if (!this.#env.notify) throw new CoreError('Unavailable', 'уведомлений нет в этой среде');
-        await this.#env.notify(str(method, args[0], 'заголовок'), typeof args[1] === 'string' ? args[1] : undefined);
-        return undefined;
-      }
       case 'clipboard.readText':
       case 'clipboard.writeText': {
         const want = method === 'clipboard.readText' ? 'read' : 'write';
@@ -634,7 +670,7 @@ export class OsGateway {
         const target = await this.#checkPath(m, method, args[0], false, 'shell');
         const st = await fs.stat(target).catch(() => undefined);
         if (st === undefined) throw new CoreError('NotFound', `${method}: нет ${String(args[0])}`);
-        if (EXECUTABLE.test(target) || (st.isFile() && (st.mode & 0o111) !== 0)) throw this.#denied(m, method, `исполняемый файл: ${String(args[0])}`);
+        await this.#checkOpen(m, method, target, st, String(args[0]));
         if (!this.#env.shell) throw new CoreError('Unavailable', 'открытия в системе нет в этой среде');
         await this.#env.shell.openPath(target);
         return undefined;
