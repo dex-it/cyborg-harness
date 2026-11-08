@@ -192,6 +192,9 @@ D-00 -> P-02 -> P-03 -> K-13 -> K-21; параллельно D-00 и T-08 -> K-0
 | [PL-09](https://github.com/dex-it/cyborg-harness/issues/37) | Базовые метрики Cyborg и записанные сессии для сравнения | M | - |
 | [T-01](https://github.com/dex-it/cyborg-harness/issues/48) | Неперехваченные ошибки вне вызова в хосте: проверить итог PR #5 и закрыть остаток | S | PR #5 |
 | [T-02](https://github.com/dex-it/cyborg-harness/issues/49) | Предметные имена в core/src/workspace.ts вынести в хук приложения | S | - |
+| [K-24](https://github.com/dex-it/cyborg-harness/issues/84) | Кнопки следующего шага не отвечают за человека | S | - |
+| [K-25](https://github.com/dex-it/cyborg-harness/issues/85) | net.fetch не ведёт на локальные и частные адреса | S | [T-07](https://github.com/dex-it/cyborg-harness/issues/14), [K-14](https://github.com/dex-it/cyborg-harness/issues/58) |
+| [K-26](https://github.com/dex-it/cyborg-harness/issues/86) | Окно не открывает новых окон и не уходит со своих адресов | S | - |
 | [T-03](https://github.com/dex-it/cyborg-harness/issues/51) | Один источник версии API и демо-контракты вне боевого пакета | S | - |
 | [T-04](https://github.com/dex-it/cyborg-harness/issues/52) | Тест чистоты ядра: нет предметных имён, Electron и npm-зависимостей | S | [T-02](https://github.com/dex-it/cyborg-harness/issues/49) |
 | [T-05](https://github.com/dex-it/cyborg-harness/issues/10) | Тест: секрет не попадает в журнал, config и state | S | - |
@@ -209,6 +212,9 @@ D-00 -> P-02 -> P-03 -> K-13 -> K-21; параллельно D-00 и T-08 -> K-0
 | [K-10](https://github.com/dex-it/cyborg-harness/issues/47) | Удаление плагина с зачисткой его данных, секретов и прав | M | - |
 | [K-12](https://github.com/dex-it/cyborg-harness/issues/59) | Достаточность ctx.os для базовых плагинов (fs, process, net) | M | [D-00](https://github.com/dex-it/cyborg-harness/issues/21) |
 | [K-17](https://github.com/dex-it/cyborg-harness/issues/55) | Политика загрузки плагинов из каталога пользователя на этапе 1 | S | [D-00](https://github.com/dex-it/cyborg-harness/issues/21) |
+| [K-22](https://github.com/dex-it/cyborg-harness/issues/82) | Права вызывающего у команд: кому открыта команда | S | - |
+| [K-23](https://github.com/dex-it/cyborg-harness/issues/83) | Агент в модели доверия: текст агенту, инструменты MCP, граница prompt injection | S | [K-15](https://github.com/dex-it/cyborg-harness/issues/53) |
+| [K-27](https://github.com/dex-it/cyborg-harness/issues/87) | Доверие к воркспейсу: значения, расширяющие права, не из файла воркспейса | M | [D-00](https://github.com/dex-it/cyborg-harness/issues/21) |
 | [P-01](https://github.com/dex-it/cyborg-harness/issues/29) | Версионирование и публикация @cyborg-harness/contracts | M | [D-00](https://github.com/dex-it/cyborg-harness/issues/21), [T-03](https://github.com/dex-it/cyborg-harness/issues/51) |
 | [P-02](https://github.com/dex-it/cyborg-harness/issues/34) | Ядро как пакет @cyborg-harness/core | L | [D-00](https://github.com/dex-it/cyborg-harness/issues/21) |
 | [P-03](https://github.com/dex-it/cyborg-harness/issues/35) | Адаптер Electron как пакет @cyborg-harness/electron | L | [P-02](https://github.com/dex-it/cyborg-harness/issues/34) |

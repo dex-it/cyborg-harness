@@ -5,6 +5,7 @@ import { SectionStore, type LayerStore } from '../src/config.ts';
 import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
 import { inlineHosts } from '../src/transports.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 const ED = { id: 'ed', version: '1.0.0', engines: { cyborg: '^1' }, documents: { note: { restorable: true }, scratch: {} } };
 
@@ -14,7 +15,7 @@ async function start(saved: unknown[]) {
   let ctx: PluginContext | undefined;
   let changes = 0;
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async () => ({
       activate: (c) => {
         ctx = c;

@@ -10,6 +10,7 @@ import { parseManifest } from '../src/manifest.ts';
 import { describePermissions } from '../src/permissions.ts';
 import type { OsEnvironment, SecretStore } from '../src/os-gateway.ts';
 import { inlineHosts } from '../src/transports.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 const manifest = (id: string, permissions?: unknown) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...(permissions !== undefined && { permissions }) });
 
@@ -30,7 +31,7 @@ function memorySecrets(available = true): SecretStore & { map: Map<string, strin
 async function kernel(plugins: Record<string, unknown>, env: Partial<OsEnvironment> & Pick<OsEnvironment, 'dataDir' | 'tempDir'>, config?: Record<string, unknown>) {
   const contexts = new Map<string, PluginContext>();
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async (entry) => ({ activate: (ctx: PluginContext) => void contexts.set(entry, ctx) })),
     enabled: Object.keys(plugins),
     manifests: Object.entries(plugins).map(([id, p]) => manifest(id, p)),
@@ -333,7 +334,7 @@ test('net config:<поле>: плагин не пишет в поле хоста
   const store = await SectionStore.open({ load: async (l) => structuredClone(docs.get(l)), save: async (l, d) => void docs.set(l, structuredClone(d)) }, ['user', 'workspace']);
   const contexts = new Map<string, PluginContext>();
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async (entry) => ({ activate: (ctx: PluginContext) => void contexts.set(entry, ctx) })),
     enabled: ['web'],
     manifests: [{ ...manifest('web', { net: ['config:baseUrl'] }), config: { version: 1 } }],
@@ -478,7 +479,7 @@ test('granted: выбор в dialog лежит в state воркспейса и 
   const start = async () => {
     const contexts = new Map<string, PluginContext>();
     const k = await load({
-      apiVersion: '1.0.0',
+      apiVersion: PLUGIN_API_VERSION,
       spawnHost: inlineHosts(async (entry) => ({ activate: (ctx: PluginContext) => void contexts.set(entry, ctx) })),
       enabled: ['picker', 'other'],
       manifests: [manifest('picker', { 'fs.read': ['granted'] }), manifest('other', { 'fs.read': ['granted'] })],

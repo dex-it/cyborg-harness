@@ -9,6 +9,7 @@ import { load } from '../src/loader.ts';
 import { RecentWorkspaces } from '../src/recent.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { lockWorkspace, openWorkspace, workspaceKey, type MigrateWorkspace, type Workspace } from '../src/workspace.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 async function sandbox() {
   // На macOS tmpdir - симлинк /var -> /private/var, а «Недавние» хранят путь после realpath.
@@ -132,7 +133,7 @@ test('правка файла извне доходит до ctx.config.onChange
     },
   };
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async () => lock),
     enabled: ws.plugins.enabled,
     manifests: [{ id: 'lock', version: '1.0.0', engines: { cyborg: '^1' }, config: { version: 1 } }],
@@ -183,7 +184,7 @@ test('слежение: правка между открытием ворксп�
     },
   };
   const k = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async () => lock),
     enabled: ws.plugins.enabled,
     manifests: [{ id: 'lock', version: '1.0.0', engines: { cyborg: '^1' }, config: { version: 1 } }],
