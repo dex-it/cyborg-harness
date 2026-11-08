@@ -5,7 +5,7 @@ import type { CoreError } from './errors.ts';
 import type { ContractGraph } from './graph.ts';
 import type { SectionInput, SystemEvent } from './host-runtime.ts';
 import type { DeniedCollapse } from './journal.ts';
-import type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Keybinding, LoadOptions } from './kernel-types.ts';
+import type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Keybinding, LoadOptions, UninstallReport } from './kernel-types.ts';
 import type { ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { Notices } from './notices.ts';
@@ -106,6 +106,7 @@ export interface Lifecycle {
   disable(pluginId: string, options?: DisableOptions): Promise<void>;
   setEnabled(next: readonly string[]): Promise<EnabledChange>;
   disablePreview(pluginId: string): DisablePreview;
+  uninstall(pluginId: string): Promise<UninstallReport>;
   shutdown(): Promise<void>;
 }
 
@@ -163,6 +164,8 @@ export interface ViewsState {
   viewKey(pluginId: string, view: string): string;
   viewState(pluginId: string, view: string): unknown;
   setViewState(pluginId: string, view: string, value: unknown): Promise<void>;
+  /** Плагин удалён: стирает все ключи `<плагин>/*`, манифест не нужен; число стёртых. */
+  forget(pluginId: string): Promise<number>;
 }
 
 /** Обработчики сообщений хоста. */

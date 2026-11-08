@@ -58,6 +58,7 @@ export function buildKernel(ctx: KernelContext): Kernel {
     disable: (pluginId, options) => lifecycle.disable(pluginId, options),
     setEnabled: (next) => lifecycle.setEnabled(next),
     disablePreview: (pluginId) => lifecycle.disablePreview(pluginId),
+    uninstall: (pluginId) => lifecycle.uninstall(pluginId),
     enable: (pluginId) => lifecycle.enable(pluginId),
     run: (command, ...args) => commands.run(command, ...args),
     idle: () => lifecycle.idle(),

@@ -128,6 +128,8 @@ function journalLine(e: JournalEntry): string {
       return `${yellow('⛔')} ${id} отказ ctx.os: ${e.detail}`;
     case 'unloaded':
       return `${dim('⏏')} ${id} выгружен${e.by === e.pluginId ? '' : ` вместе с ${e.by}`}${e.error ? `, ошибка: ${e.error}` : ''}`;
+    case 'uninstalled':
+      return `${e.error ? red('✖') : dim('␡')} ${id} удалён; стёрто: ${e.erased.join(', ') || 'ничего'}${e.error ? `; не удалось: ${e.error}` : ''}`;
     case 'pty-expired':
       return `${yellow('⚠')} ${id} терминал ${e.id} (${e.program}) завершён: не подхвачен за ${String(e.graceMs / 1000)} с`;
     case 'key-conflict':
