@@ -209,6 +209,54 @@ test('служба окна: сочетания с конфликтом, пер�
   );
 });
 
+test('служба окна: динамическое сочетание кнопки идёт с аргументами и условиями, автоповтор и поле ввода его не запускают, видимость сообщает окно', async (t) => {
+  const userData = tmp();
+  const dir = path.join(userData, 'plugins');
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['buttons'] } }));
+  plugin(dir, 'buttons', { commands: { 'buttons.run': { args: ['string'] } }, ui: { views: { main: './ui.js' } } }, 'export default {}');
+  const ran: unknown[][] = [];
+  const modules: Record<string, PluginModule> = {
+    buttons: {
+      async activate(ctx) {
+        ctx.commands.register('buttons.run', (name) => void ran.push([name]));
+        await ctx.keys.register({ key: 'F2', command: 'buttons.run', args: ['build'], when: { visible: true } });
+        await ctx.keys.register({ key: 'F3', command: 'buttons.run', args: ['again'], when: { repeat: true, input: 'any' } });
+      },
+    },
+  };
+  const service = new PluginsService({ changed: () => {}, alert: () => {} }, () => 5);
+  await service.start({
+    userData,
+    builtinDir: path.join(userData, 'нет'),
+    spawnHost: inlineHosts(async (entry) => modules[/\/(\w+)\/index\.mjs$/.exec(entry)?.[1] ?? ''] ?? { activate() {} }),
+    platform: 'linux',
+    log: () => {},
+  });
+  t.after(() => service.unload());
+  const f = (key: string) => ({ key, code: key, control: false, alt: false, shift: false, meta: false });
+
+  assert.equal(service.press(f('F2')), false, 'вид не показан - сочетание молчит');
+  service.setViewVisible('buttons', true);
+  service.setViewVisible('ghost', true);
+  service.setInputFocus('text');
+  assert.equal(service.press(f('F2')), false, 'фокус в поле ввода');
+  service.setInputFocus('terminal');
+  assert.equal(service.press(f('F2'), true), false, 'автоповтор');
+  assert.equal(service.press(f('F2')), true, 'терминал - не поле ввода');
+  service.setInputFocus('nonsense');
+  service.setInputFocus('text');
+  assert.equal(service.press(f('F3'), true), true, 'repeat и input: any');
+  for (let i = 0; i < 150 && ran.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(ran, [['build'], ['again']]);
+  assert.deepEqual(
+    service.snapshot().keys.filter((k) => k.pluginId === 'buttons').map((k) => [k.key, k.live]),
+    [
+      ['F2', true],
+      ['F3', true],
+    ],
+  );
+});
+
 test('виды: адрес у плагина с ui в манифесте и у снятого, лента вида - только свои строки, команда и контракт из вида - только свои', async () => {
   const userData = tmp();
   const dir = path.join(userData, 'plugins');

@@ -52,9 +52,22 @@ const spike: SpikeBridge = {
   report: (event: SpikeReport) => ipcRenderer.send('spike:report', event),
 };
 
+/** Что в фокусе: поле ввода, терминал (xterm держит скрытый textarea) или остальное; ядро по этому решает судьбу сочетаний с `when.input`. */
+function focusKind(target: EventTarget | null): 'text' | 'terminal' | 'other' {
+  if (!(target instanceof HTMLElement)) return 'other';
+  if (target.classList.contains('xterm-helper-textarea')) return 'terminal';
+  if (target.isContentEditable || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return 'text';
+  if (target instanceof HTMLInputElement) return ['button', 'checkbox', 'radio', 'submit', 'reset', 'range', 'color', 'image', 'file'].includes(target.type) ? 'other' : 'text';
+  return 'other';
+}
+
 // nodeIntegrationInSubFrames: тот же preload идёт в каждый фрейм, включая чужие страницы внутри вида, - мост получает только свой документ.
 const inView = location.protocol === `${VIEW_SCHEME}:`;
 const inWindow = location.protocol === 'file:' && window.top === window;
+if (inView || inWindow) {
+  window.addEventListener('focusin', (event) => ipcRenderer.send('input:focus', focusKind(event.composedPath()[0] ?? event.target)), true);
+  window.addEventListener('focusout', () => ipcRenderer.send('input:focus', 'other'), true);
+}
 if (inView) contextBridge.exposeInMainWorld('cyborgView', view);
 if (inWindow && !location.pathname.endsWith('/spike.html')) contextBridge.exposeInMainWorld('playground', api);
 if ((inView && /^probe(?:-\d+)?$/.test(location.host)) || (inWindow && location.pathname.endsWith('/spike.html'))) contextBridge.exposeInMainWorld('spike', spike);
