@@ -31,7 +31,7 @@ export const LIMITS: ResourceLimits = {
   runs: 16,
   processOutput: 16 * 1024 * 1024,
   processOutputMax: 64 * 1024 * 1024,
-  readText: 5 * 1024 * 1024,
+  readText: 8 * 1024 * 1024,
   subscriptions: 256,
   idleWatchers: 64,
 };
