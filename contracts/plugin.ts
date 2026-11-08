@@ -56,6 +56,7 @@ export type CoreErrorCode =
   | 'CommandConflict'
   | 'HostGone'
   | 'Timeout'
+  | 'Cancelled'
   | 'Remote'
   | 'PermissionDenied'
   | 'NotFound';
