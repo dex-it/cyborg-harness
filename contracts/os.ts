@@ -1,6 +1,6 @@
 import type { Disposable } from './plugin.ts';
 
-/** Программа или программа с первыми аргументами; `env` - имена переменных, которые плагин может ей передать. */
+/** Программа или программа с первыми аргументами; `env` - имена переменных, которые плагин может ей передать: точное имя или маска `ПРЕФИКС_*` для номерных (`GIT_CONFIG_KEY_*` покрывает `GIT_CONFIG_KEY_0`, `GIT_CONFIG_KEY_1`, ...). */
 export type ProgramRule = string | { readonly program: string; readonly args: readonly string[]; readonly env?: readonly string[] };
 
 /** Права главной части плагина: что ядро пропустит через `ctx.os` (SAD §3.7). Нет права - нет члена в `ctx.os`. */

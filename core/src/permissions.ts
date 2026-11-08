@@ -21,6 +21,10 @@ export const ANY_PATH = 'any';
 // file: открыл бы путь мимо проверки областей, javascript: и data: - не адрес.
 const isScheme = (v: string) => /^[a-z][a-z0-9+.-]*:$/.test(v) && !['file:', 'javascript:', 'data:', 'vbscript:'].includes(v);
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** Имя переменной в `env` правила `process`, `pty`, `launch`: точное или маска `ПРЕФИКС_*` - переменные с переменным номером (`GIT_CONFIG_KEY_<n>`). */
+const ENV_RULE_NAME = /^[A-Za-z_][A-Za-z0-9_]*(?:_\*)?$/;
+/** Имя переменной подходит под запись `env` правила: точное совпадение либо непустой хвост после префикса маски. */
+export const envNameAllowed = (entry: string, name: string): boolean => (entry.endsWith('*') ? name.length > entry.length - 1 && name.startsWith(entry.slice(0, -1)) : entry === name);
 
 /** Программа правила `process` и `pty`: оболочка входа человека; ядро подставляет её путь само. */
 export const LOGIN_SHELL = '$SHELL';
@@ -73,9 +77,9 @@ export function readPermissions(raw: unknown, errors: string[]): PluginPermissio
           // Оболочка без закреплённого скрипта (`-lc` и текст) запустила бы что угодно.
           (r.program !== LOGIN_SHELL || r.args.length >= 2) &&
           r.args.every((a) => typeof a === 'string') &&
-          (r.env === undefined || (Array.isArray(r.env) && r.env.every((v) => typeof v === 'string' && ENV_NAME.test(v))))),
+          (r.env === undefined || (Array.isArray(r.env) && r.env.every((v) => typeof v === 'string' && ENV_RULE_NAME.test(v))))),
     );
-    if (!ok) errors.push(`permissions.${key}: ожидается список программ или {program, args, env?}; ${LOGIN_SHELL} - только с флагом и скриптом в args`);
+    if (!ok) errors.push(`permissions.${key}: ожидается список программ или {program, args, env?}, имя в env - точное или ПРЕФИКС_*; ${LOGIN_SHELL} - только с флагом и скриптом в args`);
     else set(key, rules);
   }
   return out;

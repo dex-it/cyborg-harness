@@ -9,7 +9,7 @@ import { CoreError } from './errors.ts';
 import { limitsOf, type ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { NotifyLimits, ShowNotice } from './notices.ts';
-import { ANY_PATH, LOGIN_SHELL } from './permissions.ts';
+import { ANY_PATH, envNameAllowed, LOGIN_SHELL } from './permissions.ts';
 import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type KeptPty, type PtyExpiry, type TerminalSink, type TerminalView } from './pty.ts';
 import { HttpServes, type AskHost } from './serve.ts';
 import type { GuardRight } from './via-contract.ts';
@@ -262,9 +262,9 @@ function ruleRefusal(m: PluginManifest, key: 'process' | 'pty' | 'launch', progr
   });
   // Аргументы в журнал не идут: в них бывают токены (`--header 'Authorization: …'`).
   if (rule === undefined) return (m.permissions[key] ?? []).some((r) => (typeof r === 'string' ? r : r.program) === program) ? `аргументы не по правилу ${key}: ${program}` : `программа не в ${key}: ${program}`;
-  // Окружение - тоже ввод программы (GIT_CONFIG_*, NODE_OPTIONS, LD_PRELOAD): только имена из правила.
+  // Окружение - тоже ввод программы (GIT_CONFIG_*, NODE_OPTIONS, LD_PRELOAD): только имена из правила, маска `ПРЕФИКС_*` - для номерных `GIT_CONFIG_KEY_<n>`.
   const allowedEnv = typeof rule === 'string' ? [] : (rule.env ?? []);
-  const foreign = envNames.filter((k) => !allowedEnv.includes(k));
+  const foreign = envNames.filter((k) => !allowedEnv.some((a) => envNameAllowed(a, k)));
   return foreign.length > 0 ? `переменные не в правиле ${key}: ${foreign.join(', ')}` : undefined;
 }
 

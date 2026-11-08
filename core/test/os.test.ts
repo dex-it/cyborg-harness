@@ -749,6 +749,25 @@ test('granted: выбор в dialog лежит в state воркспейса и 
   await second.k.unload();
 });
 
+test('env правила: маска имени `ПРЕФИКС_*` принимается манифестом, звёздочка в иных местах - ошибка; права словами называют маску', () => {
+  const rule = (env: unknown) => ({ process: [{ program: 'git', args: [], env }] });
+  const ok = parseManifest(manifest('p', rule(['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_*', 'GIT_CONFIG_VALUE_*'])));
+  assert.ok(ok.ok);
+  assert.deepEqual(describePermissions(ok.manifest.permissions), ['запускает программы: git (окружение: GIT_CONFIG_COUNT, GIT_CONFIG_KEY_*, GIT_CONFIG_VALUE_*) - полный доступ через программу']);
+  for (const bad of [['*'], ['GIT*'], ['GIT_*_X'], ['_*'], ['GIT_CONFIG_*_*'], ['*_KEY'], ['1_*'], [' GIT_*']]) assert.equal(parseManifest(manifest('p', rule(bad))).ok, false, JSON.stringify(bad));
+  assert.equal(parseManifest(manifest('p', { env: ['GIT_CONFIG_KEY_*'] })).ok, false, 'право env.get маски не принимает: читать можно только названную переменную');
+});
+
+test('env правила: программа получает GIT_CONFIG_COUNT, KEY_<n>, VALUE_<n> через маску и применяет их', async () => {
+  await using box = await sandbox();
+  const rule = { program: process.execPath, args: ['-e'], env: ['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_*', 'GIT_CONFIG_VALUE_*'] };
+  const { k, os } = await kernel({ vcs: { process: [rule] } }, { dataDir: box.data, tempDir: box.temp });
+  const env = { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'filter.lfs.clean', GIT_CONFIG_VALUE_0: '', GIT_CONFIG_KEY_1: 'filter.lfs.required', GIT_CONFIG_VALUE_1: 'false' };
+  const got = await os('vcs').process!.run(process.execPath, ['-e', 'process.stdout.write(JSON.stringify(Object.entries(process.env).filter(([k]) => k.startsWith("GIT_CONFIG_")).sort()))'], { env });
+  assert.deepEqual(JSON.parse(got.stdout), Object.entries(env).sort());
+  await k.unload();
+});
+
 test('права в манифесте: маска под названным каталогом, workspace.git только у записи, shell без file:', () => {
   const errors = (permissions: unknown) => {
     const r = parseManifest(manifest('x', permissions));
