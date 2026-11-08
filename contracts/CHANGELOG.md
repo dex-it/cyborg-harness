@@ -15,6 +15,6 @@
 - Пакет собирается в декларации (`dist/*.d.ts`) без расширений `.ts` в путях и ставится по номеру версии; в `exports` только условие `types`, кода выполнения в пакете нет.
 - Снимок деклараций `api-snapshot.txt` и проверка `npm run check:contracts`: изменение публичных типов без повышения версии пакета - ошибка CI.
 
-## 1.0.0 - не выпущена
+## 1.0.0-dev - не выпущена
 
-Первая версия набора: `cyborg.agent` v1, `cyborg.agent-tool` v1, `cyborg.session-prompt` v1, API плагина (`PluginModule`, `PluginContext`, `UiModule`, `UiContext`), `ctx.os`, элементы ядра `cy-*`. Выпуск в реестр - задача P-10 после заморозки API (K-21).
+Линия разработки до первого выпуска: типы меняются без повышения версии (проверка `--base` её не требует), снимок `api-snapshot.txt` обновляется. Первый выпуск `1.0.0` фиксирует набор: `cyborg.agent` v1, `cyborg.agent-tool` v1, `cyborg.session-prompt` v1, API плагина (`PluginModule`, `PluginContext`, `UiModule`, `UiContext`), `ctx.os`, элементы ядра `cy-*`. Выпуск в реестр - задача P-10 после заморозки API (K-21).
