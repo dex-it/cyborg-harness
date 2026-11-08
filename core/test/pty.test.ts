@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, PtyExit } from '@cyborg-harness/contracts';
-import { load } from '../src/loader.ts';
+import { load, type LoadOptions } from '../src/loader.ts';
 import { describePermissions } from '../src/permissions.ts';
 import { fakePty, type FakeProc } from './fake-pty.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
@@ -12,7 +12,7 @@ import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 const tick = () => new Promise((r) => setTimeout(r, 30));
 
-async function setup(plugins: Record<string, unknown>, withBackend = true) {
+async function setup(plugins: Record<string, unknown>, withBackend = true, limits?: LoadOptions['limits'], ptyOrphanGrace?: number, onKeptPty?: () => void) {
   // На macOS tmpdir - симлинк /var -> /private/var, а шлюз отдаёт пути после realpath.
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-pty-')));
   const work = path.join(root, 'work');
@@ -25,12 +25,14 @@ async function setup(plugins: Record<string, unknown>, withBackend = true) {
     apiVersion: PLUGIN_API_VERSION,
     enabled: Object.keys(plugins),
     manifests: Object.entries(plugins).map(([id, permissions]) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...(permissions !== undefined && { permissions }) })),
-    os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), env: { PATH: '/usr/bin', HOME: '/h', SECRET: 'x' }, ...(withBackend && { pty: backend }) },
+    os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), env: { PATH: '/usr/bin', HOME: '/h', SECRET: 'x' }, ...(withBackend && { pty: backend }), ...(ptyOrphanGrace !== undefined && { ptyOrphanGrace }) },
+    ...(limits && { limits }),
     spawnHost: (id) => {
       const h = spawn(id);
       handles.set(id, h);
       return h;
     },
+    onKeptPty,
   });
   const pty = (id: string) => {
     const p = contexts.get(id)?.os.pty;
@@ -144,6 +146,22 @@ test('падение хоста: pty с persist живёт и копит выв�
   assert.equal(keptProc.killed, 'SIGHUP', 'выключенный плагин оставил pty');
 });
 
+test('сирота: плагин вернулся после падения хоста, но не взял pty за срок - процесс завершён, журнал называет срок', async () => {
+  await using s = await setup({ agent: shell }, true, undefined, 100);
+  const taken = await s.pty('agent').spawn({ program: '/bin/bash', persist: true });
+  await s.pty('agent').spawn({ program: '/bin/bash', persist: true });
+  const [takenProc, orphanProc] = s.backend.procs as [FakeProc, FakeProc];
+  s.handles.get('agent')!.kill();
+  await s.k.idle();
+  await s.pty('agent').attach(taken.id);
+  await new Promise((r) => setTimeout(r, 250));
+  assert.equal(orphanProc.killed, 'SIGHUP');
+  assert.equal(takenProc.killed, undefined, 'взятый до срока живёт');
+  assert.deepEqual((await s.pty('agent').list()).map((p) => p.id), [taken.id]);
+  const expired = s.k.journal.filter((e) => e.kind === 'pty-expired');
+  assert.deepEqual(expired, [{ kind: 'pty-expired', pluginId: 'agent', id: 'pty-2', program: '/bin/bash', graceMs: 100 }]);
+});
+
 test('pty завершился без владельца: list показывает выход, attach отдаёт хвост и выход и убирает запись', async () => {
   await using s = await setup({ agent: shell });
   const kept = await s.pty('agent').spawn({ program: '/bin/bash', persist: true });
@@ -247,4 +265,60 @@ test('выключение: preview называет живые pty; keepPty о�
   await s.k.disable('quiet', { keepPty: true });
   await s.k.unload();
   assert.equal(s.backend.procs.find((p) => p.pid === parked.pid)?.killed, 'SIGHUP', 'припаркованный pty пережил выгрузку ядра');
+});
+
+test('оставленный: ждёт без срока, пока плагин выключен, виден приложению и завершается человеком; вернувшийся плагин без attach теряет его по сроку', async () => {
+  let changes = 0;
+  await using s = await setup({ agent: shell }, true, undefined, 100, () => {
+    changes++;
+  });
+  const ended = await s.pty('agent').spawn({ program: '/bin/bash' });
+  const left = await s.pty('agent').spawn({ program: '/bin/bash' });
+  const [endedProc, leftProc] = s.backend.procs as [FakeProc, FakeProc];
+
+  await s.k.disable('agent', { keepPty: true });
+  assert.deepEqual(s.k.keptPty().map((p) => [p.pluginId, p.id, typeof p.keptAt]), [['agent', ended.id, 'number'], ['agent', left.id, 'number']]);
+  assert.ok(changes > 0, 'приложение не узнало об оставленных');
+  await new Promise((r) => setTimeout(r, 250));
+  assert.equal(leftProc.killed, undefined, 'срок сработал, пока плагин выключен');
+
+  s.k.endKeptPty(ended.id);
+  assert.equal(endedProc.killed, 'SIGHUP');
+  assert.deepEqual(s.k.keptPty().map((p) => p.id), [left.id]);
+  assert.throws(() => s.k.endKeptPty(ended.id), { code: 'NotFound' });
+
+  await s.k.enable('agent');
+  assert.deepEqual(s.k.keptPty(), [], 'вернувшийся плагин владеет процессом, он больше не оставленный');
+  await new Promise((r) => setTimeout(r, 250));
+  assert.equal(leftProc.killed, 'SIGHUP', 'плагин не взял процесс за срок, а он жив');
+  assert.deepEqual(s.k.journal.filter((e) => e.kind === 'pty-expired'), [{ kind: 'pty-expired', pluginId: 'agent', id: left.id, program: '/bin/bash', graceMs: 100 }]);
+});
+
+test('пределы pty: ввод больше предела - Invalid, pty жив и принимает следующий; из хоста и из вида; число живых pty освобождается выходом и выключением; COLORTERM от ядра', async () => {
+  await using s = await setup({ term: shell, other: shell }, true, { ptyInput: 8, ptys: 2 });
+  const a = await s.pty('term').spawn({ program: '/bin/bash', persist: true });
+  const proc = s.backend.procs[0]!;
+  assert.equal(proc.options.env.COLORTERM, 'truecolor', 'терминал вида - truecolor без объявления в правах');
+  await assert.rejects(a.write('123456789'), { code: 'Invalid', message: /больше 8 байт/ });
+  await assert.rejects(a.write('ёёёёё'), { code: 'Invalid' }, 'пять символов - десять байт UTF-8');
+  await a.write('12345678');
+  const view = s.k.openTerminal('term', await a.share(), { data: () => undefined, exit: () => undefined });
+  assert.throws(() => view.write('x'.repeat(9)), { code: 'Invalid', message: /больше 8 байт/ });
+  view.write('ok');
+  assert.deepEqual(proc.writes, ['12345678', 'ok']);
+
+  const own = await s.pty('term').spawn({ program: '/bin/bash', env: { COLORTERM: '24bit' } });
+  assert.equal(s.backend.procs[1]!.options.env.COLORTERM, '24bit', 'плагин с правом на переменную задаёт своё');
+  await assert.rejects(s.pty('term').spawn({ program: '/bin/bash' }), { code: 'Invalid', message: /живых pty больше 2/ });
+  await s.pty('other').spawn({ program: '/bin/bash' });
+  assert.equal(s.backend.procs.length, 3, 'отказ не запустил процесс; предел у каждого плагина свой');
+
+  s.backend.procs[1]!.exit(0);
+  await tick();
+  assert.equal((await s.pty('term').list()).find((p) => p.id === own.id), undefined);
+  await s.pty('term').spawn({ program: '/bin/bash' });
+  await s.k.disable('term');
+  await s.k.enable('term');
+  await s.pty('term').spawn({ program: '/bin/bash' });
+  await s.pty('term').spawn({ program: '/bin/bash' });
 });

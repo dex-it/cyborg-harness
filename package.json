@@ -13,6 +13,9 @@
     "smoke": "npm run build && node playground/scripts/smoke.mjs",
     "spike": "npm run build && node playground/scripts/spike-iframe.mjs",
     "spike:hosts": "npm run build && node playground/scripts/spike-hosts.mjs",
+    "spike:gateway": "npm run build && node playground/scripts/spike-gateway.mjs",
+    "spike:pty": "node playground/scripts/spike-pty.mjs",
+    "spike:pty-restore": "node playground/scripts/spike-pty-restore.mjs",
     "lint": "eslint --max-warnings 0 .",
     "postinstall": "electron-rebuild -f -w node-pty"
   },

@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { PluginContext } from '@cyborg-harness/contracts';
 import type { HostHandle } from '../src/transports.ts';
 import { load, type LoadOptions } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { keepFocus } from '../src/ui-shell.ts';
-import { parseDialog, reservedId, WINDOW_OWNER, WindowLayer, type WindowSnapshot } from '../src/window-layer.ts';
+import { KERNEL_OWNER, parseDialog, reservedId, WINDOW_OWNER, WindowLayer, type WindowSnapshot } from '../src/window-layer.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 const shown = (layer: WindowLayer) => layer.snapshot.dialog;
@@ -245,7 +246,7 @@ test('манифест: ui.lock только с ui.overlay, overlay и lock.onSt
   assert.match(errors({ permissions: { 'ui.lock': true }, ui: { overlay: '../lock.js' } }).join(), /ui.overlay: ожидается путь/);
 });
 
-test('команды окна: F6 и Shift+F6 у ядра, плагин их не перехватит, человек переназначит; под замком не работают', async () => {
+test('команды окна: F6 и Shift+F6 у ядра, плагин их не перехватит, человек переназначит и даст сочетание команде ядра; под замком не работают', async () => {
   const pad: PluginModule = {
     activate(ctx) {
       ctx.commands.register('pad.open', () => 'open');
@@ -260,6 +261,7 @@ test('команды окна: F6 и Shift+F6 у ядра, плагин их н�
       keybindings: [
         { key: 'Ctrl+Alt+Right', command: 'cyborg.window.focus-next' },
         { key: 'Shift+F6', command: null },
+        { key: 'Ctrl+Alt+W', command: 'cyborg.workspace.reveal' },
       ],
       platform: 'linux',
     },
@@ -270,6 +272,7 @@ test('команды окна: F6 и Shift+F6 у ядра, плагин их н�
   assert.equal(k.keybinding('Ctrl+Alt+Right')?.command, 'cyborg.window.focus-next');
   assert.ok(!k.journal.some((e) => e.kind === 'key-ignored'), 'команда окна - известная команда');
   assert.equal(k.keybinding('Shift+F6'), undefined, 'освобождённое сочетание идёт в окно');
+  assert.equal(k.keybinding('Ctrl+Alt+W')?.pluginId, KERNEL_OWNER, 'команда ядра берёт сочетание человека');
   await k.run('pin.lock', false);
   assert.equal(k.keybinding('F6'), undefined, 'под замком области недоступны');
   await k.run('pin.unlock');
@@ -278,7 +281,7 @@ test('команды окна: F6 и Shift+F6 у ядра, плагин их н�
 });
 
 test('манифест: id, в пространстве которого лежат команды окна, занят', () => {
-  for (const id of ['cyborg', 'cyborg.window']) assert.equal(reservedId(id), true, id);
+  for (const id of ['cyborg', 'cyborg.window', 'cyborg.workspace']) assert.equal(reservedId(id), true, id);
   for (const id of ['cyborg.files', 'cyborg.window.focus-next', 'window']) assert.equal(reservedId(id), false, id);
   const r = parseManifest(manifest('cyborg.window'));
   assert.ok(!r.ok && r.errors.join().includes('занято командами окна'));
@@ -330,5 +333,39 @@ test('замок окна: системный диалог чужого плаг
   await assert.rejects(k.run('picker.pick'), { code: 'Unavailable' });
   await k.run('pin.unlock');
   assert.deepEqual(await k.run('picker.pick'), ['/выбран']);
+  await k.unload();
+});
+
+test('заголовок окна: воркспейс, фрагменты по id плагина, приложение; undefined и выгрузка снимают, управляющие символы убираются, длинный - Invalid, под замком только свои', async () => {
+  const contexts = new Map<string, PluginContext>();
+  const titled: PluginModule = {
+    activate(ctx) {
+      contexts.set(ctx.pluginId, ctx);
+      return undefined;
+    },
+  };
+  const { start, snaps } = kernel(
+    { zeta: titled, alpha: titled, pin },
+    { enabled: ['zeta', 'alpha', 'pin'], manifests: [manifest('zeta'), manifest('alpha'), pinManifest()], windowTitle: { workspace: 'team.cyborg.json', app: 'Cyborg' } },
+  );
+  const k = await start();
+  assert.equal(k.window.title, 'team.cyborg.json - Cyborg');
+  const win = (id: string) => contexts.get(id)!.window;
+  await win('zeta').setTitle('Проект\n\u202eX\t');
+  await win('alpha').setTitle('main');
+  assert.equal(k.window.title, 'team.cyborg.json - main - Проект X - Cyborg');
+  assert.equal(snaps.at(-1)?.title, k.window.title, 'приложение получает строку');
+  await assert.rejects(win('alpha').setTitle('x'.repeat(81)), { code: 'Invalid' });
+  assert.equal(k.window.title, 'team.cyborg.json - main - Проект X - Cyborg');
+  await k.run('pin.lock', false);
+  assert.equal(k.window.title, 'team.cyborg.json - Cyborg', 'под замком фрагменты других плагинов не видны');
+  await k.run('pin.lock', true);
+  assert.equal(k.window.title, 'Cyborg', 'с hideNotifications имя воркспейса тоже скрыто');
+  assert.equal(snaps.at(-1)?.title, 'Cyborg', 'приложение получает скрытый заголовок');
+  await k.run('pin.unlock');
+  await win('alpha').setTitle(undefined);
+  assert.equal(k.window.title, 'team.cyborg.json - Проект X - Cyborg');
+  await k.disable('zeta');
+  assert.equal(k.window.title, 'team.cyborg.json - Cyborg');
   await k.unload();
 });

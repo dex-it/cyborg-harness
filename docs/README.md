@@ -19,6 +19,9 @@
 | Решения ADR-CH; где они расходятся с SAD, действует SAD ([раздел 7](04-architecture/design/sad.md#7-расхождения-с-первой-редакцией-пакета)) | [04-architecture/adr/](04-architecture/adr/) |
 | Спайк UI во фреймах: память, задержка, мост, клавиши, перетаскивание | [05-verification/spike-iframe-ui.md](05-verification/spike-iframe-ui.md) |
 | Спайк хостов плагинов: память на хост, цена вызова, пороги сторожа | [05-verification/spike-hosts.md](05-verification/spike-hosts.md) |
+| Замер шлюза `ctx.os`: цена проверок и канала хоста на горячих путях, проверка бюджета | [05-verification/spike-gateway.md](05-verification/spike-gateway.md) |
+| Замер горячего пути pty: задержка вывода и склейка | [05-verification/spike-pty.md](05-verification/spike-pty.md) |
+| Спайк экрана терминала после `attach`: хвост или снимок на настоящем `claude` | [05-verification/spike-pty-restore.md](05-verification/spike-pty-restore.md) |
 | Проверка на macOS: замеры хостов и фреймов, клавиши, терминал | [05-verification/macos-check.md](05-verification/macos-check.md) |
 | Эпик «Микроядро»: цель, карта, итерации, реестр задач | [06-plans/epic-microkernel.md](06-plans/epic-microkernel.md) |
 | Анализ готовности ядра и инвентарь Cyborg | [research/microkernel-readiness.md](research/microkernel-readiness.md), [research/cyborg-migration-inventory.md](research/cyborg-migration-inventory.md) |

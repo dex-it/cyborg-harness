@@ -171,7 +171,27 @@ export interface OsPty {
   spawn(options: PtySpawnOptions): Promise<PtyHandle>;
   /** Только свои pty. */
   list(): Promise<PtyInfo[]>;
+  /** Свой pty без владельца: после перезапуска хоста или «Оставить работать». Брать при активации: с неё идёт льготный срок ядра, после него процесс завершён и ответ - `NotFound`. */
   attach(id: string): Promise<PtyHandle>;
+}
+
+/** Клик по уведомлению: своя команда из манифеста, аргументы сверяются её схемой. Команда, а не колбэк: клик переживёт перезапуск хоста. */
+export interface NotifyClick {
+  readonly command: string;
+  readonly args?: readonly unknown[];
+}
+
+export interface NotifyOptions {
+  /** Клик поднимает окно, закрывает уведомление и запускает команду. */
+  readonly onClick?: NotifyClick;
+}
+
+/** Выгрузка плагина закрывает его живые уведомления; падение хоста - нет, клик дойдёт до вернувшегося плагина. */
+export interface OsNotify {
+  /** Ответ - id уведомления для `close`. Длина заголовка и текста ограничена средой, превышение - `Invalid`; сверх предела живых закрывается старейшее уведомление плагина. */
+  show(title: string, body?: string, options?: NotifyOptions): Promise<string>;
+  /** Уже закрытое или чужое уведомление - ничего не делает. */
+  close(id: string): Promise<void>;
 }
 
 export interface PluginOs {
@@ -182,7 +202,7 @@ export interface PluginOs {
   readonly process?: { run(program: string, args: readonly string[], options?: ProcessOptions): Promise<ProcessResult> };
   readonly net?: { fetch(url: string, request?: HttpRequest): Promise<HttpResponse> };
   readonly env?: { get(name: string): Promise<string | undefined> };
-  readonly notify?: { show(title: string, body?: string): Promise<void> };
+  readonly notify?: OsNotify;
   readonly clipboard?: { readText?(): Promise<string>; writeText?(text: string): Promise<void> };
   readonly secrets: OsSecrets;
   readonly security?: { setRoots(paths: readonly string[]): Promise<void> };
@@ -208,7 +228,7 @@ export interface OsDialog {
 
 /** Замок окна: чужие виды скрыты и `inert`, виден только `ui.overlay` владельца, работают только его сочетания и диалоги. Главные части работают дальше. */
 export interface OsUi {
-  /** Повторный вызов владельца меняет только `hideNotifications`. Хост владельца упал - окно остаётся закрытым до его возвращения. */
+  /** `hideNotifications` прячет текст уведомлений и имя воркспейса в заголовке окна. Повторный вызов владельца меняет только его. Хост владельца упал - окно остаётся закрытым до его возвращения. */
   lock(options?: { readonly hideNotifications?: boolean }): Promise<UiLock>;
 }
 

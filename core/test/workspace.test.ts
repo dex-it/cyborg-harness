@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, PluginModule } from '@cyborg-harness/contracts';
@@ -213,6 +213,28 @@ test('битый файл пользователя не роняет откры�
   await assert.rejects(ws.config.write('user', 'x', 1, { a: 1 }));
   assert.equal(await readFile(box.userFile, 'utf8'), '{ "plugins": ');
   ws.close();
+});
+
+test('битый файл воркспейса: рядом копия .corrupt-<время> с исходником, сам файл не тронут, повторное открытие копий не плодит', async () => {
+  await using box = await sandbox();
+  const broken = '{ "cyborg": 2, "plugins": ';
+  await writeFile(box.file, broken);
+  const copies = async () => (await readdir(box.root)).filter((n) => n.startsWith('team.cyborg.json.corrupt-'));
+  const first = await open(box);
+  const [copy] = await copies();
+  assert.ok(copy, 'копии нет');
+  assert.match(copy, /^team\.cyborg\.json\.corrupt-\d{4}-\d\d-\d\dT[\d-]+Z(-\d+)?$/);
+  assert.match(first.problems[0] ?? '', new RegExp(`копия - ${copy.replaceAll('.', '\\.')}`));
+  assert.equal(await readFile(path.join(box.root, copy), 'utf8'), broken);
+  assert.equal(await readFile(box.file, 'utf8'), broken);
+  first.close();
+
+  const again = await open(box);
+  assert.deepEqual(await copies(), [copy], 'та же порча - та же копия');
+  again.close();
+  await writeFile(box.file, `${broken} "иначе"`);
+  (await open(box)).close();
+  assert.equal((await copies()).length, 2, 'новая порча - новая копия');
 });
 
 test('«Недавние»: последний открытый первым, без повторов по realpath, пропавший файл не показывается, битый список не мешает', async () => {

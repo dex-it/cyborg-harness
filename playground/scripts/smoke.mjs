@@ -38,9 +38,17 @@ async function waitFor(what, probe, timeout = TIMEOUT_MS) {
   throw new Error(`не дождались: ${what}${last instanceof Error ? ` (${last.message})` : ''}`);
 }
 
+const liveClaude = process.env.CYBORG_SMOKE_CLAUDE === '1';
+// Без живого claude оболочка входа находит подставной (fake-claude.mjs): профиль человека с его PATH в smoke не нужен.
+const fakeBin = join(userData, 'fake-bin');
+mkdirSync(fakeBin);
+writeFileSync(join(fakeBin, 'claude'), `#!/bin/sh\nexec '${process.execPath}' '${join(repo, 'playground', 'scripts', 'fake-claude.mjs')}' "$@"\n`, { mode: 0o755 });
+writeFileSync(join(fakeBin, 'login-shell'), `#!/bin/sh\nPATH='${fakeBin}':"$PATH"; export PATH\nif [ "$1" = -lc ]; then shift; exec /bin/sh -c "$@"; fi\nexec /bin/sh "$@"\n`, { mode: 0o755 });
+
 // --inspect=0 - инспектор главного процесса: нажатие оттуда идёт через before-input-event, как с клавиатуры.
 const app = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${userData}`, '--remote-debugging-port=0', ...electronArgs], {
   stdio: ['ignore', 'ignore', 'pipe'],
+  env: liveClaude ? process.env : { ...process.env, SHELL: join(fakeBin, 'login-shell') },
 });
 let stderr = '';
 app.stderr.on('data', (d) => (stderr += d));
@@ -255,6 +263,31 @@ async function main() {
   await waitFor('вид echo открыл pty по билету главной части', async () => /^pty \d+$/.test(await inView('echo', "document.getElementById('term-state').textContent")));
   await type('echo до-$((6*7))');
   await waitFor('терминал вида ответил', async () => /до-42/.test(await screen()));
+
+  const windows = () => main("process.mainModule.require('electron').BrowserWindow.getAllWindows().length");
+  assert.equal(await inView('echo', "window.open('https://example.com/login') === null"), true, 'window.open вида вернул окно');
+  await sleep(500);
+  assert.equal(await windows(), 1, 'вид открыл новое окно');
+  await inView('echo', "location.href = 'https://example.com/away'; true");
+  await waitFor('переход фрейма вида отклонён и записан в журнал echo', () =>
+    lines().some((l) => l.includes('"pluginId":"echo","kind":"denied","method":"navigate"') && l.includes('https://example.com/away')),
+  );
+  assert.equal(await inView('echo', 'location.protocol'), 'cyborg-plugin:', 'фрейм вида ушёл со своего адреса');
+  await type('echo на-месте-$((2*21))');
+  await waitFor('вид после отказа работает', async () => /на-месте-42/.test(await screen()));
+  // CSP окна пропускает data: во фрейм, поэтому решает только will-frame-navigate: переход отклонён, вид остаётся.
+  await inView('echo', "location.href = 'data:text/html,%3Cb%3Ex%3C/b%3E'; true");
+  await waitFor('переход фрейма вида на data: отклонён и записан в журнал echo', () =>
+    lines().some((l) => l.includes('"pluginId":"echo","kind":"denied","method":"navigate"') && l.includes('data:text/html')),
+  );
+  assert.equal(await inView('echo', 'location.protocol'), 'cyborg-plugin:', 'фрейм вида ушёл на data:');
+  const windowUrl = await ev('location.href');
+  await ev("location.href = 'https://example.com/'; true");
+  await sleep(500);
+  assert.equal(await ev('location.href'), windowUrl, 'окно ушло на внешний адрес');
+  assert.equal(await windows(), 1);
+  log('окно не открывает новых окон и не уходит со своих адресов: отказ виду - в журнал его плагина');
+
   if (process.platform !== 'win32') {
     const hung = await pid('echo');
     assert.equal(await button('echo', 'Повесить хост'), true);
@@ -277,8 +310,11 @@ async function main() {
     assert.equal(await choose('keep'), true);
     await waitFor('echo выгружен, процесс оставлен', async () => (await state('echo')) === 'stopped' && /оставлено: 1/.test(await text('#plugins-journal')));
     assert.equal(await alive(sh), true, 'оставленный процесс завершён');
+    const kept = () => text('#plugins-list [data-plugin="echo"] .plugin-kept');
+    await waitFor('строка echo показывает оставленный процесс', async () => (await kept()).includes(`/bin/sh - pid ${sh}`));
     assert.equal(await load(), true);
     await waitFor('вернувшийся echo подхватил тот же процесс', async () => (await state('echo')) === 'active' && (await inView('echo', "document.getElementById('term-state').textContent")) === `pty ${sh}` && /после-72/.test(await screen()));
+    assert.equal(await kept(), '', 'подхваченный процесс остался в списке оставленных');
     await type('echo снова-$((9*9))');
     await waitFor('терминал ожил', async () => /снова-81/.test(await screen()));
     assert.equal(await button('echo', 'Выгрузить'), true);
@@ -287,7 +323,16 @@ async function main() {
     await waitFor('процесс echo завершён', async () => (await state('echo')) === 'stopped' && !(await alive(sh)));
     assert.equal(await load(), true);
     await waitFor('echo с новым терминалом', async () => (await state('echo')) === 'active' && /^pty \d+$/.test(await inView('echo', "document.getElementById('term-state').textContent")));
-    log('выключение спрашивает о pty: оставленный процесс ждёт плагин, завершённый уходит');
+    const sh2 = /^pty (\d+)$/.exec(await inView('echo', "document.getElementById('term-state').textContent"))[1];
+    assert.equal(await button('echo', 'Выгрузить'), true);
+    await waitFor('третий вопрос', async () => (await ask()).includes(`pid ${sh2}`));
+    assert.equal(await choose('keep'), true);
+    await waitFor('второй процесс оставлен', async () => (await kept()).includes(`pid ${sh2}`));
+    assert.equal(await ev(`(() => { const b = document.querySelector('#plugins-list [data-plugin="echo"] .kept-row button'); b?.click(); return !!b; })()`), true);
+    await waitFor('человек завершил оставленный процесс из строки плагина', async () => !(await alive(sh2)) && (await kept()) === '');
+    assert.equal(await load(), true);
+    await waitFor('echo снова активен', async () => (await state('echo')) === 'active' && /^pty \d+$/.test(await inView('echo', "document.getElementById('term-state').textContent")));
+    log('выключение спрашивает о pty: оставленный процесс виден в строке плагина и ждёт его, завершённый уходит, оставленный завершается человеком');
   }
   log('падение и зависание хоста: сторож перезапускает');
 
@@ -407,7 +452,7 @@ async function main() {
   log('документы: вкладка сессии в окне, «Закрыть» уводит onClose владельцу и завершает его сессию');
 
   // Живой claude нужен с входом в аккаунт и сетью: шаг по CYBORG_SMOKE_CLAUDE=1, в CI его нет.
-  if (process.env.CYBORG_SMOKE_CLAUDE === '1') {
+  if (liveClaude) {
     assert.match(await agentButtons(), /claude-code\+/, 'CYBORG_SMOKE_CLAUDE=1, а claude не найден в PATH оболочки входа');
     await inView('sessions', "document.querySelector('#agents cy-button[data-agent=\"claude-code\"]').click()");
     const screen = () => sessionScreen();
@@ -429,7 +474,29 @@ async function main() {
     await ev("document.querySelector('#documents-list .document-row button').click()");
     await waitFor('сессия claude закрыта', async () => (await docRows()) === '' && /вышла/.test(await inView('sessions', "document.getElementById('session-state').textContent")));
     log(`живой claude: оболочка входа по праву launch поставщика, ${reached}; вкладка закрывает сессию`);
-  } else log('живой claude пропущен: CYBORG_SMOKE_CLAUDE не задан');
+  } else {
+    await inView('sessions', "document.querySelector('#agents cy-button[data-agent=\"claude-code\"]').click()");
+    await waitFor('подставной claude запущен', async () => /fake claude: готов/.test(await sessionScreen()));
+    // Подписка на файл событий начинается с его конца: хук до неё не дошёл бы.
+    await sleep(500);
+    const say = (text) => inView('sessions', `(() => { const l = document.getElementById('line'); l.value = ${JSON.stringify(text)}; l.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); })()`);
+    const action = () => inView('sessions', "(() => { const b = document.querySelector('#actions cy-button'); const r = b?.querySelector('.reply'); return b && !b.closest('[hidden]') && r.getBoundingClientRect().height > 0 ? `${b.querySelector('.label').textContent}/${r.textContent}/${b.getAttribute('variant') === 'primary' ? 'отправит' : 'в строку'}` : ''; })()");
+    const received = async () => (await sessionScreen()).split('получено: smoke-reply').length - 1;
+    await say('go');
+    await waitFor('ход кончился: кнопка с репликой второй строкой отправляет сразу', async () => (await action()) === 'Продолжить/smoke-reply/отправит');
+    await inView('sessions', "document.querySelector('#actions cy-button').click()");
+    await waitFor('реплика кнопки ушла агенту с Enter', async () => (await received()) === 1);
+    await say('ask');
+    await waitFor('агент спрашивает: кнопка ставит реплику в строку', async () => (await action()) === 'Продолжить/smoke-reply/в строку' && /просит разрешение/.test(await sessionScreen()));
+    await inView('sessions', "document.querySelector('#actions cy-button').click()");
+    assert.equal(await inView('sessions', "document.getElementById('line').value"), 'smoke-reply', 'реплика не встала в строку ввода');
+    await sleep(300);
+    assert.equal(await received(), 1, 'кнопка ответила на вопрос агента за человека');
+    await waitFor('вкладка сессии подставного claude в панели «Документы»', async () => (await docRows()) === 'sessions · session:true');
+    await ev("document.querySelector('#documents-list .document-row button').click()");
+    await waitFor('сессия подставного claude закрыта', async () => (await docRows()) === '');
+    log('кнопки агента: реплика на кнопке второй строкой; Enter за человека - только после конца хода, при вопросе агента реплика встаёт в строку ввода');
+  }
 
   assert.equal(await button('flaky', 'Журнал'), true, 'у flaky нет кнопки «Журнал»');
   assert.equal(await text('#plugins-journal-title'), 'Журнал: flaky');

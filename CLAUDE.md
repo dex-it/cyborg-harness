@@ -1,3 +1,9 @@
+## Цель
+
+Cyborg Harness - микроядро для настольных приложений на плагинах: ядро не знает предметной области, агент, сессии, файлы, проекты и трекеры - равные плагины на одном API, а поставка приложения - список встроенных плагинов. Первый потребитель - Cyborg, рабочее место с несколькими сессиями агентов (docs/00-strategy/one-pager.md). Продукт репозитория - ядро `core/` и контракты `contracts/`.
+
+Плагины в `playground/plugins`, базовые тоже, - исключительно для проверки, пилота и демонстрации ядра: ими проверяют API и контракты, замеряют и показывают ядро вживую. Продуктом они не являются. Что должен соблюдать любой плагин, закрепляется в ядре и контрактах, а не только в плагине стенда.
+
 ## Сборка и гейты
 
 - Сборка - `npm run build` (playground в `playground/dist`)
@@ -12,7 +18,7 @@
 - `docs/` - проект Cyborg Harness: ресёрч, BRD и SRS фич (`CH-`), сценарии, SAD и ADR-CH, замеры хостов и фреймов, дорожная карта; вход - docs/README.md
 - `core/` - ядро плагинов по SAD без зависимостей: загрузчик, граф контрактов, хосты со сторожем, журнал и состояние плагинов; тесты `core/test`, сценарии `core/examples`
 - `contracts/` - пакет объявлений `@cyborg-harness/contracts`: карта контрактов имя -> мажорная версия -> тип; правила и пример - `contracts/README.md`, проверки компилятора - `core/test/contracts-types.ts`
-- `playground/` - Electron-приложение для проверки ядра вживую: `src/main` (служба PluginsService, хосты в utilityProcess, процесс хоста, схема cyborg-plugin и мост видов - views, замер фреймов - spike), `src/renderer` (окно: сессия агента слева, справа вкладки плагинов, видов, документов, сообщений, журнала и клавиш; страница замера spike и пробный вид probe), `plugins/` (базовые sessions, agent-claude-code, agent-shell, session-isolation, next-actions, pin-lock; демо echo, chat, alice, bob, flaky, later; код вида плагина - в его `ui/`), `scripts/` (build, smoke, spike-iframe и spike-hosts - замеры фреймов и хостов, xtest.py - настоящий ввод X11 для замера фреймов)
+- `playground/` - Electron-приложение для проверки ядра вживую: `src/main` (служба PluginsService, хосты в utilityProcess, процесс хоста, схема cyborg-plugin и мост видов - views, замер фреймов - spike), `src/renderer` (окно: сессия агента слева, справа вкладки плагинов, видов, документов, сообщений, журнала и клавиш; страница замера spike и пробный вид probe), `plugins/` (базовые sessions, agent-claude-code, agent-shell, session-isolation, next-actions, pin-lock; демо echo, chat, alice, bob, flaky, later; код вида плагина - в его `ui/`), `scripts/` (build, smoke, spike-iframe и spike-hosts - замеры фреймов и хостов, xtest.py - настоящий ввод X11 для замера фреймов, fake-claude.mjs - подставной claude для smoke)
 - `site/` - сборка сайта документации (Astro и Starlight); страницы лежат в `docs/guide/`; `npm run build` и `npm run verify` внутри `site/`, публикация - `.github/workflows/docs-site.yml`
 
 ## Правила

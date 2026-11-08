@@ -13,11 +13,23 @@ export const WINDOW_COMMANDS: Readonly<Record<string, string>> = {
   'cyborg.window.focus-prev': 'Shift+F6',
 };
 
+/** Владелец команд ядра в таблице клавиш: сочетание пользователя на них работает, как на команду плагина. */
+export const KERNEL_OWNER = 'cyborg.kernel';
+
+/** Команды, которые исполняет само ядро: им нужна среда, закрытая плагинам. Зовёт их приложение, не плагин. */
+export const KERNEL_COMMANDS = {
+  /** Показать файл воркспейса в файловом менеджере: сам файл плагинам закрыт как защищённый путь. */
+  revealWorkspace: 'cyborg.workspace.reveal',
+} as const;
+
 const MAX_PENDING = 8;
 const MAX_CHOICES = 12;
 const MAX_LABEL = 80;
 const MAX_TITLE = 200;
 const MAX_MESSAGE = 4000;
+const MAX_SEGMENT = 80;
+// Перевод строки, табуляция и невидимые знаки направления текста ломают строку заголовка в панели задач.
+const INVISIBLE = /[\p{Cc}\p{Cf}\u2028\u2029]/gu;
 
 /** Диалог, который приложение показывает сейчас; `at` у меню - в координатах фрейма вида. */
 export interface ShownDialog {
@@ -32,8 +44,16 @@ export interface WindowLock {
   readonly hideNotifications: boolean;
 }
 
+/** Края заголовка окна вокруг фрагментов плагинов. */
+export interface WindowTitle {
+  readonly workspace?: string | undefined;
+  readonly app: string;
+}
+
 export interface WindowSnapshot {
   readonly dialog?: ShownDialog;
+  /** Заголовок окна: воркспейс, фрагменты плагинов по их id, приложение - через « - ». */
+  readonly title: string;
   /** Ждут своей очереди, включая отложенные замком. */
   readonly queued: number;
   readonly locks: readonly WindowLock[];
@@ -62,7 +82,7 @@ function choices(field: string, raw: unknown): DialogChoice[] {
 /** Описание от вида - недоверенные данные: в окно уходит только разобранная копия. */
 /** Плагин с таким id мог бы объявить команду окна в своём пространстве имён. */
 export function reservedId(id: string): boolean {
-  return Object.keys(WINDOW_COMMANDS).some((c) => c.startsWith(`${id}.`));
+  return [...Object.keys(WINDOW_COMMANDS), ...Object.values(KERNEL_COMMANDS)].some((c) => c.startsWith(`${id}.`));
 }
 
 export function parseDialog(raw: unknown): DialogSpec {
@@ -84,17 +104,38 @@ export class WindowLayer {
   readonly #changed: (snapshot: WindowSnapshot) => void;
   readonly #queue: Pending[] = [];
   readonly #locks = new Map<string, WindowLock>();
+  readonly #titles = new Map<string, string>();
+  readonly #frame: WindowTitle;
   #shown: Pending | undefined;
   #seq = 0;
 
-  constructor(changed: (snapshot: WindowSnapshot) => void) {
+  constructor(changed: (snapshot: WindowSnapshot) => void, frame: WindowTitle = { app: 'Cyborg' }) {
     this.#changed = changed;
+    this.#frame = frame;
+  }
+
+  /** Под замком в заголовке только фрагменты владельцев замка, с `hideNotifications` - и без имени воркспейса: заголовок виден в панели задач и на экране замка. */
+  get title(): string {
+    const segments = [...this.#titles].filter(([id]) => this.allows(id)).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return [this.hideNotifications ? undefined : this.#frame.workspace, ...segments.map(([, s]) => s), this.#frame.app].filter((s) => s !== undefined && s !== '').join(' - ');
+  }
+
+  /** `undefined` или пустая после чистки строка снимает фрагмент. */
+  setTitle(pluginId: string, raw: unknown): void {
+    if (raw !== undefined && typeof raw !== 'string') throw new CoreError('Invalid', 'window.setTitle: фрагмент - строка или undefined');
+    const segment = raw?.replace(INVISIBLE, ' ').replace(/\s+/g, ' ').trim();
+    if (segment !== undefined && segment.length > MAX_SEGMENT) throw new CoreError('Invalid', `window.setTitle: фрагмент длиннее ${String(MAX_SEGMENT)} символов`);
+    const before = this.title;
+    if (segment) this.#titles.set(pluginId, segment);
+    else this.#titles.delete(pluginId);
+    if (this.title !== before) this.#changed(this.snapshot);
   }
 
   get snapshot(): WindowSnapshot {
     const shown = this.#shown;
     return {
       ...(shown && { dialog: { id: shown.id, pluginId: shown.pluginId, view: shown.view, spec: shown.spec } }),
+      title: this.title,
       queued: this.#queue.length,
       locks: [...this.#locks.values()],
     };
@@ -140,12 +181,13 @@ export class WindowLayer {
 
   /** Плагин выгружен: его диалоги закрываются с undefined. Замок остаётся - его снимает только владелец. */
   forget(pluginId: string): void {
+    const titled = this.#titles.delete(pluginId);
     const gone = this.#queue.filter((d) => d.pluginId === pluginId);
     for (const d of gone) this.#queue.splice(this.#queue.indexOf(d), 1);
     const shown = this.#shown?.pluginId === pluginId ? this.#shown : undefined;
     if (shown) this.#shown = undefined;
     for (const d of [...gone, ...(shown ? [shown] : [])]) d.resolve(undefined);
-    if (gone.length > 0 || shown) this.#next(true);
+    if (gone.length > 0 || shown || titled) this.#next(true);
   }
 
   lock(pluginId: string, hideNotifications: boolean): void {

@@ -48,7 +48,11 @@ export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[]
         case 'key-conflict':
         case 'key-ignored':
         case 'denied':
-          // Ни конфликт сочетаний, ни отказ шлюза о работе плагина ничего не говорят: плагин работает как обычно.
+        case 'unhandled-rejection':
+        case 'pty-expired':
+        case 'host-isolated':
+        case 'host-own-grouped':
+          // Ни конфликт сочетаний, ни отказ шлюза, ни удержанное хостом отклонение, ни завершённый по сроку pty, ни выбор хоста о работе плагина ничего не говорят: плагин работает как обычно.
           break;
         case 'host-restart':
           // Причиной остаётся падение: «перезапуск» без «почему» человеку ничего не говорит.
@@ -125,8 +129,12 @@ export function describeEntry(e: JournalEntry): string {
       return 'ждёт первой команды, показа вида или потребителя';
     case 'revived':
       return 'включён снова';
-    case 'denied':
-      return e.repeats ? `отказ ctx.os: ${e.detail} - ещё ${String(e.repeats)} раз за ${String(DENIED_WINDOW_MS / 1000)} с` : `отказ ctx.os: ${e.detail}`;
+    case 'denied': {
+      const what = `${e.reason === 'window' ? 'отказ окна' : 'отказ ctx.os'}: ${e.detail}`;
+      return e.repeats ? `${what} - ещё ${String(e.repeats)} раз за ${String(DENIED_WINDOW_MS / 1000)} с` : what;
+    }
+    case 'pty-expired':
+      return `терминал ${e.id} (${e.program}) завершён: плагин не подхватил его за ${String(e.graceMs / 1000)} с`;
     case 'unloaded': {
       const base = e.by === e.pluginId ? 'выгружен' : `выгружен вместе с ${e.by}: требует его контракт`;
       const what = e.keptPty ? `${base}; процессов в терминале оставлено: ${String(e.keptPty)}` : base;
@@ -138,6 +146,10 @@ export function describeEntry(e: JournalEntry): string {
       return `plugins.keybindings: ${e.key} -> ${String(e.command)} не применено: ${e.reason}`;
     case 'host-isolated':
       return `сторонний плагин не делит хост: группа ${e.group} из plugins.hosts не действует, работает в своём хосте ${e.hostId}`;
+    case 'unhandled-rejection':
+      return `необработанное отклонение промиса: ${e.error}`;
+    case 'host-own-grouped':
+      return `манифест просит свой хост, но группа ${e.group} из plugins.hosts сажает его к ${list(e.neighbours)}: его зависание перезапустит и их`;
     case 'switched-off':
       return `выключен, сбоев подряд: ${e.strikes}` + (e.affects.length ? `; его контракты брали: ${list(e.affects)}` : '');
     case 'host-down': {
@@ -166,6 +178,7 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
     case 'key-conflict':
     case 'key-ignored':
     case 'denied':
+    case 'pty-expired':
       return 'warn';
     case 'deactivated':
       return e.error ? 'warn' : 'info';
@@ -174,8 +187,10 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
       return e.result.status === 'ok' ? 'info' : 'error';
     case 'safe-mode':
     case 'skipped':
+    case 'unhandled-rejection':
     case 'host-down':
     case 'host-isolated':
+    case 'host-own-grouped':
       return 'warn';
     default:
       return 'error';

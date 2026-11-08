@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { load, type JournalEntry, type Kernel } from '../src/loader.ts';
+import { pluginStatuses } from '../src/status.ts';
 import { isRecord } from '../src/wire.ts';
 import { forkHosts, type SpawnHost } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
@@ -87,7 +88,14 @@ test('после N сбоев виновник выключается, потр�
 
 // Два плагина из поставки в одном хосте: busy виснет вне вызова ядра, calm - невиновный сосед.
 const shared = [
-  { id: 'busy', version: '1.0.0', engines: { cyborg: '^1' }, commands: { 'busy.timer': {}, 'busy.late': {}, 'busy.exit': {}, 'busy.focus': {}, 'busy.after': {} } },
+  {
+    id: 'busy',
+    version: '1.0.0',
+    engines: { cyborg: '^1' },
+    commands: Object.fromEntries(
+      ['timer', 'late', 'exit', 'focus', 'after', 'reject.timer', 'reject.focus', 'reject.await', 'throw.microtask', 'throw.tick', 'host.throw', 'host.reject', 'host.timer'].map((name) => [`busy.${name}`, name === 'reject.await' ? { args: ['number'] } : {}]),
+    ),
+  },
   { id: 'calm', version: '1.0.0', engines: { cyborg: '^1' }, commands: { 'calm.echo': { args: ['any'] }, 'calm.pid': {} } },
 ];
 
@@ -180,6 +188,106 @@ test('сторож: процесс хоста убит снаружи - сбой
     process.kill((await k.run('calm.pid')) as number, 'SIGKILL');
     await hostDown(k);
     assert.deepEqual(downs(k), [['shared', 'crash', [], []]]);
+  } finally {
+    await k.unload();
+  }
+});
+
+const rejections = (k: Kernel) =>
+  k.journal.filter((e): e is Extract<JournalEntry, { kind: 'unhandled-rejection' }> => e.kind === 'unhandled-rejection').map((e) => [e.pluginId, e.error]);
+
+async function rejected(k: Kernel, run: () => Promise<unknown>): Promise<void> {
+  const before = rejections(k).length;
+  await run();
+  for (let i = 0; i < 100 && rejections(k).length === before; i++) await sleep(20);
+}
+
+test('сторож: необработанное отклонение плагина - запись на него, хост и сосед живут', async () => {
+  const k = await startShared(5);
+  try {
+    const pid = await k.run('calm.pid');
+    await rejected(k, () => k.run('busy.reject.timer'));
+    await rejected(k, async () => {
+      await k.run('busy.reject.focus');
+      k.emit({ kind: 'focus', focused: true });
+    });
+    await rejected(k, () => k.run('busy.reject.await', 0));
+    assert.deepEqual(rejections(k), [
+      ['busy', 'busy: таймер'],
+      ['busy', 'busy: слушатель'],
+      ['busy', 'busy: после await'],
+    ]);
+    assert.deepEqual(downs(k), []);
+    assert.equal(await k.run('calm.pid'), pid);
+    assert.deepEqual(k.active, ['busy', 'calm']);
+    assert.equal(pluginStatuses(k.journal).find((s) => s.id === 'busy')?.state, 'active');
+  } finally {
+    await k.unload();
+  }
+});
+
+test('сторож: отклонение после await вменяется начавшему цепочку, а не соседу, чей код шёл последним', async () => {
+  const k = await startShared();
+  try {
+    await rejected(k, async () => {
+      await k.run('busy.reject.await', 150);
+      for (let i = 0; i < 5; i++) await k.run('calm.echo', i);
+    });
+    assert.deepEqual(rejections(k), [['busy', 'busy: после await']]);
+  } finally {
+    await k.unload();
+  }
+});
+
+test('сторож: исключение в queueMicrotask и process.nextTick - хост падает, виновник назван', async () => {
+  const k = await startShared();
+  try {
+    for (const command of ['busy.throw.microtask', 'busy.throw.tick']) {
+      await k.run(command);
+      await hostDown(k);
+    }
+    assert.deepEqual(downs(k), [
+      ['shared', 'crash', ['busy'], []],
+      ['shared', 'crash', ['busy'], []],
+    ]);
+    assert.deepEqual(k.active, ['busy', 'calm']);
+  } finally {
+    await k.unload();
+  }
+});
+
+test('сторож: три отклонения подряд выключают только виновника - хост не падает и не бросается, сосед работает', async () => {
+  const k = await startShared(3);
+  try {
+    const pid = await k.run('calm.pid');
+    for (let i = 0; i < 3; i++) await rejected(k, () => k.run('busy.reject.timer'));
+    await k.idle();
+    const off = k.journal.filter((e) => e.kind === 'switched-off');
+    assert.deepEqual(off.map((e) => [e.pluginId, e.strikes]), [['busy', 3]]);
+    assert.equal(k.journal.some((e) => e.kind === 'host-abandoned'), false);
+    assert.deepEqual(downs(k), []);
+    assert.deepEqual(k.active, ['calm']);
+    assert.equal(await k.run('calm.pid'), pid);
+    const busy = pluginStatuses(k.journal).find((s) => s.id === 'busy');
+    assert.deepEqual([busy?.state, busy?.cause?.kind, busy?.revivable], ['stopped', 'switched-off', true]);
+  } finally {
+    await k.unload();
+  }
+});
+
+test('сторож: исключение, отклонение и таймер вне цепочки плагина - сбой кода хоста, виновника нет', async () => {
+  const k = await startShared();
+  try {
+    for (const command of ['busy.host.throw', 'busy.host.reject', 'busy.host.timer']) {
+      await k.run(command);
+      await hostDown(k);
+    }
+    assert.deepEqual(downs(k), [
+      ['shared', 'crash', [], []],
+      ['shared', 'crash', [], []],
+      ['shared', 'crash', [], []],
+    ]);
+    assert.deepEqual(rejections(k), []);
   } finally {
     await k.unload();
   }
