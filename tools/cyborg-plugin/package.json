@@ -1,0 +1,21 @@
+{
+  "name": "cyborg-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Инструмент автора плагина Cyborg Harness: check, build, pack - проверка состава, бандл главной части, сборка видов, упаковка",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": { "node": ">=24" },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "bin": { "cyborg-plugin": "./dist/src/cli-bin.js" },
+  "exports": {
+    ".": { "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md"],
+  "dependencies": {
+    "@cyborg-harness/core": "^0.1.0",
+    "esbuild": "^0.28.2"
+  }
+}

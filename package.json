@@ -4,19 +4,22 @@
   "private": true,
   "workspaces": [
     "contracts",
-    "core"
+    "core",
+    "tools/cyborg-plugin"
   ],
   "description": "Ядро плагинов Cyborg Harness и playground-приложение на Electron для проверки его вживую",
   "main": "playground/dist/main.js",
   "scripts": {
     "build:core": "node core/scripts/build.mjs",
-    "prebuild": "npm run build:core",
+    "build:tools": "node tools/cyborg-plugin/scripts/build.mjs",
+    "build:packages": "npm run build:core && npm run build:tools",
+    "prebuild": "npm run build:packages",
     "build": "node playground/scripts/build.mjs",
     "start": "npm run build && electron .",
-    "pretypecheck": "npm run build:core",
-    "typecheck": "node node_modules/typescript7/bin/tsc --noEmit -p core && node node_modules/typescript7/bin/tsc --noEmit -p core/elements && node node_modules/typescript7/bin/tsc --noEmit -p playground",
-    "pretest": "npm run build:core",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-timeout=120000 'core/test/*.test.ts' 'playground/src/**/*.test.ts' 'playground/test/*.test.ts'",
+    "pretypecheck": "npm run build:packages",
+    "typecheck": "node node_modules/typescript7/bin/tsc --noEmit -p core && node node_modules/typescript7/bin/tsc --noEmit -p core/elements && node node_modules/typescript7/bin/tsc --noEmit -p tools/cyborg-plugin && node node_modules/typescript7/bin/tsc --noEmit -p playground",
+    "pretest": "npm run build:packages",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-timeout=120000 'core/test/*.test.ts' 'playground/src/**/*.test.ts' 'playground/test/*.test.ts' 'tools/cyborg-plugin/test/*.test.ts'",
     "demo": "node core/examples/run.ts",
     "smoke": "npm run build && node playground/scripts/smoke.mjs",
     "spike": "npm run build && node playground/scripts/spike-iframe.mjs",
@@ -24,7 +27,7 @@
     "spike:gateway": "npm run build && node playground/scripts/spike-gateway.mjs",
     "spike:pty": "node playground/scripts/spike-pty.mjs",
     "spike:pty-restore": "node playground/scripts/spike-pty-restore.mjs",
-    "prelint": "npm run build:core",
+    "prelint": "npm run build:packages",
     "lint": "eslint --max-warnings 0 .",
     "postinstall": "electron-rebuild -f -w node-pty"
   },

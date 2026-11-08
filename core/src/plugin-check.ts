@@ -12,7 +12,7 @@ import { satisfies } from './semver.ts';
 
 const CONTRACTS = '@cyborg-harness/contracts';
 /** Точка входа главной части: первый найденный файл; тот же порядок у загрузки плагинов стенда. */
-const ENTRY_FILES = ['index.mjs', 'index.js', 'index.ts'];
+export const ENTRY_FILES: readonly string[] = ['index.mjs', 'index.js', 'index.ts'];
 const TEST_DIRS = new Set(['test', 'tests', '__tests__']);
 
 /** Нарушение: `file` - путь от каталога плагина, `line` - только у разбора исходников. */
