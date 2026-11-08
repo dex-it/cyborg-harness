@@ -5,8 +5,6 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 
 // P-02: ядро как пакет @cyborg-harness/core. Тесты про состав и форму пакета; сборка - `npm run build:core` (её гоняют pretest/pretypecheck/prelint/prebuild).
-const dbg = (m: string) => process.stderr.write(`DBG package ${Date.now()} ${m}\n`);
-dbg('start');
 const core = path.resolve(import.meta.dirname, '..');
 const root = path.resolve(core, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(core, 'package.json'), 'utf8')) as {
@@ -60,10 +58,8 @@ describe('package.json ядра', () => {
 
 describe('потребители в репозитории', () => {
   it('playground берёт ядро через пакет, а не относительными путями в core/src и core/elements', () => {
-    dbg('walk begin');
     const playground = path.join(root, 'playground');
     const files = walk(playground).filter((f) => /\.(ts|mjs)$/.test(f) && !f.includes(`${path.sep}dist${path.sep}`) && !f.includes(`${path.sep}node_modules${path.sep}`));
-    dbg('walk end');
     assert.ok(files.length > 50, `файлов playground: ${files.length}`);
     const bad = files.flatMap((f) =>
       fs
@@ -109,9 +105,7 @@ describe('собранный пакет (core/dist)', () => {
   });
 
   it('npm pack: в архиве dist, package.json и README, без исходников и тестов', () => {
-    dbg('pack begin');
     const out = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: core, encoding: 'utf8', timeout: 90_000, killSignal: 'SIGKILL' });
-    dbg('pack end');
     const [pack] = JSON.parse(out) as [{ files: { path: string }[] }];
     const names = pack.files.map((f) => f.path);
     assert.ok(names.includes('package.json') && names.includes('README.md'), 'нет package.json или README.md');
