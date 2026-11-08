@@ -45,7 +45,7 @@ describe('пример из README адаптера', { timeout: 120_000 }, () =
 
   it('компилятор принимает пример: имена и типы пакета на месте', () => {
     try {
-      execFileSync(process.execPath, [tsc, '-p', work], { cwd: work, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 90_000 });
+      execFileSync(process.execPath, [tsc, '-p', work], { cwd: work, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 90_000, killSignal: 'SIGKILL' });
     } catch (error) {
       const e = error as { stdout?: string; stderr?: string };
       assert.fail(`tsc отказал:\n${e.stdout ?? ''}${e.stderr ?? ''}`);
