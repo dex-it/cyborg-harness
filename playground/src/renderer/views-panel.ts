@@ -12,7 +12,18 @@ export interface ViewsPort {
 interface Box {
   readonly figure: HTMLElement;
   readonly live: boolean;
+  /** Виды, из которых собран фрейм: сменился состав - фрейм собирается заново. */
+  readonly names: string;
   readonly update: (row: PluginRow) => void;
+}
+
+/** Имена видов плагина по порядку манифеста; у строки без `views` (старый снимок) - один безымянный вид по `view`. */
+export function viewList(row: PluginRow): readonly { readonly name: string; readonly url: string }[] {
+  return row.views ?? (row.view === undefined ? [] : [{ name: '', url: row.view }]);
+}
+
+export function viewNames(row: PluginRow): string {
+  return viewList(row).map((v) => v.name).join(' ');
 }
 
 /** Что показать на месте вида: фрейм, фрейм под плашкой или заглушку. */
@@ -42,7 +53,7 @@ export class ViewsPanel {
     const wanted = new Map(plugins.flatMap((p) => (viewMode(p) === undefined ? [] : [[p.id, p] as const])));
     for (const [id, box] of this.boxes) {
       const row = wanted.get(id);
-      if (row && (viewMode(row) !== 'placeholder') === box.live) continue;
+      if (row && (viewMode(row) !== 'placeholder') === box.live && viewNames(row) === box.names) continue;
       box.figure.remove();
       this.boxes.delete(id);
     }
@@ -72,12 +83,18 @@ export class ViewsPanel {
     const caption = el('figcaption', 'view-caption');
     caption.append(el('span', 'view-origin', row.view ?? ''), toggle);
     const body = el('div', 'view-body');
-    const frame = document.createElement('iframe');
-    frame.src = row.view ?? '';
-    frame.title = `Вид ${row.id}`;
+    // Плагин с несколькими `ui.views` показывает все: по фрейму на вид, в порядке манифеста.
+    const list = viewList(row);
+    const frames = list.map((v) => {
+      const frame = document.createElement('iframe');
+      frame.src = v.url;
+      frame.dataset.view = v.name;
+      frame.title = list.length > 1 ? `Вид ${row.id}: ${v.name}` : `Вид ${row.id}`;
+      return frame;
+    });
     const plaque = el('div', 'view-plaque', 'Перезапуск…');
     plaque.setAttribute('role', 'status');
-    body.append(frame, plaque);
+    body.append(...frames, plaque);
     figure.append(caption, body);
     toggle.addEventListener('click', () => {
       // Свёрнутый вид остаётся в DOM: display:none у обёртки, а не снятие фрейма - так документ плагина не теряет состояние.
@@ -90,11 +107,12 @@ export class ViewsPanel {
     return {
       figure,
       live: true,
+      names: viewNames(row),
       update: (next) => {
         const restarting = viewMode(next) === 'restarting';
         figure.dataset.state = next.state;
         plaque.hidden = !restarting;
-        frame.inert = restarting;
+        for (const frame of frames) frame.inert = restarting;
       },
     };
   }
@@ -108,6 +126,7 @@ export class ViewsPanel {
     return {
       figure,
       live: false,
+      names: viewNames(row),
       update: (next) => {
         figure.dataset.state = next.state;
         reason.textContent = next.reason ?? 'Плагин снят';

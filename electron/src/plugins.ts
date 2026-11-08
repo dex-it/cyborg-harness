@@ -465,7 +465,7 @@ export class PluginsService {
         commands,
         permissions: manifest ? describePermissions(manifest.permissions) : [],
         ...(manifest && { version: manifest.version }),
-        ...(s.state !== 'disabled' && manifest?.ui && Object.keys(manifest.ui.views).length > 0 && this.views.has(s.id) && { view: `${viewOrigin(s.id)}/` }),
+        ...(s.state !== 'disabled' && manifest?.ui && Object.keys(manifest.ui.views).length > 0 && this.views.has(s.id) && { view: `${viewOrigin(s.id)}/`, views: Object.keys(manifest.ui.views).map((name, i) => ({ name, url: i === 0 ? `${viewOrigin(s.id)}/` : `${viewOrigin(s.id)}/?view=${encodeURIComponent(name)}` })) }),
         ...(manifest?.ui?.overlay !== undefined && this.views.has(s.id) && { overlay: `${viewOrigin(s.id)}/?view=overlay` }),
         ...(host !== undefined && { host }),
         ...(pid !== undefined && { pid }),

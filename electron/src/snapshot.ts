@@ -23,12 +23,21 @@ export interface PluginRow {
   readonly commands: readonly string[];
   /** Права главной части словами - те же строки покажет окно согласия. */
   readonly permissions: readonly string[];
-  /** Адрес вида для <iframe>: есть у включённого плагина с `ui` в манифесте; у снятого окно рисует заглушку вместо фрейма. */
+  /** Адрес вида для <iframe>: есть у включённого плагина с `ui` в манифесте; у снятого окно рисует заглушку вместо фрейма. Это адрес первого вида из `views`. */
   readonly view?: string;
+  /** Все виды `ui.views` по порядку манифеста, у каждого свой адрес: плагин с двумя видами показывает оба. */
+  readonly views?: readonly PluginViewRow[];
   /** Адрес экрана замка `ui.overlay`: окно показывает его, пока замок плагина стоит. */
   readonly overlay?: string;
   /** Процессы, оставленные человеком при выключении: без строки в окне их не видно до выхода. */
   readonly kept?: readonly KeptPtyRow[];
+}
+
+export interface PluginViewRow {
+  /** Имя вида из `ui.views`. */
+  readonly name: string;
+  /** Адрес для <iframe>: первый вид открывается по `cyborg-plugin://<id>/`, остальные по `/?view=<имя>`. */
+  readonly url: string;
 }
 
 export interface KeptPtyRow {

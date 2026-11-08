@@ -338,3 +338,30 @@ test('plugins.enabled из файла воркспейса без перезап
   assert.deepEqual(kernel.active, ['a', 'b']);
   assert.deepEqual(problems, ['plugins.enabled: c - включатся после перезапуска']);
 });
+
+test('несколько видов: оба адреса в строке плагина по порядку манифеста, первый остаётся в view; у невключённого и без ui видов нет', async () => {
+  const userData = tmp();
+  const dir = path.join(userData, 'plugins');
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['duo', 'solo', 'bare'] } }));
+  plugin(dir, 'duo', { ui: { views: { main: './ui/main.js', 'side-tree': './ui/tree.js' } } }, 'export default {}');
+  plugin(dir, 'solo', { ui: { views: { main: './ui/main.js' } } }, 'export default {}');
+  plugin(dir, 'bare', {}, 'export default {}');
+  plugin(dir, 'spare', { ui: { views: { main: './ui/main.js' } } }, 'export default {}');
+  const service = new PluginsService({ changed: () => {}, alert: () => {} }, () => 1);
+  await service.start({ userData, builtinDir: path.join(userData, 'нет'), spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {} });
+  try {
+    const rows = Object.fromEntries(service.snapshot().plugins.map((p) => [p.id, p]));
+    assert.deepEqual(rows.duo?.views, [
+      { name: 'main', url: 'cyborg-plugin://duo/' },
+      { name: 'side-tree', url: 'cyborg-plugin://duo/?view=side-tree' },
+    ]);
+    assert.equal(rows.duo.view, 'cyborg-plugin://duo/', 'view - адрес первого вида, как был');
+    assert.deepEqual(rows.solo?.views, [{ name: 'main', url: 'cyborg-plugin://solo/' }]);
+    assert.equal(rows.bare?.views, undefined);
+    assert.equal(rows.spare?.views, undefined, 'невключённому окно вид не рисует');
+    assert.deepEqual(await service.disable('duo'), {});
+    assert.equal(service.snapshot().plugins.find((p) => p.id === 'duo')?.views?.length, 2, 'снятому окно рисует заглушку на месте видов');
+  } finally {
+    await service.unload();
+  }
+});

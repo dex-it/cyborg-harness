@@ -183,6 +183,7 @@ button:focus-visible {
   position: relative;
   display: flex;
   flex: 1;
+  gap: 6px;
   min-height: 0;
 }
 

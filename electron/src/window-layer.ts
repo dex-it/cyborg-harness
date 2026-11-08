@@ -71,7 +71,9 @@ export class WindowLayerView {
 
   private frameOf(d: ShownDialog): HTMLIFrameElement | null {
     const scope = d.view === 'overlay' ? this.lockLayer : this.main;
-    return scope.querySelector(`[data-plugin="${CSS.escape(d.pluginId)}"] iframe`);
+    // Плагин с несколькими видами: диалог ставится у фрейма своего вида (`data-view`), а не у первого.
+    const plugin = `[data-plugin="${CSS.escape(d.pluginId)}"]`;
+    return scope.querySelector(`${plugin} iframe[data-view="${CSS.escape(d.view)}"]`) ?? scope.querySelector(`${plugin} iframe`);
   }
 
   private show(d: ShownDialog): void {
