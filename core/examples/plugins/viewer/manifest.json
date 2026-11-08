@@ -2,5 +2,5 @@
   "id": "viewer",
   "version": "1.1.0",
   "engines": { "cyborg": "^1" },
-  "provides": { "cyborg.tab": "1.1" }
+  "provides": { "demo.tab": "1.1" }
 }

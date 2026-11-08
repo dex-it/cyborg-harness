@@ -9,11 +9,11 @@ description: "Как объявить свой контракт, отдать е
 
 ```jsonc
 // поставщик
-"provides": { "cyborg.files": ["1.4", "2.0"] }
+"provides": { "demo.files": ["1.4", "2.0"] }
 // потребитель
-"requires": { "cyborg.files": "^2" },
-"optional": { "cyborg.projects": "^1" },
-"consumes": { "cyborg.tab": "^1" }
+"requires": { "demo.files": "^2" },
+"optional": { "demo.projects": "^1" },
+"consumes": { "demo.tab": "^1" }
 ```
 
 `requires` и `optional` - кратность one (один поставщик), `consumes` - many (все поставщики списком). Два поставщика при кратности one - отказ при загрузке, выбор за пользователем. Недостающий `requires`, цикл и несовместимая версия мешают плагину загрузиться, и причина попадает в журнал.
@@ -22,7 +22,7 @@ description: "Как объявить свой контракт, отдать е
 
 ```ts
 // поставщик: версия берётся из provides, тип - из карты Contracts
-ctx.contracts.provide('cyborg.files', '2.0', {
+ctx.contracts.provide('demo.files', '2.0', {
   readText: async (path: string) => {
     const text = disk.get(path);
     return text === undefined ? undefined : { path, text, size: text.length };
@@ -30,12 +30,12 @@ ctx.contracts.provide('cyborg.files', '2.0', {
 });
 
 // потребитель кратности one
-const files = ctx.contracts.get('cyborg.files', 2); // Remote<FilesV2> | undefined
+const files = ctx.contracts.get('demo.files', 2); // Remote<FilesV2> | undefined
 const file = await files?.readText('/notes.txt');
 
 // потребитель кратности many
-const tabs = ctx.contracts.all('cyborg.tab', 1);    // Provider<Remote<Tab>>[]
-ctx.subscriptions.add(ctx.contracts.onChange('cyborg.tab', () => refresh()));
+const tabs = ctx.contracts.all('demo.tab', 1);    // Provider<Remote<Tab>>[]
+ctx.subscriptions.add(ctx.contracts.onChange('demo.tab', () => refresh()));
 ```
 
 Мажорная версия в `get` и `all` обязательна: по ней компилятор выводит тип, а ядро сверяет её с диапазоном манифеста. Версия вне диапазона - `NotDeclared`. Результат `get` - `Remote<T>`: каждый метод возвращает `Promise`, даже если в типе он синхронный, а поле данных приходит снимком на момент `provide`.
@@ -78,7 +78,7 @@ export interface Clock {
 
 ```json
 "provides": {
-  "cyborg.files": {
+  "demo.files": {
     "version": "1.0",
     "guard": { "read": { "fs.read": 0 }, "open": { "fs.read": "0.path" } }
   }
