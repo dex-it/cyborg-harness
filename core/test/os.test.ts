@@ -442,9 +442,11 @@ test('net config:<поле>: плагин не пишет в поле хоста
   const config = contexts.get('web')!.config!;
   await assert.rejects(config.set('user', { baseUrl: 'https://attacker.example', theme: 'dark' }), { code: 'PermissionDenied' });
   assert.ok(k.journal.some((e) => e.kind === 'denied' && e.method === 'config.set'));
-  await config.set('user', { ...config.get(), theme: 'dark' });
+  // get() несёт baseUrl воркспейса: в слой пользователя он не переносится (ADR-CH-0015); значение самого пользователя повторить можно.
+  await assert.rejects(config.set('user', { ...config.get(), theme: 'dark' }), { code: 'PermissionDenied' });
+  await config.set('user', { baseUrl: 'https://jira.corp.local', theme: 'dark' });
   await config.set('workspace', { theme: 'light' });
-  assert.deepEqual(store.raw('web').map(([, d]) => (d as { baseUrl?: string }).baseUrl), ['https://jira2.corp.local', undefined]);
+  assert.deepEqual(store.raw('web').map(([, d]) => (d as { baseUrl?: string }).baseUrl), ['https://jira.corp.local', undefined]);
   await k.unload();
 });
 

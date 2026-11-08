@@ -90,7 +90,7 @@ function gatewayOs(env: OsEnvironment, m: PluginManifest, denied: string[]): Pro
   const gateway = new OsGateway(
     env,
     (d) => denied.push(`${d.method}: ${d.detail}`),
-    () => ({}),
+    () => ({ trusted: {}, untrusted: {} }),
     (_pluginId, method, params) => {
       const p = params as { id: string; data?: string };
       if (method === 'pty.data' || method === 'fs.change') listeners.get(p.id)?.(p);

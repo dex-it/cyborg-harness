@@ -254,6 +254,24 @@ const str = (method: string, v: unknown, name: string): string => {
   return v;
 };
 
+/** Config плагина для права `net`: `trusted` - слой пользователя, `untrusted` - остальные слои (файл воркспейса). */
+export interface ConfigView {
+  readonly trusted: Readonly<Record<string, unknown>>;
+  readonly untrusted: Readonly<Record<string, unknown>>;
+}
+
+/** Хост записи `net`: имя как есть либо значение поля `config:<поле>` из `config`; нет значения - пусто. */
+function configHost(entry: string, config: Readonly<Record<string, unknown>>): string[] {
+  if (!entry.startsWith('config:')) return [entry.toLowerCase()];
+  const v = config[entry.slice('config:'.length)];
+  if (typeof v !== 'string') return [];
+  try {
+    return [new URL(v).host.toLowerCase()];
+  } catch {
+    return [v.toLowerCase()];
+  }
+}
+
 /** Причина отказа правила `process`, `pty` или `launch`; undefined - запуск подходит. */
 function ruleRefusal(m: PluginManifest, key: 'process' | 'pty' | 'launch', program: string, argv: readonly string[], envNames: readonly string[]): string | undefined {
   const rule = (m.permissions[key] ?? []).find((r) => {
@@ -272,11 +290,11 @@ function ruleRefusal(m: PluginManifest, key: 'process' | 'pty' | 'launch', progr
 export class OsGateway {
   readonly #env: OsEnvironment;
   readonly #deny: (denial: Denial) => void;
-  readonly #configOf: (pluginId: string) => Readonly<Record<string, unknown>>;
+  readonly #configOf: (pluginId: string) => ConfigView;
   readonly #manifestOf: (pluginId: string) => PluginManifest | undefined;
   readonly #roots = new Map<string, readonly string[]>();
-  /** Хосты `config:<поле>` на момент активации или правки файла человеком: своя запись плагина в config их не меняет. */
-  readonly #approved = new Map<string, Readonly<Record<string, unknown>>>();
+  /** Config на момент активации или правки файла человеком: своя запись плагина в config его не меняет. */
+  readonly #approved = new Map<string, ConfigView>();
 
   readonly #pty: PtyTable | undefined;
   readonly #push: (pluginId: string, method: PushMethod, params: unknown) => void;
@@ -298,7 +316,7 @@ export class OsGateway {
   constructor(
     env: OsEnvironment,
     deny: (denial: Denial) => void,
-    configOf: (pluginId: string) => Readonly<Record<string, unknown>> = () => ({}),
+    configOf: (pluginId: string) => ConfigView = () => ({ trusted: {}, untrusted: {} }),
     push: (pluginId: string, method: PushMethod, params: unknown) => void = () => undefined,
     manifestOf: (pluginId: string) => PluginManifest | undefined = () => undefined,
     grants?: GrantStore,
@@ -865,19 +883,15 @@ export class OsGateway {
       throw new CoreError('Invalid', `${method}: адрес не URL`);
     }
     if (url.protocol !== 'https:' && url.protocol !== 'http:') throw this.#denied(m, method, `схема ${url.protocol}`);
-    const config = this.#approved.get(m.id) ?? {};
-    const hosts = (m.permissions.net ?? []).flatMap((h) => {
-      if (!h.startsWith('config:')) return [h.toLowerCase()];
-      const v = config[h.slice('config:'.length)];
-      if (typeof v !== 'string') return [];
-      try {
-        return [new URL(v).host.toLowerCase()];
-      } catch {
-        return [v.toLowerCase()];
-      }
-    });
+    const { trusted, untrusted } = this.#approved.get(m.id) ?? { trusted: {}, untrusted: {} };
+    const net = m.permissions.net ?? [];
+    const hosts = net.flatMap((h) => configHost(h, trusted));
     // Запись без порта - только порт схемы по умолчанию: URL сводит его к пустой строке.
-    if (!hosts.includes(url.host.toLowerCase())) throw this.#denied(m, method, `хост не в net: ${url.host}`);
+    if (!hosts.includes(url.host.toLowerCase())) {
+      // Значение из файла воркспейса хоста не даёт (ADR-CH-0015): причина называет поле, чтобы человек знал, где его задать.
+      const field = net.find((h) => h.startsWith('config:') && configHost(h, untrusted).includes(url.host.toLowerCase()));
+      throw this.#denied(m, method, field === undefined ? `хост не в net: ${url.host}` : `хост не в net: ${url.host}; ${field} задан в файле воркспейса, а хосты из настройки берутся только из файла пользователя`);
+    }
     const request = isRecord(args[1]) ? args[1] : {};
     const headers = isRecord(request.headers) ? Object.fromEntries(Object.entries(request.headers).filter((e): e is [string, string] => typeof e[1] === 'string')) : {};
     const timeout = typeof request.timeoutMs === 'number' && request.timeoutMs > 0 ? request.timeoutMs : FETCH_TIMEOUT_MS;

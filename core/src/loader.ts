@@ -3,7 +3,7 @@ import type { NotifyClick, PtyInfo } from '@cyborg-harness/contracts';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { VERSION_KEY, type SectionResult, type SectionStore } from './config.ts';
+import { TRUSTED_LAYER, VERSION_KEY, type SectionResult, type SectionStore } from './config.ts';
 import type { Disposable } from './disposable.ts';
 import { appendBounded, DeniedCollapse } from './journal.ts';
 import { CoreError, errorMessage, ignore } from './errors.ts';
@@ -411,7 +411,12 @@ export async function load(options: LoadOptions): Promise<Kernel> {
   const gateway = new OsGateway(
     osEnv,
     (d) => record({ pluginId: d.pluginId, kind: 'denied', method: d.method, detail: d.detail, ...(d.reason && { reason: d.reason }) }),
-    (id) => Object.assign({}, ...(options.config?.raw(id) ?? []).map(([, data]) => (isRecord(data) ? data : {}))) as Record<string, unknown>,
+    (id) => {
+      // Права расширяет только слой пользователя (ADR-CH-0015): файл воркспейса приходит из репозитория команды.
+      const layers = options.config?.raw(id) ?? [];
+      const merged = (trusted: boolean) => Object.assign({}, ...layers.filter(([layer]) => (layer === TRUSTED_LAYER) === trusted).map(([, data]) => (isRecord(data) ? data : {}))) as Record<string, unknown>;
+      return { trusted: merged(true), untrusted: merged(false) };
+    },
     (id, method, params) => {
       const host = hosts.get(hostOf(id) ?? id);
       if (host && !host.down) host.endpoint.notify(method, params);
@@ -893,9 +898,10 @@ export async function load(options: LoadOptions): Promise<Kernel> {
 
   // Поле из net "config:<поле>" задаёт человек: запись плагина в него расширила бы его сеть после перезапуска.
   function guardNetFields(m: PluginManifest, data: Record<string, unknown>): void {
-    const layers = (options.config?.raw(m.id) ?? []).map(([, d]) => (isRecord(d) ? d : {}));
+    // Повторить можно только значение слоя пользователя: значение из файла воркспейса, записанное в слой пользователя, стало бы доверенным.
+    const layers = (options.config?.raw(m.id) ?? []).filter(([layer]) => layer === TRUSTED_LAYER).map(([, d]) => (isRecord(d) ? d : {}));
     const fields = (m.permissions.net ?? []).filter((h) => h.startsWith('config:')).map((h) => h.slice('config:'.length));
-    // Удалить поле или повторить значение, заданное человеком в любом слое, можно: новых хостов это не даёт.
+    // Удалить поле или повторить значение, заданное человеком в слое пользователя, можно: новых хостов это не даёт.
     const touched = fields.filter((f) => data[f] !== undefined && !layers.some((d) => isDeepStrictEqual(d[f], data[f])));
     if (touched.length === 0) return;
     const detail = `поля ${touched.join(', ')} задают хосты net - их меняет только человек`;
