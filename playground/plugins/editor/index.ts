@@ -4,7 +4,10 @@ import { checkSettings, type Problem } from './check.ts';
 // Пробный редактор (PL-05): файлы лежат в каталоге данных плагина, виду их отдают команды; схему настроек проверяет владелец, а не вид.
 const SEED: Readonly<Record<string, string>> = {
   'settings.json': '{\n  "fontSize": 14,\n  "theme": "dark",\n  "keys": ["Ctrl+S"]\n}\n',
-  'sample.ts': "// Подсветка и подсказки TypeScript работают в воркере Monaco.\nexport function greet(name: string): string {\n  return `Привет, ${name}`;\n}\n\nconsole.log(greet('Cyborg'));\n",
+  // Ошибка типа в конце файла: маркер приходит из воркера TypeScript, поэтому его видно без ввода.
+  'sample.ts': "// Подсветка и подсказки TypeScript работают в воркере Monaco.\nexport function greet(name: string): string {\n  return `Привет, ${name}`;\n}\n\nconsole.log(greet('Cyborg'));\nexport const broken: number = 'строка';\n",
+  // Синтаксическая ошибка: маркер приходит из воркера json.
+  'broken.json': '{\n  "name": ,\n}\n',
 };
 
 /** Вид просит файл по имени из списка, а не по пути: другое имя - отказ. */

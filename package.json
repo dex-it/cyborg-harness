@@ -24,6 +24,7 @@
     "spike": "npm run build && node playground/scripts/spike-iframe.mjs",
     "spike:hosts": "npm run build && node playground/scripts/spike-hosts.mjs",
     "spike:gateway": "npm run build && node playground/scripts/spike-gateway.mjs",
+    "spike:monaco": "npm run build && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON playground/scripts/spike-monaco.mjs",
     "spike:pty": "node playground/scripts/spike-pty.mjs",
     "spike:pty-restore": "node playground/scripts/spike-pty-restore.mjs",
     "prelint": "npm run build:core && npm run build:electron",
