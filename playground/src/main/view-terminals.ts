@@ -1,4 +1,5 @@
-import { errorMessage, type TerminalSink, type TerminalView } from '@cyborg-harness/core';
+import type { TerminalSink, TerminalView } from '@cyborg-harness/core';
+import { errorMessage } from './guards.ts';
 import type { Reply } from '../shared/plugins.ts';
 
 /** То, что нужно от `WebFrameMain`: тест подставляет свой фрейм без Electron. */

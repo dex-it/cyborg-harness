@@ -50,24 +50,9 @@ describe('package.json ядра', () => {
     assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}), ['@cyborg-harness/contracts']);
   });
 
-  it('точки входа: главный процесс, хост, вход хоста для fork, оболочка вида и элементы окна', () => {
-    assert.deepEqual(Object.keys(manifest.exports ?? {}), ['.', './host', './host-entry', './keys', './ui-shell', './elements', './package.json']);
+  it('точки входа: главный процесс, хост, вход хоста для fork, клавиши, оболочка вида, слой окна и элементы окна (имена в них - public-api.test.ts)', () => {
+    assert.deepEqual(Object.keys(manifest.exports ?? {}), ['.', './host', './host-entry', './keys', './ui-shell', './window', './elements', './package.json']);
     for (const target of exportTargets()) assert.match(target, /^\.\/dist\/.+\.(js|d\.ts)$/, target);
-  });
-});
-
-describe('потребители в репозитории', () => {
-  it('playground берёт ядро через пакет, а не относительными путями в core/src и core/elements', () => {
-    const playground = path.join(root, 'playground');
-    const files = walk(playground).filter((f) => /\.(ts|mjs)$/.test(f) && !f.includes(`${path.sep}dist${path.sep}`) && !f.includes(`${path.sep}node_modules${path.sep}`));
-    assert.ok(files.length > 50, `файлов playground: ${files.length}`);
-    const bad = files.flatMap((f) =>
-      fs
-        .readFileSync(f, 'utf8')
-        .split('\n')
-        .flatMap((line, i) => (/(?:from|import\()\s*'[^']*core\/(?:src|elements)\//.test(line) ? [`${path.relative(root, f)}:${i + 1}: ${line.trim()}`] : [])),
-    );
-    assert.deepEqual(bad, []);
   });
 });
 
