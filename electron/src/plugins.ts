@@ -93,7 +93,7 @@ export interface StartOptions {
   readonly workspace?: string;
   /** Перенос формата старого файла воркспейса при открытии; приложение, у которого такого формата не было, его не задаёт. */
   readonly migrate?: MigrateWorkspace;
-  /** Последний фрагмент заголовка окна. */
+  /** Последний фрагмент заголовка окна: имя приложения; по умолчанию «Cyborg». */
   readonly appName?: string;
   readonly builtinDir: string;
   readonly spawnHost: SpawnHost;
@@ -157,7 +157,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     os: options.os,
     platform: options.platform,
     idleSeconds: options.idleSeconds,
-    windowTitle: { workspace: path.basename(file), app: options.appName ?? 'Cyborg Playground' },
+    windowTitle: { workspace: path.basename(file), app: options.appName ?? 'Cyborg' },
     safeMode: options.safeMode,
     onWindow: (snapshot) => options.onWindow?.(snapshot),
     onDocuments: () => options.onDocuments?.(),

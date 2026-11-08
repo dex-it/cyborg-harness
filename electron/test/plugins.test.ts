@@ -365,3 +365,20 @@ test('несколько видов: оба адреса в строке пла�
     await service.unload();
   }
 });
+
+test('заголовок окна: имя приложения задаёт приложение, адаптер без имени подписывает окно «Cyborg»', async () => {
+  const titles: string[] = [];
+  for (const appName of [undefined, 'Мой редактор']) {
+    const userData = tmp();
+    const kernel = await startPlugins({
+      userData,
+      builtinDir: path.join(userData, 'нет'),
+      spawnHost: inlineHosts(async () => ({ activate() {} })),
+      log: () => {},
+      ...(appName !== undefined && { appName }),
+    });
+    titles.push(kernel.window.title);
+    await kernel.unload();
+  }
+  assert.deepEqual(titles, ['workspace.cyborg.json - Cyborg', 'workspace.cyborg.json - Мой редактор']);
+});
