@@ -1,9 +1,17 @@
 {
   "name": "@cyborg-harness/contracts",
   "version": "1.0.0",
-  "private": true,
   "description": "Типы контрактов cyborg.* без логики; сторонние пакеты дополняют карту Contracts",
   "type": "module",
-  "types": "./index.ts",
-  "exports": { ".": { "types": "./index.ts" } }
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts" },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md", "CHANGELOG.md"],
+  "repository": { "type": "git", "url": "git+https://github.com/dex-it/cyborg-harness.git", "directory": "contracts" },
+  "publishConfig": { "registry": "https://registry.npmjs.org/", "access": "restricted" },
+  "scripts": {
+    "prepack": "node scripts/build.ts"
+  }
 }
