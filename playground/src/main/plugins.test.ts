@@ -214,7 +214,7 @@ test('виды: адрес у плагина с ui в манифесте и у �
   const dir = path.join(userData, 'plugins');
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['face', 'voice'] } }));
   plugin(dir, 'face', { commands: { 'face.hi': {}, 'face.sum': { args: ['number', 'number'] } }, optional: { 'demo.echo': '^1' }, ui: { views: { main: './ui/ui.js' } } }, 'export default {}');
-  plugin(dir, 'voice', { commands: ['voice.ping'], provides: { 'demo.echo': '1.0' } }, 'export default {}');
+  plugin(dir, 'voice', { commands: { 'voice.ping': { callers: 'plugins' } }, provides: { 'demo.echo': '1.0' } }, 'export default {}');
   const modules: Record<string, PluginModule> = {
     face: {
       activate(ctx) {
@@ -241,6 +241,8 @@ test('виды: адрес у плагина с ui в манифесте и у �
   assert.deepEqual(Object.fromEntries(service.snapshot().plugins.map((p) => [p.id, p.view])), { face: 'cyborg-plugin://face/', voice: undefined });
   assert.deepEqual(service.uiOf('face'), { dir: path.join(dir, 'face'), views: { main: './ui/ui.js' } });
   assert.equal(service.uiOf('voice'), undefined);
+  assert.deepEqual(service.snapshot().plugins.find((p) => p.id === 'voice')?.permissions, ['другие плагины могут звать команды: voice.ping'], 'открытые чужим команды - в правах словами');
+  assert.deepEqual(service.snapshot().plugins.find((p) => p.id === 'face')?.permissions, []);
   assert.deepEqual(await service.runFor('face', 'face.hi'), {});
   assert.deepEqual(await service.runFor('face', 'face.sum', [2, 3]), { value: 5 });
   assert.deepEqual(await service.runFor('face', 'face.sum', 'x'), { error: 'face.sum: аргументы - не массив' });

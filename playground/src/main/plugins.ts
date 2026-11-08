@@ -3,6 +3,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   describeEntry,
+  describeOpenCommands,
   describePermissions,
   entryLevel,
   errorMessage,
@@ -461,7 +462,7 @@ export class PluginsService {
         revivable: (s.revivable || s.cause?.kind === 'safe-mode') && kernel !== undefined,
         unloaded: s.cause?.kind === 'unloaded' && s.cause.by === s.id,
         commands,
-        permissions: manifest ? describePermissions(manifest.permissions) : [],
+        permissions: manifest ? [...describePermissions(manifest.permissions), ...describeOpenCommands(manifest.commands)] : [],
         ...(manifest && { version: manifest.version }),
         ...(s.state !== 'disabled' && manifest?.ui && Object.keys(manifest.ui.views).length > 0 && this.views.has(s.id) && { view: `${viewOrigin(s.id)}/` }),
         ...(manifest?.ui?.overlay !== undefined && this.views.has(s.id) && { overlay: `${viewOrigin(s.id)}/?view=overlay` }),

@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { PluginContext } from '@cyborg-harness/contracts';
 import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
+import { describeOpenCommands } from '../src/permissions.ts';
 import { describeEntry } from '../src/status.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
@@ -65,6 +66,13 @@ test('манифест: неизвестное значение callers и guard
     'commands.bad.g.guard: ожидается { право: номер аргумента или "номер.поле" }',
     'commands.bad.h.guard: ожидается { право: номер аргумента или "номер.поле" }',
   ]);
+});
+
+test('права словами: команды, открытые другим плагинам, названы; закрытых и пустого списка нет', () => {
+  const parsed = parseManifest({ ...base, id: 'sessions', commands: { 'sessions.new': {}, 'sessions.actions': { callers: 'plugins' }, 'sessions.open': { callers: 'plugins', guard: { 'fs.read': 0 } } } });
+  assert.ok(parsed.ok);
+  assert.deepEqual(describeOpenCommands(parsed.manifest.commands), ['другие плагины могут звать команды: sessions.actions, sessions.open']);
+  assert.deepEqual(describeOpenCommands({ 'sessions.new': {} }), []);
 });
 
 /** sessions - привилегированный исполнитель; nosy без прав, trusted читает work; lazy спит до первой команды. */
