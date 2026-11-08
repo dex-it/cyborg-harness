@@ -17,6 +17,7 @@ const api = {
   answerDialog: (id: number, choice: string | undefined): Promise<Reply> => ipcRenderer.invoke('window:answer', { id, choice }),
   closeDocument: (id: string): Promise<Reply> => ipcRenderer.invoke('documents:close', id),
   openWorkspace: (file?: string): Promise<Reply> => ipcRenderer.invoke('workspace:open', file),
+  setSafeMode: (on: boolean): Promise<Reply> => ipcRenderer.invoke('app:safe-mode', on),
 };
 
 export type PlaygroundApi = typeof api;

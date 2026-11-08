@@ -1,9 +1,8 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
-import { CoreError, errorMessage, forkHosts, isRecord, load, parseManifest, SectionStore, type ContractGraph, type JournalEntry, type LayerStore, type Rejection } from '../src/index.ts';
+import { CoreError, errorMessage, forkHosts, isRecord, load, parseManifest, PLUGIN_API_VERSION, SectionStore, type ContractGraph, type JournalEntry, type LayerStore, type Rejection } from '../src/index.ts';
 import { scenarios, type Documents, type Scenario } from './scenarios.ts';
 
-const API_VERSION = '1.0.0';
 const pluginsDir = new URL('./plugins/', import.meta.url);
 
 const tty = process.stdout.isTTY;
@@ -20,7 +19,7 @@ const step = args.includes('--step');
 const names = args.filter((a) => !a.startsWith('--'));
 
 if (args.includes('--help') || names.some((n) => n !== 'all' && !scenarios.some((s) => s.name === n))) {
-  console.log(`${bold('npm run core:demo -- [сценарий ...|all] [--step]')}\n`);
+  console.log(`${bold('npm run demo -- [сценарий ...|all] [--step]')}\n`);
   for (const s of scenarios) console.log(`  ${cyan(s.name.padEnd(10))} ${s.title}`);
   console.log(`\n  без имени - basic; --step - пауза на Enter после каждого шага`);
   process.exit(names.length > 0 && !args.includes('--help') ? 1 : 0);
@@ -68,6 +67,8 @@ function rejection(r: Rejection): string {
       return `${r.contract}: поставщиков несколько (${r.providers.join(', ')}), а кратность one`;
     case 'cycle':
       return `цикл зависимостей: ${r.members.join(' -> ')}`;
+    case 'reserved':
+      return `${r.what === 'id' ? 'id' : 'контракт'} ${r.name} из пространства поставки ${r.prefix}*, а плагин сторонний`;
   }
 }
 
@@ -186,7 +187,7 @@ async function runScenario(s: Scenario): Promise<void> {
   const early: JournalEntry[] = [];
   let activationStarted = false;
   const kernel = await load({
-    apiVersion: API_VERSION,
+    apiVersion: PLUGIN_API_VERSION,
     enabled: s.enabled,
     manifests: raw,
     spawnHost: forkHosts(),

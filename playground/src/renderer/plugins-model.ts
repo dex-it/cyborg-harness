@@ -69,6 +69,7 @@ export function summary(snapshot: PluginsSnapshot): string {
   if (snapshot.phase === 'starting') return 'Ядро плагинов запускается…';
   if (snapshot.phase === 'failed') return `Ядро плагинов не запустилось: ${snapshot.error ?? 'причина неизвестна'}`;
   const enabled = snapshot.plugins.filter((p) => p.state !== 'disabled');
+  if (snapshot.safeMode) return `Безопасный режим: включённых плагинов ${enabled.length}, их код не запускается.`;
   if (enabled.length === 0) return 'Включённых плагинов нет: список включённых - plugins.enabled в cyborg.json в папке настроек Cyborg.';
   const count = (state: PluginState) => enabled.filter((p) => p.state === state).length;
   const parts = [`работает: ${count('active')} из ${enabled.length}`];

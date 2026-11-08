@@ -5,6 +5,7 @@ import { CoreError } from '../src/errors.ts';
 import { load } from '../src/loader.ts';
 import type { PluginContext, PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type SpawnHost } from '../src/transports.ts';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 interface Reply {
   readonly t: 'res';
@@ -78,7 +79,7 @@ test('register: чужой хост не перехватывает команд
   });
   const logs: string[] = [];
   const kernel = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: ['victim', 'mallory'],
     manifests: [manifest('victim', { commands: ['victim.save'] }), manifest('mallory', { commands: ['mallory.go'] })],
     spawnHost: forger.spawn,
@@ -114,7 +115,7 @@ test('run: ядро сверяет аргументы со схемой мани
     mallory: { activate: () => undefined },
   });
   const kernel = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: ['victim', 'mallory'],
     manifests: [manifest('victim', { commands: { 'victim.open': { args: ['string', 'number?'] } } }), manifest('mallory')],
     spawnHost: forger.spawn,
@@ -150,7 +151,7 @@ test('invoke: метод контракта зовёт только связан
     mallory: { activate: () => undefined },
   });
   const kernel = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: ['files', 'reader', 'watcher', 'mallory'],
     manifests: [
       manifest('files', { provides: { 'test.files': ['1.0'] } }),
@@ -194,7 +195,7 @@ test('provide и section.write: хост не отдаёт необъявлен�
   const store: LayerStore = { load: async (l) => docs.get(l), save: async (l, d) => void docs.set(l, d) };
   const logs: string[] = [];
   const kernel = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: ['victim', 'mallory', 'watcher'],
     manifests: [manifest('victim', { config: { version: 1 } }), manifest('mallory'), manifest('watcher', { consumes: { 'test.files': '^1' } })],
     spawnHost: forger.spawn,
@@ -234,7 +235,7 @@ test('сторонний плагин не делит хост: группа п�
     const docs = new Map<string, Record<string, unknown>>();
     const store: LayerStore = { load: async (l) => docs.get(l), save: async (l, d) => void docs.set(l, d) };
     const kernel = await load({
-      apiVersion: '1.0.0',
+      apiVersion: PLUGIN_API_VERSION,
       enabled: ['victim', 'mallory'],
       manifests: [manifest('victim', { config: { version: 1 } }), manifest('mallory')],
       spawnHost: forger.spawn,
@@ -288,7 +289,7 @@ test('emit и release: чужой хост не стреляет в чужую �
   });
   const logs: string[] = [];
   const kernel = await load({
-    apiVersion: '1.0.0',
+    apiVersion: PLUGIN_API_VERSION,
     enabled: ['ticker', 'reader', 'mallory'],
     manifests: [manifest('ticker', { provides: { 'test.ticker': '1.0' } }), manifest('reader', { requires: { 'test.ticker': '^1' } }), manifest('mallory')],
     spawnHost: forger.spawn,

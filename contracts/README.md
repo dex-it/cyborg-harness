@@ -8,10 +8,13 @@
 
 ```ts
 export interface Contracts {
-  'cyborg.files': { 1: FilesV1; 2: FilesV2 };
-  'cyborg.tab': { 1: Tab };
+  'cyborg.agent': { 1: Agent };
+  'cyborg.agent-tool': { 1: AgentTool };
+  'cyborg.session-prompt': { 1: SessionPrompt };
 }
 ```
+
+Примеры ниже берут демонстрационные контракты `demo.*` (`demo.files` с двумя мажорными версиями, `demo.tab`): они не входят в пакет и дополняют карту из `core/examples/contracts.ts` так же, как сторонний пакет объявлений.
 
 | Правило | Почему |
 |---|---|
@@ -25,7 +28,7 @@ export interface Contracts {
 Поставщик, который по чужой просьбе читает или пишет путь (или разрешает ссылку на секрет), объявляет это в `provides`, иначе он посредник: вызывающий без `fs.read` прочитал бы файл его правами.
 
 ```jsonc
-"provides": { "cyborg.files": { "version": "1.0", "guard": { "read": { "fs.read": 0 }, "open": { "fs.read": "0.path" } } } }
+"provides": { "demo.files": { "version": "1.0", "guard": { "read": { "fs.read": 0 }, "open": { "fs.read": "0.path" } } } }
 ```
 
 Ключ - член контракта, значение - право (`fs.read`, `fs.write`, `shell`, `secrets.ref`) и номер аргумента или `"номер.поле"`. Ядро проверяет аргумент по праву вызывающего до передачи вызова - и из главной части, и из вида; отказ - `PermissionDenied` с записью `denied` и `reason: 'via-contract'`. Дальше поставщик работает своими правами: действует пересечение. Член без `guard` ядро не проверяет.
@@ -167,15 +170,15 @@ const n = await clock?.nowSync();                    // number | undefined, то
 ```jsonc
 // files/manifest.json
 { "id": "files", "version": "2.0.0", "engines": { "cyborg": "^1" },
-  "provides": { "cyborg.files": ["1.4", "2.0"] } }
+  "provides": { "demo.files": ["1.4", "2.0"] } }
 ```
 
 ```ts
-ctx.contracts.provide('cyborg.files', '1.4', {
+ctx.contracts.provide('demo.files', '1.4', {
   read: async (path: string) => disk.get(path),
   list: async () => [...disk.keys()],
 });
-ctx.contracts.provide('cyborg.files', '2.0', {
+ctx.contracts.provide('demo.files', '2.0', {
   readText: async (path: string) => {
     const text = disk.get(path);
     return text === undefined ? undefined : { path, text, size: text.length };
@@ -188,13 +191,13 @@ ctx.contracts.provide('cyborg.files', '2.0', {
 ```jsonc
 // editor/manifest.json
 { "id": "editor", "version": "1.0.0", "engines": { "cyborg": "^1" },
-  "provides": { "cyborg.tab": "1.0" }, "requires": { "cyborg.files": "^2" } }
+  "provides": { "demo.tab": "1.0" }, "requires": { "demo.files": "^2" } }
 ```
 
 ```ts
-const files = ctx.contracts.get('cyborg.files', 2);           // Remote<FilesV2> | undefined
-if (!files) throw new Error('cyborg.files в requires, но его нет');
-ctx.contracts.provide('cyborg.tab', '1.0', {
+const files = ctx.contracts.get('demo.files', 2);           // Remote<FilesV2> | undefined
+if (!files) throw new Error('demo.files в requires, но его нет');
+ctx.contracts.provide('demo.tab', '1.0', {
   kind: 'редактор',
   open: async (path: string) => {
     const file = await files.readText(path);                  // FileText | undefined
@@ -208,18 +211,18 @@ ctx.contracts.provide('cyborg.tab', '1.0', {
 ```jsonc
 // tabs/manifest.json
 { "id": "tabs", "version": "1.0.0", "engines": { "cyborg": "^1" },
-  "consumes": { "cyborg.tab": "^1" },
+  "consumes": { "demo.tab": "^1" },
   "commands": { "tabs.open": { "args": ["string"] } } }
 ```
 
 ```ts
-const kinds = () => ctx.contracts.all('cyborg.tab', 1)
+const kinds = () => ctx.contracts.all('demo.tab', 1)
   .map((p) => `${p.impl.icon ?? ''}${p.impl.kind} (${p.pluginId}@${p.version})`);
-ctx.contracts.onChange('cyborg.tab', () => ctx.log(kinds().join(', ')));
+ctx.contracts.onChange('demo.tab', () => ctx.log(kinds().join(', ')));
 
 ctx.commands.register('tabs.open', async (path) => {          // path: unknown
   if (typeof path !== 'string') throw new Error('путь не строка');
-  return Promise.all(ctx.contracts.all('cyborg.tab', 1).map((p) => p.impl.open(path)));
+  return Promise.all(ctx.contracts.all('demo.tab', 1).map((p) => p.impl.open(path)));
 });
 ```
 

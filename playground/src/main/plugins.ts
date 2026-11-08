@@ -12,6 +12,7 @@ import {
   load,
   pluginStatuses,
   openWorkspace,
+  PLUGIN_API_VERSION,
   type JournalEntry,
   type Kernel,
   type KeyInput,
@@ -26,9 +27,9 @@ import { isRecord } from '../../../core/src/manifest.ts';
 import { WINDOW_OWNER } from '../../../core/src/window-layer.ts';
 import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from '../shared/plugins.ts';
 import { viewOrigin } from '../shared/views.ts';
+import { migrateLegacyWorkspace } from './legacy-workspace.ts';
 import type { PluginUi } from './view-files.ts';
 
-export const PLUGIN_API_VERSION = '1.0.0';
 
 const ENTRY_FILES = ['index.mjs', 'index.js', 'index.ts'];
 
@@ -110,6 +111,8 @@ export interface StartOptions {
   readonly onDocuments?: () => void;
   /** `plugins.enabled` из файла применён. */
   readonly onEnabled?: () => void;
+  /** Безопасный режим: манифесты разобраны, хосты не запускаются, «Включить» отвечает `Unavailable`. */
+  readonly safeMode?: boolean;
 }
 
 export async function startPlugins(options: StartOptions): Promise<Kernel & { readonly workspace: string }> {
@@ -118,7 +121,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     options.onProblem?.(p);
   };
   const file = options.workspace ?? path.join(options.userData, 'workspace.cyborg.json');
-  const opened = await openWorkspace({ file, userFile: path.join(options.userData, 'cyborg.json'), stateDir: path.join(options.userData, 'state') });
+  const opened = await openWorkspace({ file, userFile: path.join(options.userData, 'cyborg.json'), stateDir: path.join(options.userData, 'state'), migrate: migrateLegacyWorkspace });
   if (!opened.ok) throw new Error(`воркспейс ${file} уже открыт процессом ${opened.owner}`);
   const ws = opened.workspace;
   for (const p of ws.problems) report(p);
@@ -135,6 +138,8 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     keybindings: ws.plugins.keybindings,
     // Признак поставки - каталог установки, а не манифест: сторонний автор пишет в манифест что угодно.
     bundled: [...found.origins].filter(([, dir]) => dir === options.builtinDir).map(([id]) => id),
+    // ADR-CH-0002 п. 6: cyborg.* - пространство поставки; чужой поставщик cyborg.agent сделал бы встроенного потребителя ambiguous.
+    reservedPrefixes: ['cyborg.'],
     spawnHost: options.spawnHost,
     entry: (m) => found.entries.get(m.id) ?? m.id,
     config: ws.config,
@@ -148,6 +153,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     os: options.os,
     platform: options.platform,
     idleSeconds: options.idleSeconds,
+    safeMode: options.safeMode,
     onWindow: () => options.onWindow?.(),
     onDocuments: () => options.onDocuments?.(),
     onLog: (id, message) => {
@@ -217,6 +223,7 @@ export class PluginsService {
   private workspace: WorkspaceInfo = { current: null, recent: [] };
   private error: string | undefined;
   private pidOf: ServiceOptions['pidOf'];
+  private safeMode = false;
   private readonly entries: { at: number; entry: JournalEntry }[] = [];
   private readonly problems: string[] = [];
   private readonly feed: FeedLine[] = [];
@@ -251,6 +258,7 @@ export class PluginsService {
 
   async start(options: ServiceOptions): Promise<void> {
     this.pidOf = options.pidOf;
+    this.safeMode = options.safeMode === true;
     try {
       this.kernel = await startPlugins({
         ...options,
@@ -425,7 +433,8 @@ export class PluginsService {
       return {
         id: s.id,
         state: s.state,
-        revivable: s.revivable && kernel !== undefined,
+        // В безопасном режиме кнопка остаётся: её отказ объясняет, почему плагин не работает.
+        revivable: (s.revivable || s.cause?.kind === 'safe-mode') && kernel !== undefined,
         unloaded: s.cause?.kind === 'unloaded' && s.cause.by === s.id,
         commands,
         permissions: manifest ? describePermissions(manifest.permissions) : [],
@@ -454,6 +463,7 @@ export class PluginsService {
     }));
     return {
       phase: this.phase,
+      safeMode: this.safeMode,
       ...(this.error !== undefined && { error: this.error }),
       problems: [...this.problems],
       plugins,
