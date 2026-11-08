@@ -57,6 +57,7 @@ Peer-зависимости: `@cyborg-harness/core`, `@cyborg-harness/contracts`
 ```ts
 // file: main.ts
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, powerMonitor } from 'electron';
 import {
   bindWindow,
@@ -89,7 +90,7 @@ void app.whenReady().then(async () => {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegrationInSubFrames: true },
   });
   const page = path.join(__dirname, 'index.html');
-  guardNavigation(win.webContents, `file://${page}`, (pluginId, url) => plugins.viewDenied(pluginId, url));
+  guardNavigation(win.webContents, pathToFileURL(page).href, (pluginId, url) => plugins.viewDenied(pluginId, url));
   bindWindow(win, plugins);
   watchPower(plugins);
   void win.loadFile(page);
