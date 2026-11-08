@@ -145,10 +145,16 @@ export function formatProblem(p: Problem): string {
 }
 
 /** Исходники плагина: без `node_modules`, скрытых каталогов, тестов и `.d.ts`; порядок не зависит от ОС. */
-async function sources(home: string): Promise<string[]> {
+async function sources(home: string, unreadable: (dir: string, error: unknown) => void): Promise<string[]> {
   const out: string[] = [];
   const walk = async (dir: string): Promise<void> => {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch (error) {
+      unreadable(dir, error);
+      return;
+    }
     for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
@@ -245,7 +251,7 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
   // Пути через realpath, как корень плагина: иначе `/var` и `/private/var` на macOS дали бы разные пути одного файла.
   const declarations = await Promise.all((options.declarations ?? []).map((d) => fs.realpath(d).catch(() => path.resolve(d))));
   const rules: ImportRules = { home: root, declarations, packages: options.declarationPackages ?? [] };
-  const files = await sources(root);
+  const files = await sources(root, (d, error) => at(toPosix(path.relative(root, d)) || '.', `каталог не прочитан - ${error instanceof Error ? error.message : String(error)}`));
   for (const file of files) {
     try {
       problems.push(...importProblems(file, await fs.readFile(file, 'utf8'), rules));

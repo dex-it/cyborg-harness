@@ -109,7 +109,7 @@ function tokenize(text: string): Token[] {
         i++;
       } else if (c === '`') {
         i++;
-        if (head && templates.at(-1) !== depth) {
+        if (head) {
           push('str', cook(raw), startLine);
         } else push('tpl-end', '', line);
         return;

@@ -196,6 +196,19 @@ describe('checkPlugin: манифест и файлы из него', () => {
     assert.equal(missing.ok, false);
   });
 
+  it('нечитаемый подкаталог - нарушение, а не падение проверки', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, async () => {
+    const dir = plugin(OK);
+    const locked = path.join(dir, 'locked');
+    fs.mkdirSync(locked, { mode: 0o000 });
+    try {
+      const found = strings(await checkPlugin(dir));
+      assert.equal(found.length, 1, found.join('\n'));
+      assert.match(found[0] ?? '', /^locked: каталог не прочитан - /);
+    } finally {
+      fs.chmodSync(locked, 0o755);
+    }
+  });
+
   it('при ошибках манифеста импорты всё равно проверены', async () => {
     const dir = plugin({ 'index.ts': "import fs from 'node:fs';\n" }, { bogus: 1 });
     assert.deepEqual(strings(await checkPlugin(dir)), ['manifest.json: bogus: незнакомое поле манифеста', "index.ts:1: 'node:fs': только @cyborg-harness/contracts и свои модули"]);
