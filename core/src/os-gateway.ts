@@ -145,6 +145,14 @@ async function readAtMost(method: string, handle: fs.FileHandle, size: number, m
   }
 }
 
+const READS = new Set(['fs.readText', 'fs.readSlice', 'fs.list', 'fs.stat', 'fs.watch']);
+
+/** Чтение несуществующего: плагин различает «нет» и «ошибка» по коду, а не по тексту ОС. До этой точки путь уже проверен областью, поэтому чужой путь отвечает `PermissionDenied`, а не `NotFound`. */
+function missing(method: string, error: unknown): unknown {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return error instanceof Error && !(error instanceof CoreError) && (code === 'ENOENT' || code === 'ENOTDIR') && READS.has(method) ? new CoreError('NotFound', error.message) : error;
+}
+
 const int = (method: string, v: unknown, name: string, min: number, max: number): number => {
   if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < min || v > max) throw new CoreError('Invalid', `${method}: ${name} - целое от ${String(min)} до ${String(max)}`);
   return v;
@@ -514,6 +522,14 @@ export class OsGateway {
   }
 
   async call(m: PluginManifest, method: string, args: readonly unknown[]): Promise<unknown> {
+    try {
+      return await this.#call(m, method, args);
+    } catch (error) {
+      throw missing(method, error);
+    }
+  }
+
+  async #call(m: PluginManifest, method: string, args: readonly unknown[]): Promise<unknown> {
     const p = m.permissions;
     switch (method) {
       case 'fs.readText': {
@@ -862,7 +878,7 @@ export class OsGateway {
       child.stderr.on('data', (c: Buffer) => err.write(c));
       child.once('error', (error) => {
         done();
-        reject(new CoreError('Remote', `${program}: ${error.message}`));
+        reject(new CoreError((error as NodeJS.ErrnoException).code === 'ENOENT' ? 'NotFound' : 'Remote', `${program}: ${error.message}`));
       });
       child.once('close', (code, signal) => {
         done();

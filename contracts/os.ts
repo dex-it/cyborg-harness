@@ -106,7 +106,7 @@ export interface HttpServer {
   dispose(): void;
 }
 
-/** Файлы: без права - только свои каталоги `paths`; чтение шире - по `fs.read`, запись - по `fs.write`. Путь вне области - `PermissionDenied`, никогда `NotFound`. */
+/** Файлы: без права - только свои каталоги `paths`; чтение шире - по `fs.read`, запись - по `fs.write`. Путь вне области - `PermissionDenied`, никогда `NotFound`; нет файла или каталога внутри области в `readText`, `readSlice`, `list`, `stat`, `watch` - `NotFound` (проверка существования - `stat` и ловля `NotFound`). */
 export interface OsFs {
   readText(path: string): Promise<string>;
   list(dir: string): Promise<DirEntry[]>;
@@ -205,6 +205,7 @@ export interface PluginOs {
   readonly paths: { readonly data: string; readonly temp: string; readonly home: string };
   readonly fs: OsFs;
   readonly pty?: OsPty;
+  /** Программы нет в системе (или нет `cwd`) - `NotFound`; ненулевой код выхода ошибкой не считается и приходит в `ProcessResult.code`. */
   readonly process?: { run(program: string, args: readonly string[], options?: ProcessOptions): Promise<ProcessResult> };
   readonly net?: { fetch(url: string, request?: HttpRequest): Promise<HttpResponse> };
   readonly env?: { get(name: string): Promise<string | undefined> };

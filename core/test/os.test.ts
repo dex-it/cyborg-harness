@@ -326,6 +326,27 @@ test('секреты: ключи своего плагина, $secret, без ш
   await locked.k.unload();
 });
 
+test('NotFound: нет файла, каталога или программы - NotFound, а не безымянный Remote; чужой путь по-прежнему PermissionDenied', async () => {
+  await using box = await sandbox();
+  await writeFile(path.join(box.work, 'file.txt'), 'x');
+  const { k, os, denied } = await kernel({ reader: { 'fs.read': [box.work], 'fs.write': [box.work], process: [{ program: process.execPath, args: ['-e'] }, 'cyborg-no-such-program'] } }, { dataDir: box.data, tempDir: box.temp });
+  const fs = os('reader').fs;
+  const gone = path.join(box.work, 'gone');
+  for (const [name, call] of Object.entries({
+    readText: () => fs.readText(gone),
+    readSlice: () => fs.readSlice(gone, 0, 16),
+    stat: () => fs.stat(gone),
+    list: () => fs.list(gone),
+    'stat под файлом': () => fs.stat(path.join(box.work, 'file.txt', 'child')),
+    watch: () => fs.watch(gone, () => undefined),
+  })) await assert.rejects(call(), { code: 'NotFound', message: /ENOENT|ENOTDIR/ }, name);
+  await assert.rejects(fs.stat(path.join(box.outside, 'gone')), { code: 'PermissionDenied' }, 'вне области существования файла не выдаём');
+  await assert.rejects(os('reader').process!.run('cyborg-no-such-program', []), { code: 'NotFound', message: /cyborg-no-such-program/ });
+  await assert.rejects(os('reader').process!.run(process.execPath, ['-e', '0'], { cwd: gone }), { code: 'NotFound' }, 'каталога запуска нет - тоже ENOENT от spawn');
+  assert.deepEqual(denied(), ['reader:fs.stat'], 'NotFound в журнал отказов не идёт');
+  await k.unload();
+});
+
 test('fs.readSlice: кусок по байтам, символ UTF-8 не рвётся, пределы и права', async () => {
   await using box = await sandbox();
   const file = path.join(box.work, 'log.jsonl');
