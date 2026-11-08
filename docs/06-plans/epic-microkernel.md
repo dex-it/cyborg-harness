@@ -31,7 +31,7 @@ quality-checks: входных записей нет
 6. Бюджеты заданы числами и проверяются в CI; macOS подтверждён замерами и настоящей клавиатурой.
 7. Принята политика загрузки плагинов из каталога пользователя на этапе 1.
 8. SAD и ADR приняты владельцем (сейчас `review`/`proposed`).
-9. Пилоты PL-01..PL-09 пройдены, результаты записаны в `docs/04-verification/`.
+9. Пилоты PL-01..PL-09 пройдены, результаты записаны в `docs/05-verification/`.
 
 ## 3. Границы
 
@@ -291,6 +291,6 @@ D-00 -> P-02 -> P-03 -> K-13 -> K-21; параллельно D-00 и T-08 -> K-0
 
 - [Анализ готовности ядра](../research/microkernel-readiness.md) - состояние кода и документов, полный перечень работ и противоречий документации;
 - [Инвентарь Cyborg и карта переноса](../research/cyborg-migration-inventory.md) - что есть в ai-cyborg, что нужно от ядра, пилоты;
-- [SAD](../03-architecture/design/sad.md), [ADR](../03-architecture/adr/), [дорожная карта](roadmap.md), [проверка macOS](../04-verification/macos-check.md), [спорные пункты](../03-architecture/design/sad2-disputed-points.md).
+- [SAD](../04-architecture/design/sad.md), [ADR](../04-architecture/adr/), [дорожная карта](roadmap.md), [проверка macOS](../05-verification/macos-check.md), [спорные пункты](../04-architecture/design/sad2-disputed-points.md).
 
 Оба аналитических отчёта подготовлены чтением кода и документов без запуска приложения и тестов: числа и утверждения в них проверяются в задачах.

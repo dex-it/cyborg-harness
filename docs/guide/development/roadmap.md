@@ -6,7 +6,7 @@ description: "Эпик «Микроядро»: цель, критерий гот
 Работа над ядром ведётся одним эпиком: [github.com/dex-it/cyborg-harness/issues/15](https://github.com/dex-it/cyborg-harness/issues/15). Его цель - ядро, готовое к системе плагинов: пакеты вместо копирования из стенда, документация и инструменты для автора плагина, сценарии Cyborg, доказанные на ядре. Эта страница - карта по итерациям; статус каждой задачи показывает GitHub.
 
 :::note[Что уже сделано]
-Остаток этапа 1 SAD описан в [дорожной карте проекта](https://github.com/dex-it/cyborg-harness/blob/master/docs/05-plans/roadmap.md): воркспейс, загрузка, граф контрактов, хосты со сторожем, `ctx.os` и права, pty с `persist` и `attach`, виды во фреймах, диалоги и замок, документы, клавиши по манифесту, `config` и `state`. Замеры на Linux и macOS - в [проверке на macOS](https://github.com/dex-it/cyborg-harness/blob/master/docs/04-verification/macos-check.md).
+Что выполнено и что осталось по каждому направлению ядра, сводкой сверху, - в [дорожной карте проекта](https://github.com/dex-it/cyborg-harness/blob/master/docs/06-plans/roadmap.md). Сделано: воркспейс, загрузка, граф контрактов, хосты со сторожем, `ctx.os` и права, pty с `persist` и `attach`, виды во фреймах, диалоги и замок, документы, клавиши по манифесту, `config` и `state`. Замеры на Linux и macOS - в [проверке на macOS](https://github.com/dex-it/cyborg-harness/blob/master/docs/05-verification/macos-check.md).
 :::
 
 ## Когда эпик готов
@@ -18,7 +18,7 @@ description: "Эпик «Микроядро»: цель, критерий гот
 5. Автору доступны шаблон, сборка, `checkPlugin` и тест-кит.
 6. Бюджеты заданы числами и проверяются в CI; macOS подтверждён замерами и настоящей клавиатурой.
 7. Принята политика загрузки плагинов из каталога пользователя; SAD и ADR приняты владельцем.
-8. Пилоты PL-01..PL-09 пройдены, результаты записаны в `docs/04-verification/`.
+8. Пилоты PL-01..PL-09 пройдены, результаты записаны в `docs/05-verification/`.
 
 ## Что не входит
 

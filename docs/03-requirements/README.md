@@ -1,0 +1,17 @@
+# Нормы
+
+FR и NFR Cyborg Harness, выведенные из [BRD](../01-product/brd.md) и [сценариев](../02-use-cases/README.md): FR - из шагов и расширений сценариев, NFR - из мер BR и ограничений. Фича - папка `<NN>-<слаг>/` с файлом `srs.md`; у фичи, прошедшей решения, рядом лежит `decision-log.md`.
+
+Номер единицы сквозной и при переносе в другую фичу не меняется: принадлежность задают папка и поле `feature`. Новая единица берёт номер из блока своей фичи - фича 03 нумерует с 3001, фича 07 с 7001. Поэтому в фиче 04 лежат FR-CH-1010 и NFR-CH-1004: они выведены раньше, когда фич было две.
+
+| Фича | Что | BR | Сценарии |
+|---|---|---|---|
+| [01-plugin-host](01-plugin-host/srs.md) | Ядро и загрузчик: манифест, обнаружение, граф, хосты и сторож, откат, выгрузка, ленивая активация, воркспейс, pty; накладные расходы, устойчивость, компактность | BR-CH-001, 002, 006, 007 | [сбой плагина](../02-use-cases/plugin-failure-isolated/scenario.md), [автор встроенного плагина](../02-use-cases/maintainer-adds-feature/scenario.md) |
+| [02-extension-contracts](02-extension-contracts/srs.md) | Контракты, события, команды и сочетания, виды и документы, слой окна, контракт агента; доступность | BR-CH-001, 003 | [второй агент](../02-use-cases/second-agent/scenario.md), [автор встроенного плагина](../02-use-cases/maintainer-adds-feature/scenario.md) |
+| [03-security-trust](03-security-trust/srs.md) | Шлюз `ctx.os` и права, этапы изоляции, секреты, допуск команд и пространство `cyborg.*`, группы рендера и адреса окна, агент в модели доверия, безопасность DOM, безопасный режим, учёт угроз | BR-CH-004, 005 | [установка стороннего плагина](../02-use-cases/third-party-install-permissions/scenario.md), [автор плагина](../02-use-cases/author-writes-plugin/scenario.md) |
+| [04-observability](04-observability/srs.md) | Журнал и окно «Плагины Cyborg», трасса операций, журнал плагина, хранение и выгрузка | BR-CH-006 | [разбор сбоя по трассе](../02-use-cases/diagnose-failure-by-trace/scenario.md), [сбой плагина](../02-use-cases/plugin-failure-isolated/scenario.md) |
+| [05-compatibility](05-compatibility/srs.md) | `engines.cyborg`, версии API и контрактов, `config` и `state` с миграциями, снимок API | BR-CH-002, 008 | [после обновления](../02-use-cases/user-after-upgrade/scenario.md), [плагин переживает обновление ядра](../02-use-cases/plugin-survives-core-upgrade/scenario.md) |
+| [06-delivery](06-delivery/srs.md) | Пакеты `@cyborg-harness/*`, упакованная сборка, платформы | BR-CH-009 | [приложение подключает ядро](../02-use-cases/app-embeds-core/scenario.md) |
+| [07-author-kit](07-author-kit/srs.md) | Пакет объявлений, проверка импортов, шаблон, сборка, `checkPlugin`, тест-кит, руководство | BR-CH-004, 010 | [автор плагина](../02-use-cases/author-writes-plugin/scenario.md), [автор встроенного плагина](../02-use-cases/maintainer-adds-feature/scenario.md) |
+
+Мера против угрозы лежит в фиче 03, даже если ложится на контракт или вид фичи 02: так карта «угроза -> единица» остаётся в одном SRS. Дубли, найденные при разрезке, сняты и записаны в журналах решений фич 01 и 02.
