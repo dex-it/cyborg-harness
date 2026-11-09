@@ -165,8 +165,6 @@ export interface PluginsList {
   readonly hosts: Readonly<Record<string, readonly string[]>>;
   /** `plugins.uiGroups`: группа рендера -> плагины. Слой воркспейса перекрывает пользователя по имени группы и идёт первым: плагин, названный в двух группах, получает ту, что названа раньше. */
   readonly uiGroups: Readonly<Record<string, readonly string[]>>;
-  /** `plugins.uiGroups` одного слоя пользователя: сторонний плагин садится в общую группу только по нему (ADR-CH-0015). */
-  readonly userUiGroups: Readonly<Record<string, readonly string[]>>;
   /** Сначала пользователя, затем воркспейса: у одного сочетания последнее слово за воркспейсом. */
   readonly keybindings: readonly UserKeybinding[];
 }
@@ -348,7 +346,6 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
       enabled: own.enabled ?? user.enabled ?? [],
       hosts: { ...user.hosts, ...own.hosts },
       // Воркспейс первым: плагин, названный и там и там, получает группу воркспейса.
-      userUiGroups: user.uiGroups ?? {},
       uiGroups: { ...own.uiGroups, ...Object.fromEntries(Object.entries(user.uiGroups ?? {}).filter(([group]) => !Object.hasOwn(own.uiGroups ?? {}, group))) },
       keybindings: [...user.keybindings, ...own.keybindings],
     };

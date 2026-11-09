@@ -107,7 +107,7 @@ test('хук вернул undefined или его нет: файл не трон
 test('plugins: воркспейс перекрывает enabled пользователя, группы хостов сливаются; нет файла - пустой новый', async () => {
   await using box = await sandbox();
   const fresh = await open(box);
-  assert.deepEqual(fresh.plugins, { enabled: [], hosts: {}, uiGroups: {}, userUiGroups: {}, keybindings: [] });
+  assert.deepEqual(fresh.plugins, { enabled: [], hosts: {}, uiGroups: {}, keybindings: [] });
   assert.deepEqual(await json(box.file), { cyborg: 2, plugins: {}, settings: {} });
   fresh.close();
   await rm(box.file);
@@ -115,7 +115,7 @@ test('plugins: воркспейс перекрывает enabled пользов�
   await mkdir(path.dirname(box.userFile), { recursive: true });
   await writeFile(box.userFile, JSON.stringify({ plugins: { enabled: ['a'], hosts: { one: ['a'] }, keybindings: [{ key: 'F2', command: 'a.go' }] } }));
   const ws = await open(box);
-  assert.deepEqual(ws.plugins, { enabled: ['b'], hosts: { one: ['a'], two: ['b'] }, uiGroups: {}, userUiGroups: {}, keybindings: [{ key: 'F2', command: 'a.go' }, { key: 'F2', command: null }] });
+  assert.deepEqual(ws.plugins, { enabled: ['b'], hosts: { one: ['a'], two: ['b'] }, uiGroups: {}, keybindings: [{ key: 'F2', command: 'a.go' }, { key: 'F2', command: null }] });
   ws.close();
 });
 
@@ -127,7 +127,6 @@ test('plugins.uiGroups: группы пользователя и воркспе�
   await writeFile(box.userFile, JSON.stringify({ plugins: { uiGroups: { panels: ['a'], extra: ['e', 7] } } }));
   const ws = await open(box);
   assert.deepEqual(ws.plugins.uiGroups, { panels: ['b', 'c'], extra: ['e'], solo: ['d'] });
-  assert.deepEqual(ws.plugins.userUiGroups, { panels: ['a'], extra: ['e'] }, 'слой пользователя отдельно: только им сторонний садится в общую группу');
   assert.deepEqual(ws.plugins.hosts, {}, 'группы рендера не смешиваются с группами хостов');
   assert.deepEqual(ws.problems.map((p) => p.replace(box.root, '')), ['/user/cyborg.json: plugins.uiGroups.extra[1]: ожидается id плагина (строка), получено 7']);
   ws.close();
@@ -247,7 +246,7 @@ test('битый файл пользователя не роняет откры�
   const ws = await open(box);
   assert.equal(ws.problems.length, 1);
   assert.match(ws.problems[0] ?? '', /cyborg\.json/);
-  assert.deepEqual(ws.plugins, { enabled: [], hosts: {}, uiGroups: {}, userUiGroups: {}, keybindings: [] });
+  assert.deepEqual(ws.plugins, { enabled: [], hosts: {}, uiGroups: {}, keybindings: [] });
   await assert.rejects(ws.config.write('user', 'x', 1, { a: 1 }));
   assert.equal(await readFile(box.userFile, 'utf8'), '{ "plugins": ');
   ws.close();

@@ -66,8 +66,6 @@ export type JournalEntry =
    * плагин поставки (`reason: 'taken'`) называл группу, имя которой - id стороннего плагина с видами.
    */
   | { readonly pluginId: string; readonly kind: 'group-isolated'; readonly group: string; readonly renderGroup: string; readonly reason: 'third-party' | 'taken' }
-  /** Сторонний плагин по воле владельца (`plugins.uiGroups` слоя пользователя) в общей группе рендера: он видит DOM и хранилище origin соседей `neighbours`, а они - его. */
-  | { readonly pluginId: string; readonly kind: 'group-shared'; readonly group: string; readonly neighbours: readonly string[] }
   /** Загружен плагин не из поставки (по `bundled`): его код не проверен, а на этапе 1 хост - обычный процесс Node. Состояния плагину запись не меняет. */
   | { readonly pluginId: string; readonly kind: 'third-party' }
   /** Промис плагина отклонён без обработчика; хост держится, плагину страйк. */
@@ -133,8 +131,6 @@ export interface LoadOptions {
   readonly hosts?: Readonly<Record<string, readonly string[]>> | undefined;
   /** `plugins.uiGroups`: группа рендера -> плагины с видами; перекрывает `ui.group` манифеста. Не названный идёт в группу по `ui.group`, без неё - в группу со своим id; сторонний всегда один. */
   readonly uiGroups?: Readonly<Record<string, readonly string[]>> | undefined;
-  /** `plugins.uiGroups` только слоя пользователя: сторонний плагин садится в общую группу лишь отсюда (ADR-CH-0015); в `uiGroups` его просьба из воркспейса или манифеста не действует. */
-  readonly userUiGroups?: Readonly<Record<string, readonly string[]>> | undefined;
   /** Акселераторы меню приложения: id пункта -> сочетание. Заняты наравне с командами окна: манифест проигрывает с `key-conflict`, динамически занять нельзя. */
   readonly menuKeys?: Readonly<Record<string, string>> | undefined;
   /** `plugins.keybindings` пользователя: перекрывают манифесты; `command: null` освобождает сочетание для окна. */
