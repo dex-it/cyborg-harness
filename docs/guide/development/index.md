@@ -68,7 +68,7 @@ flowchart LR
 
 ## Документы
 
-Корпус в `docs/` повторяет раскладку корпуса Cyborg: `00-strategy`, `01-product`, `02-use-cases`, `03-architecture`, `04-verification`, `05-plans`, плюс `research`. Решения и их статусы - на странице [Решения](/development/decisions/). Вход в корпус - `docs/README.md`, краткий обзор - `docs/OVERVIEW.md`.
+Корпус в `docs/` повторяет раскладку корпуса Cyborg: `00-strategy`, `01-product`, `02-use-cases`, `03-requirements`, `04-architecture`, `05-verification`, `06-plans`, плюс `research`. Решения и их статусы - на странице [Решения](/development/decisions/). Вход в корпус - `docs/README.md`, краткий обзор - `docs/OVERVIEW.md`.
 
 ## Работа с репозиторием
 
