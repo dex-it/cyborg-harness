@@ -54,6 +54,7 @@ export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[]
         case 'pty-expired':
         case 'host-isolated':
         case 'host-own-grouped':
+        case 'third-party':
           // Ни конфликт сочетаний, ни отказ шлюза, ни вызов устаревшего члена, ни удержанное хостом отклонение, ни завершённый по сроку pty, ни выбор хоста о работе плагина ничего не говорят: плагин работает как обычно.
           break;
         case 'host-restart':
@@ -157,6 +158,8 @@ export function describeEntry(e: JournalEntry): string {
       return `plugins.keybindings: ${e.key} -> ${String(e.command)} не применено: ${e.reason}`;
     case 'host-isolated':
       return `сторонний плагин не делит хост: группа ${e.group} из plugins.hosts не действует, работает в своём хосте ${e.hostId}`;
+    case 'third-party':
+      return 'сторонний плагин: код не из поставки, не проверен; на этапе 1 хост - обычный процесс Node, и плагин может обойти шлюз ctx.os';
     case 'unhandled-rejection':
       return `необработанное отклонение промиса: ${e.error}`;
     case 'host-own-grouped':
@@ -207,6 +210,7 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
     case 'host-down':
     case 'host-isolated':
     case 'host-own-grouped':
+    case 'third-party':
       return 'warn';
     default:
       return 'error';

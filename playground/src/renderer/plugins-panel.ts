@@ -7,7 +7,7 @@ import { byId, el } from './dom.ts';
 import { ViewsPanel } from './views-panel.ts';
 import { moveFocus } from './focus.ts';
 import { SideTabs } from './side-tabs.ts';
-import { actionsFor, clock, conflictText, journalFor, keyStatus, mergeFeed, sortedPlugins, STATE_LABEL, summary, viewSlots, type ActionButton } from './plugins-model.ts';
+import { actionsFor, clock, conflictText, journalFor, keyStatus, mergeFeed, originNote, sortedPlugins, STATE_LABEL, summary, userPluginsNotice, viewSlots, type ActionButton } from './plugins-model.ts';
 
 export interface PluginsPort {
   pluginsSnapshot(): Promise<PluginsSnapshot>;
@@ -40,6 +40,7 @@ export class PluginsPanel {
   private readonly workspaceEl = byId('workspace-current', HTMLElement);
   private readonly recentEl = byId('workspace-recent', HTMLElement);
   private readonly safeModeEl = byId('safe-mode', HTMLElement);
+  private readonly userPluginsEl = byId('user-plugins', HTMLElement);
   private readonly safeModeEnter = byId('safe-mode-enter', HTMLButtonElement);
   private readonly feedEl = byId('feed', HTMLElement);
   private readonly journalTitle = byId('plugins-journal-title', HTMLElement);
@@ -117,6 +118,9 @@ export class PluginsPanel {
     this.problemsEl.textContent = snapshot.problems.length ? `Не дошло до ядра:\n${snapshot.problems.join('\n')}` : '';
     this.problemsEl.hidden = snapshot.problems.length === 0;
     this.safeModeEl.hidden = !snapshot.safeMode;
+    const notice = userPluginsNotice(snapshot);
+    this.userPluginsEl.textContent = notice ?? '';
+    this.userPluginsEl.hidden = notice === undefined;
     this.safeModeEnter.hidden = snapshot.safeMode || snapshot.phase === 'no-workspace';
     this.listEl.replaceChildren(...sortedPlugins(snapshot.plugins).map((row) => this.row(row, snapshot.canHang)));
     this.keysEl.replaceChildren(...(snapshot.keys.length ? snapshot.keys.map((row) => this.keyRow(row)) : [this.emptyKeys()]));
@@ -134,12 +138,16 @@ export class PluginsPanel {
     const item = el('li', 'plugin-row');
     item.dataset.state = row.state;
     item.dataset.plugin = row.id;
+    if (row.origin) item.dataset.origin = row.origin;
     const head = el('div', 'plugin-head');
     head.append(el('span', 'plugin-name', row.id));
     if (row.version) head.append(el('span', 'plugin-version', row.version));
     if (row.host) head.append(el('span', 'plugin-host', row.pid === undefined ? `хост ${row.host}` : `хост ${row.host} · pid ${row.pid}`));
+    if (row.origin === 'user') head.append(el('span', 'plugin-origin', 'сторонний'));
     head.append(el('span', 'spacer'), el('span', 'plugin-state', STATE_LABEL[row.state]));
     item.append(head);
+    const origin = originNote(row);
+    if (origin) item.append(el('p', 'plugin-origin-note', origin));
     if (row.reason) item.append(el('p', 'plugin-reason', row.reason));
     if (row.permissions.length > 0) {
       const list = el('ul', 'plugin-permissions');

@@ -1,7 +1,7 @@
 // Адаптер Electron, часть главного процесса. Явные именованные экспорты: имя в перечне - обещание совместимости.
 export type { ServeViewsOptions } from './views.ts';
 export type { ElectronOsOptions } from './os-env.ts';
-export { discoverPlugins, PluginsService, startPlugins } from './plugins.ts';
+export { discoverPlugins, PluginsService, startPlugins, USER_PLUGINS_FLAG } from './plugins.ts';
 export type { Discovered, PluginsEvents, ServiceOptions, StartOptions } from './plugins.ts';
 export { utilityHosts, utilityPtyHost } from './plugin-hosts.ts';
 export type { UtilityHosts, UtilityPtyHost } from './plugin-hosts.ts';

@@ -29,15 +29,26 @@ import {
   WINDOW_OWNER,
 } from '@cyborg-harness/core';
 import { errorMessage, isRecord } from './guards.ts';
-import type { FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from './snapshot.ts';
+import type { FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginOrigin, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from './snapshot.ts';
 import { viewOrigin } from './view-protocol.ts';
 import type { PluginUi } from './view-files.ts';
 
 const ENTRY_FILES = ['index.mjs', 'index.js', 'index.ts'];
 
+/** Флаг запуска, включающий каталог плагинов пользователя (политика этапа 1, SAD 6.1). */
+export const USER_PLUGINS_FLAG = '--user-plugins';
+
+function countDirs(dir: string): number {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).length;
+  } catch {
+    return 0;
+  }
+}
+
 export interface Discovered {
   readonly manifests: unknown[];
-  /** id -> file URL точки входа; при повторе id остаётся первый, второму граф откажет. */
+  /** id -> file URL точки входа; при повторе id остаётся первый, второй манифест пропущен с записью в `problems`. */
   readonly entries: Map<string, string>;
   /** id -> каталог, где найден первым. */
   readonly origins: Map<string, string>;
@@ -67,11 +78,17 @@ export function discoverPlugins(dirs: readonly string[]): Discovered {
         found.problems.push(`${home}: manifest.json не прочитан - ${(error as Error).message}`);
         continue;
       }
-      found.manifests.push(raw);
       const id = isRecord(raw) && typeof raw.id === 'string' ? raw.id : undefined;
+      // Второй манифест с тем же id ядру не отдаётся: граф отверг бы оба, и встроенный плагин пропал бы вместе с пользовательским.
+      const first = id === undefined ? undefined : found.homes.get(id);
+      if (id !== undefined && first !== undefined) {
+        found.problems.push(`повтор id ${id} в ${home}: действует ${first}`);
+        continue;
+      }
+      found.manifests.push(raw);
       const entry = ENTRY_FILES.map((f) => path.join(home, f)).find((f) => fs.existsSync(f));
-      if (id && entry && !found.entries.has(id)) found.entries.set(id, pathToFileURL(entry).href);
-      if (id && !found.origins.has(id)) {
+      if (id && entry) found.entries.set(id, pathToFileURL(entry).href);
+      if (id) {
         found.origins.set(id, dir);
         found.homes.set(id, home);
         if (isRecord(raw) && raw.ui !== undefined) found.views.set(id, home);
@@ -99,6 +116,11 @@ export interface StartOptions {
   /** Последний фрагмент заголовка окна: имя приложения; по умолчанию «Cyborg». */
   readonly appName?: string;
   readonly builtinDir: string;
+  /**
+   * Читать ли каталог плагинов пользователя (`<userData>/plugins`). Политика этапа 1 (SAD 6.1): по умолчанию нет.
+   * Включает только человек за машиной, флагом запуска: файл воркспейса может лежать в репозитории и включить это от чужого имени.
+   */
+  readonly userPlugins?: boolean;
   readonly spawnHost: SpawnHost;
   readonly log: (line: string) => void;
   readonly watchdog?: WatchdogOptions;
@@ -133,7 +155,12 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
   const ws = opened.workspace;
   for (const p of ws.problems) report(p);
   for (const m of ws.migrated) options.log(`[plugins] ${m}`);
-  const found = discoverPlugins([options.builtinDir, path.join(options.userData, 'plugins')]);
+  const userDir = path.join(options.userData, 'plugins');
+  const found = discoverPlugins(options.userPlugins === true ? [options.builtinDir, userDir] : [options.builtinDir]);
+  if (options.userPlugins !== true) {
+    const skipped = countDirs(userDir);
+    if (skipped > 0) options.log(`[plugins] каталог плагинов пользователя ${userDir} не читается (плагинов в нём: ${String(skipped)}); сторонний код загружается только запуском с ${USER_PLUGINS_FLAG}`);
+  }
   for (const p of found.problems) report(p);
   options.onDiscovered?.(found);
 
@@ -239,6 +266,9 @@ export class PluginsService {
   private pidOf: ServiceOptions['pidOf'];
   private title: string | undefined;
   private safeMode = false;
+  private userPlugins = false;
+  /** id плагинов не из каталога поставки: происхождение определяет каталог установки, а не манифест. */
+  private origins = new Map<string, PluginOrigin>();
   private readonly entries: { at: number; entry: JournalEntry }[] = [];
   private readonly problems: string[] = [];
   private readonly feed: FeedLine[] = [];
@@ -280,6 +310,7 @@ export class PluginsService {
   async start(options: ServiceOptions): Promise<void> {
     this.pidOf = options.pidOf;
     this.safeMode = options.safeMode === true;
+    this.userPlugins = options.userPlugins === true;
     try {
       this.kernel = await startPlugins({
         ...options,
@@ -288,7 +319,10 @@ export class PluginsService {
           this.problems.push(problem);
           this.events.changed();
         },
-        onDiscovered: (found) => (this.views = found.views),
+        onDiscovered: (found) => {
+          this.views = found.views;
+          this.origins = new Map([...found.origins].map(([id, dir]): [string, PluginOrigin] => [id, dir === options.builtinDir ? 'bundled' : 'user']));
+        },
         onWindow: (snapshot) => {
           this.showTitle(snapshot.title);
           this.events.changed();
@@ -462,8 +496,10 @@ export class PluginsService {
       const commands = Object.entries(manifest?.commands ?? {})
         .filter(([, spec]) => spec.args.every((a) => a.optional))
         .map(([name]) => name);
+      const origin = this.origins.get(s.id);
       return {
         id: s.id,
+        ...(origin !== undefined && { origin }),
         state: s.state,
         // В безопасном режиме кнопка остаётся: её отказ объясняет, почему плагин не работает.
         revivable: (s.revivable || s.cause?.kind === 'safe-mode') && kernel !== undefined,
@@ -502,6 +538,7 @@ export class PluginsService {
     return {
       phase: this.phase,
       safeMode: this.safeMode,
+      userPlugins: this.userPlugins,
       ...(this.error !== undefined && { error: this.error }),
       problems: [...this.problems],
       plugins,

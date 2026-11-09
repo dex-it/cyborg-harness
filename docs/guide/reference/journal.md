@@ -29,6 +29,7 @@ description: "Записи журнала плагинов: когда ядро 
 | `pty-expired` | предупреждение | Терминал без владельца не взят через `attach` за льготное время и завершён: после падения хоста или после активации плагина, в том числе вернувшегося к оставленным человеком процессам | `id`, `program`, `graceMs` |
 | `key-conflict` | предупреждение | Сочетание уже занято другим плагином | `key`, `command`, `winner` |
 | `host-isolated` | предупреждение | Сторонний плагин назван в группе, но получил отдельный хост | `group`, `hostId` |
+| `third-party` | предупреждение | Загружен плагин не из поставки: на первом этапе это плагин из каталога пользователя, включённого флагом `--user-plugins`. Код не проверен; запись состояния не меняет. Пишется, только когда приложение передало ядру список поставки `bundled` | - |
 | `host-own-grouped` | предупреждение | Плагин поставки просит `"host": "own"`, а группа `plugins.hosts` сажает его к соседям: действует группа | `group`, `neighbours` |
 
 ## Записи по хосту и настройкам
@@ -46,7 +47,7 @@ description: "Записи журнала плагинов: когда ядро 
 
 | Причина | Смысл |
 |---|---|
-| `duplicate` | Второй плагин с тем же id |
+| `duplicate` | Два манифеста с одним id: ядро отвергает оба. Приложение второй манифест ядру не передаёт, поэтому из каталогов поставки и пользователя эта причина не приходит |
 | `engines` | `engines.cyborg` не принимает версию API; поля `range` и `api` |
 | `missing` | Нет поставщика для `requires`; поля `contract`, `range` |
 | `ambiguous` | Несколько поставщиков при кратности `one`; поля `contract`, `providers` |
@@ -73,7 +74,7 @@ description: "Записи журнала плагинов: когда ядро 
 
 ## Состояние плагина по журналу
 
-Состояние вычисляется по последней записи, меняющей его. Записи `key-conflict`, `key-ignored`, `denied`, `unhandled-rejection`, `pty-expired`, `host-isolated` и `host-own-grouped` о работе плагина ничего не говорят и состояние не меняют.
+Состояние вычисляется по последней записи, меняющей его. Записи `key-conflict`, `key-ignored`, `denied`, `unhandled-rejection`, `pty-expired`, `host-isolated`, `host-own-grouped` и `third-party` о работе плагина ничего не говорят и состояние не меняют.
 
 | Запись | Состояние | «Включить снова» |
 |---|---|---|
@@ -88,7 +89,7 @@ description: "Записи журнала плагинов: когда ядро 
 ## Уровни
 
 - **инфо:** `activated`, `waiting`, `disabled`, `revived`, `host-restart`; `unloaded`, `deactivated` и `uninstalled` без ошибки.
-- **предупреждение:** `denied`, `key-conflict`, `key-ignored`, `safe-mode`, `skipped`, `unhandled-rejection`, `pty-expired`, `host-down`, `host-isolated`, `host-own-grouped`; `unloaded` и `deactivated` с ошибкой.
+- **предупреждение:** `denied`, `key-conflict`, `key-ignored`, `safe-mode`, `skipped`, `unhandled-rejection`, `pty-expired`, `host-down`, `host-isolated`, `host-own-grouped`, `third-party`; `unloaded` и `deactivated` с ошибкой.
 - **ошибка:** все остальные, а также `config` и `state`, если статус не `ok`, и `uninstalled` с `error`.
 
 ## Дальше

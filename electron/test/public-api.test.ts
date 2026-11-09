@@ -20,6 +20,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
     source: 'src/index.ts',
     values: [
       'PluginsService',
+      'USER_PLUGINS_FLAG',
       'VIEW_CSP',
       'alertNotification',
       'bindWindow',
@@ -73,7 +74,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
   './window': {
     source: 'src/index-window.ts',
     values: ['PATH_MIME', 'VIEW_SCHEME', 'WindowLayerView', 'pluginOfOrigin', 'viewOrigin'],
-    types: ['FeedLine', 'KeptPtyRow', 'KeyRow', 'LayoutRow', 'PluginJournalLine', 'PluginRow', 'PluginState', 'PluginsSnapshot', 'Reply', 'TerminalEvent', 'ViewBridge', 'ViewDrop', 'WindowApi', 'WindowPort', 'WorkspaceInfo'],
+    types: ['FeedLine', 'KeptPtyRow', 'KeyRow', 'LayoutRow', 'PluginJournalLine', 'PluginOrigin', 'PluginRow', 'PluginState', 'PluginsSnapshot', 'Reply', 'TerminalEvent', 'ViewBridge', 'ViewDrop', 'WindowApi', 'WindowPort', 'WorkspaceInfo'],
   },
 };
 

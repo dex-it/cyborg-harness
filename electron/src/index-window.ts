@@ -3,4 +3,4 @@ export { PATH_MIME, VIEW_SCHEME, pluginOfOrigin, viewOrigin } from './view-proto
 export type { TerminalEvent, ViewBridge, ViewDrop } from './view-protocol.ts';
 export { WindowLayerView } from './window-layer.ts';
 export type { WindowPort } from './window-layer.ts';
-export type { FeedLine, KeptPtyRow, KeyRow, LayoutRow, PluginJournalLine, PluginRow, PluginState, PluginsSnapshot, Reply, WindowApi, WorkspaceInfo } from './snapshot.ts';
+export type { FeedLine, KeptPtyRow, KeyRow, LayoutRow, PluginJournalLine, PluginOrigin, PluginRow, PluginState, PluginsSnapshot, Reply, WindowApi, WorkspaceInfo } from './snapshot.ts';

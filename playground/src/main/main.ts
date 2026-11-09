@@ -21,6 +21,7 @@ import {
   serveViews,
   showWindow,
   singleInstance,
+  USER_PLUGINS_FLAG,
   utilityHosts,
   utilityPtyHost,
   watchPower,
@@ -58,20 +59,24 @@ const viewCsp = process.argv.find((a) => a.startsWith('--view-csp='))?.slice('--
 const spiking = spikeOut !== undefined || hostsSpikeOut !== undefined || gatewaySpikeOut !== undefined;
 /** `--safe-mode` (BR-CH-005): манифесты разобраны, код плагинов не запускается; смена воркспейса флаг сохраняет, снимает его только «Выйти из безопасного режима». */
 const safeMode = process.argv.includes('--safe-mode');
+/** `--user-plugins` (SAD 6.1): читать каталог плагинов пользователя; без флага грузятся только плагины из поставки. Флаг только в командной строке: файл воркспейса может лежать в репозитории. Смена воркспейса и безопасного режима его сохраняет (перезапуск берёт argv). */
+const userPlugins = process.argv.includes(USER_PLUGINS_FLAG);
 
 let win: BrowserWindow | undefined;
 
 // Один экземпляр - один воркспейс - одно окно: второй запуск с любым воркспейсом поднимает открытое окно, а не второе ядро.
 const sole =
   spiking ||
-  singleInstance({ workspace: workspaceFile ?? null, safeMode }, (data) => {
-    const asked = data as { workspace?: unknown; safeMode?: unknown } | null;
+  singleInstance({ workspace: workspaceFile ?? null, safeMode, userPlugins }, (data) => {
+    const asked = data as { workspace?: unknown; safeMode?: unknown; userPlugins?: unknown } | null;
     showWindow(win);
     if (!Notification.isSupported()) return;
     const say = (body: string) => alertNotification(APP_NAME, body, () => showWindow(win));
     if (asked?.workspace !== workspaceFile) say(`Открыт воркспейс ${workspaceFile ?? 'нет'}; другой открывается из окна - «Недавние» или «Открыть…».`);
     // Запрошенный режим вторым запуском не применяется: ядро решает про него один раз, до первого хоста.
     if ((asked?.safeMode === true) !== safeMode) say(safeMode ? 'Безопасный режим уже включён; выйти из него можно пунктом окна «Выйти из безопасного режима».' : 'Безопасный режим не включён: закройте приложение или выберите в окне «Перезапустить в безопасном режиме».');
+    // Каталог пользователя, как и безопасный режим, решается один раз при старте ядра.
+    if ((asked?.userPlugins === true) !== userPlugins) say(userPlugins ? `Каталог плагинов пользователя уже включён (${USER_PLUGINS_FLAG}); снять его можно, закрыв приложение и запустив без флага.` : `Каталог плагинов пользователя не включён: чтобы загрузить сторонние плагины, закройте приложение и запустите его с ${USER_PLUGINS_FLAG}.`);
   });
 if (!sole) app.exit(0);
 
@@ -162,6 +167,7 @@ void app.whenReady().then(() => {
     appName: APP_NAME,
     migrate: migrateLegacyWorkspace,
     safeMode,
+    userPlugins,
     builtinDir: path.join(__dirname, 'plugins'),
     spawnHost: hosts.spawn,
     pidOf: hosts.pidOf,
