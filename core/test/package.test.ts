@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { describe, it } from 'node:test';
 
 // P-02: ядро как пакет @cyborg-harness/core. Тесты про состав и форму пакета; сборка - `npm run build:core` (её гоняют pretest/pretypecheck/prelint/prebuild).
@@ -36,11 +37,18 @@ describe('package.json ядра', () => {
     assert.equal(manifest.type, 'module');
   });
 
-  it('engines.node - мажор Node, на котором идёт CI и который несёт Electron playground (Node 24)', () => {
+  it('engines.node - мажор Node, который несёт Electron playground: берётся у самого Electron (ELECTRON_RUN_AS_NODE, process.versions.node)', () => {
+    const electron = createRequire(path.join(root, 'package.json'))('electron') as string;
+    const version = execFileSync(electron, ['-p', 'process.versions.node'], { encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 30_000, killSignal: 'SIGKILL' }).trim();
+    const major = /^(\d+)\./.exec(version)?.[1];
+    assert.ok(major, `версия Node в Electron: ${version}`);
+    assert.equal(manifest.engines?.node, `>=${major}`, `Node в Electron playground ${version}`);
+  });
+
+  it('engines.node совпадает с Node в CI (node-version в ci.yml): пакет проверяется на той версии, которую заявляет', () => {
     const ci = fs.readFileSync(path.join(root, '.github', 'workflows', 'ci.yml'), 'utf8');
     const major = /node-version:\s*(\d+)/.exec(ci)?.[1];
     assert.equal(manifest.engines?.node, `>=${major}`);
-    assert.equal(major, '24');
   });
 
   it('рантайм-зависимостей нет; единственная связь - peer на контракты', () => {
@@ -57,15 +65,17 @@ describe('package.json ядра', () => {
 });
 
 describe('потребители в репозитории', () => {
-  it('playground берёт ядро через пакет, а не относительными путями в core/src и core/elements', () => {
+  it('playground берёт ядро через пакет: ни импортов, ни строковых путей (new URL, fork, readFile) в core/src и core/elements', () => {
     const playground = path.join(root, 'playground');
-    const files = walk(playground).filter((f) => /\.(ts|mjs)$/.test(f) && !f.includes(`${path.sep}dist${path.sep}`) && !f.includes(`${path.sep}node_modules${path.sep}`));
+    // Спайки вне CI берут из core/src то, чего нет в точках входа пакета: SP-01 (Tail, BACKLOG_LIMIT), замер шлюза (net-transport: guardedLookup, isLocalAddress).
+    const allowed = new Set([path.join(playground, 'scripts', 'spike-pty-restore.mjs'), path.join(playground, 'src', 'main', 'spike-gateway.ts')]);
+    const files = walk(playground).filter((f) => /\.(ts|mjs)$/.test(f) && !allowed.has(f) && !f.includes(`${path.sep}dist${path.sep}`) && !f.includes(`${path.sep}node_modules${path.sep}`));
     assert.ok(files.length > 50, `файлов playground: ${files.length}`);
     const bad = files.flatMap((f) =>
       fs
         .readFileSync(f, 'utf8')
         .split('\n')
-        .flatMap((line, i) => (/(?:from|import\()\s*'[^']*core\/(?:src|elements)\//.test(line) ? [`${path.relative(root, f)}:${i + 1}: ${line.trim()}`] : [])),
+        .flatMap((line, i) => (/['"`][^'"`\n]*core\/(?:src|elements)\/|['"`]core['"`]\s*,\s*['"`](?:src|elements)['"`]/.test(line) ? [`${path.relative(root, f)}:${i + 1}: ${line.trim()}`] : [])),
     );
     assert.deepEqual(bad, []);
   });
@@ -84,7 +94,7 @@ describe('собранный пакет (core/dist)', () => {
   it('JS и .d.ts без .ts-расширений в импортах и без чужих зависимостей', () => {
     const code = files.filter((f) => f.endsWith('.js') || f.endsWith('.d.ts'));
     assert.ok(code.length > 30, `файлов в dist: ${code.length}`);
-    const specs = /(?:from|import)\s*\(?\s*'([^']+)'/g;
+    const specs = /(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g;
     for (const file of code) {
       const text = fs.readFileSync(file, 'utf8');
       for (const m of text.matchAll(specs)) {

@@ -4,11 +4,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, Notification, powerMonitor, screen, type IpcMainInvokeEvent, type WebContents } from 'electron';
-import { viewOrigin } from '../shared/views.ts';
+import { viewOfUrl, viewOrigin } from '../shared/views.ts';
 import { electronOs } from './os-env.ts';
 import { utilityHosts } from './plugin-hosts.ts';
 import { guardNavigation } from './navigation.ts';
 import { PluginsService } from './plugins.ts';
+import { quietPipes } from './quiet-pipes.ts';
 import { runSpike } from './spike.ts';
 import { runHostsSpike } from './spike-hosts.ts';
 import { runGatewaySpike } from './spike-gateway.ts';
@@ -47,7 +48,7 @@ if (!spiking && !app.requestSingleInstanceLock({ workspace: workspaceFile ?? nul
 /** Первый запуск: alice и bob делят хост c - видно, как падение одного процесса снимает обоих, а чат в хосте b живёт. */
 const DEFAULT_CONFIG = {
   plugins: {
-    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions', 'sessions', 'pin-lock'],
+    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions', 'sessions', 'pin-lock', 'panels'],
     hosts: { a: ['echo'], b: ['chat'], c: ['alice', 'bob'], d: ['flaky'], agents: ['agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions'] },
   },
 };
@@ -217,8 +218,23 @@ ipcMain.on('view:terminal:close', (event, tid: unknown) => {
 });
 ipcMain.handle('view:theme', () => themeTokens(nativeTheme.shouldUseDarkColors));
 windowChannel('views:visibility', (arg) => {
-  if (!isRecord(arg) || typeof arg.id !== 'string' || typeof arg.visible !== 'boolean' || !win) return;
-  for (const frame of framesOf(win.webContents, viewOrigin(arg.id))) frame.send('view:visibility', arg.visible);
+  if (!isRecord(arg) || typeof arg.id !== 'string' || typeof arg.view !== 'string' || typeof arg.visible !== 'boolean' || !win) return;
+  // Видов у плагина может быть несколько, каждый во фрейме со своим ?view=: свёрнутый вид не прячет остальные.
+  for (const frame of framesOf(win.webContents, viewOrigin(arg.id))) if (viewOfUrl(frame.url) === arg.view) frame.send('view:visibility', arg.visible);
+  plugins.setViewVisible(arg.id, arg.visible);
+});
+// Фокус ввода сообщают документ окна и виды плагинов: ядро решает по нему, пускать ли сочетание с `when.input` в поле ввода.
+// Фреймы живут в разных процессах, и уход фокуса из старого приходит то раньше, то позже прихода в новый: уход засчитывается, только если фокус ещё у его фрейма.
+let focusFrame = '';
+ipcMain.on('input:focus', (event, kind: unknown) => {
+  if (event.senderFrame !== event.sender.mainFrame && senderPlugin(event) === undefined) return;
+  const frame = `${String(event.processId)}:${String(event.frameId)}`;
+  if (kind === 'blur') {
+    if (frame === focusFrame) plugins.setInputFocus('other');
+    return;
+  }
+  focusFrame = frame;
+  plugins.setInputFocus(kind);
 });
 /** Корень файлов, которые виды могут перетаскивать; в Cyborg это проекты, доступные плагину на чтение. */
 let workspace = '';
@@ -267,7 +283,7 @@ function createWindow(): void {
   void win.loadFile(page);
   // Ядро видит нажатие раньше страницы: сочетание активного плагина до окна не доходит.
   win.webContents.on('before-input-event', (event, input) => {
-    if (input.type === 'keyDown' && !input.isAutoRepeat && plugins.press(input)) event.preventDefault();
+    if (input.type === 'keyDown' && plugins.press(input, input.isAutoRepeat)) event.preventDefault();
   });
   win.on('focus', () => plugins.emit({ kind: 'focus', focused: true }));
   win.on('blur', () => plugins.emit({ kind: 'focus', focused: false }));
@@ -288,6 +304,8 @@ app.on('before-quit', (event) => {
 app.on('window-all-closed', () => {
   if (!spiking) app.quit();
 });
+
+quietPipes();
 
 void app.whenReady().then(() => {
   if (gatewaySpikeOut !== undefined) {

@@ -1,0 +1,136 @@
+import { checkCall, mayUse } from './call-check.ts';
+import type { Disposable } from './disposable.ts';
+import { CoreError } from './errors.ts';
+import { CALLBACK, handleKey, marker, SUBSCRIPTION, type ContractDescriptor } from './host-runtime.ts';
+import type { BridgeEnd, ContractCalls, Host, KernelContext, Subscription } from './kernel-context.ts';
+
+/** Контракты между хостами: что предоставил каждый плагин, подписки через границу и сам вызов члена. */
+export function createContractCalls(ctx: KernelContext): ContractCalls {
+  const { registry, limits, callTimeout } = ctx;
+  const descriptors = new Map<string, ContractDescriptor[]>();
+  const provided = new Map<string, Disposable>();
+  const subscriptions = new Map<number, Subscription>();
+  let subscriptionSeq = 0;
+
+  const broadcast = (contract: string) => {
+    for (const host of ctx.parts.pool.hosts.values()) host.endpoint.notify('contracts', { contract, providers: descriptors.get(contract) ?? [] });
+  };
+
+  function dropProvided(pluginId: string, contract: string, version: string): void {
+    const key = handleKey(pluginId, contract, version);
+    const disposable = provided.get(key);
+    if (!disposable) return;
+    provided.delete(key);
+    disposable.dispose();
+    descriptors.set(contract, (descriptors.get(contract) ?? []).filter((d) => d.pluginId !== pluginId || d.version !== version));
+    broadcast(contract);
+  }
+
+  function release(subscription: number): void {
+    const s = subscriptions.get(subscription);
+    if (!s) return;
+    subscriptions.delete(subscription);
+    s.providerHost.endpoint.notify('release', { subscription });
+    s.consumerHost.endpoint.notify('forget', { ids: s.callbacks.filter((id) => id !== undefined) });
+  }
+
+  /** Вызов члена контракта из хоста `host` от имени `p.caller`; колбэки в аргументах становятся подпиской. */
+  async function invoke(
+    host: Host,
+    p: { readonly caller: string; readonly pluginId: string; readonly contract: string; readonly version: string; readonly member: string; readonly args: readonly unknown[] },
+  ): Promise<unknown> {
+    const { pool } = ctx.parts;
+    const d = descriptors.get(p.contract)?.find((x) => x.pluginId === p.pluginId && x.version === p.version);
+    if (!d?.methods.includes(p.member)) throw new CoreError('Unavailable', `${p.contract}@${p.version}.${p.member} у ${p.pluginId} нет`);
+    if (!mayUse(ctx, p.caller, p.pluginId, p.contract, p.version)) {
+      throw new CoreError('NotDeclared', `${p.caller}: ${p.contract}@${p.version} от ${p.pluginId} не объявлен потребляемым`);
+    }
+    const { pluginId, contract, version, member } = p;
+    await checkCall(ctx, p.caller, pluginId, contract, member, p.args);
+    const target = pool.live(pluginId);
+    const callbacks = p.args.map((arg) => marker(arg, CALLBACK));
+    if (!callbacks.some((id) => id !== undefined)) return pool.call(target, pluginId, 'call', { pluginId, contract, version, member, args: p.args }, callTimeout);
+    if (callbacks.some((id) => id !== undefined && typeof id !== 'string')) throw new CoreError('Invalid', 'invoke: номер колбэка не строка');
+
+    const held = [...subscriptions.values()].filter((s) => s.consumer === p.caller).length;
+    if (held >= limits.subscriptions) throw new CoreError('Invalid', `${p.caller}: подписок через контракты больше ${String(limits.subscriptions)} - снимите прежние`);
+    const subscription = ++subscriptionSeq;
+    subscriptions.set(subscription, { consumer: p.caller, consumerHost: host, provider: pluginId, providerHost: target, callbacks: callbacks as (string | undefined)[] });
+    const args = p.args.map((arg, i) => (callbacks[i] === undefined ? arg : { [CALLBACK]: i }));
+    return pool.call(target, pluginId, 'call', { pluginId, contract, version, member, args, subscription }, callTimeout).then(
+      (result) => {
+        // Потребителя могли снять, пока поставщик отвечал: тогда подписку закрывает ядро.
+        if (marker(result, SUBSCRIPTION) === subscription && subscriptions.has(subscription)) return result;
+        if (marker(result, SUBSCRIPTION) === subscription) target.endpoint.notify('release', { subscription });
+        subscriptions.delete(subscription);
+        return result;
+      },
+      (error: unknown) => {
+        subscriptions.delete(subscription);
+        throw error;
+      },
+    );
+  }
+
+  function attach({ host, mine, onRequest, onNote }: BridgeEnd): void {
+    const KEY = { pluginId: 'string', contract: 'string', version: 'string' } as const;
+
+    onNote('provide', { ...KEY, data: 'record', methods: 'strings' }, (d) => {
+      if (!mine(d.pluginId).provides[d.contract]?.includes(d.version)) {
+        throw new CoreError('NotDeclared', `${d.pluginId}: ${d.contract}@${d.version} не объявлен в provides`);
+      }
+      const descriptor: ContractDescriptor = { pluginId: d.pluginId, contract: d.contract, version: d.version, data: d.data, methods: d.methods };
+      const impl: Record<string, unknown> = { ...descriptor.data };
+      for (const member of descriptor.methods) {
+        impl[member] = (...args: unknown[]) => ctx.parts.pool.call(host, d.pluginId, 'call', { pluginId: d.pluginId, contract: d.contract, version: d.version, member, args }, callTimeout);
+      }
+      provided.set(handleKey(d.pluginId, d.contract, d.version), registry.provide(d.pluginId, d.contract, d.version, impl));
+      descriptors.set(d.contract, [...(descriptors.get(d.contract) ?? []), descriptor]);
+      broadcast(d.contract);
+    });
+    onNote('unprovide', KEY, (p) => {
+      mine(p.pluginId);
+      dropProvided(p.pluginId, p.contract, p.version);
+    });
+    onRequest('invoke', { ...KEY, caller: 'string', member: 'string', args: 'array' }, async (p) => {
+      mine(p.caller);
+      return invoke(host, p);
+    });
+    onNote('emit', { subscription: 'number', index: 'number', args: 'array' }, (p) => {
+      const s = subscriptions.get(p.subscription);
+      if (!s) return;
+      if (s.providerHost !== host) throw new CoreError('Unavailable', `подписка ${p.subscription} не из этого хоста`);
+      const id = s.callbacks[p.index];
+      if (id !== undefined) s.consumerHost.endpoint.notify('callback', { id, args: p.args });
+    });
+    onNote('release', { caller: 'string', subscription: 'number' }, (p) => {
+      mine(p.caller);
+      const s = subscriptions.get(p.subscription);
+      if (!s) return;
+      if (s.consumerHost !== host || s.consumer !== p.caller) throw new CoreError('Unavailable', `подписка ${p.subscription} не у ${p.caller}`);
+      release(p.subscription);
+    });
+  }
+
+  return {
+    attach,
+    announce(host) {
+      for (const contract of descriptors.keys()) host.endpoint.notify('contracts', { contract, providers: descriptors.get(contract) });
+    },
+    dropFor(pluginId) {
+      for (const [n, s] of [...subscriptions]) if (s.consumer === pluginId || s.provider === pluginId) release(n);
+      const given = [...descriptors.values()].flat().filter((d) => d.pluginId === pluginId);
+      for (const d of given) dropProvided(d.pluginId, d.contract, d.version);
+    },
+    async callAs(caller, contract, major, member, args) {
+      const impl = registry.get(caller, contract, major);
+      if (impl === undefined) throw new CoreError('Unavailable', `${contract}: поставщика сейчас нет`);
+      const fn = Object.hasOwn(impl, member) ? impl[member] : undefined;
+      if (typeof fn !== 'function') throw new CoreError('Invalid', `${contract}.${member}: не метод контракта`);
+      const provider = ctx.graph.bindings.get(caller)?.get(contract);
+      if (provider === undefined) throw new CoreError('Unavailable', `${contract}: поставщика сейчас нет`);
+      await checkCall(ctx, caller, provider, contract, member, args);
+      return (fn as (...xs: unknown[]) => unknown).apply(impl, [...args]);
+    },
+  };
+}

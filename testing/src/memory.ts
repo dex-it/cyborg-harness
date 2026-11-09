@@ -29,5 +29,10 @@ export type MemorySecrets = SecretStore & { readonly map: Map<string, string> };
 /** Хранилище секретов в памяти; `available: false` изображает систему без хранилища (ядро отвечает `Unavailable`). */
 export function memorySecrets(available = true): MemorySecrets {
   const map = new Map<string, string>();
-  return { map, available: () => available, get: async (k) => map.get(k), set: async (k, v) => void map.set(k, v), delete: async (k) => void map.delete(k) };
+  const deletePrefix = async (prefix: string) => {
+    const keys = [...map.keys()].filter((k) => k.startsWith(prefix));
+    for (const k of keys) map.delete(k);
+    return keys.length;
+  };
+  return { map, available: () => available, get: async (k) => map.get(k), set: async (k, v) => void map.set(k, v), delete: async (k) => void map.delete(k), deletePrefix };
 }
