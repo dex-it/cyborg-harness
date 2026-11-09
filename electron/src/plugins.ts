@@ -171,7 +171,6 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     manifests: found.manifests,
     hosts: ws.plugins.hosts,
     uiGroups: ws.plugins.uiGroups,
-    userUiGroups: ws.plugins.userUiGroups,
     keybindings: ws.plugins.keybindings,
     // Признак поставки - каталог установки, а не манифест: сторонний автор пишет в манифест что угодно.
     bundled: [...found.origins].filter(([, dir]) => dir === options.builtinDir).map(([id]) => id),
@@ -507,7 +506,7 @@ export class PluginsService implements ViewGroups {
         .map(([name]) => name);
       const origin = this.origins.get(s.id);
       const group = this.views.has(s.id) ? kernel?.groupOf(s.id) : undefined;
-      const isolated = this.entries.findLast(({ entry }) => (entry.kind === 'group-isolated' || entry.kind === 'group-shared') && entry.pluginId === s.id)?.entry;
+      const isolated = this.entries.findLast(({ entry }) => entry.kind === 'group-isolated' && entry.pluginId === s.id)?.entry;
       return {
         id: s.id,
         ...(origin !== undefined && { origin }),

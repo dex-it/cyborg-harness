@@ -1,12 +1,11 @@
 // Замер K-04: память при десяти видах, десять разных групп рендера против одной общей. Нужен собранный playground и дисплей (на Linux - xvfb-run ... --no-sandbox).
 //   node playground/scripts/spike-groups.mjs [--json] [--no-sandbox] [--runs=3]
-// Десять сторонних плагинов с одним видом каждый лежат в каталоге пользователя; в «общей» группе их собирает владелец (plugins.uiGroups слоя пользователя, он же cyborg.json).
+// Десять плагинов с одним видом каждый кладутся в playground/dist/plugins (поставка, сторонний общую группу не получает) и убираются в конце; в «общей» группе их собирает plugins.uiGroups.
 // Виды идут настоящим путём: протокол cyborg-plugin://<группа>/<плагин>/, оболочка, мост. Результат - таблица (docs/04-verification/spike-render-groups.md) или JSON.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pssKb } from '../src/main/proc-memory.ts';
-import { launch, sleep, waitFor } from './cdp.mjs';
+import { launch, repo, sleep, waitFor } from './cdp.mjs';
 
 const argv = process.argv.slice(2);
 const json = argv.includes('--json');
@@ -17,17 +16,17 @@ const mb = (kb) => Math.round((kb ?? 0) / 1024);
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 const IDS = Array.from({ length: 10 }, (_, i) => `probe${i}`);
 
-/** Каталог пользователя с десятью плагинами: манифест, пустая главная часть и вид из одной строки. */
-function makeUserData() {
-  const root = mkdtempSync(join(tmpdir(), 'cyborg-groups-'));
+const PLUGINS = join(repo, 'playground', 'dist', 'plugins');
+
+/** Десять плагинов в каталоге поставки: манифест, пустая главная часть и вид из одной строки. */
+function makeProbes() {
   for (const id of IDS) {
-    const dir = join(root, 'plugins', id);
+    const dir = join(PLUGINS, id);
     mkdirSync(join(dir, 'ui'), { recursive: true });
     writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ id, version: '1.0.0', engines: { cyborg: '^1' }, ui: { views: { main: './ui/ui.js' } } }));
     writeFileSync(join(dir, 'index.mjs'), 'export default { activate() {} };\n');
     writeFileSync(join(dir, 'ui', 'ui.js'), `export function mount(root) { root.textContent = '${id}'; return { dispose() {} }; }\n`);
   }
-  return root;
 }
 
 const VARIANTS = [
@@ -35,8 +34,8 @@ const VARIANTS = [
   { name: 'одна общая группа', plugins: { enabled: IDS, uiGroups: { all: IDS } } },
 ];
 
-async function once(variant, userDataRoot) {
-  const h = await launch({ config: { plugins: variant.plugins }, args: [...electronArgs, '--user-plugins'], plugins: userDataRoot });
+async function once(variant) {
+  const h = await launch({ config: { plugins: variant.plugins }, args: electronArgs });
   try {
     await waitFor('десять видов во фреймах', async () => (await h.ev("document.getElementById('tab-views')?.click(), document.querySelectorAll('.views iframe').length")) === 10, 60_000);
     await waitFor('виды собраны', async () => {
@@ -57,20 +56,20 @@ async function once(variant, userDataRoot) {
   }
 }
 
-const root = makeUserData();
+makeProbes();
 const results = [];
 try {
   for (let i = 0; i < runsPerVariant; i++) {
     for (const variant of VARIANTS) {
       try {
-        results.push({ variant: variant.name, ...(await once(variant, root)) });
+        results.push({ variant: variant.name, ...(await once(variant)) });
       } catch (error) {
         results.push({ variant: variant.name, error: error instanceof Error ? error.message : String(error) });
       }
     }
   }
 } finally {
-  rmSync(root, { recursive: true, force: true });
+  for (const id of IDS) rmSync(join(PLUGINS, id), { recursive: true, force: true });
 }
 const summary = VARIANTS.map((v) => {
   const ok = results.filter((r) => r.variant === v.name && r.error === undefined);

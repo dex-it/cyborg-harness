@@ -1,6 +1,6 @@
 // Запуск собранного playground и разговор с ним по DevTools Protocol: общее для пилотов, которым нужно окно и виды (spike-monaco.mjs).
 import { spawn } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -51,13 +51,11 @@ export async function connect(url, sockets) {
 }
 
 /**
- * Приложение со своим userData. `config` - cyborg.json первого запуска (без него playground пишет свой), `args` - аргументы Electron,
- * `plugins` - каталог, чьё содержимое станет каталогом плагинов пользователя (читается с `--user-plugins`).
+ * Приложение со своим userData. `config` - cyborg.json первого запуска (без него playground пишет свой), `args` - аргументы Electron.
  * Подставной claude из smoke не нужен: сессии открывает агент shell.
  */
-export async function launch({ config, args = [], plugins } = {}) {
+export async function launch({ config, args = [] } = {}) {
   const userData = mkdtempSync(join(tmpdir(), 'cyborg-pilot-'));
-  if (plugins) cpSync(join(plugins, 'plugins'), join(userData, 'plugins'), { recursive: true });
   if (config) {
     mkdirSync(userData, { recursive: true });
     writeFileSync(join(userData, 'cyborg.json'), JSON.stringify(config, null, 2));

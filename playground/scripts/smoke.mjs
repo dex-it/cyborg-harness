@@ -74,7 +74,7 @@ function defaultConfig() {
 }
 const userConfig = defaultConfig();
 userConfig.plugins.enabled.push('built-dep');
-// K-04: cyborg.json - слой пользователя; сторонний built-dep назван в группе duo к alice и bob по воле владельца (запись group-shared, предупреждение в строке плагина).
+// K-04: сторонний built-dep назван в группе duo к alice и bob - группа ему не достаётся (запись group-isolated, предупреждение в строке плагина).
 userConfig.plugins.uiGroups.duo.push('built-dep');
 writeFileSync(join(userData, 'cyborg.json'), JSON.stringify(userConfig, null, 2));
 
@@ -260,25 +260,24 @@ async function main() {
   assert.equal(await inView('bob', 'window.cyborgView.drop()'), null, 'вид получил путь без перетаскивания');
   log('виды во фреймах: свой мост, лента плагина, чужая команда отклонена');
 
-  // K-04: группы рендера. alice и bob - один origin и один процесс рендера, echo - другая группа и другой процесс; сторонний built-dep посажен владельцем в duo.
+  // K-04: группы рендера. alice и bob - один origin и один процесс рендера, echo - другая группа и другой процесс; сторонний built-dep группу не получил.
   const [aliceFrame, bobFrame, echoFrame, builtFrame] = await Promise.all([frameOf('alice'), frameOf('bob'), frameOf('echo'), frameOf('built-dep')]);
-  assert.deepEqual([aliceFrame?.origin, bobFrame?.origin, echoFrame?.origin, builtFrame?.origin], ['cyborg-plugin://duo', 'cyborg-plugin://duo', 'cyborg-plugin://echo', 'cyborg-plugin://duo']);
+  assert.deepEqual([aliceFrame?.origin, bobFrame?.origin, echoFrame?.origin, builtFrame?.origin], ['cyborg-plugin://duo', 'cyborg-plugin://duo', 'cyborg-plugin://echo', 'cyborg-plugin://built-dep']);
   assert.match(aliceFrame.url, /^cyborg-plugin:\/\/duo\/alice\/\?view=main$/, 'адрес вида не несёт плагина в пути');
   assert.ok(aliceFrame.pid && aliceFrame.pid === bobFrame.pid, `виды одной группы в разных процессах рендера: ${String(aliceFrame.pid)} и ${String(bobFrame.pid)}`);
-  assert.equal(builtFrame.pid, aliceFrame.pid, 'сторонний из общей группы в другом процессе рендера');
-  assert.notEqual(echoFrame.pid, aliceFrame.pid, 'виды разных групп делят процесс рендера');
+  assert.ok(echoFrame.pid !== aliceFrame.pid && builtFrame.pid !== aliceFrame.pid && echoFrame.pid !== builtFrame.pid, 'виды разных групп делят процесс рендера');
   // Адрес кадра можно сменить без загрузки (history.pushState): плагин вне группы кадра мост не признаёт, сосед по группе - признаёт (граница доверия - группа).
   const asAt = (path, command) =>
     inView('alice', `(async () => { history.pushState({}, '', ${JSON.stringify(path)}); try { return await window.cyborgView.run(${JSON.stringify(command)}); } finally { history.replaceState({}, '', '/alice/?view=main'); } })()`);
   assert.deepEqual(await asAt('/echo/', 'echo.ping'), { error: 'не вид плагина' }, 'вид группы вызвал команду плагина вне группы подменой адреса');
-  assert.deepEqual(await asAt('/panels/', 'echo.ping'), { error: 'не вид плагина' }, 'вид группы назвался плагином вне группы');
+  assert.deepEqual(await asAt('/built-dep/', 'echo.ping'), { error: 'не вид плагина' }, 'вид группы назвался сторонним плагином');
   assert.equal((await asAt('/bob/', 'alice.hello'))?.error, 'alice.hello: не команда плагина bob', 'вид alice, назвавшийся bob, прошёл как alice');
   assert.equal(await inView('alice', 'location.pathname'), '/alice/', 'адрес кадра не вернулся');
-  assert.match(await text('#plugins-list [data-plugin="built-dep"] .plugin-group-note'), /сторонний плагин по воле владельца в общей группе рендера duo: он видит DOM и хранилище origin плагинов .*alice/, 'нет предупреждения о группе у built-dep');
+  assert.match(await text('#plugins-list [data-plugin="built-dep"] .plugin-group-note'), /сторонний плагин не делит группу рендера: группа duo не действует, работает в своей built-dep/, 'нет предупреждения о группе у built-dep');
   assert.equal(await text('#plugins-list [data-plugin="alice"] .plugin-group'), 'группа duo');
   assert.equal(await ev(`document.querySelector('#plugins-list [data-plugin="echo"] .plugin-group') === null`), true, 'у плагина в своей группе метка группы');
-  assert.ok(lines().some((l) => l.includes('"pluginId":"built-dep","kind":"group-shared","group":"duo"')), 'нет записи group-shared у built-dep');
-  log('группы рендера: alice и bob в одном процессе рендера, echo в своём; сторонний built-dep по воле владельца в duo с предупреждением; подмена адреса вне группы отклонена');
+  assert.ok(lines().some((l) => l.includes('"pluginId":"built-dep","kind":"group-isolated","group":"duo","renderGroup":"built-dep"')), 'нет записи group-isolated у built-dep');
+  log('группы рендера: alice и bob в одном процессе рендера, echo и built-dep в своих; подмена адреса вне группы отклонена; предупреждение у стороннего');
 
   assert.match(await viewVar('alice', '--cy-scheme'), /^(light|dark)$/, 'токены темы не дошли до вида');
   // Тема рабочего стола бывает тёмной: без шага через светлую смена на dark не случится, и onChange не позовётся.

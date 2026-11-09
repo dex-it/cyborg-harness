@@ -26,7 +26,7 @@ export function groupLabel(row: PluginRow): string | undefined {
   return row.group === undefined || row.group === row.id ? undefined : `группа ${row.group}`;
 }
 
-/** Предупреждение о группе словами записи ядра: сторонний плагин не получил общую группу (`group-isolated`) или сидит в ней по воле владельца (`group-shared`). */
+/** Предупреждение о группе: сторонний плагин просил общую группу, ядро дало ему свою (запись `group-isolated` словами). */
 export function groupNote(row: PluginRow): string | undefined {
   return row.groupWarning;
 }
