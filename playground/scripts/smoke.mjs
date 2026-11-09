@@ -740,7 +740,7 @@ async function main() {
   assert.equal(await state('example'), 'active', 'плагин из шаблона не включился');
   await waitFor('вид шаблона открыт: в нём кнопка cy-button', async () => (await inView('example', "document.getElementById('hello')?.localName")) === 'cy-button');
   await inView('example', "document.getElementById('hello').click()");
-  await waitFor('ответ команды example.hello во виде шаблона', async () => (await inView('example', "document.getElementById('answer')?.textContent")) === 'привет');
+  await waitFor('ответ команды example.hello в виде шаблона', async () => (await inView('example', "document.getElementById('answer')?.textContent")) === 'привет');
   log('шаблон плагина: собран cyborg-plugin, активен, вид открыт, команда из вида ответила');
 
   const lock = JSON.parse(readFileSync(join(userData, 'workspace.cyborg.json.lock'), 'utf8'));

@@ -98,10 +98,12 @@ npm start
 ## Плагин за пять минут
 
 ```bash
-npx cyborg-plugin new my-plugin
+cp -R templates/plugin my-plugin
 cd my-plugin
 npm test
 ```
+
+В клоне после `npm ci`; шаблон и порядок переименования - [Первый плагин](docs/guide/start/first-plugin.md).
 
 Плагин - каталог с манифестом и точкой входа. Манифест:
 

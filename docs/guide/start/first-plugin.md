@@ -25,12 +25,14 @@ cp -R cyborg-harness/templates/plugin greeter
 cd greeter
 ```
 
-Замените слово `example` на `greeter` в `manifest.json`, `index.ts`, `contracts.ts`, `ui/ui.ts`, `package.json` и в тесте `test/example.test.ts` (файл переименуйте тоже). Команды `cyborg-plugin new` нет: шаблон - обычный каталог.
+Замените слово `example` на `greeter` во всех файлах каталога: `manifest.json`, `index.ts`, `contracts.ts`, `ui/ui.ts`, `package.json`, тест `test/example.test.ts` (файл переименуйте тоже) и потребитель контракта `test/consumer/index.ts` и `test/consumer/manifest.json` - иначе он попросит `example.greeting`, которого больше нет. Команды `cyborg-plugin new` нет: шаблон - обычный каталог.
 
 :::caution[Пакеты ещё не опубликованы]
 Пакеты `@cyborg-harness/*` и команда `cyborg-plugin` ещё не в реестре. `@cyborg-harness/contracts` готов к выпуску ([P-01](https://github.com/dex-it/cyborg-harness/issues/29): собирается, упаковывается и ставится в пустой проект из tarball), его выпуск - [P-10](https://github.com/dex-it/cyborg-harness/issues/11); остальное публикуется задачами [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9). Пакеты scope `@cyborg` на npmjs.com к проекту не относятся. До выпуска соберите архивы в клоне и поставьте их в каталог плагина:
 
 ```bash
+cd ..
+mkdir -p packages
 (cd cyborg-harness && npm ci && npm run build:packages && \
   npm pack --workspace=contracts --workspace=core --workspace=testing --workspace=tools/cyborg-plugin --pack-destination "$PWD/../packages")
 cd greeter
