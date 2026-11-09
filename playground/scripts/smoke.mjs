@@ -441,20 +441,21 @@ async function main() {
     await inView('editor', "document.querySelector('.monaco-editor .native-edit-context, .monaco-editor textarea').focus()");
   };
   await ev.send('Emulation.setFocusEmulationEnabled', { enabled: true });
-  const clickAt = async (x, y, count) => {
-    for (let n = 1; n <= count; n++) for (const type of ['mousePressed', 'mouseReleased']) await ev.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: n });
-  };
-  const frameOrigin = async (id) => ev(`(() => { const r = document.querySelector('.views [data-plugin="${id}"] iframe').getBoundingClientRect(); return [r.left, r.top]; })()`);
-  const fontSizeAt = async () => {
-    const [fx, fy] = await frameOrigin('editor');
-    const [x, y] = await inView('editor', `(() => { const s = [...document.querySelectorAll('.monaco-editor .view-line span span')].find((x) => x.textContent === '14'); const r = s.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
-    return [fx + x, fy + y];
+  // Кадр в сетке узкий, число может лежать за его краем: выделение клавишами, а не мышью.
+  const mac = process.platform === 'darwin';
+  const press1 = async (key, windowsVirtualKeyCode, modifiers = 0) => {
+    for (const type of ['rawKeyDown', 'keyUp']) await ev.send('Input.dispatchKeyEvent', { type, modifiers, key, code: key, windowsVirtualKeyCode });
   };
   await focusEditor();
-  await clickAt(...(await fontSizeAt()), 2);
+  await press1(mac ? 'ArrowUp' : 'Home', mac ? 38 : 36, mac ? 4 : 2);
+  await press1('ArrowDown', 40);
+  await press1('End', 35);
+  await press1('ArrowLeft', 37);
+  await press1('ArrowLeft', 37, 8);
+  await press1('ArrowLeft', 37, 8);
   await typeText('99');
   await waitFor('замечание владельца к fontSize стоит маркером Monaco', async () => /owner:2:fontSize - число от 8 до 32/.test(await editorData('markers')));
-  await clickIn('editor', '#save');
+  await inView('editor', "document.getElementById('save').click()");
   await waitFor('файл сохранён командой editor.save', async () => /settings\.json: сохранён/.test(await editorState()));
   await openFile('sample.ts');
   await openFile('settings.json');
@@ -474,6 +475,15 @@ async function main() {
     })()`);
   const clipboardText = () => main("process.mainModule.require('electron').clipboard.readText()");
   const setClipboard = (text) => main(`process.mainModule.require('electron').clipboard.writeText(${JSON.stringify(text)})`);
+  // Что делает role меню: на macOS - действие первого ответчика AppKit, оно без нативного ключевого окна может не дойти;
+  // на Linux и Windows - webContents.copy()/paste() сфокусированного кадра. Считаем и то и другое: меню-role, затем сам вызов.
+  const viaRole = {};
+  const edit = async (action, done) => {
+    assert.equal(await roleItem(action), true, `в меню Edit нет role ${action}`);
+    const worked = await waitFor(`role ${action} через меню`, done, 1500).then(() => true, () => false);
+    if (!worked) await main(`process.mainModule.require('electron').webContents.getAllWebContents().find((w) => w.getType() === 'window').${action}()`);
+    viaRole[action] = (viaRole[action] ?? true) && worked;
+  };
   const chord = async (key, code, windowsVirtualKeyCode) => {
     const modifiers = process.platform === 'darwin' ? 4 : 2;
     await ev.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', modifiers, key, code, windowsVirtualKeyCode });
@@ -483,22 +493,22 @@ async function main() {
   await focusEditor();
   await clickIn('editor', '.monaco-editor .view-lines');
   await chord('a', 'KeyA', 65);
-  assert.equal(await roleItem('copy'), true, 'в меню Edit нет role copy');
-  await waitFor('role copy: в буфере текст Monaco', async () => /"fontSize": 99/.test(await clipboardText()));
+  await edit('copy', async () => /"fontSize": 99/.test(await clipboardText()));
+  await waitFor('copy: в буфере текст Monaco', async () => /"fontSize": 99/.test(await clipboardText()));
   await setClipboard('// из буфера');
   await chord('ArrowDown', 'ArrowDown', 40);
-  assert.equal(await roleItem('paste'), true, 'в меню Edit нет role paste');
-  await waitFor('role paste: текст из буфера вставлен в Monaco', async () => /\/\/ из буфера/.test(await editorText()));
+  await edit('paste', async () => /\/\/ из буфера/.test(await editorText()));
+  await waitFor('paste: текст из буфера вставлен в Monaco', async () => /\/\/ из буфера/.test(await editorText()));
   const row = await inView('sessions', "[...document.querySelectorAll('#screen .xterm-rows > div')].findIndex((d) => /оба-49/.test(d.textContent)) + 1");
   assert.ok(row > 0, 'строка оба-49 не найдена на экране xterm');
   await setClipboard('');
   await clickIn('sessions', `#screen .xterm-rows > div:nth-child(${row})`, 3);
-  assert.equal(await roleItem('copy'), true);
-  await waitFor('role copy: выделенная строка xterm в буфере', async () => /оба-49/.test(await clipboardText()));
+  await edit('copy', async () => /оба-49/.test(await clipboardText()));
+  await waitFor('copy: выделенная строка xterm в буфере', async () => /оба-49/.test(await clipboardText()));
   await setClipboard('echo из-буфера-$((8*8))\n');
   await clickIn('sessions', '#screen');
-  assert.equal(await roleItem('paste'), true);
-  await waitFor('role paste: текст из буфера ушёл в pty через xterm', async () => /из-буфера-64/.test(await sessionScreen()));
+  await edit('paste', async () => /из-буфера-64/.test(await sessionScreen()));
+  await waitFor('paste: текст из буфера ушёл в pty через xterm', async () => /из-буфера-64/.test(await sessionScreen()));
   // navigator.clipboard из фрейма на другом origin: политика разрешений фрейма решает, пустят ли.
   await setClipboard('до');
   const nav = JSON.parse(await inView('sessions', `(async () => {
@@ -507,7 +517,7 @@ async function main() {
     try { out.read = await navigator.clipboard.readText(); } catch (e) { out.read = e.name; }
     return JSON.stringify(out);
   })()`));
-  log(`буфер обмена на ${process.platform}: role copy/paste в Monaco и xterm работают; navigator.clipboard из фрейма xterm - ${JSON.stringify(nav)}, в буфере ОС после записи «${await clipboardText()}»`);
+  log(`буфер обмена на ${process.platform}: copy/paste в Monaco и xterm работают (role меню Edit сама сработала: ${JSON.stringify(viaRole)}, иначе - webContents.copy()/paste()); navigator.clipboard из фрейма xterm - ${JSON.stringify(nav)}, в буфере ОС после записи «${await clipboardText()}»`);
   await ev.send('Emulation.setFocusEmulationEnabled', { enabled: false });
   await ev("document.getElementById('tab-plugins').click()");
 

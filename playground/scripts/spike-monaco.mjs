@@ -120,10 +120,11 @@ async function runSandbox() {
     await watchConsole(h);
     await showViews(h);
     await waitFor('вид editor смонтирован', () => h.inView('editor', "document.getElementById('cyborg-view')?.dataset.mountMs ?? ''"), 10_000);
-    for (const [plugin, sandbox] of [['editor', 'allow-scripts'], ['sessions', 'allow-scripts'], ['editor', 'allow-scripts allow-same-origin'], ['sessions', 'allow-scripts allow-same-origin']]) {
+    // Последняя строка - не sandbox, а атрибут allow: пускает ли политика разрешений navigator.clipboard из кадра вида.
+    for (const [plugin, sandbox, allow] of [['editor', 'allow-scripts'], ['sessions', 'allow-scripts'], ['editor', 'allow-scripts allow-same-origin'], ['sessions', 'allow-scripts allow-same-origin'], ['sessions', '', 'clipboard-read; clipboard-write'], ['sessions', '', '']]) {
       const tag = `sbx${String(results.length)}`;
       const before = (await h.main('globalThis.pilotLog.length')) ?? 0;
-      await h.ev(`(() => { const f = document.createElement('iframe'); f.sandbox = ${JSON.stringify(sandbox)}; f.src = 'cyborg-plugin://${plugin}/?${tag}=1'; f.style.cssText = 'position:fixed;left:0;top:0;width:700px;height:500px;z-index:99'; f.id = ${JSON.stringify(tag)}; document.body.append(f); })()`);
+      await h.ev(`(() => { const f = document.createElement('iframe'); if (${JSON.stringify(sandbox)}) f.sandbox = ${JSON.stringify(sandbox)}; if (${JSON.stringify(allow ?? '')}) f.allow = ${JSON.stringify(allow ?? '')}; f.src = 'cyborg-plugin://${plugin}/?${tag}=1'; f.style.cssText = 'position:fixed;left:0;top:0;width:700px;height:500px;z-index:99'; f.id = ${JSON.stringify(tag)}; document.body.append(f); })()`);
       await sleep(7000);
       const probe = `(async () => {
         const out = { origin: location.origin, bridge: typeof window.cyborgView, mounted: !!document.querySelector('#cyborg-view > *') };
@@ -131,6 +132,9 @@ async function runSandbox() {
         try { out.indexedDB = typeof indexedDB.open === 'function' ? 'есть' : 'нет'; await new Promise((res, rej) => { const r = indexedDB.open('pilot'); r.onsuccess = res; r.onerror = () => rej(r.error); }); } catch (e) { out.indexedDB = e.name; }
         out.editor = document.getElementById('editor-state')?.textContent ?? null;
         out.screen = !!document.querySelector('.xterm') || !!document.querySelector('.monaco-editor');
+        out.text = document.body.innerText.replace(/\\s+/g, ' ').slice(0, 140);
+        out.agents = document.querySelectorAll('#agents cy-button').length;
+        try { await navigator.clipboard.writeText('pilot'); out.clipboard = 'записал'; } catch (e) { out.clipboard = e.name; }
         return out;
       })()`;
       const found = await h.main(`(async () => {
@@ -141,7 +145,7 @@ async function runSandbox() {
         return Promise.race([frame.executeJavaScript(${JSON.stringify(probe)}), new Promise((r) => setTimeout(() => r('проба не ответила'), 5000))]);
       })()`);
       const log = (await h.main('globalThis.pilotLog')).slice(before);
-      results.push({ plugin, sandbox, frame: found, console: [...new Set(log.map((l) => l.slice(0, 160)))].slice(0, 4) });
+      results.push({ plugin, sandbox: sandbox || (allow ? `allow=${allow}` : 'без атрибутов'), frame: found, console: [...new Set(log.map((l) => l.slice(0, 160)))].slice(0, 4) });
       await h.ev(`document.getElementById(${JSON.stringify(tag)}).remove()`);
     }
   } catch (error) {
@@ -162,8 +166,8 @@ async function runMemory() {
     try {
       await waitFor('плагины работают', () => states(h, ['sessions', 'agent-shell', ...(withEditor ? ['editor'] : [])]), 60_000);
       await showViews(h);
-      await h.inView('sessions', "document.querySelector('#agents cy-button[data-agent=\"shell\"]').click()");
-      await waitFor('сессия shell', async () => /^Оболочка: pid \d+$/.test(await h.inView('sessions', "document.getElementById('session-state').textContent")), 10_000);
+      await waitFor('кнопка агента shell', () => h.inView('sessions', "(() => { const b = document.querySelector('#agents cy-button[data-agent=\"shell\"]'); b?.click(); return !!b && !b.disabled; })()"), 15_000);
+      await waitFor('сессия shell', async () => /^Оболочка: pid \d+$/.test(await h.inView('sessions', "document.getElementById('session-state').textContent")), 15_000);
       if (withEditor) await waitFor('файл открыт', async () => (await h.inView('editor', "document.getElementById('cyborg-view').dataset.openedMs ?? ''")) !== '', 20_000);
       await sleep(4000);
       const procs = await h.main(`(() => {
@@ -173,17 +177,14 @@ async function runMemory() {
         return { all: app.getAppMetrics().map((m) => ({ pid: m.pid, type: m.type })), editor: of('cyborg-plugin://editor'), sessions: of('cyborg-plugin://sessions') };
       })()`);
       const total = procs.all.reduce((sum, p) => sum + (pssKb(p.pid) ?? 0), 0);
-      const timing = (id) => h.inView(id, `(() => { const e = performance.getEntriesByType('resource').find((r) => r.name.endsWith('/ui/ui.js')); return e ? Math.round(e.responseEnd) : null; })()`);
       runs.push({
         withEditor,
         processes: procs.all.length,
         totalMb: mb(total),
-        editorProcessMb: mb(pssKb(procs.editor ?? -1)),
-        sessionsProcessMb: mb(pssKb(procs.sessions ?? -1)),
-        editorModuleLoadedMs: withEditor ? await timing('editor') : undefined,
+        editorProcessMb: procs.editor === null ? undefined : mb(pssKb(procs.editor)),
+        sessionsProcessMb: procs.sessions === null ? undefined : mb(pssKb(procs.sessions)),
         editorMountMs: withEditor ? Number(await h.inView('editor', "document.getElementById('cyborg-view').dataset.mountMs")) : undefined,
         editorOpenedMs: withEditor ? Number(await h.inView('editor', "document.getElementById('cyborg-view').dataset.openedMs")) : undefined,
-        sessionsModuleLoadedMs: await timing('sessions'),
       });
     } catch (error) {
       runs.push({ withEditor, error: error instanceof Error ? error.message : String(error) });
@@ -202,10 +203,8 @@ async function runMemory() {
       totalWithEditorMb: pick(true, 'totalMb'),
       editorProcessMb: pick(true, 'editorProcessMb'),
       sessionsProcessMb: pick(true, 'sessionsProcessMb'),
-      editorModuleLoadedMs: pick(true, 'editorModuleLoadedMs'),
       editorMountMs: pick(true, 'editorMountMs'),
       editorOpenedMs: pick(true, 'editorOpenedMs'),
-      sessionsModuleLoadedMs: pick(true, 'sessionsModuleLoadedMs'),
     },
     bundlesKb: { 'ui.js': size('ui.js'), 'ui.css': size('ui.css'), 'editor.worker': size('workers/editor.worker.js'), 'json.worker': size('workers/json.worker.js'), 'ts.worker': size('workers/ts.worker.js'), 'css.worker': size('workers/css.worker.js'), 'html.worker': size('workers/html.worker.js') },
   };
@@ -227,8 +226,8 @@ else {
     for (const r of result.csp) console.log(`  ${r.name} | ${yes(r.mounted)} | ${yes(r.opened)} | ${r.tokenClasses ?? '-'} | ${r.workers || '-'} | ${yes(r.jsonMarker)} | ${yes(r.tsMarker)} | ${r.fonts === undefined ? '-' : r.fonts > 0 ? 'загружен' : 'нет'} | ${yes(r.xterm)} | ${r.blobWorker ?? '-'} | ${r.blocked || '-'}${r.error ? ` | ОШИБКА ${r.error}` : ''}`);
   }
   if (result.sandbox) {
-    console.log('\nsandbox: плагин | sandbox | origin кадра | мост | вид собран | localStorage | indexedDB | консоль');
-    for (const r of result.sandbox) console.log(r.error ? `  ОШИБКА ${r.error}` : `  ${r.plugin} | ${r.sandbox} | ${r.frame?.origin ?? '-'} | ${r.frame?.bridge ?? '-'} | ${yes(r.frame?.mounted)} | ${r.frame?.localStorage ?? '-'} | ${r.frame?.indexedDB ?? '-'} | ${r.console.join(' // ') || '-'}`);
+    console.log('\nsandbox: плагин | sandbox | origin кадра | мост | вид собран | localStorage | indexedDB | clipboard | консоль');
+    for (const r of result.sandbox) console.log(r.error ? `  ОШИБКА ${r.error}` : `  ${r.plugin} | ${r.sandbox} | ${r.frame?.origin ?? '-'} | ${r.frame?.bridge ?? '-'} | ${yes(r.frame?.mounted)} | ${r.frame?.localStorage ?? '-'} | ${r.frame?.indexedDB ?? '-'} | ${r.frame?.clipboard ?? '-'} | ${r.console.join(' // ') || '-'}`);
   }
   if (result.memory) {
     console.log(`\nПамять (${result.memory.metric}) и время, медиана из трёх запусков:`);
