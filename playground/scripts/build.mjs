@@ -33,12 +33,6 @@ for (const entry of readdirSync(plugins, { withFileTypes: true })) {
     cpSync(join(plugins, entry.name), join(dist, 'plugins', entry.name));
     continue;
   }
-  if (entry.name === 'editor') {
-    // editor (PL-05) тянет Monaco: значки .ttf кладёт рядом с модулем вида загрузчик `file`, а сборка видов cyborg-plugin такого загрузчика не знает; модуль собирается здесь.
-    cpSync(join(plugins, entry.name), join(dist, 'plugins', entry.name), { recursive: true, filter: (from) => !/[/\\]ui[/\\][^/\\]+\.ts$/.test(from) });
-    await build({ ...browser, format: 'esm', loader: { '.ttf': 'file' }, entryPoints: [join(plugins, entry.name, 'ui', 'ui.ts')], outfile: join(dist, 'plugins', entry.name, 'ui', 'ui.js') });
-    continue;
-  }
   const report = await buildPlugin(join(plugins, entry.name), { out: join(dist, 'plugins', entry.name), main: 'source', check: false });
   for (const warning of report.warnings) console.warn(`${entry.name}: ${warning}`);
   if (!report.ok) throw new Error(`плагин ${entry.name}: ${report.problems.map((p) => `${p.file}${p.line === undefined ? '' : `:${String(p.line)}`}: ${p.message}`).join('; ')}`);
