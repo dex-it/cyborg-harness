@@ -453,3 +453,30 @@ test('log и output: хост пишет строки только за свои
   assert.equal(logs.length - fromM.length, 4, logs.join('\n'));
   await kernel.unload();
 });
+
+test('output: поток строк хоста без плагина тоже под пределом частоты - одна сводная строка с меткой хоста, плагины хоста не задеты', async () => {
+  const forger = forging({ mallory: { activate: () => undefined } });
+  const logs: string[] = [];
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['mallory'],
+    manifests: [manifest('mallory')],
+    spawnHost: forger.spawn,
+    hosts: { m: ['mallory'] },
+    limits: { logRate: 2, logWindowMs: 40 },
+    onLog: (id, message, level) => logs.push(`${id} [${level}]: ${message}`),
+  });
+
+  for (let i = 0; i < 6; i++) forger.notify('m', 'output', { pluginId: '', level: i === 4 ? 'error' : 'info', text: `строка ${String(i)}` });
+  await settle();
+  for (const end = Date.now() + 2000; logs.length < 3 && Date.now() < end; ) await new Promise((r) => setTimeout(r, 10));
+
+  assert.deepEqual(logs, [
+    'хост m [info]: строка 0',
+    'хост m [info]: строка 1',
+    'хост m [warn]: строк сверх предела за интервал: 4, из них error: 1; последняя error: строка 4',
+  ]);
+  assert.deepEqual(kernel.journal.filter((e) => e.kind === 'log-summary'), [], 'у хоста нет плагина - сводная не в журнале плагина');
+  assert.deepEqual(kernel.active, ['mallory']);
+  await kernel.unload();
+});

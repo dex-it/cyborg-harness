@@ -49,7 +49,7 @@ export function createPluginLog(ctx: KernelContext): PluginLog {
     if (judge && isPlugin(origin) && w.floodEnd - w.floodSince >= limits.logFloodMs) ctx.parts.lifecycle.switchOffFlood(origin);
   }
 
-  function window(origin: string): Window {
+  function windowOf(origin: string): Window {
     let w = windows.get(origin);
     if (!w) {
       w = { start: undefined, lines: 0, skipped: 0, errors: 0, lastError: undefined, timer: undefined, floodSince: undefined, floodEnd: undefined };
@@ -58,28 +58,35 @@ export function createPluginLog(ctx: KernelContext): PluginLog {
     return w;
   }
 
-  /** Строка источника: в пределах интервала уходит в `onLog`, сверх предела только считается. */
-  function line(origin: string, raw: string, level: LogLevel): void {
-    if (ctx.parts.lifecycle.switchedOff.has(origin)) return;
-    const now = Date.now();
-    const w = window(origin);
-    if (w.start !== undefined && now - w.start >= limits.logWindowMs) close(origin, w);
-    w.start ??= now;
+  /** Строка, какой она уходит дальше: без значений секретов, не длиннее предела. */
+  function render(origin: string, raw: string): string {
     const secrets = gateway.secretValues(isPlugin(origin) ? origin : undefined);
     // Вычёркивание идёт до обрезки, иначе значение, разрезанное границей, осталось бы началом в строке; хвост дальше предела отбрасывается заранее.
     const reach = limits.logLineBytes + secrets.reduce((n, s) => Math.max(n, s.length), 0);
     const long = raw.length > reach;
     const redacted = redactSecrets(long ? raw.slice(0, reach) : raw, secrets);
-    const text = clipLine(redacted, limits.logLineBytes, long ? Buffer.byteLength(raw) : Buffer.byteLength(redacted));
+    return clipLine(redacted, limits.logLineBytes, long ? Buffer.byteLength(raw) : Buffer.byteLength(redacted));
+  }
+
+  /** Строка источника: в пределах интервала уходит в `onLog`, сверх предела только считается (разбирается лишь `error`: её последнюю несёт сводная запись). */
+  function line(origin: string, raw: string, level: LogLevel): void {
+    const { switchedOff } = ctx.parts.lifecycle;
+    if (switchedOff.has(origin)) return;
+    const now = Date.now();
+    const w = windowOf(origin);
+    if (w.start !== undefined && now - w.start >= limits.logWindowMs) close(origin, w);
+    // Закрытый интервал мог оказаться последним терпимым: плагин выключен, эта строка уже не принимается.
+    if (switchedOff.has(origin)) return;
+    w.start ??= now;
     if (w.lines < limits.logRate) {
       w.lines++;
-      options.onLog?.(origin, text, level);
+      options.onLog?.(origin, render(origin, raw), level);
       return;
     }
     w.skipped++;
     if (level === 'error') {
       w.errors++;
-      w.lastError = text;
+      w.lastError = render(origin, raw);
     }
     w.timer ??= setTimeout(() => close(origin, w), Math.max(0, w.start + limits.logWindowMs - now));
     w.timer.unref();

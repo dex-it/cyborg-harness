@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { PluginContext } from '@cyborg-harness/contracts';
+import { memorySecrets } from '../../testing/src/memory.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { load, type JournalEntry, type Kernel, type LoadOptions } from '../src/loader.ts';
 import { describeEntry, entryLevel, pluginStatuses } from '../src/status.ts';
@@ -248,24 +249,14 @@ test('поток: после «Включить снова» плагин пиш
 });
 
 // FR-CH-4018, вопрос 7 SRS фичи 04: ядро вычёркивает из строк значения, лежащие в хранилище секретов.
-function memorySecrets(): { store: Map<string, string>; os: NonNullable<LoadOptions['os']> } {
-  const store = new Map<string, string>();
-  const os = {
-    dataDir: tmpdir(),
-    tempDir: tmpdir(),
-    secrets: {
-      available: () => true,
-      get: async (key: string) => store.get(key),
-      set: async (key: string, value: string) => void store.set(key, value),
-      delete: async (key: string) => void store.delete(key),
-      deletePrefix: async () => 0,
-    },
-  };
-  return { store, os };
+/** Среда ядра с хранилищем секретов в памяти из тест-кита; `map` - то, что в хранилище лежит. */
+function withSecrets(): { store: Map<string, string>; os: NonNullable<LoadOptions['os']> } {
+  const secrets = memorySecrets();
+  return { store: secrets.map, os: { dataDir: tmpdir(), tempDir: tmpdir(), secrets } };
 }
 
 test('секреты: значение из хранилища (set, get, resolve) вычёркивается из строки ctx.log; чужому плагину оно не принадлежит', async () => {
-  const { os } = memorySecrets();
+  const { os } = withSecrets();
   const { k, ctx, lines } = await rig(['a', 'b'], { os });
   try {
     const secret = `s3cr3t-${randomUUID()}`;
@@ -293,7 +284,7 @@ test('секреты: значение из хранилища (set, get, resolv
 });
 
 test('секреты: прочитанное через get и resolve вычёркивается, в том числе из сводной записи', async () => {
-  const { store, os } = memorySecrets();
+  const { store, os } = withSecrets();
   const secret = `s3cr3t-${randomUUID()}`;
   store.set('a/via-get', secret);
   store.set('a/via-resolve', `${secret}-2`);
@@ -316,7 +307,7 @@ test('секреты: прочитанное через get и resolve вычё�
 });
 
 test('секреты: значение, разрезанное границей обрезки, не остаётся началом строки; вычёркивание удлиняет короткую строку - обрезка после него', async () => {
-  const { os } = memorySecrets();
+  const { os } = withSecrets();
   const { k, ctx, lines } = await rig(['a'], { os, limits: { logLineBytes: 32 } });
   try {
     const secret = `s3cr3t-${randomUUID()}`;
