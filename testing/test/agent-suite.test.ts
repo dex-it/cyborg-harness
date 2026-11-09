@@ -90,8 +90,8 @@ describe('набор cyborg.agent на плохих поставщиках', () 
   });
 
   it('тип os набора не допускает pty', () => {
-    // @ts-expect-error -- pty в os набора запрещён типом
-    const bad: AgentSuiteOptions = { os: () => ({ pty: fakePty() }) };
+    // @ts-expect-error -- pty в os набора запрещён типом и рядом с другими полями среды
+    const bad: AgentSuiteOptions = { os: () => ({ env: {}, pty: fakePty() }) };
     assert.ok(bad);
   });
 

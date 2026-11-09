@@ -5,13 +5,16 @@ import type { OsEnvironment } from '@cyborg-harness/core';
 import { resolvePlugin, startKernel, type InlinePlugin, type TestKernel, type TestPlugin } from './kernel.ts';
 import { sandbox, type Sandbox } from './sandbox.ts';
 
+/** `pty?: never`, а не один `Omit`: объект с `pty` рядом с другим полем среды `Omit` пропускает, отказ ловит только объект из одного `pty`. */
+type SuiteOs = Omit<Partial<OsEnvironment>, 'pty'> & { readonly pty?: never };
+
 export interface AgentSuiteOptions {
   /**
    * Среда, в которой программа агента находится: например PATH с подставным исполняемым файлом и `SHELL`, если поставщик запускает `$SHELL`.
    * Получает песочницу набора; её корень - `cwd` всех запросов набора. Без неё работает среда `startKernel` по умолчанию.
    * `pty` здесь нет: запуск через потребителя набор наблюдает в своём `fakePty()`, а свой бэкенд оставил бы проверку слепой.
    */
-  readonly os?: (box: Sandbox) => Omit<Partial<OsEnvironment>, 'pty'> | Promise<Omit<Partial<OsEnvironment>, 'pty'>>;
+  readonly os?: (box: Sandbox) => SuiteOs | Promise<SuiteOs>;
   /** Плагины, без которых поставщик не активируется (его `requires`). */
   readonly plugins?: readonly TestPlugin[];
 }
