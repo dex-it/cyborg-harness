@@ -15,6 +15,25 @@ export interface PluginStatus {
   readonly revivable: boolean;
 }
 
+/**
+ * Записи, которые о работе плагина ничего не говорят: ни конфликт сочетаний, ни отказ шлюза, ни вызов устаревшего члена, ни удержанное хостом отклонение, ни завершённый по сроку pty, ни выбор хоста.
+ * Плагин работает как обычно (или стоит, как стоял), и они не должны перекрывать запись жизненного цикла: по последней из них `pluginStatuses` и `enable` решают, что с плагином.
+ */
+const NOT_LIFECYCLE = new Set<JournalEntry['kind']>([
+  'key-conflict',
+  'key-ignored',
+  'denied',
+  'deprecated-call',
+  'unhandled-rejection',
+  'pty-expired',
+  'host-isolated',
+  'host-own-grouped',
+  'third-party',
+]);
+
+/** Запись о жизненном цикле плагина: загружен, пропущен, снят, упал. Остальные виды (`NOT_LIFECYCLE`) приходят в любой момент, в том числе после снятия. */
+export const isLifecycleEntry = (entry: JournalEntry): boolean => !NOT_LIFECYCLE.has(entry.kind);
+
 const REVIVABLE = new Set<JournalEntry['kind']>(['switched-off', 'failed', 'skipped', 'host-abandoned']);
 
 /** Плагины, которых касается запись: свой id или перечень у записей хоста; у вызова устаревшего члена ещё и поставщик, чтобы он видел своих вызывающих. */
@@ -31,6 +50,7 @@ export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[]
   const revivable = (id: string, cause: JournalEntry) => REVIVABLE.has(cause.kind) || (cause.kind === 'unloaded' && cause.by === id);
   const set = (id: string, state: PluginState, cause: JournalEntry) => states.set(id, { id, state, cause, revivable: state === 'stopped' && revivable(id, cause) });
   for (const entry of journal) {
+    if (!isLifecycleEntry(entry)) continue;
     for (const id of entryPlugins(entry)) {
       switch (entry.kind) {
         case 'activated':
@@ -45,17 +65,6 @@ export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[]
         case 'host-down':
         case 'revived':
           set(id, 'restarting', entry);
-          break;
-        case 'key-conflict':
-        case 'key-ignored':
-        case 'denied':
-        case 'deprecated-call':
-        case 'unhandled-rejection':
-        case 'pty-expired':
-        case 'host-isolated':
-        case 'host-own-grouped':
-        case 'third-party':
-          // Ни конфликт сочетаний, ни отказ шлюза, ни вызов устаревшего члена, ни удержанное хостом отклонение, ни завершённый по сроку pty, ни выбор хоста о работе плагина ничего не говорят: плагин работает как обычно.
           break;
         case 'host-restart':
           // Причиной остаётся падение: «перезапуск» без «почему» человеку ничего не говорит.
