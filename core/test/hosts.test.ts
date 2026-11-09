@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fileURLToPath } from 'node:url';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { load, type JournalEntry, type Kernel } from '../src/loader.ts';
 import { pluginStatuses } from '../src/status.ts';
@@ -359,12 +362,19 @@ test('forkHosts: явный путь входа хоста берётся как
   assert.equal(code, 1);
 });
 
-test('forkHosts: заданный путь входа совпадает с выведенным - вызов между процессами работает', async () => {
-  const entry = fileURLToPath(new URL('../src/host-entry.ts', import.meta.url));
-  const k = await start(3, forkHosts({ entry }));
+test('forkHosts: заданный путь входа работает и используется, а не выведенный - вызов между процессами идёт через него', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cyborg-entry-'));
+  const marker = join(dir, 'marker');
+  // Обёртка отличается от выведенного пути и оставляет след, затем отдаёт управление настоящему входу: если entry игнорируется, следа нет.
+  const wrapper = join(dir, 'wrapper-entry.mjs');
+  const real = pathToFileURL(fileURLToPath(new URL('../src/host-entry.ts', import.meta.url))).href;
+  writeFileSync(wrapper, `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(marker)}, 'x');\nawait import(${JSON.stringify(real)});\n`);
+  const k = await start(3, forkHosts({ entry: wrapper }));
   try {
     assert.equal(await k.run('consumer.call', 'read', 'a.txt'), 'data:a.txt');
+    assert.ok(existsSync(marker), 'хост запущен не через заданный путь входа');
   } finally {
     await k.unload();
+    rmSync(dir, { recursive: true, force: true });
   }
 });
