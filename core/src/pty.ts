@@ -56,6 +56,10 @@ interface Entry {
   attached: boolean;
   /** Хвост пропал вместе с pty-хостом. */
   lost: boolean;
+  /** Сколько раз владелец уходил (`detach`, `park`): `attach` в пути сверяет это число с ответом pty-хоста. */
+  turn: number;
+  /** `attach` в пути: пока он есть, pty-хосту о потере владельца не напоминают - ответ решит сам. */
+  attaching: number;
   readonly views: Set<string>;
   exit?: PtyExit;
   orphaned?: ReturnType<typeof setTimeout>;
@@ -158,7 +162,7 @@ export class PtyTable {
     // Терминал на той стороне - xterm.js вида: TERM и COLORTERM описывают его, а не окно, из которого запустили приложение.
     const env = { COLORTERM: 'truecolor', ...o.env };
     // Запись встаёт в таблицу до ответа хоста: предел живых pty и падение владельца видят и запуск, который ещё в пути.
-    const e: Entry = { id: `pty-${String(++this.#next)}`, pluginId, pid: undefined, program: o.program, args: o.args, persist: o.persist, attached: true, lost: false, views: new Set(), keptAt: undefined };
+    const e: Entry = { id: `pty-${String(++this.#next)}`, pluginId, pid: undefined, program: o.program, args: o.args, persist: o.persist, attached: true, lost: false, turn: 0, attaching: 0, views: new Set(), keptAt: undefined };
     this.#entries.set(e.id, e);
     try {
       e.pid = await this.#link.spawn({ key: e.id, file: o.program, args: o.args, options: { name: 'xterm-256color', ...(o.cwd !== undefined && { cwd: o.cwd }), env, cols: o.cols, rows: o.rows } });
@@ -171,6 +175,8 @@ export class PtyTable {
       this.#link.note('end', { key: e.id });
       throw new CoreError('NotFound', `pty ${e.id}: плагин ${pluginId} ушёл до запуска`);
     }
+    // `detach` и `park` во время запуска слали `owner` в хост, где записи ещё не было: хост считает pty присоединённым.
+    if (!e.attached) this.#link.note('owner', { key: e.id, attached: false });
     return { ...info(e as Started), backlog: '' };
   }
 
@@ -185,8 +191,24 @@ export class PtyTable {
       e.keptAt = undefined;
       this.#keptChanged();
     }
-    // Хвост пропал вместе с pty-хостом: спрашивать некого.
-    const remote: { backlog: string; exit?: PtyExit } = e.lost ? { backlog: '', ...(e.exit && { exit: e.exit }) } : await this.#link.attach(id);
+    const turn = e.turn;
+    e.attaching++;
+    let remote: { backlog: string; exit?: PtyExit };
+    try {
+      // Хвост пропал вместе с pty-хостом: спрашивать некого.
+      remote = e.lost ? { backlog: '', ...(e.exit && { exit: e.exit }) } : await this.#link.attach(id);
+    } finally {
+      e.attaching--;
+    }
+    if (e.turn !== turn && this.#entries.get(id) === e) {
+      // Владелец ушёл, пока pty-хост отвечал: ответ адресован мёртвому хосту плагина, срок сироты или выбор человека в силе.
+      if (remote.exit) {
+        // Хост свою запись с выходом уже отдал: следующий attach получит выход отсюда.
+        e.exit ??= remote.exit;
+        e.lost = true;
+      } else if (e.attaching === 0 && !e.attached && !e.lost) this.#link.note('owner', { key: id, attached: false });
+      throw new CoreError('NotFound', `pty ${id}: владелец ушёл до присоединения`);
+    }
     if (e.exit ?? remote.exit) {
       this.#entries.delete(id);
       if (!e.lost) this.#link.note('end', { key: id });
@@ -252,6 +274,7 @@ export class PtyTable {
         this.#end(e);
         continue;
       }
+      e.turn++;
       this.#unattach(e);
       this.#orphan(e);
     }
@@ -282,6 +305,7 @@ export class PtyTable {
       clearTimeout(e.orphaned);
       if (e.exit) this.#drop(e);
       else {
+        e.turn++;
         this.#unattach(e);
         e.keptAt ??= Date.now();
         kept++;

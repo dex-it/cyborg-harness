@@ -6,8 +6,9 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { PluginContext, PtyHandle } from '@cyborg-harness/contracts';
 import { load } from '../src/loader.ts';
-import { PtyTable, type PtyExpiry, type PtyTableOptions } from '../src/pty.ts';
-import { inlinePtyHost } from '../src/pty-link.ts';
+import { PtyTable, type PtyBackend, type PtyExpiry, type PtyTableOptions } from '../src/pty.ts';
+import { inlinePtyHost, type SpawnPtyHost } from '../src/pty-link.ts';
+import { isRecord } from '../src/wire.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { fakePty } from './fake-pty.ts';
 import { fakeView } from './view-channel.ts';
@@ -374,5 +375,122 @@ test('stress-pty: пачка уходит по размеру, не дожида
   for (const c of ['2345', '6789', '0abc', 'd']) proc.emit(c);
   await settle();
   assert.deepEqual(got, ['$ ', '1234567890abc'], 'первый после затишья - сразу, затем по накоплении 10 символов');
+  await t.releaseAll();
+});
+
+test('attach в пути, хост плагина упал: pty остаётся без владельца и истекает по сроку, вывод не уходит мёртвому владельцу (ревью K-01, гонка attach)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const backend = fakePty();
+  const pushed: string[] = [];
+  const expired: PtyExpiry[] = [];
+  const table = new PtyTable(inlinePtyHost(backend), (_p, method) => void pushed.push(method), { backlog: 1000, graceMs: 1000, expired: (e) => void expired.push(e) });
+  const wire = await table.spawn('p', spawnOpts);
+  table.detach('p');
+  await settle();
+  table.claim('p');
+  const attach = table.attach('p', wire.id);
+  attach.catch(() => undefined);
+  // Хост плагина упал снова, пока pty-хост отвечал на attach.
+  table.detach('p');
+  await assert.rejects(attach, { code: 'NotFound' });
+  await settle();
+  backend.procs[0]!.emit('вывод мёртвому владельцу');
+  await settle();
+  assert.deepEqual(pushed, [], 'pty.data ушёл владельцу, которого нет');
+  t.mock.timers.tick(1000);
+  await settle();
+  assert.deepEqual(expired.map((e) => e.id), [wire.id], 'срок сироты не вышел: pty остался присоединённым к мёртвому владельцу');
+  assert.deepEqual(table.list('p'), []);
+  assert.equal(backend.procs[0]!.killed, 'SIGHUP');
+  t.mock.timers.reset();
+  await table.releaseAll();
+});
+
+test('attach в пути и park: оставленный человеком pty не присоединяется к выключенному плагину, срока у него нет (ревью K-01, гонка attach)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const backend = fakePty();
+  const pushed: string[] = [];
+  const table = new PtyTable(inlinePtyHost(backend), (_p, method) => void pushed.push(method), { backlog: 1000, graceMs: 1000 });
+  const wire = await table.spawn('p', spawnOpts);
+  table.detach('p');
+  await settle();
+  table.claim('p');
+  const attach = table.attach('p', wire.id);
+  attach.catch(() => undefined);
+  assert.equal(table.park('p'), 1);
+  await assert.rejects(attach, { code: 'NotFound' });
+  await settle();
+  backend.procs[0]!.emit('x');
+  await settle();
+  assert.deepEqual(pushed, [], 'оставленный pty присоединён к выключенному плагину');
+  assert.equal(table.kept().length, 1, 'оставленный человеком пропал');
+  t.mock.timers.tick(5000);
+  assert.equal(backend.procs[0]!.killed, undefined, 'оставленный человеком ждёт без срока');
+  // Вернувшийся плагин забирает его обычным attach.
+  table.claim('p');
+  assert.deepEqual((await table.attach('p', wire.id)).backlog.includes('$ '), true);
+  t.mock.timers.reset();
+  await table.releaseAll();
+});
+
+test('spawn в пути и detach: pty-хост узнаёт, что владельца нет, - вывод не идёт уведомлениями в главный процесс (ревью K-01)', async () => {
+  const base = fakePty();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const backend: PtyBackend = {
+    async spawn(file, args, options) {
+      await gate;
+      return base.spawn(file, args, options);
+    },
+  };
+  const host = inlinePtyHost(backend);
+  let notes = 0;
+  const spawnHost: SpawnPtyHost = () => {
+    const handle = host();
+    return {
+      ...handle,
+      port: {
+        post: handle.port.post,
+        onMessage: (l) =>
+          handle.port.onMessage((m, tr) => {
+            if (isRecord(m) && m.t === 'note' && m.m === 'data') notes++;
+            l(m, tr);
+          }),
+      },
+    };
+  };
+  const table = new PtyTable(spawnHost, () => undefined, { backlog: 1000, ptyFlushMs: 0 });
+  const wire = table.spawn('p', spawnOpts);
+  wire.catch(() => undefined);
+  await settle();
+  table.detach('p');
+  await settle();
+  release();
+  const w = await wire;
+  await settle();
+  // Приветствие fakePty уходит сразу после запуска и может обогнать `owner`; считаем то, что пришло после.
+  const before = notes;
+  base.procs[0]!.emit('вывод сироты');
+  await settle();
+  assert.equal(notes, before, 'pty-хост считает pty присоединённым и шлёт вывод, который главный процесс выбрасывает');
+  assert.equal((await table.attach('p', w.id)).backlog.includes('вывод сироты'), true, 'хвост сироты пропал');
+  await table.releaseAll();
+});
+
+test('attach в пути, pty вышел, хост плагина упал: выход не теряется, следующий attach вернувшегося плагина его отдаёт (ревью K-01)', async () => {
+  const { t, backend } = table();
+  const wire = await t.spawn('p', spawnOpts);
+  t.detach('p');
+  await settle();
+  backend.procs[0]!.exit(7);
+  t.claim('p');
+  const attach = t.attach('p', wire.id);
+  attach.catch(() => undefined);
+  t.detach('p');
+  await assert.rejects(attach, { code: 'NotFound' });
+  await settle();
+  t.claim('p');
+  assert.deepEqual((await t.attach('p', wire.id)).exit, { code: 7 });
+  assert.deepEqual(t.list('p'), []);
   await t.releaseAll();
 });
