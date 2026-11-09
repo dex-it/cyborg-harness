@@ -32,7 +32,7 @@ test('поиск: встроенные раньше пользовательск
   assert.match(found.entries.get('files') ?? '', new RegExp(`${path.basename(builtin)}/files/index\\.mjs$`));
   assert.match(found.entries.get('notes') ?? '', /notes\/index\.ts$/);
   assert.equal(found.problems.length, 2);
-  assert.ok(found.problems.some((p) => /broken/.test(p)));
+  assert.ok(found.problems.some((p) => p.includes('broken')));
   assert.ok(found.problems.some((p) => p.includes('повтор id files') && p.includes(user) && p.includes(`действует ${builtin}`)));
   assert.deepEqual([...found.origins], [['files', builtin], ['notes', user]]);
 });
