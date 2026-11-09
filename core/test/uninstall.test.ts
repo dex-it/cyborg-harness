@@ -36,7 +36,7 @@ function memorySecrets(): SecretStore & { map: Map<string, string> } {
 }
 
 /** Всё, что переживает перезапуск ядра: каталоги, секреты и документы воркспейса. */
-async function world() {
+async function world(dialog?: () => Promise<readonly string[]>) {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-uninstall-')));
   const picked = path.join(root, 'picked');
   await mkdir(picked);
@@ -58,7 +58,7 @@ async function world() {
       ...(options.bundled && { bundled: options.bundled }),
       ...(options.safeMode && { safeMode: true }),
       manifests: plugins.map((id) => manifest(id, options.manifests?.[id])),
-      os: { ...dirs, secrets, dialog: { open: async () => [picked] } },
+      os: { ...dirs, secrets, dialog: { open: dialog ?? (async () => [picked]) } },
       state: await SectionStore.open(store, ['workspace']),
       config: await SectionStore.open(store, ['user', 'workspace']),
     });
@@ -298,4 +298,24 @@ test('uninstall: документ типа, у которого владелец
   const third = await w.start(['jira']);
   assert.deepEqual(await third.ctx('jira').documents.list(), []);
   await third.k.unload();
+});
+
+test('uninstall: выбор в диалоге, начатый до disable и законченный после uninstall, не достаётся новому плагину с тем же id', async () => {
+  let choose: (paths: readonly string[]) => void = () => undefined;
+  await using w = await world(() => new Promise((resolve) => (choose = resolve)));
+  const first = await w.start(['jira']);
+  const asked = first.ctx('jira').os.dialog.open({ directory: true }).catch(() => undefined);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await first.k.disable('jira');
+  await first.k.uninstall('jira');
+  choose([w.picked]);
+  await asked;
+  // Ответ хосту уже не нужен (хост погашен): ядро доделывает выбор само, ждём его запись.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(byPlugin(w.docs.workspace), {});
+  await first.k.unload();
+
+  const second = await w.start(['jira']);
+  await assert.rejects(second.ctx('jira').os.fs.readText(path.join(w.picked, 'a.txt')), { code: 'PermissionDenied' });
+  await second.k.unload();
 });

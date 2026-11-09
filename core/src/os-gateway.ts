@@ -805,6 +805,8 @@ export class OsGateway {
         const options = readDialogOptions(method, args[0]);
         if (!this.#env.dialog) throw new CoreError('Unavailable', 'диалога выбора нет в этой среде');
         const chosen = (await this.#env.dialog.open(options)).filter((c) => path.isAbsolute(c));
+        // Человек выбирал, пока плагин сняли (disable, uninstall): выбор снятому не записывается, иначе его унаследует новый плагин с тем же id.
+        if (!this.#approved.has(m.id)) throw new CoreError('Unavailable', `${m.id} снят, пока шёл выбор`);
         const grants = this.#granted.get(m.id) ?? new Set<string>();
         const before = grants.size;
         for (const c of chosen) grants.add(await real(c));
