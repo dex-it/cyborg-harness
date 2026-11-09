@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { SecretStore } from '../../../core/src/index.ts';
+import type { SecretStore } from '@cyborg-harness/core';
 
 /** Шифр ОС (в приложении - `safeStorage`); отдельно от файла, чтобы файловую часть проверял юнит-тест без Electron. */
 export interface SecretCipher {
