@@ -143,6 +143,13 @@ test('net.fetch по node:http: метод, тело и заголовки до�
   assert.equal(f.hung.length, 2, 'сервер не увидел обрыва соединений: по тайм-ауту и по выгрузке плагина');
 });
 
+test('net.fetch: учётные данные в адресе (http://u:p@host/) - Invalid, как у прежнего fetch', async () => {
+  const { lookup } = answer({});
+  await using f = await fixture({ net: ['127.0.0.1:$PORT'] }, lookup);
+  await assert.rejects(f.net.fetch(`http://u:p@127.0.0.1:${String(f.port)}/`), { code: 'Invalid' });
+  assert.equal(f.hits.length, 0);
+});
+
 test('net.fetch: ответ со статусом вне 200-599 - Remote сразу, без зависания и исключения в процессе', async () => {
   const { lookup } = answer({});
   await using f = await fixture({ net: ['127.0.0.1:$PORT'] }, lookup);

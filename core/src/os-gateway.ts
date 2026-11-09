@@ -875,6 +875,8 @@ export class OsGateway {
       throw new CoreError('Invalid', `${method}: адрес не URL`);
     }
     if (url.protocol !== 'https:' && url.protocol !== 'http:') throw this.#denied(m, method, `схема ${url.protocol}`);
+    // Прежний fetch отвергал учётные данные в адресе, а node:http отправил бы их как Basic: заголовок задаёт плагин явно.
+    if (url.username !== '' || url.password !== '') throw new CoreError('Invalid', `${method}: учётные данные в адресе не принимаются, используйте заголовок Authorization`);
     const config = this.#approved.get(m.id) ?? {};
     // Хост из `config:<поле>` назвал человек, принимая настройку: внутренний адрес у него - ожидаемый (Jira за VPN).
     const rights = (m.permissions.net ?? []).flatMap((h) => {
