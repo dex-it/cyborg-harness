@@ -595,7 +595,8 @@ export class OsGateway {
     return made;
   }
 
-  async call(m: PluginManifest, method: string, args: readonly unknown[]): Promise<unknown> {
+  /** `signal` - отмена запроса плагина: пока её слышит только `process.run` (программа и её группа завершаются). */
+  async call(m: PluginManifest, method: string, args: readonly unknown[], signal?: AbortSignal): Promise<unknown> {
     const p = m.permissions;
     switch (method) {
       case 'fs.readText': {
@@ -717,7 +718,7 @@ export class OsGateway {
         return undefined;
       }
       case 'process.run':
-        return this.#run(m, args);
+        return this.#run(m, args, signal);
       case 'pty.spawn': {
         const table = this.#ptyTable();
         const o = isRecord(args[0]) ? args[0] : {};
@@ -885,7 +886,7 @@ export class OsGateway {
     return { file, argv, cwd, env: { ...base, ...extra } };
   }
 
-  async #run(m: PluginManifest, args: readonly unknown[]): Promise<ProcessResult> {
+  async #run(m: PluginManifest, args: readonly unknown[], signal?: AbortSignal): Promise<ProcessResult> {
     const method = 'process.run';
     const program = str(method, args[0], 'программа');
     const options = isRecord(args[2]) ? args[2] : {};
@@ -896,14 +897,18 @@ export class OsGateway {
     this.#runs.set(m.id, runs);
     runs.n++;
     try {
-      return await this.#spawnRun(m.id, program, file, argv, cwd, env, timeout, options.input);
+      return await this.#spawnRun(m.id, program, file, argv, cwd, env, timeout, options.input, signal);
     } finally {
       runs.n--;
     }
   }
 
-  #spawnRun(pluginId: string, program: string, file: string, argv: string[], cwd: string | undefined, env: Record<string, string>, timeout: number, input: unknown): Promise<ProcessResult> {
+  #spawnRun(pluginId: string, program: string, file: string, argv: string[], cwd: string | undefined, env: Record<string, string>, timeout: number, input: unknown, signal?: AbortSignal): Promise<ProcessResult> {
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new CoreError('Cancelled', 'process.run: отменён до запуска'));
+        return;
+      }
       // Своя группа процессов: тайм-аут и выгрузка плагина гасят и то, что программа запустила сама.
       const child = spawn(file, argv, { cwd, env, shell: false, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
       const stop = (signal: NodeJS.Signals) => {
@@ -912,9 +917,17 @@ export class OsGateway {
       };
       const timer = timeout > 0 ? setTimeout(() => stop('SIGTERM'), timeout) : undefined;
       const untrack = this.#track(pluginId, () => stop('SIGKILL'));
+      // Отмена вызывающего: SIGTERM всей группе, как по тайм-ауту; вызывающий уже получил Cancelled от канала, здесь ждём close и освобождаем место в пределе runs.
+      let cancelled = false;
+      const onAbort = () => {
+        cancelled = true;
+        stop('SIGTERM');
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
       const done = () => {
         clearTimeout(timer);
         untrack();
+        signal?.removeEventListener('abort', onAbort);
       };
       let stdout = '';
       let stderr = '';
@@ -925,9 +938,10 @@ export class OsGateway {
         done();
         reject(new CoreError('Remote', `${program}: ${error.message}`));
       });
-      child.once('close', (code, signal) => {
+      child.once('close', (code, sig) => {
         done();
-        resolve({ code, signal, stdout, stderr });
+        if (cancelled) reject(new CoreError('Cancelled', 'process.run: отменён'));
+        else resolve({ code, signal: sig, stdout, stderr });
       });
       child.stdin.end(typeof input === 'string' ? input : undefined);
     });

@@ -69,7 +69,7 @@ export interface BridgeEnd {
   /** `mine` плюс плагин active или активируется: снятый плагин общего хоста (хост жив ради соседей) ничего не пишет в ядро. */
   readonly live: (pluginId: string) => PluginManifest;
   /** Запрос с ответом: недоверенный вход сверяется со схемой до обработчика. */
-  readonly onRequest: <const S extends WireSpec>(method: string, spec: S, handler: (p: Parsed<S>) => unknown) => void;
+  readonly onRequest: <const S extends WireSpec>(method: string, spec: S, handler: (p: Parsed<S>, signal: AbortSignal) => unknown) => void;
   /** Уведомление: отказ идёт в лог, потому что вернуть его отправителю некому. */
   readonly onNote: <const S extends WireSpec>(method: string, spec: S, handler: (p: Parsed<S>) => void) => void;
 }
@@ -79,7 +79,8 @@ export interface HostPool {
   readonly hosts: Map<string, Host>;
   start(hostId: string): Host;
   stop(host: Host, error: CoreError): void;
-  call<T>(host: Host, pluginId: string, method: string, params: unknown, timeout?: number): Promise<T>;
+  /** `signal` отменяет вызов и у вызывающего, и у хоста поставщика; `timeout` - то же самое с причиной `Timeout`. */
+  call<T>(host: Host, pluginId: string, method: string, params: unknown, timeout?: number, signal?: AbortSignal, discard?: (value: unknown) => void): Promise<T>;
   /** Хост активного плагина; плагин не активен - `Unavailable`. */
   live(pluginId: string): Host;
   /** Сброс счёта сбоев хоста без виновника: «Включить снова». */

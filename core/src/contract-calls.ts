@@ -1,6 +1,8 @@
 import { checkCall, mayUse } from './call-check.ts';
+import { splitSignal } from './cancel.ts';
 import type { Disposable } from './disposable.ts';
 import { CoreError } from './errors.ts';
+import { cancelError } from './rpc.ts';
 import { CALLBACK, handleKey, marker, SUBSCRIPTION, type ContractDescriptor } from './host-runtime.ts';
 import type { BridgeEnd, ContractCalls, Host, KernelContext, Subscription } from './kernel-context.ts';
 
@@ -34,10 +36,11 @@ export function createContractCalls(ctx: KernelContext): ContractCalls {
     s.consumerHost.endpoint.notify('forget', { ids: s.callbacks.filter((id) => id !== undefined) });
   }
 
-  /** Вызов члена контракта из хоста `host` от имени `p.caller`; колбэки в аргументах становятся подпиской. */
+  /** Вызов члена контракта из хоста `host` от имени `p.caller`; колбэки в аргументах становятся подпиской. `signal` - отмена: доходит до хоста поставщика, подписка отменённого вызова снимается. */
   async function invoke(
     host: Host,
     p: { readonly caller: string; readonly pluginId: string; readonly contract: string; readonly version: string; readonly member: string; readonly args: readonly unknown[] },
+    signal?: AbortSignal,
   ): Promise<unknown> {
     const { pool } = ctx.parts;
     const d = descriptors.get(p.contract)?.find((x) => x.pluginId === p.pluginId && x.version === p.version);
@@ -49,7 +52,7 @@ export function createContractCalls(ctx: KernelContext): ContractCalls {
     await checkCall(ctx, p.caller, pluginId, contract, member, p.args);
     const target = pool.live(pluginId);
     const callbacks = p.args.map((arg) => marker(arg, CALLBACK));
-    if (!callbacks.some((id) => id !== undefined)) return pool.call(target, pluginId, 'call', { pluginId, contract, version, member, args: p.args }, callTimeout);
+    if (!callbacks.some((id) => id !== undefined)) return pool.call(target, pluginId, 'call', { pluginId, contract, version, member, args: p.args }, callTimeout, signal);
     if (callbacks.some((id) => id !== undefined && typeof id !== 'string')) throw new CoreError('Invalid', 'invoke: номер колбэка не строка');
 
     const held = [...subscriptions.values()].filter((s) => s.consumer === p.caller).length;
@@ -57,12 +60,17 @@ export function createContractCalls(ctx: KernelContext): ContractCalls {
     const subscription = ++subscriptionSeq;
     subscriptions.set(subscription, { consumer: p.caller, consumerHost: host, provider: pluginId, providerHost: target, callbacks: callbacks as (string | undefined)[] });
     const args = p.args.map((arg, i) => (callbacks[i] === undefined ? arg : { [CALLBACK]: i }));
-    return pool.call(target, pluginId, 'call', { pluginId, contract, version, member, args, subscription }, callTimeout).then(
+    // Ответ поставщика, обогнавший отмену, подписку уже открыл: снимаем её, вызывающему она не достанется.
+    const drop = (result: unknown) => {
+      if (marker(result, SUBSCRIPTION) === subscription) target.endpoint.notify('release', { subscription });
+      subscriptions.delete(subscription);
+    };
+    return pool.call(target, pluginId, 'call', { pluginId, contract, version, member, args, subscription }, callTimeout, signal, drop).then(
       (result) => {
-        // Потребителя могли снять, пока поставщик отвечал: тогда подписку закрывает ядро.
-        if (marker(result, SUBSCRIPTION) === subscription && subscriptions.has(subscription)) return result;
-        if (marker(result, SUBSCRIPTION) === subscription) target.endpoint.notify('release', { subscription });
-        subscriptions.delete(subscription);
+        // Потребителя могли снять, пока поставщик отвечал, или вызов отменили вместе с ответом: тогда подписку закрывает ядро.
+        if (!signal?.aborted && marker(result, SUBSCRIPTION) === subscription && subscriptions.has(subscription)) return result;
+        drop(result);
+        if (signal?.aborted) throw cancelError(signal);
         return result;
       },
       (error: unknown) => {
@@ -82,7 +90,10 @@ export function createContractCalls(ctx: KernelContext): ContractCalls {
       const descriptor: ContractDescriptor = { pluginId: d.pluginId, contract: d.contract, version: d.version, data: d.data, methods: d.methods };
       const impl: Record<string, unknown> = { ...descriptor.data };
       for (const member of descriptor.methods) {
-        impl[member] = (...args: unknown[]) => ctx.parts.pool.call(host, d.pluginId, 'call', { pluginId: d.pluginId, contract: d.contract, version: d.version, member, args }, callTimeout);
+        impl[member] = (...given: unknown[]) => {
+          const { args, signal } = splitSignal(given);
+          return ctx.parts.pool.call(host, d.pluginId, 'call', { pluginId: d.pluginId, contract: d.contract, version: d.version, member, args }, callTimeout, signal);
+        };
       }
       provided.set(handleKey(d.pluginId, d.contract, d.version), registry.provide(d.pluginId, d.contract, d.version, impl));
       descriptors.set(d.contract, [...(descriptors.get(d.contract) ?? []), descriptor]);
@@ -92,9 +103,9 @@ export function createContractCalls(ctx: KernelContext): ContractCalls {
       mine(p.pluginId);
       dropProvided(p.pluginId, p.contract, p.version);
     });
-    onRequest('invoke', { ...KEY, caller: 'string', member: 'string', args: 'array' }, async (p) => {
+    onRequest('invoke', { ...KEY, caller: 'string', member: 'string', args: 'array' }, async (p, signal) => {
       mine(p.caller);
-      return invoke(host, p);
+      return invoke(host, p, signal);
     });
     onNote('emit', { subscription: 'number', index: 'number', args: 'array' }, (p) => {
       const s = subscriptions.get(p.subscription);

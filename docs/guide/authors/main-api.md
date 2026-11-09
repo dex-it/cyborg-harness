@@ -56,7 +56,7 @@ ctx.commands.register('acme.open', async (path) => {
 });
 ```
 
-Результат команды - данные, которые переживают `structuredClone`. `ctx.commands.run` вызывает зарегистрированную команду по имени: свою или чужую, если её исполнитель открыл плагинам (`callers: "plugins"`, [Контракты и команды](/features/contracts/#кому-открыта-команда)); отказ приходит исключением с полем `code` (`CommandNotFound`, `Invalid`, `PermissionDenied`).
+Результат команды - данные, которые переживают `structuredClone`. `ctx.commands.run` вызывает зарегистрированную команду по имени: свою или чужую, если её исполнитель открыл плагинам (`callers: "plugins"`, [Контракты и команды](/features/contracts/#кому-открыта-команда)); отказ приходит исключением с полем `code` (`CommandNotFound`, `Invalid`, `PermissionDenied`). `AbortSignal` последним аргументом (`ctx.commands.run('acme.search', query, signal)`) отменяет вызов: вызывающий получает `Cancelled`, обработчик команды получает сигнал последним аргументом на том же месте. Сигнал не входит в `args` манифеста и схемой не проверяется.
 
 ## Разделы config и state
 
