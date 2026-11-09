@@ -402,3 +402,15 @@ test('forkHosts: заданный путь входа работает и исп
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('forkHosts: запись в канал уже убитого хоста - не необработанное событие error процесса ядра (EPIPE), хост просто сообщает о выходе', async () => {
+  const host = forkHosts({ silent: true })('epipe');
+  const exit = new Promise<number | null>((resolve) => host.onExit(resolve));
+  // Пока цикл событий занят, канал ещё `connected`, а собеседник уже мёртв: запись идёт в закрытый конец.
+  host.kill();
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
+  host.port.post({ t: 'note', m: 'system', p: null });
+  host.port.post({ t: 'note', m: 'system', p: null });
+  await exit;
+  await sleep(100);
+});

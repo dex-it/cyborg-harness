@@ -1,7 +1,7 @@
 import { fork } from 'node:child_process';
 import { extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CoreError } from './errors.ts';
+import { CoreError, ignore } from './errors.ts';
 import { runHost, type Importer } from './host-runtime.ts';
 import type { Port } from './rpc.ts';
 
@@ -53,6 +53,8 @@ export function forkHosts(options: { silent?: boolean; entry?: string } = {}): S
   return (hostId) => {
     const stdio = options.silent ? 'ignore' : 'inherit';
     const child = fork(hostEntry, [hostId], { serialization: 'advanced', stdio: [stdio, stdio, stdio, 'ipc'] });
+    // Запись в канал хоста, который уже умер, а `connected` ещё держится, приходит событием error (EPIPE): без слушателя оно роняет процесс ядра. О гибели хоста скажет exit.
+    child.on('error', ignore);
     return {
       port: {
         post(message) {
