@@ -245,3 +245,27 @@ test('вид: размер и ввод проверяет pty-хост и отв
   assert.deepEqual(s.backend.procs[0]?.resizes.at(-1), [100, 30]);
   assert.deepEqual(s.backend.procs[0].writes, []);
 });
+
+test('pty-хост: end пришёл, пока backend ещё поднимал процесс, - процесс завершён сразу после запуска, запрос отклонён', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const base = fakePty();
+  const backend: PtyBackend = {
+    async spawn(file, args, options) {
+      await gate;
+      return base.spawn(file, args, options);
+    },
+  };
+  const host = inlinePtyHost(backend)();
+  const ep = new Endpoint(host.port);
+  await ep.request('init', { ptyInput: 1024, ptyFlushMs: 4, ptyFlushChars: 1024, backlog: 100 });
+  const spawned = ep.request('spawn', { key: 'k', file: 'sh', args: [], options: { name: 'xterm-256color', env: {}, cols: 80, rows: 24 } });
+  spawned.catch(() => undefined);
+  await tick();
+  ep.notify('end', { key: 'k' });
+  await tick();
+  release();
+  await assert.rejects(spawned, { code: 'NotFound' });
+  assert.equal(base.procs[0]?.killed, 'SIGHUP', 'процесс отозванного запуска жив');
+  host.kill();
+});
