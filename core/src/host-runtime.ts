@@ -9,6 +9,7 @@ import type { PluginManifest } from './manifest.ts';
 import type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';
 import { ContractRegistry, type ContractImpl } from './registry.ts';
 import { Endpoint, type Owner, type Port } from './rpc.ts';
+import { captureOutput } from './host-output.ts';
 import { LOG_LEVELS } from './log-text.ts';
 import { BACKLOG_LIMIT, Tail } from './pty-tail.ts';
 import type { PtyWire } from './pty-types.ts';
@@ -456,6 +457,7 @@ export function runHost(port: Port, importer: Importer, options: HostOptions = {
   if (options.ownsProcess) {
     attributeTimers(running);
     attributeFailures(running, endpoint);
+    captureOutput(process, console, () => running.blame(), (note) => endpoint.notify('output', note));
   }
   let manifests = new Map<string, PluginManifest>();
   let mirror: ContractRegistry | undefined;

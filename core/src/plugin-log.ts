@@ -86,9 +86,13 @@ export function createPluginLog(ctx: KernelContext): PluginLog {
   }
 
   return {
-    attach({ mine, onNote }: BridgeEnd): void {
+    attach({ host, mine, onNote }: BridgeEnd): void {
       onNote('log', { pluginId: 'string', message: 'string', level: LOG_LEVELS }, (p) => {
         line(mine(p.pluginId).id, p.message, p.level);
+      });
+      // Пустой `pluginId` - хост плагин не определил: строка хоста, как прочие его сообщения в `onLog`.
+      onNote('output', { pluginId: 'string', level: LOG_LEVELS, text: 'string' }, (p) => {
+        line(p.pluginId === '' ? `хост ${host.id}` : mine(p.pluginId).id, p.text, p.level);
       });
     },
     drop(pluginId) {

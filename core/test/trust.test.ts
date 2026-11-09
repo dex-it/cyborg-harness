@@ -426,3 +426,30 @@ test('keys.register и keys.unregister: хост не занимает соче�
   assert.equal(logs.filter((l) => l.startsWith('хост m: ядро отказало')).length, 1, logs.join('\n'));
   await kernel.unload();
 });
+
+test('log и output: хост пишет строки только за свои плагины, неизвестный уровень отклоняется, строка без плагина идёт с меткой хоста', async () => {
+  const forger = forging({ victim: { activate: () => undefined }, mallory: { activate: () => undefined } });
+  const logs: string[] = [];
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['victim', 'mallory'],
+    manifests: [manifest('victim'), manifest('mallory')],
+    spawnHost: forger.spawn,
+    hosts: { v: ['victim'], m: ['mallory'] },
+    onLog: (id, message, level) => logs.push(`${id} [${level}]: ${message}`),
+  });
+
+  forger.notify('m', 'log', { pluginId: 'mallory', message: 'свои слова', level: 'warn' });
+  forger.notify('m', 'log', { pluginId: 'victim', message: 'слова от имени victim', level: 'info' });
+  forger.notify('m', 'log', { pluginId: 'mallory', message: 'уровень из головы', level: 'fatal' });
+  forger.notify('m', 'output', { pluginId: 'mallory', level: 'error', text: 'вывод mallory' });
+  forger.notify('m', 'output', { pluginId: '', level: 'info', text: 'вывод хоста' });
+  forger.notify('m', 'output', { pluginId: 'victim', level: 'info', text: 'вывод от имени victim' });
+  forger.notify('m', 'output', { pluginId: '', level: 'trace', text: 'уровень из головы' });
+  await settle();
+
+  const fromM = logs.filter((l) => !l.startsWith('хост m [warn]: ядро отказало'));
+  assert.deepEqual(fromM, ['mallory [warn]: свои слова', 'mallory [error]: вывод mallory', 'хост m [info]: вывод хоста']);
+  assert.equal(logs.length - fromM.length, 4, logs.join('\n'));
+  await kernel.unload();
+});
