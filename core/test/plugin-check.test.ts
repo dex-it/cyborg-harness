@@ -209,6 +209,62 @@ describe('checkPlugin: манифест и файлы из него', () => {
     }
   });
 
+  describe('символические ссылки', { skip: process.platform === 'win32' }, () => {
+    /** Каталог снаружи плагина (рядом с ним) с файлами: node грузит файл по реальному пути, то есть оттуда. */
+    function outside(files: Record<string, string>): string {
+      const dir = path.join(scratch, `out${++counter}`);
+      for (const [name, text] of Object.entries(files)) {
+        fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+        fs.writeFileSync(path.join(dir, name), text);
+      }
+      return dir;
+    }
+
+    it('каталог-ссылка наружу: чужой модуль за ней не проходит мимо проверки', async () => {
+      const out = outside({ 'evil.ts': "import fs from 'node:fs';\nexport default fs;\n" });
+      const dir = plugin({ 'index.ts': "import evil from './lib/evil.ts';\nexport default evil;\n" });
+      fs.symlinkSync(out, path.join(dir, 'lib'), 'dir');
+      const report = await checkPlugin(dir);
+      assert.equal(report.ok, false);
+      const found = strings(report);
+      assert.ok(found.includes("lib: ссылка ведёт за пределы каталога плагина"), found.join('\n'));
+      assert.ok(found.includes("index.ts:1: './lib/evil.ts': ведёт за пределы каталога плагина (символическая ссылка)"), found.join('\n'));
+    });
+
+    it('файл-ссылка наружу: сам файл и относительный импорт в него - нарушения', async () => {
+      const out = outside({ 'evil.ts': "import fs from 'node:fs';\nexport default fs;\n" });
+      const dir = plugin({ 'index.ts': "import evil from './alias.ts';\nexport default evil;\n" });
+      fs.symlinkSync(path.join(out, 'evil.ts'), path.join(dir, 'alias.ts'));
+      const found = strings(await checkPlugin(dir));
+      assert.ok(found.includes('alias.ts: ссылка ведёт за пределы каталога плагина'), found.join('\n'));
+      assert.ok(found.includes("index.ts:1: './alias.ts': ведёт за пределы каталога плагина (символическая ссылка)"), found.join('\n'));
+    });
+
+    it('ссылка внутри плагина: каталог обходится один раз, цикл не вешает проверку', async () => {
+      const dir = plugin({ ...OK, 'real/a.ts': "import fs from 'node:fs';\n" });
+      fs.symlinkSync(path.join(dir, 'real'), path.join(dir, 'twin'), 'dir');
+      fs.symlinkSync(dir, path.join(dir, 'real', 'loop'), 'dir');
+      const report = await checkPlugin(dir);
+      assert.deepEqual(strings(report), ["real/a.ts:1: 'node:fs': только @cyborg-harness/contracts и свои модули"]);
+      assert.equal(report.files, 2);
+    });
+
+    it('ссылка на файл внутри плагина - обычный модуль', async () => {
+      const dir = plugin({ ...OK, 'lib/impl.ts': 'export const x = 1;\n' });
+      fs.symlinkSync(path.join(dir, 'lib', 'impl.ts'), path.join(dir, 'alias.ts'));
+      fs.appendFileSync(path.join(dir, 'index.ts'), "import { x } from './alias.ts';\nexport { x };\n");
+      assert.deepEqual(strings(await checkPlugin(dir)), []);
+    });
+
+    it('битая ссылка не роняет проверку', async () => {
+      const dir = plugin(OK);
+      fs.symlinkSync(path.join(scratch, 'no-such-target'), path.join(dir, 'gone.ts'));
+      const found = strings(await checkPlugin(dir));
+      assert.equal(found.length, 1, found.join('\n'));
+      assert.match(found[0] ?? '', /^gone\.ts: ссылка не прочитана - /);
+    });
+  });
+
   it('при ошибках манифеста импорты всё равно проверены', async () => {
     const dir = plugin({ 'index.ts': "import fs from 'node:fs';\n" }, { bogus: 1 });
     assert.deepEqual(strings(await checkPlugin(dir)), ['manifest.json: bogus: незнакомое поле манифеста', "index.ts:1: 'node:fs': только @cyborg-harness/contracts и свои модули"]);

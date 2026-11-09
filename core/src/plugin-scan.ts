@@ -28,6 +28,10 @@ const ID_PART = /[\p{ID_Continue}$‌‍]/u;
 const DIGIT = /[0-9]/;
 // После этих слов `/` начинает регулярное выражение, после остальных идентификаторов - деление.
 const REGEX_AFTER = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'throw', 'case', 'do', 'else', 'yield', 'await']);
+// Скобка после этих слов - заголовок оператора: `if (a) /x/.test(b)`, слеш после `)` начинает регулярное выражение.
+const HEADER_WORDS = new Set(['if', 'while', 'for', 'with']);
+// Слова перед `{`, после которых это объект или значение, а не блок: `return {}`, `typeof {}`. Остальные слова (имя класса, `try`, `finally`, `else`, `do`) открывают блок.
+const VALUE_BEFORE_BRACE = new Set([...REGEX_AFTER].filter((w) => w !== 'do' && w !== 'else'));
 const SIMPLE_ESCAPES: Readonly<Record<string, string>> = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', v: '\v', '0': '\0' };
 
 const isLineBreak = (c: string | undefined) => c === '\n' || c === '\r' || c === ' ' || c === ' ';
@@ -76,6 +80,10 @@ function tokenize(text: string): Token[] {
   // Глубина фигурных скобок и глубины, на которых открыты подстановки `${` шаблонов.
   let depth = 0;
   const templates: number[] = [];
+  // Открытые скобки: у `(` - заголовок ли оператора, у `{` - блок ли. Закрывающая скобка с таким признаком оставляет слеш за ней регулярным выражением, а не делением.
+  const parens: boolean[] = [];
+  const braces: boolean[] = [];
+  const regexAfterClose = new Set<number>();
 
   const newline = (at: number) => {
     if (text[at] === '\r' && text[at + 1] === '\n') return;
@@ -90,12 +98,28 @@ function tokenize(text: string): Token[] {
     if (prev === undefined) return true;
     if (prev.kind === 'id') return REGEX_AFTER.has(prev.text);
     if (prev.kind === 'p') {
-      if (prev.text === ')' || prev.text === ']' || prev.text === '}') return false;
+      if (prev.text === ')' || prev.text === '}') return regexAfterClose.has(tokens.length - 1);
+      if (prev.text === ']') return false;
       // `i++ / 2`: после постфиксного `++` и `--` стоит деление.
       const before = tokens.at(-2);
       return !((prev.text === '+' || prev.text === '-') && before?.kind === 'p' && before.text === prev.text);
     }
     return false;
+  };
+
+  /** Слово перед `(` - заголовок оператора (`for await (` тоже). */
+  const opensHeader = (): boolean => {
+    const prev = tokens.at(-1);
+    if (prev?.kind !== 'id') return false;
+    return HEADER_WORDS.has(prev.text) || (prev.text === 'await' && tokens.at(-2)?.text === 'for');
+  };
+  /** `{` открывает блок (за `}` слеш - регулярное выражение), а не объект или тело выражения. После `)` это блок: тело оператора или функции. */
+  const opensBlock = (): boolean => {
+    const prev = tokens.at(-1);
+    if (prev === undefined) return true;
+    if (prev.kind === 'id') return !VALUE_BEFORE_BRACE.has(prev.text);
+    if (prev.kind !== 'p') return false;
+    return prev.text === ';' || prev.text === '{' || prev.text === '}' || prev.text === ')';
   };
 
   /** Читает шаблон с позиции после "`" или "}" подстановки до "`" или "${". */
@@ -172,6 +196,7 @@ function tokenize(text: string): Token[] {
       template(true, line);
     } else if (c === '{') {
       depth++;
+      braces.push(opensBlock());
       push('p', c, line);
       i++;
     } else if (c === '}') {
@@ -182,7 +207,9 @@ function tokenize(text: string): Token[] {
         template(false, startLine);
       } else {
         depth = Math.max(0, depth - 1);
+        const block = braces.pop() ?? false;
         push('p', c, line);
+        if (block) regexAfterClose.add(tokens.length - 1);
         i++;
       }
     } else if (c === '/' && prevAllowsRegex()) {
@@ -220,7 +247,9 @@ function tokenize(text: string): Token[] {
       push('num', text.slice(i, j), line);
       i = j;
     } else {
+      if (c === '(') parens.push(opensHeader());
       push('p', c, line);
+      if (c === ')' && (parens.pop() ?? false)) regexAfterClose.add(tokens.length - 1);
       i++;
     }
   }

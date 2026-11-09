@@ -145,6 +145,43 @@ describe('разбор импортов: формы', () => {
   });
 });
 
+describe('разбор импортов: регулярное выражение после ) и }', () => {
+  const HIDDEN = "import fs from 'node:fs';\nconst s = `x`;";
+  // После `if (…)`, `while (…)`, `for (…)`, `with (…)` и блока `{}` слеш открывает регулярное выражение; внутри него бывают "`", "/*" и кавычки.
+  const heads: Readonly<Record<string, string>> = {
+    'if (…) с обратной кавычкой': "if (true) /`/.test('');",
+    'if (…) с «/*»': 'if (true) /\\/*/.test(s);',
+    'if (…) с кавычкой': 'if (true) /\'/.test(s);',
+    'while (…)': "while (x) /`/.test(s);",
+    'for (…)': "for (const a of b) /`/.test(a);",
+    'for await (…)': "for await (const a of b) /`/.test(a);",
+    'with (…)': "with (o) /`/.test(s);",
+    'блок после ;': "{}\n/`/.test(s);",
+    'тело функции': "function f() {}\n/`/.test(s);",
+    'тело if': "if (a) { b(); }\n/`/.test(s);",
+    'else-блок': "if (a) { b(); } else { c(); }\n/`/.test(s);",
+    'тело класса': "class A {}\n/`/.test(s);",
+    'try-блок': "try { a(); } finally { b(); }\n/`/.test(s);",
+  };
+  for (const [name, head] of Object.entries(heads)) {
+    it(`${name}: импорт после регулярного выражения виден и совпадает с компилятором`, () => {
+      const text = `${head}\n${HIDDEN}\n`;
+      assert.deepEqual(specs(text), ['node:fs'], text);
+      assert.deepEqual(
+        usesOf(text).map((u) => `${u.line} ${u.spec}`),
+        oracle('x.ts', text).map((u) => `${u.line} ${u.spec}`),
+      );
+    });
+  }
+
+  it('деление после ) и } остаётся делением', () => {
+    for (const head of ['const a = (1 + 2) / 3 / 4;', 'const a = { b: 1 }.b / 2 / 3;', 'const a = f(x) / 2; const b = `p` / 2;', 'const a = (() => {}) / 2 / 3;', 'x = function () {} / 2 / 3;', 'const a = [1][0] / 2 / 3;', 'x = { y: 1 } / 2 / 3;', 'const g = `${a}` / 2; const h = `${{ a: 1 }}` / 2 / 3;']) {
+      const text = `${head}\n${HIDDEN}\n`;
+      assert.deepEqual(specs(text), ['node:fs'], text);
+    }
+  });
+});
+
 describe('пакет объявлений: операторы верхнего уровня', () => {
   const problems = (text: string) => declarationProblems(text, CONTRACTS);
 
