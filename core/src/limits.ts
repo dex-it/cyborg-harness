@@ -21,6 +21,8 @@ export interface ResourceLimits {
   readonly subscriptions: number;
   /** Слушателей `onIdle` у плагина. */
   readonly idleWatchers: number;
+  /** Байт одного сообщения канала «главная часть - вид» в любую сторону (размер по `v8.serialize`); больше - `Invalid`. */
+  readonly viewMessage: number;
 }
 
 export const LIMITS: ResourceLimits = {
@@ -34,6 +36,7 @@ export const LIMITS: ResourceLimits = {
   readText: 8 * 1024 * 1024,
   subscriptions: 256,
   idleWatchers: 64,
+  viewMessage: 64 * 1024,
 };
 
 export function limitsOf(...overrides: (Partial<ResourceLimits> | undefined)[]): ResourceLimits {

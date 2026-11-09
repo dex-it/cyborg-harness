@@ -29,6 +29,10 @@ export interface ViewBridge {
   dialog(view: string, spec: DialogSpec): Promise<Reply>;
   /** Команды своего плагина -> сочетание; таблица сочетаний не меняется до перезапуска ядра. */
   keys(): Promise<Readonly<Record<string, string>>>;
+  /** Сообщение вида `view` своей главной части: плагин ядро берёт из origin фрейма; отказ - `error` с текстом ядра. */
+  channelPost(view: string, message: unknown): Promise<Reply>;
+  /** Сообщения главной части этому виду; приложение отдаёт их фрейму вида с этим именем. */
+  onChannel(listener: (message: unknown) => void): void;
 }
 
 /** Ответ на `terminalOpen`: описание pty, хвост и номер терминала в этом документе. */
@@ -184,6 +188,8 @@ export async function connectView(bridge: ViewBridge, target: ViewTarget): Promi
   });
   bridge.onLog((line) => logs.emit(line));
   const terminals = new Terminals(bridge, target.report);
+  const messages = new Listeners<unknown>(target.report);
+  bridge.onChannel((message) => messages.emit(message));
   return Object.freeze({
     pluginId: target.pluginId,
     view: target.view,
@@ -214,6 +220,10 @@ export async function connectView(bridge: ViewBridge, target: ViewTarget): Promi
       },
     }),
     dialogs: Object.freeze({ show: async (spec: DialogSpec) => unwrap(await bridge.dialog(target.view, spec)) as string | undefined }),
+    channel: Object.freeze({
+      post: async (message: unknown) => void unwrap(await bridge.channelPost(target.view, message)),
+      onMessage: (listener: (message: unknown) => void) => messages.add(listener),
+    }),
     keys: Object.freeze({ of: (command: string) => (Object.hasOwn(keys, command) ? keys[command] : undefined) }),
     drag: Object.freeze({ start: (path: string) => bridge.startDrag(path), drop: () => bridge.drop() }),
   });

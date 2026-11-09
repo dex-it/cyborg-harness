@@ -18,6 +18,7 @@
 - `ProcessOptions.signal` [minor]: отмена `ctx.os.process.run` сигналом `AbortSignal`, код отказа `Cancelled` (K-09); в пакете объявлен минимум `AbortSignal` (`aborted`), чтобы потребитель без lib DOM и @types/node собирал плагин.
 - `ProcessResult.truncated`, `ProcessOptions.maxOutputBytes` [minor]: вывод `process.run` до предела с признаком обрезки вместо тихой потери; предел задаёт плагин (K-12).
 - `OsFs.realpath` [minor]: настоящий путь с проверкой области; ссылка наружу - `PermissionDenied`, нет пути - `NotFound` (K-12).
+- `PluginContext.views`, `PluginViews`, `ViewChannel`, `UiContext.channel` [minor]: канал «главная часть - вид» по имени вида, `post` и `onMessage` в обе стороны, сообщение до 64 КиБ (K-13).
 
 ## 1.0.0-dev - не выпущена
 

@@ -1,6 +1,6 @@
 import type { ContractName, ContractType, Major } from './index.ts';
 import type { PtyExit, PtyInfo, PtyTicket } from './os.ts';
-import type { Disposable } from './plugin.ts';
+import type { Disposable, ViewChannel } from './plugin.ts';
 
 /** Строка ленты, которую ядро показывает виду его плагина. */
 export interface FeedLine {
@@ -90,6 +90,8 @@ export interface UiContext {
     /** Окно показывает диалоги по одному, под замком чужие ждут; ответ - id выбранного пункта, отмена или выгрузка плагина - undefined. */
     show(spec: DialogSpec): Promise<string | undefined>;
   };
+  /** Канал с главной частью плагина по имени этого вида: сообщения, которые она шлёт виду, и ответы ей. Правила и лимит - у `ViewChannel`. */
+  readonly channel: ViewChannel;
   readonly keys: {
     /** Сочетание своей команды, как оно сейчас привязано (с правками человека, под платформу): `Ctrl+Shift+F`; не привязана - undefined. Нажатие ловит ядро, вид его не видит. */
     of(command: string): string | undefined;

@@ -86,6 +86,7 @@ export interface PluginContext {
   readonly window: PluginWindow;
   readonly system: PluginSystem;
   readonly documents: PluginDocuments;
+  readonly views: PluginViews;
   log(message: string): void;
 }
 
@@ -161,6 +162,24 @@ export interface PluginDocuments {
   close(id: string): Promise<void>;
   /** Документ закрыл человек из окна. */
   onClose(listener: (id: string) => void): Disposable;
+}
+
+/**
+ * Канал между главной частью плагина и его видом по имени вида (`ui.views` манифеста). Сообщение - данные, переживающие `structuredClone`,
+ * не больше 64 КиБ (`limits.viewMessage`): больше - `Invalid`, канал работает дальше, не данные - `NotCloneable`.
+ * Канал не хранит сообщения: вид, которого ещё нет или который перезагружается, посланное ему не получит; нужное состояние вид спрашивает командой при открытии.
+ * Сообщение главной части получают все открытые виды плагина с этим именем и никакие другие. После выгрузки плагина `post` отказывает `Unavailable`, слушатели сняты.
+ */
+export interface ViewChannel {
+  post(message: unknown): Promise<void>;
+  /** Слушатель, бросивший исключение, пишет в журнал плагина и не мешает соседям. */
+  onMessage(listener: (message: unknown) => void): Disposable;
+}
+
+/** Связь главной части с видами своего плагина. */
+export interface PluginViews {
+  /** Вид должен быть в `ui.views` манифеста; чужого плагина и вида, которого нет, у плагина нет: `Invalid` при первом `post`. */
+  channel(view: string): ViewChannel;
 }
 
 export interface PluginWindow {

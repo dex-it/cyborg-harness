@@ -2,7 +2,7 @@
 import { app, nativeTheme, Notification, powerMonitor, type BrowserWindow } from 'electron';
 import type { PluginsEvents, PluginsService } from './plugins.ts';
 import { themeTokens } from './theme.ts';
-import { viewOrigin } from './view-protocol.ts';
+import { viewOfUrl, viewOrigin } from './view-protocol.ts';
 import { framesOf, viewFrames } from './views.ts';
 
 const alive = (win: BrowserWindow | undefined): win is BrowserWindow => win !== undefined && !win.isDestroyed();
@@ -33,7 +33,7 @@ export function alertNotification(title: string, body: string, onClick: () => vo
   notification.show();
 }
 
-/** События службы плагинов -> окно приложения: снимок, команда окна, лента вида, заголовок, уведомление о выключении плагина. */
+/** События службы плагинов -> окно приложения: снимок, команда окна, лента вида, сообщение главной части виду, заголовок, уведомление о выключении плагина. */
 export function windowEvents(getWindow: () => BrowserWindow | undefined): PluginsEvents {
   return {
     windowCommand: (command) => {
@@ -48,6 +48,11 @@ export function windowEvents(getWindow: () => BrowserWindow | undefined): Plugin
     log: (pluginId, line) => {
       const win = getWindow();
       if (alive(win)) for (const frame of framesOf(win.webContents, viewOrigin(pluginId))) frame.send('view:log', line);
+    },
+    viewMessage: (pluginId, view, message) => {
+      const win = getWindow();
+      // Фрейм вида знает своё имя по ?view= в адресе; плагин - по origin: чужому плагину и чужому виду сообщение не достаётся.
+      if (alive(win)) for (const frame of framesOf(win.webContents, viewOrigin(pluginId))) if (viewOfUrl(frame.url) === view) frame.send('view:channel', message);
     },
     title: (title) => {
       const win = getWindow();

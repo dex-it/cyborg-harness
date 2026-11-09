@@ -12,6 +12,7 @@ import { createLifecycle } from './lifecycle.ts';
 import { createKeyRegistry } from './keybindings.ts';
 import { createOsRequests } from './os-requests.ts';
 import { createSections } from './sections.ts';
+import { createViewChannels } from './view-channels.ts';
 import { createViewsState } from './views-state.ts';
 
 export type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Kernel, Keybinding, KeyPress, LoadOptions, UninstallReport, UserKeybinding, WatchdogOptions } from './kernel-types.ts';
@@ -28,6 +29,7 @@ const createParts = (ctx: KernelContext): Parts => ({
   sections: createSections(ctx),
   osRequests: createOsRequests(ctx),
   views: createViewsState(ctx),
+  viewChannels: createViewChannels(ctx),
   bridge: createBridge(ctx),
 });
 

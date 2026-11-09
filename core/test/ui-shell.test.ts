@@ -10,7 +10,7 @@ import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 function fakeBridge(tokens: ThemeTokens) {
   const calls: unknown[][] = [];
-  const on: { theme?: (t: ThemeTokens) => void; visibility?: (v: boolean) => void; log?: (l: FeedLine) => void; terminal?: (e: TerminalEvent) => void } = {};
+  const on: { theme?: (t: ThemeTokens) => void; visibility?: (v: boolean) => void; log?: (l: FeedLine) => void; terminal?: (e: TerminalEvent) => void; channel?: (m: unknown) => void } = {};
   const bridge: ViewBridge = {
     run: async (command, args) => (calls.push(['run', command, ...args]), command === 'own.go' ? { value: args.length } : { error: `${command}: не команда плагина own` }),
     contract: async (contract): Promise<Reply> => (contract === 'test.files' ? { value: true } : contract === 'test.tab' ? { value: false } : { error: `${contract} нет в requires и optional` }),
@@ -36,6 +36,8 @@ function fakeBridge(tokens: ThemeTokens) {
     state: async (view) => (view === 'main' ? { value: { opened: 1 } } : {}),
     dialog: async (view, spec) => (calls.push(['dialog', view, spec.kind]), spec.kind === 'ask' ? { value: spec.buttons[0]?.id } : { error: 'диалог: меню вне вида' }),
     keys: async () => ({ 'own.go': 'Ctrl+G' }),
+    channelPost: async (view, message) => (calls.push(['channel', view, message]), JSON.stringify(message).length > 20 ? { error: 'сообщение больше предела' } : {}),
+    onChannel: (l) => (on.channel = l),
     setState: async (view, value) => (calls.push(['state', view, value]), (value === undefined ? 0 : JSON.stringify(value).length) > 20 ? { error: 'память вида больше 20 байт' } : {}),
   };
   return { bridge, calls, on };
@@ -186,4 +188,26 @@ test('диалоги и сочетания вида: ответ окна, отк
   assert.deepEqual(calls.filter((c) => c[0] === 'dialog'), [['dialog', 'main', 'ask'], ['dialog', 'main', 'menu']]);
   assert.equal(ctx.keys.of('own.go'), 'Ctrl+G');
   assert.equal(ctx.keys.of('toString'), undefined);
+});
+
+test('connectView: канал с главной частью - сообщения вида идут мостом под именем вида, сообщения главной части - слушателям, отказ - исключение', async () => {
+  const reported: unknown[] = [];
+  const { bridge, calls, on } = fakeBridge({});
+  const ctx = await connectView(bridge, { pluginId: 'own', view: 'main', applyTheme: () => undefined, report: (e) => reported.push(e) });
+  await ctx.channel.post({ ask: 1 });
+  await assert.rejects(ctx.channel.post({ big: 'x'.repeat(30) }), /больше предела/);
+  assert.deepEqual(calls, [['channel', 'main', { ask: 1 }], ['channel', 'main', { big: 'x'.repeat(30) }]]);
+
+  const seen: unknown[] = [];
+  ctx.channel.onMessage(() => {
+    throw new Error('сломан');
+  });
+  const sub = ctx.channel.onMessage((m) => seen.push(m));
+  on.channel?.('раз');
+  on.channel?.({ два: 2 });
+  sub.dispose();
+  on.channel?.('после отписки');
+  assert.deepEqual(seen, ['раз', { два: 2 }]);
+  assert.equal(reported.length, 3, 'упавший слушатель сообщён оболочке на каждое сообщение, соседу он не мешает');
+  assert.throws(() => Object.assign(ctx.channel, { post: () => undefined }), TypeError, 'плагин не подменит канал');
 });

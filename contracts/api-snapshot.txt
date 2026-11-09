@@ -425,6 +425,7 @@ export interface PluginContext {
     readonly window: PluginWindow;
     readonly system: PluginSystem;
     readonly documents: PluginDocuments;
+    readonly views: PluginViews;
     log(message: string): void;
 }
 export interface KeyWhen {
@@ -467,6 +468,13 @@ export interface PluginDocuments {
     close(id: string): Promise<void>;
     onClose(listener: (id: string) => void): Disposable;
 }
+export interface ViewChannel {
+    post(message: unknown): Promise<void>;
+    onMessage(listener: (message: unknown) => void): Disposable;
+}
+export interface PluginViews {
+    channel(view: string): ViewChannel;
+}
 export interface PluginWindow {
     onFocusChange(listener: (focused: boolean) => void): Disposable;
     setTitle(segment: string | undefined): Promise<void>;
@@ -486,7 +494,7 @@ export interface PluginModule {
 // ---- view.d.ts
 import type { ContractName, ContractType, Major } from './index.js';
 import type { PtyExit, PtyInfo, PtyTicket } from './os.js';
-import type { Disposable } from './plugin.js';
+import type { Disposable, ViewChannel } from './plugin.js';
 export interface FeedLine {
     readonly at: number;
     readonly kind: 'log' | 'key' | 'window' | 'error';
@@ -557,6 +565,7 @@ export interface UiContext {
     readonly dialogs: {
         show(spec: DialogSpec): Promise<string | undefined>;
     };
+    readonly channel: ViewChannel;
     readonly keys: {
         of(command: string): string | undefined;
     };

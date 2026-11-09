@@ -3,7 +3,7 @@ import { splitSignal, withSignal } from './cancel.ts';
 import { resolveSection, VERSION_KEY, type SectionResult } from './config.ts';
 import { DisposableStore, toDisposable, type Disposable } from './disposable.ts';
 import { compileSchema } from './json-schema.ts';
-import type { ContractName, ContractType, DocumentChange, DocumentInfo, DocumentInit, HttpServer, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue, ServeRequest, ServeResponse } from '@cyborg-harness/contracts';
+import type { ContractName, ContractType, DocumentChange, DocumentInfo, DocumentInit, HttpServer, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue, ServeRequest, ServeResponse, ViewChannel } from '@cyborg-harness/contracts';
 import { CoreError, errorMessage } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';
@@ -199,10 +199,17 @@ export type SystemEvent = { readonly kind: 'focus'; readonly focused: boolean } 
 
 type Listener = (value?: boolean | string) => unknown;
 
+interface ViewListener {
+  readonly pluginId: string;
+  readonly view: string;
+  readonly fn: (message: unknown) => unknown;
+}
+
 /** Слушатели событий окна и ОС всех плагинов хоста; ядро шлёт событие хосту один раз. */
 class HostSystem {
   readonly #listeners = new Set<{ pluginId: string; kind: string; fn: Listener }>();
   readonly #idle = new Map<string, () => void>();
+  readonly #views = new Set<ViewListener>();
   readonly endpoint: Endpoint;
   readonly #running: Running;
   #seq = 0;
@@ -216,6 +223,18 @@ class HostSystem {
     const item = { pluginId, kind, fn };
     this.#listeners.add(item);
     return toDisposable(() => this.#listeners.delete(item));
+  }
+
+  /** Слушатель канала «главная часть - вид» (`ctx.views.channel(view).onMessage`). */
+  onView(pluginId: string, view: string, fn: (message: unknown) => unknown): Disposable {
+    const item = { pluginId, view, fn };
+    this.#views.add(item);
+    return toDisposable(() => this.#views.delete(item));
+  }
+
+  /** Сообщение вида: только слушателям канала этого плагина с этим именем вида. */
+  viewMessage(p: { readonly pluginId: string; readonly view: string; readonly message: unknown }): void {
+    for (const l of [...this.#views]) if (l.pluginId === p.pluginId && l.view === p.view) this.#safely(l.pluginId, `канала ${p.view}`, () => l.fn(p.message));
   }
 
   onIdle(pluginId: string, seconds: number, fn: () => void): Disposable {
@@ -258,6 +277,7 @@ class HostSystem {
 
   forget(pluginId: string): void {
     for (const l of [...this.#listeners]) if (l.pluginId === pluginId) this.#listeners.delete(l);
+    for (const l of [...this.#views]) if (l.pluginId === pluginId) this.#views.delete(l);
     for (const id of [...this.#idle.keys()]) if (id.startsWith(`${pluginId}#`)) this.#idle.delete(id);
   }
 
@@ -476,6 +496,7 @@ export function runHost(port: Port, importer: Importer, options: HostOptions = {
   endpoint.handle('system', (event: SystemEvent | { kind: 'idle'; id: string }) => system.dispatch(event));
   endpoint.handle('system.beforeQuit', () => system.beforeQuit());
   endpoint.handle('document.closed', (p: { pluginId: string; id: string }) => system.documentClosed(p));
+  endpoint.handle('view.message', (p: { pluginId: string; view: string; message: unknown }) => system.viewMessage(p));
 
   endpoint.handle('ping', () => running.answered());
 
@@ -721,6 +742,20 @@ function context(
       save: (id: string, change: DocumentChange) => endpoint.request<undefined>('documents', { pluginId, method: 'save', args: [id, change] }),
       close: (id: string) => endpoint.request<undefined>('documents', { pluginId, method: 'close', args: [id] }),
       onClose: (listener: (id: string) => void) => track(system.on(pluginId, 'document-closed', (id) => listener(String(id)))),
+    }),
+    views: Object.freeze({
+      channel(view: string): ViewChannel {
+        if (typeof view !== 'string') throw new CoreError('Invalid', `${pluginId}: канал вида - строка с именем из ui.views`);
+        let closed = false;
+        track(toDisposable(() => (closed = true)));
+        return Object.freeze({
+          post: async (message: unknown) => {
+            if (closed) throw new CoreError('Unavailable', `${pluginId}: канал вида ${view} закрыт выгрузкой плагина`);
+            await endpoint.request<undefined>('views', { pluginId, method: 'post', args: [view, message] });
+          },
+          onMessage: (listener: (message: unknown) => void) => track(system.onView(pluginId, view, listener)),
+        });
+      },
     }),
     system: Object.freeze({
       onSuspend: (listener: () => void) => track(system.on(pluginId, 'suspend', listener)),

@@ -9,7 +9,7 @@ const MAX_DENIED_URL = 200;
 /** Публичный `Kernel`: тонкий слой над частями, без своего состояния. */
 export function buildKernel(ctx: KernelContext): Kernel {
   const { parts, keys, active, layer, documents, gateway, known } = ctx;
-  const { pool, lifecycle, activation, contracts, commands, keyRegistry, sections, views } = parts;
+  const { pool, lifecycle, activation, contracts, commands, keyRegistry, sections, views, viewChannels } = parts;
 
   return {
     journal: ctx.journal,
@@ -56,6 +56,7 @@ export function buildKernel(ctx: KernelContext): Kernel {
     endKeptPty: (id) => gateway.endKeptPty(id),
     viewState: (pluginId, view) => views.viewState(pluginId, view),
     setViewState: (pluginId, view, value) => views.setViewState(pluginId, view, value),
+    viewPost: (pluginId, view, message) => viewChannels.fromView(pluginId, view, message),
     emit: (event) => pool.emit(event),
     beforeQuit: (budget = 3000) => pool.beforeQuit(budget),
     disable: (pluginId, options) => lifecycle.disable(pluginId, options),

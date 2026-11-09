@@ -77,6 +77,7 @@ export interface ViewChannelsOptions {
 /** Каналы видов: плагин всегда берётся из origin фрейма-отправителя, а не из аргументов. */
 export function registerViewChannels({ plugins, dragRoot }: ViewChannelsOptions): void {
   viewChannel('view:dialog', (pluginId, view, spec) => plugins.dialogFor(pluginId, view, spec));
+  viewChannel('view:channel:post', (pluginId, view, message) => plugins.viewPostFrom(pluginId, view, message));
   viewChannel('view:keys', (pluginId) => plugins.keysFor(pluginId), {});
   viewChannel('view:logs', (pluginId) => plugins.logsOf(pluginId), []);
   viewChannel('view:run', (pluginId, command, args) => plugins.runFor(pluginId, command, args));

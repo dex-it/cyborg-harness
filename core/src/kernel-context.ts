@@ -184,6 +184,13 @@ export interface ViewsState {
   forget(pluginId: string): Promise<number>;
 }
 
+/** Канал «главная часть - вид»: сообщения главной части идут в `LoadOptions.onViewMessage`, сообщения вида - слушателям в хосте. */
+export interface ViewChannels {
+  attach(end: BridgeEnd): void;
+  /** Сообщение вида; плагин назвало приложение по origin фрейма. */
+  fromView(pluginId: string, view: string, message: unknown): Promise<void>;
+}
+
 /** Обработчики сообщений хоста. */
 export interface Bridge {
   attach(host: Host): void;
@@ -200,6 +207,7 @@ export interface Parts {
   readonly sections: Sections;
   readonly osRequests: OsRequests;
   readonly views: ViewsState;
+  readonly viewChannels: ViewChannels;
   readonly bridge: Bridge;
 }
 

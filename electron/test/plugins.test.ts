@@ -536,3 +536,40 @@ test('заголовок окна: имя приложения задаёт пр
   }
   assert.deepEqual(titles, ['workspace.cyborg.json - Cyborg', 'workspace.cyborg.json - Мой редактор']);
 });
+
+test('канал вида: сообщение главной части уходит событию с плагином и именем вида, сообщение вида - слушателю главной части, отказ ядра - Reply с текстом', async () => {
+  const userData = tmp();
+  const dir = path.join(userData, 'plugins');
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['face'] } }));
+  plugin(dir, 'face', { commands: { 'face.push': { args: ['string'] } }, ui: { views: { main: './ui/ui.js' } } }, 'export default {}');
+  const heard: unknown[] = [];
+  const modules: Record<string, PluginModule> = {
+    face: {
+      activate(ctx) {
+        const channel = ctx.views.channel('main');
+        channel.onMessage((m) => void heard.push(m));
+        ctx.commands.register('face.push', (text) => channel.post({ text }));
+      },
+    },
+  };
+  const delivered: [string, string, unknown][] = [];
+  const service = new PluginsService({ changed: () => {}, alert: () => {}, viewMessage: (id, view, message) => void delivered.push([id, view, message]) });
+  await service.start({
+    userData,
+    builtinDir: path.join(userData, 'нет'),
+    userPlugins: true,
+    spawnHost: inlineHosts(async (entry) => modules[/\/(\w+)\/index\.mjs$/.exec(entry)?.[1] ?? ''] ?? { activate() {} }),
+    log: () => {},
+  });
+  assert.deepEqual(await service.runFor('face', 'face.push', ['привет']), {});
+  assert.deepEqual(delivered, [['face', 'main', { text: 'привет' }]]);
+  assert.deepEqual(await service.viewPostFrom('face', 'main', { от: 'вида' }), {});
+  assert.deepEqual(heard, [{ от: 'вида' }]);
+  assert.match((await service.viewPostFrom('face', 'чужой', 1)).error ?? '', /вида "чужой" нет в манифесте/);
+  assert.match((await service.viewPostFrom('face', 'main', 'я'.repeat(40_000))).error ?? '', /больше 65536 байт/);
+  assert.deepEqual(await service.viewPostFrom('face', 'main', 'жив'), {});
+  assert.equal(heard.length, 2);
+  assert.deepEqual(await service.disable('face'), {});
+  assert.match((await service.viewPostFrom('face', 'main', 1)).error ?? '', /не активен/);
+  await service.unload();
+});

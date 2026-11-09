@@ -63,6 +63,8 @@ export function viewBridge(): ViewBridge {
     setState: (viewName, value) => ipcRenderer.invoke('view:state:set', viewName, value),
     dialog: (viewName, spec) => ipcRenderer.invoke('view:dialog', viewName, spec),
     keys: () => ipcRenderer.invoke('view:keys'),
+    channelPost: (viewName, message) => ipcRenderer.invoke('view:channel:post', viewName, message),
+    onChannel: (listener) => void ipcRenderer.on('view:channel', (_event, message: unknown) => listener(message)),
     onTerminal: (listener) => {
       terminals.listen(listener);
       // Потеря pty-хоста: порт молчит, главный процесс сообщает о конце событием управления.
