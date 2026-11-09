@@ -88,7 +88,7 @@ describe('снимок в репозитории', () => {
       assert.equal(problems.length, 1, problems.join('; '));
       assert.match(problems[0]!, /npm run snapshot:contracts/);
       assert.match(problems[0]!, /CHANGELOG\.md/);
-      assert.equal(/повысьте версию/.test(problems[0]!), raise, `${version}: ${problems[0]}`);
+      assert.equal(problems[0]!.includes('повысьте версию'), raise, `${version}: ${problems[0]}`);
     }
     fs.rmSync(out, { recursive: true });
     fs.rmSync(dir, { recursive: true });
