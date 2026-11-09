@@ -177,7 +177,8 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
       const { activation, views } = ctx.parts;
       const running = active.includes(pluginId) || activation.waiting.has(pluginId) || activation.waking.has(pluginId) || activation.activating.has(pluginId);
       // Плагин в графе, но не выключен ни человеком, ни сторожем: хост может вернуть его, и он пересоздал бы стёртое.
-      if (running || (graph.order.includes(pluginId) && !userOff.has(pluginId) && !switchedOff.has(pluginId))) {
+      // В безопасном режиме хостов нет и enable/disable недоступны: ждать нечего, а удалить сломанный плагин нужно именно здесь (BR-CH-005).
+      if (running || (!options.safeMode && graph.order.includes(pluginId) && !userOff.has(pluginId) && !switchedOff.has(pluginId))) {
         throw new CoreError('Invalid', `${pluginId} работает или ждёт запуска: сначала disablePreview и disable`);
       }
       const erased: string[] = [];
