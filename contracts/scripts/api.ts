@@ -54,7 +54,11 @@ export function checkSnapshot(dir: string, packageVersion: string, file = SNAPSH
   const snapshot = readSnapshot(file);
   const problems: string[] = [];
   if (snapshot.version !== packageVersion) problems.push(`снимок снят для версии ${snapshot.version}, а в package.json ${packageVersion}: обновите снимок (npm run snapshot:contracts)`);
-  if (snapshot.body !== normalizeDeclarations(dir)) problems.push(`декларации пакета изменены, а снимок ${snapshot.version} - нет: повысьте версию пакета, запишите изменение в CHANGELOG.md и обновите снимок (npm run snapshot:contracts)`);
+  if (snapshot.body !== normalizeDeclarations(dir)) {
+    // На линии разработки версию повышать не нужно (см. `isPrerelease`): просим только запись в CHANGELOG и снимок.
+    const raise = isPrerelease(snapshot.version) ? '' : 'повысьте версию пакета, ';
+    problems.push(`декларации пакета изменены, а снимок ${snapshot.version} - нет: ${raise}запишите изменение в CHANGELOG.md и обновите снимок (npm run snapshot:contracts)`);
+  }
   return problems;
 }
 

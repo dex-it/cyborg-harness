@@ -77,6 +77,23 @@ describe('снимок в репозитории', () => {
     fs.rmSync(out, { recursive: true });
   });
 
+  it('устаревший снимок: на -dev просят только обновить снимок, у выпущенной версии - повысить версию', () => {
+    const out = built();
+    fs.appendFileSync(path.join(out, 'index.d.ts'), 'export type Extra = string;\n');
+    const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'cyborg-contracts-msg-'));
+    const stale = path.join(dir, 'api-snapshot.txt');
+    for (const [version, raise] of [['1.0.0-dev', false], ['1.2.0', true]] as const) {
+      fs.writeFileSync(stale, renderSnapshot(version, 'устарело\n'));
+      const problems = checkSnapshot(out, version, stale);
+      assert.equal(problems.length, 1, problems.join('; '));
+      assert.match(problems[0]!, /npm run snapshot:contracts/);
+      assert.match(problems[0]!, /CHANGELOG\.md/);
+      assert.equal(/повысьте версию/.test(problems[0]!), raise, `${version}: ${problems[0]}`);
+    }
+    fs.rmSync(out, { recursive: true });
+    fs.rmSync(dir, { recursive: true });
+  });
+
   it('правка карты Contracts или PluginContext без новой версии даёт ошибку, с новой версией и снимком - нет', () => {
     for (const [file, from, to] of [
       ['index.d.ts', "'cyborg.agent': {", "'cyborg.extra': {\n        1: unknown;\n    };\n    'cyborg.agent': {"],
