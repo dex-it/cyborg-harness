@@ -22,6 +22,20 @@ interface PreviousRow {
   readonly title: string;
 }
 
+/** Сообщение главной части по каналу: кнопки и готовность агента одной сессии; `ended` - сессия кончилась. */
+interface ActionsMessage {
+  readonly ticket: string;
+  readonly actions: readonly SessionAction[];
+  readonly ready: boolean;
+  readonly ended?: boolean;
+}
+
+function isActionsMessage(message: unknown): message is ActionsMessage {
+  if (typeof message !== 'object' || message === null) return false;
+  const m = message as Partial<Record<keyof ActionsMessage, unknown>>;
+  return typeof m.ticket === 'string' && Array.isArray(m.actions) && typeof m.ready === 'boolean';
+}
+
 export function mount(root: HTMLElement, ctx: UiContext): Disposable {
   const agents = el('div', { id: 'agents', className: 'agents' });
   const status = el('span', { id: 'session-state', className: 'state', textContent: 'нет сессии' });
@@ -53,7 +67,9 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
   const state = (text: string) => (status.textContent = text);
   const failed = (error: unknown) => state(`отказ: ${error instanceof Error ? error.message : String(error)}`);
   let term: UiTerminal | undefined;
-  let polling = 0;
+  // Билет текущей сессии и последнее, что канал сообщил про каждый билет: сообщение может прийти раньше, чем вид откроет терминал.
+  let current: string | undefined;
+  const known = new Map<string, ActionsMessage>();
   xterm.onData((data) => void term?.write(data).catch(failed));
   // Агент рисует под размер pty: экран вида вырос - pty растёт вместе с ним, иначе TUI займёт угол.
   xterm.onResize(({ cols, rows }) => void term?.resize(cols, rows).catch(failed));
@@ -84,29 +100,22 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
     );
     suggested.hidden = list.length === 0;
   };
-  const poll = async (ticket: string, generation: number) => {
-    let since = -1;
-    while (generation === polling) {
-      const answer = (await ctx.commands.run('sessions.actions', ticket, since)) as { version: number; actions: SessionAction[]; ready: boolean } | null;
-      if (generation !== polling) return;
-      if (!answer) break;
-      since = answer.version;
-      showActions(answer.actions, answer.ready);
-    }
-    showActions([], false);
-  };
+  const pushed = ctx.channel.onMessage((message) => {
+    if (!isActionsMessage(message)) return;
+    if (message.ended === true) known.delete(message.ticket);
+    else known.set(message.ticket, message);
+    if (message.ticket === current) showActions(message.actions, message.ready);
+  });
   const open = async (title: string, command: string, arg: string) => {
     const ticket = await ctx.commands.run(command, arg);
     if (typeof ticket !== 'string') throw new Error(`${command} не вернул билет`);
     term?.close();
     const opened = await ctx.terminal.open(ticket);
     term = opened;
-    const generation = ++polling;
     // Кнопки прежней сессии не должны писать в новую, пока она не ответила своими.
-    showActions([], false);
-    void poll(ticket, generation).catch(() => {
-      if (generation === polling) showActions([], false);
-    });
+    current = ticket;
+    const pending = known.get(ticket);
+    showActions(pending?.actions ?? [], pending?.ready ?? false);
     if (!shown) {
       shown = true;
       empty.remove();
@@ -166,7 +175,7 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
   void listPrevious().catch(failed);
   return {
     dispose: () => {
-      polling++;
+      pushed.dispose();
       resized.disconnect();
       themed.dispose();
       term?.close();

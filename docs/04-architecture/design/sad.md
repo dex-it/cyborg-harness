@@ -738,7 +738,7 @@ if (sessions) ctx.subscriptions.add(await sessions.onChange(e => { /* ... */ }))
 ```jsonc
 "commands": {
   "sessions.new":     { "args": ["string"] },                                    // только пользователь
-  "sessions.actions": { "args": ["string", "number"], "callers": "plugins" },    // и чужие главные части
+  "sessions.list":    { "callers": "plugins" },                                   // и чужие главные части
   "file.open":        { "args": ["record"], "callers": "plugins", "guard": { "fs.read": "0.path" } }
 }
 ```

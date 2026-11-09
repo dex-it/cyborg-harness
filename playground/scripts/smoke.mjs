@@ -733,6 +733,30 @@ async function main() {
   assert.equal(await inView('built-dep', "document.getElementById('out')?.textContent"), 'ВИД!', 'вид из ui/ui.js не исполнил код зависимости');
   log('cyborg-plugin: собранный каталог с npm-зависимостью (manifest.json, index.mjs, ui/ui.js) загружен стендом, вид открыт');
 
+  // K-13: канал «главная часть - вид». Толчок идёт виду panel и не доходит до bar (тот же плагин, другое имя вида); окно перезагружается, и канал связывается заново.
+  const inViewNamed = (id, view, expression) =>
+    main(`(async () => {
+      const { webContents } = process.mainModule.require('electron');
+      const page = webContents.getAllWebContents().find((w) => w.getType() === 'window');
+      const frame = page.mainFrame.framesInSubtree.find((f) => f.origin === 'cyborg-plugin://${id}' && new URL(f.url).searchParams.get('view') === ${JSON.stringify(view)});
+      return frame ? frame.executeJavaScript(${JSON.stringify(expression)}) : null;
+    })()`);
+  const pushes = (view) => inViewNamed('panels', view, "document.getElementById('pushed')?.textContent ?? null");
+  const ping = () => ev("window.playground.runCommand('panels.ping')");
+  await waitFor('виды panels смонтированы', async () => (await pushes('panel')) === 'толчков: 0' && (await pushes('bar')) === 'толчков: 0');
+  assert.deepEqual(await ping(), {});
+  await waitFor('толчок главной части дошёл до вида panel без опроса', async () => (await pushes('panel')) === 'толчков: 1');
+  await sleep(300);
+  assert.equal(await pushes('bar'), 'толчков: 0', 'толчок для panel дошёл до bar того же плагина');
+  await inViewNamed('panels', 'panel', "document.getElementById('reply').click()");
+  await waitFor('сообщение вида panel дошло до главной части', () => lines().some((l) => l.includes('panels: вид panel сообщил: {"from":"panel"}')));
+  const allViews = await views();
+  await ev.send('Page.reload');
+  await waitFor('виды после перезагрузки окна', async () => (await views().catch(() => '')) === allViews && (await pushes('panel').catch(() => null)) === 'толчков: 0', 30_000);
+  assert.deepEqual(await ping(), {});
+  await waitFor('после перезагрузки окна вид panel снова получает толчки главной части', async () => (await pushes('panel')) === 'толчков: 2');
+  log('канал «главная часть - вид»: толчок доходит только до вида с этим именем, ответ вида - до главной части, после перезагрузки окна канал связан заново');
+
   const lock = JSON.parse(readFileSync(join(userData, 'workspace.cyborg.json.lock'), 'utf8'));
   assert.equal(typeof lock.pid, 'number', 'замок воркспейса без pid');
   const second = spawn(join(repo, 'node_modules', '.bin', 'electron'), [repo, `--user-data-dir=${userData}`, ...electronArgs], { stdio: 'ignore' });

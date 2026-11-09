@@ -2,6 +2,7 @@
   "id": "panels",
   "version": "1.0.0",
   "engines": { "cyborg": "^1" },
+  "commands": { "panels.ping": {} },
   "ui": {
     "views": {
       "panel": { "module": "./ui/panel.js", "area": "sidebar", "order": 900, "title": "Панель" },
