@@ -23,7 +23,7 @@ Cyborg Harness - микроядро для настольных приложен
 
 ## Правила
 
-- Ядро не импортирует Electron и ничего из playground; playground берёт ядро только как пакет `@cyborg-harness/core` (точки входа - `core/package.json`, `exports`; workspace, сборка `npm run build:core` в `core/dist`).
+- Ядро не импортирует Electron и ничего из playground; playground берёт ядро только как пакет `@cyborg-harness/core` (точки входа - `core/package.json`, `exports`; workspace, сборка `npm run build:core` в `core/dist`) и только публичными именами точек входа (перечень - `core/test/public-api.test.ts`, описание - `core/README.md`); окно не импортирует главный вход: он тянет `node:*`.
 - Импорты с расширением `.ts`: тесты идут на Node без сборки.
 - Параметры-свойства конструктора и `enum` не писать: Node снимает только стираемый синтаксис (`erasableSyntaxOnly`).
 

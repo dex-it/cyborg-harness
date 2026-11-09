@@ -58,26 +58,9 @@ describe('package.json ядра', () => {
     assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}), ['@cyborg-harness/contracts']);
   });
 
-  it('точки входа: главный процесс, хост, вход хоста для fork, оболочка вида и элементы окна', () => {
-    assert.deepEqual(Object.keys(manifest.exports ?? {}), ['.', './host', './host-entry', './keys', './ui-shell', './elements', './package.json']);
+  it('точки входа: главный процесс, хост, вход хоста для fork, клавиши, оболочка вида, слой окна и элементы окна (имена в них - public-api.test.ts)', () => {
+    assert.deepEqual(Object.keys(manifest.exports ?? {}), ['.', './host', './host-entry', './keys', './ui-shell', './window', './elements', './package.json']);
     for (const target of exportTargets()) assert.match(target, /^\.\/dist\/.+\.(js|d\.ts)$/, target);
-  });
-});
-
-describe('потребители в репозитории', () => {
-  it('playground берёт ядро через пакет: ни импортов, ни строковых путей (new URL, fork, readFile) в core/src и core/elements', () => {
-    const playground = path.join(root, 'playground');
-    // Спайки вне CI берут из core/src то, чего нет в точках входа пакета: SP-01 (Tail, BACKLOG_LIMIT), замер шлюза (net-transport: guardedLookup, isLocalAddress).
-    const allowed = new Set([path.join(playground, 'scripts', 'spike-pty-restore.mjs'), path.join(playground, 'src', 'main', 'spike-gateway.ts')]);
-    const files = walk(playground).filter((f) => /\.(ts|mjs)$/.test(f) && !allowed.has(f) && !f.includes(`${path.sep}dist${path.sep}`) && !f.includes(`${path.sep}node_modules${path.sep}`));
-    assert.ok(files.length > 50, `файлов playground: ${files.length}`);
-    const bad = files.flatMap((f) =>
-      fs
-        .readFileSync(f, 'utf8')
-        .split('\n')
-        .flatMap((line, i) => (/['"`][^'"`\n]*core\/(?:src|elements)\/|['"`]core['"`]\s*,\s*['"`](?:src|elements)['"`]/.test(line) ? [`${path.relative(root, f)}:${i + 1}: ${line.trim()}`] : [])),
-    );
-    assert.deepEqual(bad, []);
   });
 });
 

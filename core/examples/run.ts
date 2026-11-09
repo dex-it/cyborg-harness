@@ -1,7 +1,11 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
-import { CoreError, errorMessage, forkHosts, isRecord, load, parseManifest, PLUGIN_API_VERSION, SectionStore, type ContractGraph, type JournalEntry, type LayerStore, type Rejection } from '../src/index.ts';
+import { CoreError, forkHosts, load, parseManifest, PLUGIN_API_VERSION, SectionStore, type ContractGraph, type JournalEntry, type LayerStore, type Rejection } from '../src/index.ts';
 import { scenarios, type Documents, type Scenario } from './scenarios.ts';
+
+// Сценарии идут через публичный вход ядра (их же гоняет consumer.test.ts на пакете), поэтому мелкие помощники свои.
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 const pluginsDir = new URL('./plugins/', import.meta.url);
 
