@@ -67,8 +67,8 @@ describe('package.json ядра', () => {
 describe('потребители в репозитории', () => {
   it('playground берёт ядро через пакет: ни импортов, ни строковых путей (new URL, fork, readFile) в core/src и core/elements', () => {
     const playground = path.join(root, 'playground');
-    // Спайк SP-01 вне CI берёт из core/src то, чего нет в точках входа пакета (Tail, BACKLOG_LIMIT).
-    const allowed = new Set([path.join(playground, 'scripts', 'spike-pty-restore.mjs')]);
+    // Спайки вне CI берут из core/src то, чего нет в точках входа пакета: SP-01 (Tail, BACKLOG_LIMIT), замер шлюза (net-transport: guardedLookup, isLocalAddress).
+    const allowed = new Set([path.join(playground, 'scripts', 'spike-pty-restore.mjs'), path.join(playground, 'src', 'main', 'spike-gateway.ts')]);
     const files = walk(playground).filter((f) => /\.(ts|mjs)$/.test(f) && !allowed.has(f) && !f.includes(`${path.sep}dist${path.sep}`) && !f.includes(`${path.sep}node_modules${path.sep}`));
     assert.ok(files.length > 50, `файлов playground: ${files.length}`);
     const bad = files.flatMap((f) =>
