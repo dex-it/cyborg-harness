@@ -128,6 +128,8 @@ function journalLine(e: JournalEntry): string {
       return `${yellow('↻')} ${id} включён снова`;
     case 'denied':
       return `${yellow('⛔')} ${id} отказ ctx.os: ${e.detail}`;
+    case 'deprecated-call':
+      return `${yellow('⚠')} ${id} вызывает устаревший ${e.contract}.${e.member} поставщика ${e.provider}`;
     case 'unloaded':
       return `${dim('⏏')} ${id} выгружен${e.by === e.pluginId ? '' : ` вместе с ${e.by}`}${e.error ? `, ошибка: ${e.error}` : ''}`;
     case 'pty-expired':

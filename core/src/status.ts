@@ -1,6 +1,6 @@
 import type { SectionResult } from './config.ts';
 import type { Rejection } from './graph.ts';
-import { DENIED_WINDOW_MS } from './journal.ts';
+import { DENIED_WINDOW_MS, DEPRECATED_WINDOW_MS } from './journal.ts';
 import type { JournalEntry } from './kernel-types.ts';
 
 /** Что показать на месте плагина: работает, ждёт перезапуска хоста, выключен (сбоем или человеком) или не включён в настройках. */
@@ -17,8 +17,9 @@ export interface PluginStatus {
 
 const REVIVABLE = new Set<JournalEntry['kind']>(['switched-off', 'failed', 'skipped', 'host-abandoned']);
 
-/** Плагины, которых касается запись: свой id или перечень у записей хоста. */
+/** Плагины, которых касается запись: свой id или перечень у записей хоста; у вызова устаревшего члена ещё и поставщик, чтобы он видел своих вызывающих. */
 export function entryPlugins(entry: JournalEntry): readonly string[] {
+  if (entry.kind === 'deprecated-call') return [entry.pluginId, entry.provider];
   if (entry.pluginId !== undefined) return [entry.pluginId];
   if (entry.kind === 'key-ignored') return [];
   return entry.kind === 'host-down' ? [...new Set([...entry.plugins, ...entry.culprits])] : entry.plugins;
@@ -48,11 +49,12 @@ export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[]
         case 'key-conflict':
         case 'key-ignored':
         case 'denied':
+        case 'deprecated-call':
         case 'unhandled-rejection':
         case 'pty-expired':
         case 'host-isolated':
         case 'host-own-grouped':
-          // Ни конфликт сочетаний, ни отказ шлюза, ни удержанное хостом отклонение, ни завершённый по сроку pty, ни выбор хоста о работе плагина ничего не говорят: плагин работает как обычно.
+          // Ни конфликт сочетаний, ни отказ шлюза, ни вызов устаревшего члена, ни удержанное хостом отклонение, ни завершённый по сроку pty, ни выбор хоста о работе плагина ничего не говорят: плагин работает как обычно.
           break;
         case 'host-restart':
           // Причиной остаётся падение: «перезапуск» без «почему» человеку ничего не говорит.
@@ -136,6 +138,10 @@ export function describeEntry(e: JournalEntry): string {
       const what = `${source}: ${e.detail}`;
       return e.repeats ? `${what} - ещё ${String(e.repeats)} раз за ${String(DENIED_WINDOW_MS / 1000)} с` : what;
     }
+    case 'deprecated-call': {
+      const what = `${e.pluginId} вызывает устаревший ${e.contract}.${e.member} поставщика ${e.provider}`;
+      return e.repeats ? `${what} - ещё ${String(e.repeats)} раз за ${String(DEPRECATED_WINDOW_MS / 1000)} с` : what;
+    }
     case 'pty-expired':
       return `терминал ${e.id} (${e.program}) завершён: плагин не подхватил его за ${String(e.graceMs / 1000)} с`;
     case 'unloaded': {
@@ -181,6 +187,7 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
     case 'key-conflict':
     case 'key-ignored':
     case 'denied':
+    case 'deprecated-call':
     case 'pty-expired':
       return 'warn';
     case 'deactivated':
