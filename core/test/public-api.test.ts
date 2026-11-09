@@ -138,7 +138,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
     values: ['connectView', 'keepFocus', 'mountModule'],
     types: ['FocusRoot', 'FocusWindow', 'TerminalEvent', 'TerminalOpened', 'ViewBridge', 'ViewTarget'],
   },
-  './plugin-check': { source: 'src/index-plugin-check.ts', values: ['checkPlugin'], types: ['CheckOptions', 'CheckReport', 'ImportRules', 'Problem'] },
+  './plugin-check': { source: 'src/index-plugin-check.ts', values: ['checkPlugin', 'formatProblem'], types: ['CheckOptions', 'CheckReport', 'ImportRules', 'Problem'] },
   './window': { source: 'src/index-window.ts', values: ['WINDOW_OWNER'], types: ['Area', 'DisablePreview', 'DocumentRow', 'LayoutEntry', 'ShownDialog', 'WindowLock', 'WindowSnapshot', 'WindowTitle'] },
   './elements': { source: 'elements/elements.ts', values: ['defineElements'], types: [] },
 };
