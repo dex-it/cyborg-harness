@@ -19,6 +19,6 @@
   },
   "files": ["dist", "README.md"],
   "peerDependencies": {
-    "@cyborg-harness/contracts": "^1.0.0"
+    "@cyborg-harness/contracts": ">=1.0.0-0 <2.0.0"
   }
 }
