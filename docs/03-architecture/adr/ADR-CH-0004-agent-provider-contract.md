@@ -1,7 +1,7 @@
 ---
 id: ADR-CH-0004
 status: review
-date: 2026-11-05
+date: 2026-11-08
 relates_to: product, cyborg-harness, ADR-0003, ADR-0012, ADR-0016
 origin: derived
 quality-checks: входных записей нет
@@ -43,7 +43,7 @@ bb: провайдер - плагин; мост по JSON-RPC (stdio) с рук�
 ## Alternatives Considered
 
 - **Точка расширения «провайдер агента» в ядре, `AgentProvider` с `handshake`, `launch`, `attach`, `history`, `recover`; ядро само исполняет `LaunchSpec` (первая редакция).** Why rejected: агент - предметная область, ей не место в ядре; ядро держит только pty как ресурс дольше плагина, а запуск по описанию делает потребитель по своему праву ([SAD, раздел 7](../design/sad.md#7-расхождения-с-первой-редакцией-пакета)). `attach` стал общим членом `ctx.os.pty`, `recover` - членом `ended`.
-- **Waterfall-событие `session.prompt` для вклада в промпт (первая редакция, п. 6).** Why rejected: шины событий в ядре нет ([ADR-CH-0005](ADR-CH-0005-extension-points.md)), а контракт кратности many даёт тот же сбор без нового механизма.
+- **Waterfall-событие `session.prompt` для вклада в промпт (первая редакция, п. 6).** Why rejected: шины событий в ядре нет ([ADR-CH-0005](ADR-CH-0005-plugin-interaction.md)), а контракт кратности many даёт тот же сбор без нового механизма.
 - **Только Agent SDK.** Pros: структурные события, как у образцов. Cons: нативный интерактивный терминал пропадает; противоречит сути продукта. Why rejected.
 - **ACP как основа.** Pros: стандарт, много агентов. Cons: интерактивный pty тоже не получить; Claude Code в ACP - через мост. Why rejected для v1; остаётся отдельным контрактом позже (пункт 8).
 
