@@ -690,8 +690,9 @@ export class OsGateway {
       case 'fs.realpath': {
         await this.#ownDirs(m.id);
         // Ответ - сам проверенный путь, а не результат второго `realpath`: ссылка, подложенная между проверкой и ответом, вывела бы наружу область. Второе обращение к ОС нужно только за существованием.
+        // `stat`, а не `lstat`: висячая ссылка, которую `realOrParent` не раскрыл, иначе вернулась бы как «настоящий путь» вместо NotFound.
         const target = await this.#checkPath(m, method, args[0], false);
-        await fs.lstat(target);
+        await fs.stat(target);
         return target;
       }
       case 'fs.writeText': {
@@ -909,9 +910,22 @@ export class OsGateway {
     return new Promise((resolve, reject) => {
       // Своя группа процессов: тайм-аут и выгрузка плагина гасят и то, что программа запустила сама.
       const child = spawn(file, argv, { cwd, env, shell: false, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
+      let exited = false;
+      child.once('exit', () => {
+        exited = true;
+      });
       const stop = (signal: NodeJS.Signals) => {
+        if (child.pid === undefined) return;
         // До close, а не до выхода лидера: потомки, держащие его вывод, ещё живы в группе.
-        if (child.pid !== undefined) killGroup(child.pid, signal);
+        if (!exited) killGroup(child.pid, signal);
+        // Лидер собран, его pid свободен для чужого процесса: сигнал только группе - её номер не переиспользуется, пока в ней кто-то жив.
+        else if (process.platform !== 'win32') {
+          try {
+            process.kill(-child.pid, signal);
+          } catch {
+            // Группа пуста: добивать некого.
+          }
+        }
       };
       // Программа, глушащая SIGTERM, иначе жила бы без срока, не возвращала бы `run` и держала место в пределе `runs`; таймер снимает `done`.
       let kill: NodeJS.Timeout | undefined;

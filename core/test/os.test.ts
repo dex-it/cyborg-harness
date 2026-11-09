@@ -148,9 +148,11 @@ test('process.run: программа и префикс аргументов и�
   await k.unload();
 });
 
-test('process.run: вывод больше предела - truncated, программа остановлена, прочитанное до предела целое по символам; предел в байтах и по потокам', async () => {
+test('process.run: вывод больше предела - truncated, программа остановлена, прочитанное до предела целое по символам; предел в байтах и по потокам', async (t) => {
   await using box = await sandbox();
   const { k, os } = await kernel({ runner: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp, limits: { processOutput: 1000, processOutputMax: 4000 } });
+  // Иначе упавшая проверка оставит наблюдатель или программу живыми, и процесс файла не выйдет до срока job.
+  t.after(() => k.unload());
   const run = (script: string, options?: object) => os('runner').process!.run(process.execPath, ['-e', script], options);
   const small = await run(`process.stdout.write('я'.repeat(500));process.stderr.write('e')`);
   assert.deepEqual([small.code, small.truncated, small.stdout.length], [0, false, 500], 'ровно в предел (1000 байт) - не обрезано');
@@ -170,17 +172,30 @@ test('process.run: вывод больше предела - truncated, прог�
   const lowered = await run(`process.stdout.write('x'.repeat(100))`, { maxOutputBytes: 10 });
   assert.deepEqual([lowered.truncated, lowered.stdout], [true, 'x'.repeat(10)], 'опция опускает предел');
   for (const bad of [0, -1, 1.5, 4001, '10', Number.NaN]) await assert.rejects(run('0', { maxOutputBytes: bad }), { code: 'Invalid', message: /maxOutputBytes/ }, String(bad));
-  await k.unload();
 });
 
-test('process.run: тайм-аут программы, глушащей SIGTERM, кончается SIGKILL, а не висит в пределе runs', async () => {
+test('process.run: тайм-аут программы, глушащей SIGTERM, кончается SIGKILL, а не висит в пределе runs', async (t) => {
   await using box = await sandbox();
   const { k, os } = await kernel({ runner: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp, limits: {} });
-  const t = Date.now();
+  // Иначе упавшая проверка оставит наблюдатель или программу живыми, и процесс файла не выйдет до срока job.
+  t.after(() => k.unload());
+  const started = Date.now();
   const got = await os('runner').process!.run(process.execPath, ['-e', `process.on('SIGTERM',()=>{});setInterval(()=>{},1000)`], { timeoutMs: 200 });
   assert.deepEqual([got.signal, got.truncated], ['SIGKILL', false]);
-  assert.ok(Date.now() - t < 8000, 'не ждали вечно');
-  await k.unload();
+  assert.ok(Date.now() - started < 8000, 'не ждали вечно');
+});
+
+test('process.run: SIGKILL после выхода лидера идёт только группе, а не его освободившемуся pid', { skip: process.platform === 'win32' && 'группы процессов POSIX' }, async (t) => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ runner: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp, limits: {} });
+  t.after(() => k.unload());
+  const kill = t.mock.method(process, 'kill');
+  // Лидер умирает от SIGTERM, а вывод держит потомок в своей сессии: close ждёт его, и таймер SIGKILL срабатывает уже после выхода лидера.
+  const daemon = `require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},2600)'],{detached:true,stdio:['ignore','inherit','inherit']}).unref();process.stderr.write(String(process.pid));setInterval(()=>{},1000)`;
+  const got = await os('runner').process!.run(process.execPath, ['-e', daemon], { timeoutMs: 200 });
+  const leader = Number(got.stderr);
+  assert.ok(leader > 0);
+  assert.deepEqual(kill.mock.calls.map((c) => c.arguments[0]).filter((pid) => pid === leader), [], 'собранный лидер не получает сигналов по своему pid');
 });
 
 test('process.run: предел вывода по умолчанию - 16 МиБ, как и записано в SAD', async () => {
@@ -414,6 +429,8 @@ test('fs.realpath: настоящий путь внутри области - с�
   assert.equal(await fs.realpath(path.join(box.work, 'real', '..', 'real')), path.join(box.work, 'real'));
   assert.equal(await fs.realpath(box.work), box.work);
   await assert.rejects(fs.realpath(path.join(box.work, 'gone')), { code: 'NotFound' });
+  await symlink(path.join(box.work, 'gone'), path.join(box.work, 'dangling'));
+  await assert.rejects(fs.realpath(path.join(box.work, 'dangling')), { code: 'NotFound' }, 'висячая ссылка не отдаётся как настоящий путь');
   await assert.rejects(fs.realpath(path.join(box.work, 'escape')), { code: 'PermissionDenied' }, 'ссылка наружу области');
   await assert.rejects(fs.realpath(box.outside), { code: 'PermissionDenied' });
   await assert.rejects(fs.realpath('relative'), { code: 'PermissionDenied' });
@@ -554,9 +571,11 @@ test('fs.watch: имена изменённых в каталоге склеен
   await new Promise((r) => setTimeout(r, 100));
 });
 
-test('fs.watch файла: каждая из записей writeText (подмена inode через rename) и запись на месте дают событие; наблюдение не молчит и onClose не зовётся', { skip: process.platform === 'win32' && 'rename поверх открытого' }, async () => {
+test('fs.watch файла: каждая из записей writeText (подмена inode через rename) и запись на месте дают событие; наблюдение не молчит и onClose не зовётся', { skip: process.platform === 'win32' && 'rename поверх открытого' }, async (t) => {
   await using box = await sandbox();
   const { k, os } = await kernel({ app: { 'fs.read': [box.work], 'fs.write': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  // Иначе упавшая проверка оставит наблюдатель или программу живыми, и процесс файла не выйдет до срока job.
+  t.after(() => k.unload());
   const fs = os('app').fs;
   const file = path.join(box.work, 'state.json');
   await fs.writeText(file, '0');
@@ -576,12 +595,13 @@ test('fs.watch файла: каждая из записей writeText (подм�
   await next(5);
   assert.deepEqual(closed, []);
   sub.dispose();
-  await k.unload();
 });
 
-test('fs.watch файла: файл удалён - onClose с причиной, а не тишина', async () => {
+test('fs.watch файла: файл удалён - onClose с причиной, а не тишина', async (t) => {
   await using box = await sandbox();
   const { k, os } = await kernel({ app: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  // Иначе упавшая проверка оставит наблюдатель или программу живыми, и процесс файла не выйдет до срока job.
+  t.after(() => k.unload());
   const file = path.join(box.work, 'gone.json');
   await writeFile(file, '0');
   const closed: string[] = [];
@@ -589,7 +609,6 @@ test('fs.watch файла: файл удалён - onClose с причиной, 
   await rm(file);
   for (let i = 0; i < 100 && closed.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
   assert.equal(closed.length, 1, 'удаление файла закрывает наблюдение с причиной');
-  await k.unload();
 });
 
 test('fs.watch: лимит не обходится параллельными вызовами; сузились корни - наблюдение закрыто', async () => {
