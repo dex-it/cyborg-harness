@@ -4,7 +4,7 @@ import tseslint from 'typescript-eslint';
 
 export default defineConfig(
   // Спайки ресёрча - архив замеров к документам, не код харнесса; запускаются один раз и не поддерживаются.
-  { ignores: ['node_modules/', 'playground/dist/', 'core/dist/', 'electron/dist/', 'contracts/dist/', '.claude/', 'docs/research/spikes/', 'site/'] },
+  { ignores: ['node_modules/', 'playground/dist/', 'core/dist/', 'contracts/dist/', 'testing/dist/', 'electron/dist/', 'tools/cyborg-plugin/dist/', '.claude/', 'docs/research/spikes/', 'site/'] },
   { linterOptions: { reportUnusedDisableDirectives: 'error' } },
   js.configs.recommended,
   {
@@ -25,7 +25,7 @@ export default defineConfig(
     },
   },
   {
-    files: ['**/*.test.ts', 'core/test/**'],
+    files: ['**/*.test.ts', 'core/test/**', 'tools/cyborg-plugin/test/**'],
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/no-floating-promises': 'off',

@@ -9,10 +9,10 @@ import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { describeEntry } from '../src/status.ts';
 import { load, type JournalEntry, type LoadOptions } from '../src/loader.ts';
 import { inlinePtyHost } from '../src/pty-link.ts';
-import { PTY_HOST_LOST, type PtyBackend, type PtyProcess } from '../src/pty.ts';
+import { PTY_HOST_LOST, type PtyBackend } from '../src/pty.ts';
 import { Endpoint } from '../src/rpc.ts';
 import { inlineHosts } from '../src/transports.ts';
-import { fakePty, type FakeProc } from './fake-pty.ts';
+import { fakePty, type FakeProc } from '../../testing/src/fake-pty.ts';
 import { fakeView } from './view-channel.ts';
 
 const tick = () => sleep(30);
@@ -192,7 +192,7 @@ test('запуск асинхронный: pid приходит позже, че
   const backend: PtyBackend = {
     async spawn(file, args, options) {
       await gate;
-      const proc = base.spawn(file, args, options) as PtyProcess as FakeProc;
+      const proc = base.spawn(file, args, options);
       procs.push(proc);
       return proc;
     },
@@ -294,7 +294,7 @@ test('pty-хост: завершаемый процесс, переживший 
   host.kill();
 });
 
-test('выгрузка: pty-хост глух к endAll, плагин после deactivate просит слежение - после unload() оно закрыто (вторая зачистка, ревью K-01)', async () => {
+test('выгрузка: pty-хост глух к endAll, плагин после deactivate просит слежение - оно не занимает ресурс и после unload() его нет (ревью K-01, K-10)', async () => {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-pty-host-')));
   const backend = fakePty();
   const hosts = ptyHosts(backend);
@@ -316,9 +316,9 @@ test('выгрузка: pty-хост глух к endAll, плагин после
   const unloading = k.unload();
   while (!k.journal.some((e) => e.kind === 'deactivated')) await sleep(5);
   await sleep(30);
-  const sub = await ctx.os.fs.watch(root, () => undefined);
-  assert.ok(sub, 'слежение после deactivate не принято: проверка ничего не проверяет');
-  assert.equal(watching(), base + 1, 'слежение не заняло ресурс');
+  // Запрос снятого плагина ядро отклоняет (K-10: запросы `os` принимает только активный плагин), так что ресурс не занят; вторая зачистка в `unload()` - запасная.
+  await assert.rejects(ctx.os.fs.watch(root, () => undefined), { code: 'Unavailable' });
+  assert.equal(watching(), base, 'слежение снятого плагина заняло ресурс');
   await unloading;
   await sleep(30);
   assert.equal(watching(), base, 'слежение, пришедшее после выгрузки плагина, пережило unload()');

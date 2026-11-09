@@ -9,7 +9,15 @@ declare module '@cyborg-harness/contracts' {
     'test.flaky': { 1: object };
     'test.ticker': { 1: Ticker };
     'test.guarded': { 1: Guarded };
+    'test.cancel': { 1: Cancellable };
   }
+}
+
+/** Поставщик с отменой: последний аргумент члена - сигнал (SAD 4, «Отмена запросов»). */
+export interface Cancellable {
+  slow(label: string, signal?: AbortSignal): Promise<string>;
+  watch(listener: (n: number) => void, signal?: AbortSignal): Promise<Subscription>;
+  listeners(): number;
 }
 
 export interface Ticker {

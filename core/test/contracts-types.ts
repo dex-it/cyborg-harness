@@ -1,6 +1,6 @@
 // Проверяется компилятором в npm run typecheck: строка под @ts-expect-error обязана не компилироваться.
 import type { PluginModule } from '../src/plugin.ts';
-import type { Remote } from '@cyborg-harness/contracts';
+import type { CoreErrorCode, Remote } from '@cyborg-harness/contracts';
 import type { FilesV1, FilesV2 } from '../examples/contracts.ts';
 
 export const provider: PluginModule = {
@@ -39,5 +39,37 @@ export const consumer: PluginModule = {
     ctx.log(String(n));
     // @ts-expect-error обработчик команды принимает unknown, а не объявленный тип
     ctx.commands.register('x.open', (path: string) => path);
+  },
+};
+
+// Отмена вызова (K-09): код отказа входит в публичный тип, сигнал в options у process.run допустим, а флаг вместо сигнала - нет.
+export const cancelled: CoreErrorCode = 'Cancelled';
+// @ts-expect-error такого кода отказа нет
+export const unknownCode: CoreErrorCode = 'Aborted';
+export const stoppable: PluginModule = {
+  activate(ctx) {
+    const abort = new AbortController();
+    void ctx.os.process?.run('git', ['status'], { signal: abort.signal, timeoutMs: 1000 });
+    // @ts-expect-error сигнал отмены у process.run - AbortSignal, а не флаг
+    void ctx.os.process?.run('git', ['status'], { signal: true });
+  },
+};
+
+export const keyed: PluginModule = {
+  async activate(ctx) {
+    const reg = await ctx.keys.register({ key: 'F1', command: 'x.run', args: ['build'], when: { repeat: false, dialog: false, input: 'not-text', visible: true } });
+    const active: boolean = reg.active;
+    reg.dispose();
+    ctx.log(`${String(active)} ${reg.winner ?? ''}`);
+    // @ts-expect-error команда обязательна
+    await ctx.keys.register({ key: 'F1' });
+    // @ts-expect-error незнакомое условие
+    await ctx.keys.register({ key: 'F1', command: 'x.run', when: { focus: true } });
+    // @ts-expect-error input - 'any' или 'not-text'
+    await ctx.keys.register({ key: 'F1', command: 'x.run', when: { input: 'text' } });
+    // @ts-expect-error регистрация асинхронна: ядро может отказать
+    const sync: { active: boolean } = ctx.keys.register({ key: 'F1', command: 'x.run' });
+    ctx.log(String(sync.active));
+    return undefined;
   },
 };

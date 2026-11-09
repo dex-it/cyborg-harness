@@ -4,26 +4,9 @@ import { CoreError } from './errors.ts';
 import { LIMITS, type ResourceLimits } from './limits.ts';
 import { BACKLOG_LIMIT } from './pty-tail.ts';
 import { PtyLink, type PtyWatchdog, type SpawnPtyHost } from './pty-link.ts';
+import type { PtyProcess, PtyWire } from './pty-types.ts';
 
-/** Процесс в псевдотерминале; форма совпадает с IPty из node-pty, так что адаптер Electron отдаёт его как есть. */
-export interface PtyProcess {
-  readonly pid: number;
-  onData(listener: (data: string) => void): { dispose(): void };
-  onExit(listener: (e: { exitCode: number; signal?: number }) => void): { dispose(): void };
-  write(data: string): void;
-  resize(cols: number, rows: number): void;
-  kill(signal?: string): void;
-}
-
-/** Откуда pty-хост берёт процессы (в нём живёт `node-pty`). Запуск может быть асинхронным: за границей процессов `pid` приходит позже. */
-export interface PtyBackend {
-  spawn(file: string, args: string[], options: { name: string; cwd?: string; env: Record<string, string>; cols: number; rows: number }): PtyProcess | Promise<PtyProcess>;
-}
-
-/** Что уходит в хост плагина на spawn и attach: описание плюс хвост вывода. */
-export interface PtyWire extends PtyInfo {
-  readonly backlog: string;
-}
+export type { PtyBackend, PtyProcess, PtyWire } from './pty-types.ts';
 
 /**
  * Канал вида к pty-хосту: вывод идёт из хоста прямо в этот порт, ввод и размер - обратно, главный процесс в потоке не участвует.
@@ -313,6 +296,15 @@ export class PtyTable {
     }
     if (kept > 0) this.#keptChanged();
     return kept;
+  }
+
+  /** Плагин удалён: уходят все его pty, и оставленные человеком тоже; число живых, которые это завершило. */
+  endAll(pluginId: string): number {
+    const mine = this.#of(pluginId);
+    const live = mine.filter((e) => !e.exit).length;
+    for (const e of mine) this.#end(e);
+    if (mine.some((e) => e.keptAt !== undefined)) this.#keptChanged();
+    return live;
   }
 
   /** Оставленные человеком процессы выключенных плагинов, в том числе завершившиеся сами. */

@@ -6,7 +6,7 @@ import path from 'node:path';
 import type { PluginContext, PtyExit } from '@cyborg-harness/contracts';
 import { load, type LoadOptions } from '../src/loader.ts';
 import { describePermissions } from '../src/permissions.ts';
-import { fakePty, type FakeProc } from './fake-pty.ts';
+import { fakePty, type FakeProc } from '../../testing/src/fake-pty.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { fakeView } from './view-channel.ts';
@@ -298,6 +298,34 @@ test('оставленный: ждёт без срока, пока плагин 
   await new Promise((r) => setTimeout(r, 250));
   assert.equal(leftProc.killed, 'SIGHUP', 'плагин не взял процесс за срок, а он жив');
   assert.deepEqual(s.k.journal.filter((e) => e.kind === 'pty-expired'), [{ kind: 'pty-expired', pluginId: 'agent', id: left.id, program: '/bin/bash', graceMs: 100 }]);
+});
+
+test('uninstall: активный плагин с живым pty - отказ, pty жив; оставленные человеком при выключении pty завершаются, чужие целы', async () => {
+  let changes = 0;
+  await using s = await setup({ agent: shell, neighbour: shell }, true, undefined, undefined, () => {
+    changes++;
+  });
+  const own = await s.pty('agent').spawn({ program: '/bin/bash' });
+  await s.pty('agent').spawn({ program: '/bin/bash' });
+  await s.pty('neighbour').spawn({ program: '/bin/bash' });
+  const [ownProc, secondProc, neighbourProc] = s.backend.procs as [FakeProc, FakeProc, FakeProc];
+
+  await assert.rejects(s.k.uninstall('agent'), { code: 'Invalid' });
+  assert.deepEqual([ownProc.killed, secondProc.killed], [undefined, undefined], 'отказ не тронул процессы');
+  assert.equal(s.k.disablePreview('agent').ptys.length, 2, 'приложение сначала спрашивает человека о живых pty');
+
+  await s.k.disable('agent', { keepPty: true });
+  assert.equal(s.k.keptPty().length, 2);
+  assert.ok(s.k.keptPty().some((p) => p.id === own.id));
+  const before = changes;
+
+  const report = await s.k.uninstall('agent');
+  assert.deepEqual([ownProc.killed, secondProc.killed], ['SIGHUP', 'SIGHUP'], 'оставленные pty удалённого плагина завершены');
+  assert.equal(neighbourProc.killed, undefined, 'pty соседа цел');
+  assert.deepEqual(s.k.keptPty(), []);
+  assert.ok(changes > before, 'приложение узнало, что оставленных больше нет');
+  assert.ok(report.erased.includes('терминалов завершено: 2'), report.erased.join('; '));
+  await s.k.unload();
 });
 
 test('пределы pty: ввод больше предела - Invalid, pty жив и принимает следующий; из хоста и из вида; число живых pty освобождается выходом и выключением; COLORTERM от ядра', async () => {

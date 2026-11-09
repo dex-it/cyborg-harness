@@ -103,6 +103,27 @@ describe('потребитель вне репозитория', { timeout: 180_
     assert.equal(run(process.execPath, ['readme-example.ts'], project).trim(), 'hello');
   });
 
+  it('checkPlugin из @cyborg-harness/core/plugin-check: чистый плагин без нарушений, запрещённый импорт с файлом и строкой (P-09)', () => {
+    const make = (name: string, code: string) => {
+      const dir = path.join(project, 'checked', name);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ id: 'acme.hello', version: '1.0.0', engines: { cyborg: '^1' } }));
+      fs.writeFileSync(path.join(dir, 'index.js'), code);
+      return dir;
+    };
+    // Командная строка cyborg-plugin живёт в своём пакете (P-06, tools/cyborg-plugin); здесь проверяется программный вход ядра.
+    fs.writeFileSync(
+      path.join(project, 'check.mjs'),
+      "import { checkPlugin, formatProblem } from '@cyborg-harness/core/plugin-check';\nconst r = await checkPlugin(process.argv[2]);\nconsole.log(JSON.stringify({ ok: r.ok, problems: r.problems.map(formatProblem) }));\n",
+    );
+    const check = (dir: string) => JSON.parse(run(process.execPath, ['check.mjs', dir], project)) as { ok: boolean; problems: string[] };
+    assert.deepEqual(check(make('good', 'export default {};\n')), { ok: true, problems: [] });
+    assert.deepEqual(check(make('bad', "import fs from 'node:fs';\nexport default {};\n")), {
+      ok: false,
+      problems: ["index.js:1: 'node:fs': только @cyborg-harness/contracts и свои модули"],
+    });
+  });
+
   it('сценарий core/examples идёт на пакете: хосты в дочерних процессах из dist/host-entry.js', () => {
     const out = run(process.execPath, ['examples/run.ts', 'basic'], project, { NO_COLOR: '1' });
     assert.match(out, /Шаг 1\./);

@@ -18,7 +18,7 @@ export function windowApi(): WindowApi {
     runCommand: (command: string): Promise<Reply> => ipcRenderer.invoke('plugins:run', command),
     onPluginsChanged: (listener: () => void): void => void ipcRenderer.on('plugins:changed', () => listener()),
     onWindowCommand: (listener: (command: string) => void): void => void ipcRenderer.on('window:command', (_event, command: string) => listener(command)),
-    setViewVisible: (id: string, visible: boolean): Promise<void> => ipcRenderer.invoke('views:visibility', { id, visible }),
+    setViewVisible: (id: string, view: string, visible: boolean): Promise<void> => ipcRenderer.invoke('views:visibility', { id, view, visible }),
     answerDialog: (id: number, choice: string | undefined): Promise<Reply> => ipcRenderer.invoke('window:answer', { id, choice }),
     closeDocument: (id: string): Promise<Reply> => ipcRenderer.invoke('documents:close', id),
     openWorkspace: (file?: string): Promise<Reply> => ipcRenderer.invoke('workspace:open', file),
@@ -82,7 +82,28 @@ export function inWindowDocument(): boolean {
   return location.protocol === 'file:' && window.top === window;
 }
 
-/** Кладёт `window.cyborgView` во фрейм вида плагина; в остальных документах ничего не делает. */
+/** Что в фокусе: поле ввода, терминал (xterm держит скрытый textarea) или остальное; ядро по этому решает судьбу сочетаний с `when.input`. */
+function focusKind(target: EventTarget | null): 'text' | 'terminal' | 'other' {
+  if (!(target instanceof HTMLElement)) return 'other';
+  if (target.classList.contains('xterm-helper-textarea')) return 'terminal';
+  if (target.isContentEditable || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return 'text';
+  if (target instanceof HTMLInputElement) return ['button', 'checkbox', 'radio', 'submit', 'reset', 'range', 'color', 'image', 'file'].includes(target.type) ? 'other' : 'text';
+  return 'other';
+}
+
+/** Кладёт `window.cyborgView` во фрейм вида плагина и сообщает главному процессу, где фокус ввода (в виде и в документе окна); в остальных документах ничего не делает. */
 export function exposeViewBridge(): void {
+  if (inViewFrame() || inWindowDocument()) {
+    window.addEventListener(
+      'focusin',
+      (event) => {
+        const target = event.composedPath()[0] ?? event.target;
+        // Фокус во вложенном фрейме сообщает сам фрейм: элемент <iframe> в родителе - не место ввода.
+        if (!(target instanceof HTMLIFrameElement)) ipcRenderer.send('input:focus', focusKind(target));
+      },
+      true,
+    );
+    window.addEventListener('focusout', () => ipcRenderer.send('input:focus', 'blur'), true);
+  }
   if (inViewFrame()) contextBridge.exposeInMainWorld('cyborgView', viewBridge());
 }

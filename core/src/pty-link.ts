@@ -4,7 +4,7 @@
 import type { PtyExit } from '@cyborg-harness/contracts';
 import { CoreError, errorMessage, ignore } from './errors.ts';
 import { PtyHost, type PtyHostInit, type PtyHostOptions, type PtySpawnParams } from './pty-host.ts';
-import type { PtyBackend } from './pty.ts';
+import type { PtyBackend } from './pty-types.ts';
 import { Endpoint } from './rpc.ts';
 import type { HostHandle } from './transports.ts';
 

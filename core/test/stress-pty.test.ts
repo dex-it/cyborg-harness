@@ -10,7 +10,7 @@ import { PtyTable, type PtyBackend, type PtyExpiry, type PtyTableOptions } from 
 import { inlinePtyHost, type SpawnPtyHost } from '../src/pty-link.ts';
 import { isRecord } from '../src/wire.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
-import { fakePty } from './fake-pty.ts';
+import { fakePty } from '../../testing/src/fake-pty.ts';
 import { fakeView } from './view-channel.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 

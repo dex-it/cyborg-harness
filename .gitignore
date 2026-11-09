@@ -7,5 +7,7 @@ site/.astro/
 site/src/generated/
 site/public/favicon.svg
 core/dist/
+tools/cyborg-plugin/dist/
 electron/dist/
+testing/dist/
 contracts/dist/

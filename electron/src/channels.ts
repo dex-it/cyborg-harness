@@ -3,7 +3,7 @@ import { BrowserWindow, ipcMain, MessageChannelMain, nativeImage, nativeTheme, s
 import { isRecord } from './guards.ts';
 import type { PluginsService } from './plugins.ts';
 import { themeTokens } from './theme.ts';
-import { viewOrigin } from './view-protocol.ts';
+import { viewOfUrl, viewOrigin } from './view-protocol.ts';
 import { resolveDragFile, ViewDrags } from './view-drag.ts';
 import { ViewTerminals, type TerminalFrame } from './view-terminals.ts';
 import { framesOf, fromWindow, senderPlugin } from './views.ts';
@@ -47,8 +47,10 @@ export function registerWindowChannels({ plugins, window }: WindowChannelsOption
   windowChannel('documents:close', (id) => plugins.closeDocument(id));
   windowChannel('views:visibility', (arg) => {
     const win = window();
-    if (!isRecord(arg) || typeof arg.id !== 'string' || typeof arg.visible !== 'boolean' || !win) return;
-    for (const frame of framesOf(win.webContents, viewOrigin(arg.id))) frame.send('view:visibility', arg.visible);
+    if (!isRecord(arg) || typeof arg.id !== 'string' || typeof arg.view !== 'string' || typeof arg.visible !== 'boolean' || !win) return;
+    // Видов у плагина может быть несколько, каждый во фрейме со своим ?view=: свёрнутый вид не прячет остальные.
+    for (const frame of framesOf(win.webContents, viewOrigin(arg.id))) if (viewOfUrl(frame.url) === arg.view) frame.send('view:visibility', arg.visible);
+    plugins.setViewVisible(arg.id, arg.visible);
   });
 }
 
@@ -94,6 +96,19 @@ export function registerViewChannels({ plugins, dragRoot }: ViewChannelsOptions)
     if (senderPlugin(event) !== undefined && event.senderFrame) terminals.close(event.senderFrame, tid);
   });
   ipcMain.handle('view:theme', () => themeTokens(nativeTheme.shouldUseDarkColors));
+  // Фокус ввода сообщают документ окна и виды плагинов: ядро решает по нему, пускать ли сочетание с `when.input` в поле ввода.
+  // Фреймы живут в разных процессах, и уход фокуса из старого приходит то раньше, то позже прихода в новый: уход засчитывается, только если фокус ещё у его фрейма.
+  let focusFrame = '';
+  ipcMain.on('input:focus', (event, kind: unknown) => {
+    if (event.senderFrame !== event.sender.mainFrame && senderPlugin(event) === undefined) return;
+    const frame = `${String(event.processId)}:${String(event.frameId)}`;
+    if (kind === 'blur') {
+      if (frame === focusFrame) plugins.setInputFocus('other');
+      return;
+    }
+    focusFrame = frame;
+    plugins.setInputFocus(kind);
+  });
   const drags = new ViewDrags();
   ipcMain.on('view:drag', (event, relative: unknown) => {
     const pluginId = senderPlugin(event);

@@ -3,5 +3,7 @@
 export { WINDOW_OWNER } from './window-layer.ts';
 
 export type { DocumentRow } from './documents.ts';
+export type { LayoutEntry } from './layout.ts';
 export type { DisablePreview } from './loader.ts';
+export type { Area } from './manifest-layout.ts';
 export type { ShownDialog, WindowLock, WindowSnapshot, WindowTitle } from './window-layer.ts';

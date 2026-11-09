@@ -100,7 +100,7 @@ const shared = [
       ['timer', 'late', 'exit', 'focus', 'after', 'reject.timer', 'reject.focus', 'reject.await', 'throw.microtask', 'throw.tick', 'host.throw', 'host.reject', 'host.timer'].map((name) => [`busy.${name}`, name === 'reject.await' ? { args: ['number'] } : {}]),
     ),
   },
-  { id: 'calm', version: '1.0.0', engines: { cyborg: '^1' }, commands: { 'calm.echo': { args: ['any'] }, 'calm.pid': {} } },
+  { id: 'calm', version: '1.0.0', engines: { cyborg: '^1' }, commands: { 'calm.echo': { args: ['any'], callers: 'plugins' }, 'calm.pid': {} } },
 ];
 
 function startShared(strikes = 3, spawnHost: SpawnHost = forkHosts()): Promise<Kernel> {
@@ -255,6 +255,30 @@ test('сторож: исключение в queueMicrotask и process.nextTick -
       ['shared', 'crash', ['busy'], []],
     ]);
     assert.deepEqual(k.active, ['busy', 'calm']);
+  } finally {
+    await k.unload();
+  }
+});
+
+test('сторож: плагин, снятый по страйкам, остаётся в раскладке с меткой disabled, сосед без метки', async () => {
+  const withView = shared.map((m) => ({ ...m, ui: { views: { main: './main.js' } } }));
+  const k = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['busy', 'calm'],
+    manifests: withView,
+    hosts: { shared: ['busy', 'calm'] },
+    bundled: ['busy', 'calm'],
+    spawnHost: forkHosts(),
+    entry: (m) => new URL(`./fixtures/${m.id}.ts`, import.meta.url).href,
+    watchdog: { interval: 50, timeout: 400, strikes: 3 },
+  });
+  try {
+    const marks = () => Object.fromEntries(k.layout.map((e) => [e.pluginId, e.mark ?? 'ok']));
+    assert.deepEqual(marks(), { busy: 'ok', calm: 'ok' });
+    for (let i = 0; i < 3; i++) await rejected(k, () => k.run('busy.reject.timer'));
+    await k.idle();
+    assert.deepEqual(k.journal.filter((e) => e.kind === 'switched-off').map((e) => e.pluginId), ['busy'], 'снят сторожем, а не человеком');
+    assert.deepEqual(marks(), { busy: 'disabled', calm: 'ok' });
   } finally {
     await k.unload();
   }

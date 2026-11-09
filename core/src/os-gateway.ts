@@ -8,6 +8,7 @@ import path from 'node:path';
 import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, ProcessResult, PtyInfo, SecretValue } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
 import { limitsOf, type ResourceLimits } from './limits.ts';
+import { isValidId } from './manifest-fields.ts';
 import type { PluginManifest } from './manifest.ts';
 import { closePools, guardedLookup, isLocalAddress, transport } from './net-transport.ts';
 import type { NotifyLimits, ShowNotice } from './notices.ts';
@@ -24,6 +25,8 @@ export interface SecretStore {
   get(key: string): Promise<string | undefined>;
   set(key: string, value: string): Promise<void>;
   delete(key: string): Promise<void>;
+  /** Стирает все ключи, начинающиеся с `prefix` (ядро зовёт с `<pluginId>/` при удалении плагина); число стёртых. Шифрование ОС не нужно. */
+  deletePrefix(prefix: string): Promise<number>;
 }
 
 /** Среда шлюза: каталоги и то, что даёт только приложение (Electron). Нет адаптера - вызов получает `Unavailable`. */
@@ -280,6 +283,20 @@ function ruleRefusal(m: PluginManifest, key: 'process' | 'pty' | 'launch', progr
   return foreign.length > 0 ? `переменные не в правиле ${key}: ${foreign.join(', ')}` : undefined;
 }
 
+function assertOwnId(pluginId: string): void {
+  if (!isValidId(pluginId)) throw new CoreError('Invalid', `недопустимый id плагина: ${JSON.stringify(pluginId)}`);
+}
+
+/** `<base>/<id>` для допустимого id и только внутри `base`: вторая проверка держит и тогда, когда правило id ослабят. */
+function ownDir(base: string, pluginId: string): string {
+  assertOwnId(pluginId);
+  const root = path.resolve(base);
+  const dir = path.join(root, pluginId);
+  const rel = path.relative(root, dir);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) throw new CoreError('Invalid', `каталог плагина ${pluginId} вне ${base}`);
+  return dir;
+}
+
 /** Шлюз ОС в главном процессе: вызывающего знает ядро по каналу хоста, права - из его манифеста. */
 export class OsGateway {
   readonly #env: OsEnvironment;
@@ -361,6 +378,61 @@ export class OsGateway {
     if (pty === 'detach') this.#pty?.detach(pluginId);
     else this.#pty?.release(pluginId);
     return 0;
+  }
+
+  /*
+   * Удаление плагина (`Kernel.uninstall`): каждый метод стирает один вид данных по id плагина и называет, что стёр.
+   * Id проверяется здесь, а не у вызывающего: путь и ключ строятся из него, и `..` или `/` вывели бы за каталог данных.
+   */
+
+  /** `<dataDir>/<id>` и `<tempDir>/<id>`; ссылка на месте каталога стирается сама, а не то, на что она указывает. Что стёрто - словами. */
+  async eraseFiles(pluginId: string): Promise<string[]> {
+    const dirs = [
+      [ownDir(this.#env.dataDir, pluginId), 'данные плагина (plugin-data)'],
+      [ownDir(this.#env.tempDir, pluginId), 'временные файлы (plugin-temp)'],
+    ] as const;
+    const erased: string[] = [];
+    for (const [dir, what] of dirs) {
+      const present = await fs.lstat(dir).then(
+        () => true,
+        (error: unknown) => {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+          throw error;
+        },
+      );
+      if (!present) continue;
+      await fs.rm(dir, { recursive: true, force: true });
+      erased.push(what);
+    }
+    this.#ownMade.delete(pluginId);
+    return erased;
+  }
+
+  /** Ключи `<id>/` в хранилище секретов; шифрование ОС для стирания не нужно, поэтому `available()` не спрашивается. Число стёртых. */
+  async eraseSecrets(pluginId: string): Promise<number> {
+    assertOwnId(pluginId);
+    return (await this.#env.secrets?.deletePrefix(`${pluginId}/`)) ?? 0;
+  }
+
+  /** Выбор человека в `dialog`: из памяти и из state воркспейса. Число стёртых путей. */
+  async eraseGrants(pluginId: string): Promise<number> {
+    assertOwnId(pluginId);
+    const had = this.#granted.get(pluginId);
+    if (had === undefined) return 0;
+    this.#granted.delete(pluginId);
+    try {
+      await this.#saveGrants();
+    } catch (error) {
+      // Файл ещё хранит выбор: повтор должен записать его заново, а не счесть стёртым.
+      this.#granted.set(pluginId, had);
+      throw error;
+    }
+    return had.size;
+  }
+
+  /** Все pty плагина, оставленные человеком тоже; число живых, которые это завершило. */
+  endAllPty(pluginId: string): number {
+    return this.#pty?.endAll(pluginId) ?? 0;
   }
 
   /** Живые pty плагина - что завершит выключение без оставления. */
@@ -528,7 +600,8 @@ export class OsGateway {
     return made;
   }
 
-  async call(m: PluginManifest, method: string, args: readonly unknown[]): Promise<unknown> {
+  /** `signal` - отмена запроса плагина: пока её слышит только `process.run` (программа и её группа завершаются). */
+  async call(m: PluginManifest, method: string, args: readonly unknown[], signal?: AbortSignal): Promise<unknown> {
     const p = m.permissions;
     switch (method) {
       case 'fs.readText': {
@@ -650,7 +723,7 @@ export class OsGateway {
         return undefined;
       }
       case 'process.run':
-        return this.#run(m, args);
+        return this.#run(m, args, signal);
       case 'pty.spawn': {
         const table = this.#ptyTable();
         const o = isRecord(args[0]) ? args[0] : {};
@@ -748,6 +821,8 @@ export class OsGateway {
         const options = readDialogOptions(method, args[0]);
         if (!this.#env.dialog) throw new CoreError('Unavailable', 'диалога выбора нет в этой среде');
         const chosen = (await this.#env.dialog.open(options)).filter((c) => path.isAbsolute(c));
+        // Человек выбирал, пока плагин сняли (disable, uninstall): выбор снятому не записывается, иначе его унаследует новый плагин с тем же id.
+        if (!this.#approved.has(m.id)) throw new CoreError('Unavailable', `${m.id} снят, пока шёл выбор`);
         const grants = this.#granted.get(m.id) ?? new Set<string>();
         const before = grants.size;
         for (const c of chosen) grants.add(await real(c));
@@ -816,7 +891,7 @@ export class OsGateway {
     return { file, argv, cwd, env: { ...base, ...extra } };
   }
 
-  async #run(m: PluginManifest, args: readonly unknown[]): Promise<ProcessResult> {
+  async #run(m: PluginManifest, args: readonly unknown[], signal?: AbortSignal): Promise<ProcessResult> {
     const method = 'process.run';
     const program = str(method, args[0], 'программа');
     const options = isRecord(args[2]) ? args[2] : {};
@@ -827,14 +902,18 @@ export class OsGateway {
     this.#runs.set(m.id, runs);
     runs.n++;
     try {
-      return await this.#spawnRun(m.id, program, file, argv, cwd, env, timeout, options.input);
+      return await this.#spawnRun(m.id, program, file, argv, cwd, env, timeout, options.input, signal);
     } finally {
       runs.n--;
     }
   }
 
-  #spawnRun(pluginId: string, program: string, file: string, argv: string[], cwd: string | undefined, env: Record<string, string>, timeout: number, input: unknown): Promise<ProcessResult> {
+  #spawnRun(pluginId: string, program: string, file: string, argv: string[], cwd: string | undefined, env: Record<string, string>, timeout: number, input: unknown, signal?: AbortSignal): Promise<ProcessResult> {
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new CoreError('Cancelled', 'process.run: отменён до запуска'));
+        return;
+      }
       // Своя группа процессов: тайм-аут и выгрузка плагина гасят и то, что программа запустила сама.
       const child = spawn(file, argv, { cwd, env, shell: false, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
       const stop = (signal: NodeJS.Signals) => {
@@ -843,9 +922,17 @@ export class OsGateway {
       };
       const timer = timeout > 0 ? setTimeout(() => stop('SIGTERM'), timeout) : undefined;
       const untrack = this.#track(pluginId, () => stop('SIGKILL'));
+      // Отмена вызывающего: SIGTERM всей группе, как по тайм-ауту; вызывающий уже получил Cancelled от канала, здесь ждём close и освобождаем место в пределе runs.
+      let cancelled = false;
+      const onAbort = () => {
+        cancelled = true;
+        stop('SIGTERM');
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
       const done = () => {
         clearTimeout(timer);
         untrack();
+        signal?.removeEventListener('abort', onAbort);
       };
       let stdout = '';
       let stderr = '';
@@ -856,9 +943,10 @@ export class OsGateway {
         done();
         reject(new CoreError('Remote', `${program}: ${error.message}`));
       });
-      child.once('close', (code, signal) => {
+      child.once('close', (code, sig) => {
         done();
-        resolve({ code, signal, stdout, stderr });
+        if (cancelled) reject(new CoreError('Cancelled', 'process.run: отменён'));
+        else resolve({ code, signal: sig, stdout, stderr });
       });
       child.stdin.end(typeof input === 'string' ? input : undefined);
     });

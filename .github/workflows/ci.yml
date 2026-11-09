@@ -32,8 +32,6 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
-      - name: пример адаптера Electron собирается (README, electron/test/example.test.ts)
-        run: node --test electron/test/example.test.ts
       # Публичные типы пакета контрактов изменились - версия пакета выше, чем в ветке назначения (contracts/README.md, «Установка и версии»).
       - name: contracts (снимок API и версия)
         if: github.event_name == 'pull_request'
@@ -45,6 +43,8 @@ jobs:
       - name: contracts (снимок API)
         if: github.event_name != 'pull_request'
         run: npm run check:contracts
+      - name: пример адаптера Electron собирается (README, electron/test/example.test.ts)
+        run: node --test electron/test/example.test.ts
       - name: smoke (macOS)
         if: runner.os == 'macOS'
         run: node playground/scripts/smoke.mjs

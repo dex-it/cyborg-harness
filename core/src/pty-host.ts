@@ -6,7 +6,7 @@ import type { MessagePort } from 'node:worker_threads';
 import { CoreError, errorMessage } from './errors.ts';
 import { LIMITS } from './limits.ts';
 import { BACKLOG_LIMIT, Tail } from './pty-tail.ts';
-import type { PtyBackend, PtyProcess } from './pty.ts';
+import type { PtyBackend, PtyProcess } from './pty-types.ts';
 import { Endpoint, type Port } from './rpc.ts';
 import { isRecord } from './wire.ts';
 

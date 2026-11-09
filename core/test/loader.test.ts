@@ -1,12 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SectionStore, type LayerStore } from '../src/config.ts';
+import { memoryStore as memory } from '../../testing/src/memory.ts';
+import { SectionStore } from '../src/config.ts';
 import { toDisposable } from '../src/disposable.ts';
 import { load, type LoadOptions } from '../src/loader.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { entryLevel, pluginStatuses } from '../src/status.ts';
+import { startCancel } from './fixtures/cancel.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 
@@ -20,12 +22,6 @@ function kernel(table: Record<string, PluginModule>, options: Omit<LoadOptions, 
     }),
     ...options,
   });
-}
-
-function memory(initial: Record<string, Record<string, unknown>> = {}) {
-  const docs = new Map(Object.entries(initial));
-  const store: LayerStore = { load: async (l) => docs.get(l), save: async (l, d) => void docs.set(l, d) };
-  return { docs, store };
 }
 
 const kinds = (k: { journal: readonly { pluginId?: string | undefined; kind: string }[] }) => k.journal.map((e) => `${e.pluginId ?? '-'}:${e.kind}`);
@@ -112,7 +108,7 @@ test('команды: запуск из ядра и из другого плаг
         },
       },
     },
-    { enabled: ['lock', 'menu'], manifests: [manifest('lock', { commands: { 'lock.now': { args: ['string'] } } }), manifest('menu', { commands: ['menu.press'] })] },
+    { enabled: ['lock', 'menu'], manifests: [manifest('lock', { commands: { 'lock.now': { args: ['string'], callers: 'plugins' } } }), manifest('menu', { commands: ['menu.press'] })] },
   );
   assert.equal(await k.run('lock.now', 'idle'), 'locked:idle');
   assert.equal(await k.run('menu.press'), 'locked:menu');
@@ -436,5 +432,139 @@ test('схема раздела из манифеста: значение не �
   assert.deepEqual(seen, [{ minutes: 5 }, { minutes: 7 }]);
   assert.deepEqual(kinds(k).slice(-1), ['timer:config']);
   assert.deepEqual(k.journal.at(-1), { pluginId: 'timer', kind: 'config', result: { status: 'invalid', errors: ['/minutes: ожидается >= 1'] } });
+  await k.unload();
+});
+
+// Отмена запросов между плагинами (K-09): стенд - core/test/fixtures/cancel.ts.
+const pause = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+
+test('отмена вызова контракта: поставщик получает сигнал, вызывающий - Cancelled, вызовы без сигнала целы', async () => {
+  const { kernel, api, log } = await startCancel();
+  const abort = new AbortController();
+  const call = api.slow('a', abort.signal);
+  await pause();
+  assert.deepEqual(log, ['a:start']);
+  abort.abort();
+  await assert.rejects(call, { code: 'Cancelled' });
+  await pause();
+  assert.deepEqual(log, ['a:start', 'a:abort:Cancelled']);
+  const plain = api.slow('b');
+  plain.catch(() => undefined);
+  await pause();
+  assert.deepEqual(log.slice(2), ['b:start']);
+  await kernel.unload();
+});
+
+test('отмена: уже отменённый сигнал - вызов до поставщика не доходит; отмена после ответа и двойная безвредны', async () => {
+  const { kernel, api, log, held } = await startCancel();
+  await assert.rejects(api.slow('x', AbortSignal.abort()), { code: 'Cancelled' });
+  await pause();
+  assert.deepEqual(log, []);
+
+  held.slowMs = 10;
+  const abort = new AbortController();
+  assert.equal(await api.slow('fast', abort.signal), 'fast');
+  abort.abort();
+  abort.abort();
+  await pause();
+  assert.deepEqual(log, ['fast:start', 'fast:done']);
+  assert.equal(await api.slow('again'), 'again');
+  await kernel.unload();
+});
+
+test('callTimeout отменяет вызов у поставщика, а не только отпускает вызывающего', async () => {
+  const { kernel, api, log } = await startCancel({ callTimeout: 80 });
+  const never = new AbortController();
+  await assert.rejects(api.slow('t', never.signal), { code: 'Timeout' });
+  await pause();
+  assert.deepEqual(log, ['t:start', 't:abort:Timeout']);
+  await kernel.unload();
+});
+
+test('отмена команды: commands.run с сигналом доводит его до обработчика, аргументы проверяются без сигнала', async () => {
+  const { kernel, ctx, log } = await startCancel();
+  const abort = new AbortController();
+  const run = ctx.commands.run('provider.slow', 'one', abort.signal);
+  await pause();
+  assert.deepEqual(log, ['cmd:one:signal']);
+  abort.abort();
+  await assert.rejects(run, { code: 'Cancelled' });
+  await pause();
+  assert.deepEqual(log, ['cmd:one:signal', 'cmd:abort:Cancelled']);
+  const app = new AbortController();
+  const fromApp = kernel.run('provider.slow', 'two', app.signal);
+  await pause();
+  app.abort();
+  await assert.rejects(fromApp, { code: 'Cancelled' });
+  await assert.rejects(ctx.commands.run('provider.slow', 'one', 'extra'), { code: 'Invalid' });
+  await kernel.unload();
+});
+
+// K-03: упорядоченный снимок раскладки по манифестам, до запуска кода плагинов.
+const quiet: PluginModule = { activate() {} };
+const view = (module: string, area?: string, order?: number, title?: string) => ({ module, ...(area && { area }), ...(order !== undefined && { order }), ...(title && { title }) });
+const layoutOf = (k: { layout: readonly { pluginId: string; kind: string; name: string }[] }) => k.layout.map((e) => `${e.pluginId}/${e.name}`);
+
+test('раскладка: по order, при равенстве по id плагина, затем по имени; не зависит от порядка манифестов', async () => {
+  const set = [
+    manifest('zeta', { ui: { views: { main: view('./z.js', 'main', 100) } } }),
+    manifest('alpha', { ui: { views: { b: view('./b.js', 'sidebar', 200), a: view('./a.js', 'sidebar', 200) } } }),
+    manifest('beta', { ui: { views: { main: view('./m.js', 'main', 100) } }, documents: { note: { area: 'main', order: 50 } } }),
+    manifest('late', { ui: { views: { tail: view('./t.js', 'toolbar', 900) } } }),
+  ];
+  const expected = ['beta/note', 'beta/main', 'zeta/main', 'alpha/a', 'alpha/b', 'late/tail'];
+  const forward = await kernel({ zeta: quiet, alpha: quiet, beta: quiet, late: quiet }, { enabled: ['zeta', 'alpha', 'beta', 'late'], manifests: set });
+  const backward = await kernel({ zeta: quiet, alpha: quiet, beta: quiet, late: quiet }, { enabled: ['late', 'beta', 'alpha', 'zeta'], manifests: [...set].reverse() });
+  assert.deepEqual(layoutOf(forward), expected);
+  assert.deepEqual(forward.layout, backward.layout, 'снимок детерминирован');
+  assert.deepEqual(forward.layout[0], { pluginId: 'beta', kind: 'document', name: 'note', area: 'main', order: 50 });
+  assert.deepEqual(forward.layout[2], { pluginId: 'zeta', kind: 'view', name: 'main', area: 'main', order: 100 });
+  await forward.unload();
+  await backward.unload();
+});
+
+test('раскладка: вид без размещения - боковая колонка и order 1000, документ - основная область и после вида того же плагина; заголовок доходит до снимка', async () => {
+  const k = await kernel(
+    { a: quiet, b: quiet },
+    {
+      enabled: ['a', 'b'],
+      manifests: [manifest('a', { ui: { views: { plain: './p.js' } } }), manifest('b', { ui: { views: { tree: view('./t.js', undefined, undefined, 'Файлы') } }, documents: { doc: {} } })],
+    },
+  );
+  assert.deepEqual(k.layout, [
+    { pluginId: 'a', kind: 'view', name: 'plain', area: 'sidebar', order: 1000 },
+    { pluginId: 'b', kind: 'view', name: 'tree', area: 'sidebar', order: 1000, title: 'Файлы' },
+    { pluginId: 'b', kind: 'document', name: 'doc', area: 'main', order: 1000 },
+  ]);
+  await k.unload();
+});
+
+test('раскладка: невключённые, выключенные и плагины вне графа помечены, а не пропадают', async () => {
+  const ui = { views: { main: view('./m.js', 'main', 100) } };
+  const k = await kernel(
+    { on: quiet, user: quiet, orphan: quiet },
+    {
+      enabled: ['on', 'user', 'orphan'],
+      manifests: [
+        manifest('on', { ui }),
+        manifest('user', { ui }),
+        manifest('orphan', { ui, requires: { 'none.here': '^1' } }),
+        manifest('off', { ui }),
+      ],
+    },
+  );
+  const marks = () => Object.fromEntries(k.layout.map((e) => [e.pluginId, e.mark ?? 'ok']));
+  assert.deepEqual(marks(), { on: 'ok', orphan: 'out-of-graph', user: 'ok', off: 'not-enabled' });
+  await k.disable('user');
+  assert.deepEqual(marks(), { on: 'ok', orphan: 'out-of-graph', user: 'disabled', off: 'not-enabled' });
+  await k.enable('user');
+  assert.equal(marks().user, 'ok');
+  assert.deepEqual(layoutOf(k), ['off/main', 'on/main', 'orphan/main', 'user/main'], 'помеченные стоят на своём месте по order и id');
+  await k.unload();
+});
+
+test('раскладка: плагин без видов и документов в снимок не попадает, манифест с ошибкой - тоже', async () => {
+  const k = await kernel({ bare: quiet, bad: quiet }, { enabled: ['bare', 'bad'], manifests: [manifest('bare'), manifest('bad', { ui: { views: { x: view('./x.js', 'cellar') } } })] });
+  assert.deepEqual(k.layout, []);
   await k.unload();
 });
