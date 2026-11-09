@@ -291,3 +291,34 @@ test('pty-хост: завершаемый процесс, переживший 
 
   host.kill();
 });
+
+test('выгрузка: pty-хост глух к endAll, плагин после deactivate просит слежение - после unload() оно закрыто (вторая зачистка, ревью K-01)', async () => {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-pty-host-')));
+  const backend = fakePty();
+  const hosts = ptyHosts(backend);
+  const contexts = new Map<string, PluginContext>();
+  const k = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['late'],
+    manifests: [{ id: 'late', version: '1.0.0', engines: { cyborg: '^1' }, permissions: { ...shell, 'fs.read': [root] } }],
+    os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), env: { PATH: '/usr/bin' }, ptyHost: hosts.spawn },
+    watchdog: { interval: 10, timeout: 100 },
+    spawnHost: inlineHosts(async (entry) => ({ activate: (ctx: PluginContext) => void contexts.set(entry, ctx) })),
+  });
+  const ctx = contexts.get('late')!;
+  await ctx.os.pty!.spawn({ program: '/bin/bash' });
+  const watching = () => process.getActiveResourcesInfo().filter((r) => r === 'FSEventWrap').length;
+  const base = watching();
+  // pty-хост перестал отвечать: выгрузка ждёт его, пока хосты плагинов ещё живы.
+  hosts.hosts[0]!.deaf = true;
+  const unloading = k.unload();
+  while (!k.journal.some((e) => e.kind === 'deactivated')) await sleep(5);
+  await sleep(30);
+  const sub = await ctx.os.fs.watch(root, () => undefined);
+  assert.ok(sub, 'слежение после deactivate не принято: проверка ничего не проверяет');
+  assert.equal(watching(), base + 1, 'слежение не заняло ресурс');
+  await unloading;
+  await sleep(30);
+  assert.equal(watching(), base, 'слежение, пришедшее после выгрузки плагина, пережило unload()');
+  await rm(root, { recursive: true, force: true });
+});
