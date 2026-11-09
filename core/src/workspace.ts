@@ -4,6 +4,7 @@ import path from 'node:path';
 import { SectionStore, type Layer, type LayerStore } from './config.ts';
 import { toDisposable, type Disposable } from './disposable.ts';
 import { isRecord } from './manifest.ts';
+import { readGroup } from './manifest-ui.ts';
 import type { UserKeybinding } from './kernel-types.ts';
 
 /** Формат главного конфига; документ без поля `cyborg` - старый формат приложения, его переводит хук `migrate`. */
@@ -162,19 +163,62 @@ export function settingsLayer(file: string): { load(): Record<string, unknown> |
 export interface PluginsList {
   readonly enabled: readonly string[];
   readonly hosts: Readonly<Record<string, readonly string[]>>;
+  /** `plugins.uiGroups`: группа рендера -> плагины. Слой воркспейса перекрывает пользователя по имени группы и идёт первым: плагин, названный в двух группах, получает ту, что названа раньше. */
+  readonly uiGroups: Readonly<Record<string, readonly string[]>>;
   /** Сначала пользователя, затем воркспейса: у одного сочетания последнее слово за воркспейсом. */
   readonly keybindings: readonly UserKeybinding[];
 }
 
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
-function pluginsOf(doc: Record<string, unknown> | undefined): { enabled?: string[]; hosts?: Record<string, string[]>; keybindings: UserKeybinding[] } {
+/** `plugins.uiGroups` одного файла: годные группы остаются, остальное - в `problem` с именем поля; плагин, названный в двух группах файла, остаётся в первой. */
+function uiGroupsOf(raw: unknown, file: string, problem: (message: string) => void): Record<string, string[]> | undefined {
+  if (raw === undefined) return undefined;
+  if (!isRecord(raw)) {
+    problem(`${file}: plugins.uiGroups: ожидается объект «группа -> список id плагинов», получено ${JSON.stringify(raw)}`);
+    return undefined;
+  }
+  const groups: Record<string, string[]> = {};
+  const placed = new Map<string, string>();
+  for (const [name, list] of Object.entries(raw)) {
+    const field = `plugins.uiGroups.${name}`;
+    const nameErrors: string[] = [];
+    readGroup(field, name, nameErrors);
+    if (nameErrors.length > 0) {
+      problem(`${file}: ${nameErrors.join('; ')}`);
+      continue;
+    }
+    if (!Array.isArray(list)) {
+      problem(`${file}: ${field}: ожидается список id плагинов, получено ${JSON.stringify(list)}`);
+      continue;
+    }
+    const members: string[] = [];
+    list.forEach((id: unknown, i) => {
+      if (typeof id !== 'string') problem(`${file}: ${field}[${String(i)}]: ожидается id плагина (строка), получено ${JSON.stringify(id)}`);
+      else if (placed.has(id)) problem(`${file}: ${field}: плагин ${id} уже назван в группе ${placed.get(id) ?? ''} - действует первая`);
+      else {
+        placed.set(id, name);
+        members.push(id);
+      }
+    });
+    groups[name] = members;
+  }
+  return groups;
+}
+
+function pluginsOf(
+  doc: Record<string, unknown> | undefined,
+  file = '',
+  problem: (message: string) => void = () => undefined,
+): { enabled?: string[]; hosts?: Record<string, string[]>; uiGroups?: Record<string, string[]>; keybindings: UserKeybinding[] } {
   const plugins = isRecord(doc?.plugins) ? doc.plugins : {};
   const keys = Array.isArray(plugins.keybindings) ? plugins.keybindings : [];
+  const uiGroups = uiGroupsOf(plugins.uiGroups, file, problem);
   return {
     keybindings: keys.filter((k): k is UserKeybinding => isRecord(k) && typeof k.key === 'string' && (typeof k.command === 'string' || k.command === null)),
     ...(Array.isArray(plugins.enabled) && { enabled: strings(plugins.enabled) }),
     ...(isRecord(plugins.hosts) && { hosts: Object.fromEntries(Object.entries(plugins.hosts).map(([h, ids]) => [h, strings(ids)])) }),
+    ...(uiGroups && { uiGroups }),
   };
 }
 
@@ -200,7 +244,7 @@ export interface Workspace {
   readonly state: SectionStore;
   /** Что сделал перенос старого формата; пусто, если переносить было нечего. */
   readonly migrated: readonly string[];
-  /** Файлы, которые не разобрались: их разделы пусты, а запись в них отменяется, чтобы не затереть правку человека. */
+  /** Файлы, которые не разобрались (их разделы пусты, а запись в них отменяется, чтобы не затереть правку человека), и поля `plugins.uiGroups`, которые пришлось отбросить. */
   readonly problems: readonly string[];
   /** Правка файла воркспейса или пользователя извне: id разделов config, которые поменялись; `onEnabled` - новый итоговый `plugins.enabled`. */
   watch(listener: (changed: readonly string[]) => void, onProblem?: (message: string) => void, onEnabled?: (enabled: readonly string[]) => void): Disposable;
@@ -296,9 +340,15 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
     const config = await SectionStore.open(configStore, ['user', 'workspace']);
     const state = await SectionStore.open(stateStore, ['workspace']);
     opening = false;
-    const user = pluginsOf(tolerant(options.userFile));
-    const own = pluginsOf(legacy ? legacy.config : doc);
-    const plugins = { enabled: own.enabled ?? user.enabled ?? [], hosts: { ...user.hosts, ...own.hosts }, keybindings: [...user.keybindings, ...own.keybindings] };
+    const user = pluginsOf(tolerant(options.userFile), options.userFile, (m) => problems.push(m));
+    const own = pluginsOf(legacy ? legacy.config : doc, file, (m) => problems.push(m));
+    const plugins: PluginsList = {
+      enabled: own.enabled ?? user.enabled ?? [],
+      hosts: { ...user.hosts, ...own.hosts },
+      // Воркспейс первым: плагин, названный и там и там, получает группу воркспейса.
+      uiGroups: { ...own.uiGroups, ...Object.fromEntries(Object.entries(user.uiGroups ?? {}).filter(([group]) => !Object.hasOwn(own.uiGroups ?? {}, group))) },
+      keybindings: [...user.keybindings, ...own.keybindings],
+    };
     let enabledNow = plugins.enabled;
     remember(file);
     remember(options.userFile);
