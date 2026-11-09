@@ -6,7 +6,7 @@ Cyborg Harness - микроядро для настольных приложен
 
 ## Сборка и гейты
 
-- Сборка - `npm run build` (playground в `playground/dist`); перед ним, `typecheck`, `lint` и `test` сама идёт `npm run build:packages` (`build:core` - пакет ядра в `core/dist`, `build:testing` - тест-кит в `testing/dist`, `build:electron` - адаптер Electron в `electron/dist`)
+- Сборка - `npm run build` (playground в `playground/dist`); перед ним, `typecheck`, `lint` и `test` сама идёт `npm run build:packages` (`build:core` - пакет ядра в `core/dist`, `build:testing` - тест-кит в `testing/dist`, `build:electron` - адаптер Electron в `electron/dist`, `build:tools` - `cyborg-plugin` в `tools/cyborg-plugin/dist`)
 - Проверка типов - `npm run typecheck` (строгий tsconfig; TS 7 из алиаса `typescript7`, а `typescript` - TS 6 под API typescript-eslint, поэтому `npx tsc` - не тот компилятор)
 - Линтер - `npm run lint` (ESLint с strictTypeChecked, ноль предупреждений; отключение правила - только директивой с `-- причина`)
 - Тесты - `npm test` (node --test, Node 24 снимает типы сам); подделки сообщений хоста - `core/test/trust.test.ts`
@@ -20,6 +20,7 @@ Cyborg Harness - микроядро для настольных приложен
 - `contracts/` - пакет объявлений `@cyborg-harness/contracts`: карта контрактов имя -> мажорная версия -> тип; правила и пример - `contracts/README.md`, проверки компилятора - `core/test/contracts-types.ts`
 - `electron/` - пакет адаптера `@cyborg-harness/electron`: всё, что связывает ядро с Electron (служба PluginsService, хосты в utilityProcess и вход хоста, среда ctx.os, схема cyborg-plugin и мост видов, каналы IPC, preload, слой окна, оболочка вида); граница «что даёт пакет, что делает приложение» и пример - `electron/README.md`, тесты `electron/test`
 - `testing/` - тест-кит автора плагина `@cyborg-harness/testing` поверх пакета ядра: `startKernel`, `fakePty`, память слоёв и секретов, `agentContractSuite`; тесты `testing/test`, сборка `npm run build:testing`
+- `tools/cyborg-plugin/` - пакет `cyborg-plugin` (инструмент автора плагина): `check`, `build` (бандл главной части, сборка видов), `pack`; README пакета; стенд собирает им свои плагины
 - `playground/` - Electron-приложение для проверки ядра вживую поверх адаптера: `src/main` (аргументы, воркспейс, окно, замер фреймов - spike), `src/renderer` (раскладка окна: сессия агента слева, справа вкладки плагинов, видов, документов, сообщений, журнала и клавиш; страница замера spike и пробный вид probe), `plugins/` (базовые sessions, agent-claude-code, agent-shell, session-isolation, next-actions, pin-lock; демо echo, chat, alice, bob, flaky, later; код вида плагина - в его `ui/`), `scripts/` (build, smoke, spike-iframe и spike-hosts - замеры фреймов и хостов, xtest.py - настоящий ввод X11 для замера фреймов, fake-claude.mjs - подставной claude для smoke)
 - `site/` - сборка сайта документации (Astro и Starlight); страницы лежат в `docs/guide/`; `npm run build` и `npm run verify` внутри `site/`, публикация - `.github/workflows/docs-site.yml`
 

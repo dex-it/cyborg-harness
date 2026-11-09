@@ -8,7 +8,6 @@
   "engines": { "node": ">=24" },
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
-  "bin": { "cyborg-plugin": "./dist/src/plugin-cli-bin.js" },
   "exports": {
     ".": { "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" },
     "./host": { "types": "./dist/src/index-host.d.ts", "default": "./dist/src/index-host.js" },

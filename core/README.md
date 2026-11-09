@@ -18,7 +18,7 @@
 | `@cyborg-harness/core/keys` | `keyOfInput`, `KeyInput`: нажатие -> сочетание ядра | окно (браузер), без `node:*` |
 | `@cyborg-harness/core/ui-shell` | оболочка вида плагина: `mountModule`, `connectView`, `keepFocus` и типы моста | окно (браузер), без `node:*` |
 | `@cyborg-harness/core/window` | то, что главный процесс отдаёт окну: `WINDOW_OWNER`, типы `WindowSnapshot`, `ShownDialog`, `WindowLock`, `WindowTitle`, `DocumentRow`, `DisablePreview`, `LayoutEntry`, `Area` | окно (браузер), без `node:*` |
-| `@cyborg-harness/core/plugin-check` | `checkPlugin(dir, options)`, `formatProblem` (строка отчёта, как у `cyborg-plugin check`) и типы `CheckOptions`, `CheckReport`, `Problem`, `ImportRules`: проверка каталога плагина без запуска его кода (манифест, версия API, файлы из манифеста, правило импортов); те же данные печатает команда `cyborg-plugin check` | Node, инструмент автора и сборки |
+| `@cyborg-harness/core/plugin-check` | `checkPlugin(dir, options)`, `formatProblem` (строка отчёта, как у `cyborg-plugin check`), `isTestPath`, `CHECKED_KEYS` и `ENTRY_FILES` (какие файлы манифеста проверка читает; на них опирается `cyborg-plugin build`) и типы `CheckOptions`, `CheckReport`, `FileRef`, `Problem`, `ImportRules`: проверка каталога плагина без запуска его кода (манифест, версия API, файлы из манифеста, правило импортов); те же данные печатает команда `cyborg-plugin check` | Node, инструмент автора и сборки |
 | `@cyborg-harness/core/elements` | кастомные элементы `cy-*`; `defineElements`; регистрирует их при импорте; нужен DOM | окно (браузер) |
 
 Точный перечень имён каждой точки входа - в `core/test/public-api.test.ts` (`ENTRIES`): тест падает, если имя добавлено или убрано без правки перечня, если вход написан через `export *`, если из публичной сигнатуры (по собранным `core/dist/**/*.d.ts`, где видны и выведенные типы) торчит безымянный тип и если JS окна достаёт до `node:*`. Источник входов - `core/src/index.ts`, `index-host.ts`, `index-keys.ts`, `index-ui-shell.ts`, `index-window.ts`, `index-plugin-check.ts`. Имя в перечень добавляют осознанно: каждое обещает совместимость.
@@ -71,7 +71,7 @@ export default plugin;
 ### Проверка плагина вне репозитория
 
 ```sh
-npx cyborg-plugin check path/to/plugin [--declarations ../contracts.ts] [--declarations-package @acme/contracts]
+npx cyborg-plugin check path/to/plugin [--declarations ../contracts.ts] [--declarations-package @acme/contracts]   # команда - в пакете cyborg-plugin (tools/cyborg-plugin), не в ядре
 ```
 
 Код возврата 0 - нарушений нет, 1 - есть, 2 - неверный вызов; нарушения печатаются как `файл:строка: причина`, права плагина - словами. Из кода:

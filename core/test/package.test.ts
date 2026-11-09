@@ -101,11 +101,9 @@ describe('собранный пакет (core/dist)', () => {
     }
   });
 
-  it('bin cyborg-plugin: цель есть в сборке, первая строка - shebang Node', () => {
-    assert.deepEqual(manifest.bin, { 'cyborg-plugin': './dist/src/plugin-cli-bin.js' });
-    const target = path.join(core, 'dist', 'src', 'plugin-cli-bin.js');
-    assert.ok(fs.existsSync(target), 'нет цели bin - запусти `npm run build:core`');
-    assert.equal(fs.readFileSync(target, 'utf8').split('\n')[0], '#!/usr/bin/env node');
+  it('командной строки в ядре нет: cyborg-plugin живёт в своём пакете tools/cyborg-plugin (P-06)', () => {
+    assert.equal(manifest.bin, undefined);
+    assert.ok(!fs.existsSync(path.join(core, 'dist', 'src', 'plugin-cli-bin.js')), 'в сборке ядра остался вход команды');
   });
 
   it('npm pack: в архиве dist, package.json и README, без исходников и тестов', () => {

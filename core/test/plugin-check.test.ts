@@ -305,3 +305,60 @@ describe('checkPlugin: новые ключи манифеста', () => {
     assert.deepEqual(refs.map((r) => `${r.field} ${r.file}`).sort(), ['config.schema ./c.json', 'state.schema ./s.json', 'ui.overlay ./o.js', 'ui.views.v ./v.js']);
   });
 });
+
+describe('checkPlugin: bundled (P-06) - главную часть соберут в один файл', () => {
+  const WITH_DEP = { 'index.ts': "import { shout } from 'tiny-dep';\nexport default { activate() { shout('x'); } };\n" };
+
+  it('без bundled npm-пакет в главной части - нарушение, как раньше', async () => {
+    const report = await checkPlugin(plugin(WITH_DEP));
+    assert.deepEqual(strings(report), ["index.ts:1: 'tiny-dep': только @cyborg-harness/contracts и свои модули"]);
+  });
+
+  it('с bundled npm-пакет в главной части допустим', async () => {
+    assert.deepEqual(strings(await checkPlugin(plugin(WITH_DEP), { bundled: true })), []);
+  });
+
+  it('с bundled node:*, electron, модуль вне каталога, тестовый модуль и вычисляемый путь - по-прежнему нарушения', async () => {
+    const dir = plugin({
+      'index.ts': [
+        "import fs from 'node:fs';",
+        "import { app } from 'electron';",
+        "import other from '../other/index.ts';",
+        "import t from './index.test.ts';",
+        'const name = String(process.argv[2]);',
+        'await import(name);',
+        'export default { fs, app, other, t };',
+        '',
+      ].join('\n'),
+      'index.test.ts': 'export default 1;\n',
+    });
+    assert.deepEqual(strings(await checkPlugin(dir, { bundled: true })), [
+      "index.ts:1: 'node:fs': в бандле главной части нет ни node:*, ни electron",
+      "index.ts:2: 'electron': в бандле главной части нет ни node:*, ни electron",
+      "index.ts:3: '../other/index.ts': модуль вне каталога плагина",
+      "index.ts:4: './index.test.ts': тестовый модуль в коде плагина",
+      'index.ts:6: вычисляемый путь: статика не видит, какой модуль загрузится',
+    ]);
+  });
+
+  it('с bundled пакет объявлений по имени по-прежнему только import type', async () => {
+    const dir = plugin({ 'index.ts': "import { x } from '@acme/contracts';\nexport default { x };\n" });
+    const text = strings(await checkPlugin(dir, { bundled: true, declarationPackages: ['@acme/contracts'] })).join('\n');
+    assert.match(text, /пакет объявлений - только import type/);
+  });
+});
+
+describe('checkPlugin: ignore (P-06) - каталог результата сборки не проверяется как исходники', () => {
+  it('файлы каталога из ignore не читаются, соседи - читаются', async () => {
+    const dir = plugin({ ...OK, 'dist/index.mjs': "import fs from 'node:fs';\n", 'lib/bad.ts': "import fs from 'node:fs';\n" });
+    assert.match(strings(await checkPlugin(dir)).join('\n'), /dist\/index\.mjs:1/);
+    const report = await checkPlugin(dir, { ignore: ['dist'] });
+    assert.deepEqual(strings(report), ["lib/bad.ts:1: 'node:fs': только @cyborg-harness/contracts и свои модули"]);
+  });
+
+  it('ignore ведёт только вниз: путь за пределы каталога плагина ничего не скрывает', async () => {
+    const dir = plugin({ ...OK, 'dist/index.mjs': "import fs from 'node:fs';\n" });
+    const report = await checkPlugin(dir, { ignore: ['../dist', '/dist'] });
+    assert.equal(report.problems.length, 1, strings(report).join('\n'));
+  });
+});
