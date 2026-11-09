@@ -38,6 +38,8 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
   const subs = [
     ctx.onLog(show),
     ctx.theme.onChange((tokens) => show({ at: Date.now(), text: `тема: ${tokens['--cy-scheme'] ?? '?'}` })),
+    // K-04: alice и bob делят группу рендера; свёрнутый вид bob этой строки у alice не вызывает.
+    ctx.onVisibilityChange((visible) => show({ at: Date.now(), text: visible ? 'вид alice снова показан' : 'вид alice скрыт' })),
   ];
   void ctx.logs().then((lines) => lines.forEach(show));
   return { dispose: () => subs.forEach((s) => s.dispose()) };

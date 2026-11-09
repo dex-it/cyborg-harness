@@ -85,6 +85,8 @@ const DEFAULT_CONFIG = {
   plugins: {
     enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions', 'sessions', 'pin-lock', 'panels', 'editor'],
     hosts: { a: ['echo'], b: ['chat'], c: ['alice', 'bob'], d: ['flaky'], agents: ['agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions'] },
+    // K-04: виды alice и bob делят origin и процесс рендера, остальные - по одному на плагин.
+    uiGroups: { duo: ['alice', 'bob'] },
   },
 };
 
@@ -112,7 +114,7 @@ function createWindow(): void {
   // Заголовок собирает ядро; `<title>` страницы его бы затёр.
   win.on('page-title-updated', (event) => event.preventDefault());
   const page = path.join(__dirname, 'renderer', 'index.html');
-  guardNavigation(win.webContents, pathToFileURL(page).href, (pluginId, url) => plugins.viewDenied(pluginId, url));
+  guardNavigation(win.webContents, pathToFileURL(page).href, (pluginId, url) => plugins.viewDenied(pluginId, url), plugins);
   void win.loadFile(page);
   bindWindow(win, plugins);
   win.on('closed', () => (win = undefined));

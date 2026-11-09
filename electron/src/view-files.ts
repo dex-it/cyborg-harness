@@ -107,8 +107,9 @@ export function resolveStaticFile(url: string, dirOf: (id: string) => string | u
  */
 export function resolveViewRequest(url: string, uiOf: (pluginId: string) => PluginUi | undefined): ViewRequest | undefined {
   const address = frameAddress(url);
-  const ui = address && uiOf(address.plugin);
-  if (!address || ui === undefined || ui.group !== address.group) return undefined;
+  if (!address) return undefined;
+  const ui = uiOf(address.plugin);
+  if (ui?.group !== address.group) return undefined;
   const parsed = new URL(url);
   const rest = parsed.pathname.slice(address.plugin.length + 1);
   if (rest === '/' || rest === '') {

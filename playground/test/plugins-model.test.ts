@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import type { LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot } from '@cyborg-harness/electron/window';
-import { actionsFor, conflictText, journalFor, keyStatus, mergeFeed, originNote, sortedPlugins, summary, userPluginsNotice, viewMode, viewSlots } from '../src/renderer/plugins-model.ts';
+import { actionsFor, conflictText, groupLabel, groupNote, journalFor, keyStatus, mergeFeed, originNote, sortedPlugins, summary, userPluginsNotice, viewMode, viewSlots } from '../src/renderer/plugins-model.ts';
 
 const row = (id: string, state: PluginRow['state'], over: Partial<PluginRow> = {}): PluginRow => ({ id, state, revivable: state === 'stopped', unloaded: false, commands: [], permissions: [], ...over });
 const snapshot = (plugins: PluginRow[], over: Partial<PluginsSnapshot> = {}): PluginsSnapshot => ({ phase: 'ready', safeMode: false, userPlugins: false, problems: [], plugins, layout: [], keys: [], feed: [], journal: [], canHang: true, window: { title: '', queued: 0, locks: [] }, documents: [], workspace: { current: '/w.cyborg.json', recent: [] }, ...over });
@@ -71,8 +71,17 @@ describe('окно «Плагины Cyborg»: модель', () => {
     assert.match(userPluginsNotice(snapshot([], { userPlugins: true })) ?? '', /--user-plugins/);
   });
 
+  it('группа рендера: метка только у плагина в чужой группе, предупреждение - слова записи ядра', () => {
+    assert.equal(groupLabel(row('alice', 'active', { group: 'duo' })), 'группа duo');
+    assert.equal(groupLabel(row('echo', 'active', { group: 'echo' })), undefined, 'своя группа - не метка');
+    assert.equal(groupLabel(row('logic', 'active')), undefined, 'у плагина без видов группы нет');
+    const warning = 'сторонний плагин не делит группу рендера: группа duo не действует, работает в своей guest';
+    assert.equal(groupNote(row('guest', 'active', { origin: 'user', group: 'guest', groupWarning: warning })), warning);
+    assert.equal(groupNote(row('alice', 'active', { group: 'duo' })), undefined);
+  });
+
   // K-03: области окна строятся из раскладки ядра, а не из имён плагинов.
-  const view = (pluginId: string, name: string, over: Partial<LayoutRow> = {}): LayoutRow => ({ pluginId, kind: 'view', name, area: 'sidebar', order: 1000, url: `cyborg-plugin://${pluginId}/?view=${name}`, ...over });
+  const view = (pluginId: string, name: string, over: Partial<LayoutRow> = {}): LayoutRow => ({ pluginId, kind: 'view', name, area: 'sidebar', order: 1000, url: `cyborg-plugin://${pluginId}/${pluginId}/?view=${name}`, ...over });
 
   it('виды окна: порядок раскладки ядра, оба вида одного плагина, документы и невидимые без адреса не в счёт', () => {
     const plugins = [row('a', 'active'), row('b', 'active'), row('c', 'stopped'), row('d', 'disabled'), row('e', 'restarting')];

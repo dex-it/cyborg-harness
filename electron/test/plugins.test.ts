@@ -430,9 +430,10 @@ test('виды: адрес у плагина с ui в манифесте и у �
   await service.unload();
 });
 
-test('группы рендера: виды плагинов поставки в одной группе делят origin, адрес несёт плагина; сторонний один, предупреждение в строке плагина', async () => {
+test('группы рендера: виды плагинов поставки в одной группе делят origin, адрес несёт плагина; сторонний - по воле владельца, с предупреждением в строке плагина', async () => {
   const userData = tmp();
   const builtinDir = tmp();
+  // cyborg.json в userData - слой пользователя: owner посадил guest в duo. mine просит duo только манифестом, no-way - только воркспейсом.
   fs.writeFileSync(
     path.join(userData, 'cyborg.json'),
     JSON.stringify({ plugins: { enabled: ['alice', 'bob', 'echo', 'guest', 'mine'], uiGroups: { duo: ['alice', 'bob', 'guest'], 'bad name': ['echo'] } } }),
@@ -450,23 +451,23 @@ test('группы рендера: виды плагинов поставки в
       ['alice', 'main', 'cyborg-plugin://duo/alice/?view=main'],
       ['bob', 'main', 'cyborg-plugin://duo/bob/?view=main'],
       ['echo', 'main', 'cyborg-plugin://echo/echo/?view=main'],
-      ['guest', 'main', 'cyborg-plugin://guest/guest/?view=main'],
-      ['guest', 'side', 'cyborg-plugin://guest/guest/?view=side'],
+      ['guest', 'main', 'cyborg-plugin://duo/guest/?view=main'],
+      ['guest', 'side', 'cyborg-plugin://duo/guest/?view=side'],
       ['mine', 'main', 'cyborg-plugin://mine/mine/?view=main'],
     ]);
-    assert.deepEqual(snapshot.plugins.map((p) => [p.id, p.group]), [['alice', 'duo'], ['bob', 'duo'], ['echo', 'echo'], ['guest', 'guest'], ['mine', 'mine']]);
-    // Предупреждение о группе - у стороннего, которому было с кем делить; у плагина поставки и у одиночки его нет.
+    assert.deepEqual(snapshot.plugins.map((p) => [p.id, p.group]), [['alice', 'duo'], ['bob', 'duo'], ['echo', 'echo'], ['guest', 'duo'], ['mine', 'mine']]);
+    // Предупреждение о группе - у стороннего: посаженного владельцем в общую и не получившего её; у плагина поставки его нет.
     const warning = (id: string) => snapshot.plugins.find((p) => p.id === id)?.groupWarning;
-    assert.match(warning('guest') ?? '', /сторонний плагин не делит группу рендера: группа duo не действует, работает в своей guest/);
-    assert.match(warning('mine') ?? '', /группа duo не действует, работает в своей mine/);
+    assert.match(warning('guest') ?? '', /сторонний плагин по воле владельца в общей группе рендера duo: он видит DOM и хранилище origin плагинов alice, bob/);
+    assert.match(warning('mine') ?? '', /сторонний плагин не делит группу рендера: группа duo не действует, работает в своей mine/);
     assert.equal(warning('alice'), undefined);
     assert.equal(warning('echo'), undefined);
     assert.ok(snapshot.problems.some((p) => p.includes('plugins.uiGroups.bad name')), 'ошибка поля plugins.uiGroups - в «Не дошло до ядра»');
-    assert.equal(snapshot.journal.filter((l) => l.plugins.includes('guest') && l.text.includes('группу рендера')).length, 1);
+    assert.equal(snapshot.journal.filter((l) => l.plugins.includes('guest') && l.text.includes('в общей группе рендера')).length, 1);
     // Протокол: плагин обслуживается только под хостом своей группы.
-    assert.deepEqual([service.groupOf('alice'), service.groupOf('bob'), service.groupOf('guest'), service.groupOf('nobody')], ['duo', 'duo', 'guest', undefined]);
+    assert.deepEqual([service.groupOf('alice'), service.groupOf('bob'), service.groupOf('guest'), service.groupOf('nobody')], ['duo', 'duo', 'duo', undefined]);
     assert.equal(service.uiOf('alice')?.group, 'duo');
-    assert.equal(service.uiOf('guest')?.group, 'guest');
+    assert.equal(service.uiOf('mine')?.group, 'mine');
   } finally {
     await service.unload();
   }
