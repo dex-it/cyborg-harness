@@ -7,7 +7,7 @@ import type { PluginContext, PluginOs } from '@cyborg-harness/contracts';
 import { SectionStore, type LayerStore } from '../src/config.ts';
 import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
-import { describePermissions } from '../src/permissions.ts';
+import { describePermissions, envNameAllowed } from '../src/permissions.ts';
 import type { NoticeEvents } from '../src/notices.ts';
 import type { OsEnvironment, SecretStore } from '../src/os-gateway.ts';
 import { inlineHosts } from '../src/transports.ts';
@@ -966,6 +966,22 @@ test('env правила: маска имени `ПРЕФИКС_*` приним�
   assert.deepEqual(describePermissions(ok.manifest.permissions), ['запускает программы: git (окружение: GIT_CONFIG_COUNT, GIT_CONFIG_KEY_*, GIT_CONFIG_VALUE_*) - полный доступ через программу']);
   for (const bad of [['*'], ['GIT*'], ['GIT_*_X'], ['_*'], ['GIT_CONFIG_*_*'], ['*_KEY'], ['1_*'], [' GIT_*']]) assert.equal(parseManifest(manifest('p', rule(bad))).ok, false, JSON.stringify(bad));
   assert.equal(parseManifest(manifest('p', { env: ['GIT_CONFIG_KEY_*'] })).ok, false, 'право env.get маски не принимает: читать можно только названную переменную');
+});
+
+test('env правила: маска ПРЕФИКС_* покрывает только номерной хвост - GIT_CONFIG_KEY_X, GIT_SSH_COMMAND и LD_PRELOAD под неё не проходят', async () => {
+  assert.equal(envNameAllowed('GIT_CONFIG_KEY_*', 'GIT_CONFIG_KEY_0'), true);
+  assert.equal(envNameAllowed('GIT_CONFIG_KEY_*', 'GIT_CONFIG_KEY_12'), true);
+  for (const name of ['GIT_CONFIG_KEY_X', 'GIT_CONFIG_KEY_', 'GIT_CONFIG_KEY_1a', 'GIT_CONFIG_KEY', 'GIT_CONFIG_KEY_-1']) assert.equal(envNameAllowed('GIT_CONFIG_KEY_*', name), false, name);
+  assert.equal(envNameAllowed('GIT_*', 'GIT_SSH_COMMAND'), false);
+  assert.equal(envNameAllowed('LD_*', 'LD_PRELOAD'), false);
+  assert.equal(envNameAllowed('GIT_CONFIG_COUNT', 'GIT_CONFIG_COUNT'), true);
+  await using box = await sandbox();
+  const rule = { program: process.execPath, args: ['-e'], env: ['GIT_CONFIG_KEY_*', 'LD_*'] };
+  const { k, os, denied } = await kernel({ vcs: { process: [rule] } }, { dataDir: box.data, tempDir: box.temp });
+  for (const name of ['GIT_CONFIG_KEY_X', 'LD_PRELOAD']) await assert.rejects(os('vcs').process!.run(process.execPath, ['-e', '0'], { env: { [name]: '1' } }), { code: 'PermissionDenied' }, name);
+  assert.equal((await os('vcs').process!.run(process.execPath, ['-e', '0'], { env: { GIT_CONFIG_KEY_3: 'a' } })).code, 0);
+  assert.equal(denied().length, 2);
+  await k.unload();
 });
 
 test('env правила: программа получает GIT_CONFIG_COUNT, KEY_<n>, VALUE_<n> через маску и применяет их', async () => {

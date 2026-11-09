@@ -23,8 +23,8 @@ const isScheme = (v: string) => /^[a-z][a-z0-9+.-]*:$/.test(v) && !['file:', 'ja
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** Имя переменной в `env` правила `process`, `pty`, `launch`: точное или маска `ПРЕФИКС_*` - переменные с переменным номером (`GIT_CONFIG_KEY_<n>`). */
 const ENV_RULE_NAME = /^[A-Za-z_][A-Za-z0-9_]*(?:_\*)?$/;
-/** Имя переменной подходит под запись `env` правила: точное совпадение либо непустой хвост после префикса маски. */
-export const envNameAllowed = (entry: string, name: string): boolean => (entry.endsWith('*') ? name.length > entry.length - 1 && name.startsWith(entry.slice(0, -1)) : entry === name);
+/** Имя переменной подходит под запись `env` правила: точное совпадение либо префикс маски и номер из десятичных цифр (так читает `GIT_CONFIG_KEY_<n>` сам Git). `GIT_*` и `LD_*` покрывают поэтому лишь `GIT_<n>` и `LD_<n>`, а не `GIT_SSH_COMMAND` и `LD_PRELOAD`: права словами не обещают больше, чем пропускает шлюз. */
+export const envNameAllowed = (entry: string, name: string): boolean => (entry.endsWith('*') ? name.startsWith(entry.slice(0, -1)) && /^\d+$/.test(name.slice(entry.length - 1)) : entry === name);
 
 /** Программа правила `process` и `pty`: оболочка входа человека; ядро подставляет её путь само. */
 export const LOGIN_SHELL = '$SHELL';
