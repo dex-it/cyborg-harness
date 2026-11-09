@@ -102,6 +102,7 @@ describe('разбор импортов: формы', () => {
     assert.deepEqual(specs("import fs from 'node\\u003afs';"), ['node:fs']);
     assert.deepEqual(specs("import fs from 'node\\u{3a}fs';"), ['node:fs']);
     assert.deepEqual(specs('const x = require(`node:fs`);'), ['node:fs']);
+    assert.deepEqual(specs('const x = `${await import(`node:fs`)}`;'), ['node:fs'], 'шаблон без подстановок внутри подстановки - строка');
     assert.deepEqual(specs('const x = require("a\\\nb");'), ['ab']);
   });
 

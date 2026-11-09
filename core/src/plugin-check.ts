@@ -154,10 +154,16 @@ export function formatProblem(p: Problem): string {
 }
 
 /** Исходники плагина: без `node_modules`, скрытых каталогов, тестов и `.d.ts`; порядок не зависит от ОС. */
-async function sources(home: string, ignore: ReadonlySet<string>): Promise<string[]> {
+async function sources(home: string, ignore: ReadonlySet<string>, unreadable: (dir: string, error: unknown) => void): Promise<string[]> {
   const out: string[] = [];
   const walk = async (dir: string): Promise<void> => {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch (error) {
+      unreadable(dir, error);
+      return;
+    }
     for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
@@ -256,7 +262,7 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
   const rules: ImportRules = { home: root, declarations, packages: options.declarationPackages ?? [], bundled: options.bundled === true };
   // Только вниз от корня: `../x` и абсолютный путь ничего не скрывают.
   const ignore = new Set((options.ignore ?? []).filter((d) => !path.isAbsolute(d)).map((d) => path.resolve(root, d)).filter((d) => d !== root && inside(root, d)));
-  const files = await sources(root, ignore);
+  const files = await sources(root, ignore, (d, error) => at(toPosix(path.relative(root, d)) || '.', `каталог не прочитан - ${error instanceof Error ? error.message : String(error)}`));
   for (const file of files) {
     try {
       problems.push(...importProblems(file, await fs.readFile(file, 'utf8'), rules));
