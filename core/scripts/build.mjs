@@ -14,14 +14,14 @@ for (const project of ['tsconfig.build.json', 'elements/tsconfig.build.json']) {
 }
 
 // Объявления tsc оставляет с расширением `.ts` в относительных импортах: у потребителя без allowImportingTsExtensions они не читаются.
-const relativeTs = /(\bfrom\s*|\bimport\s*\(\s*)'(\.\.?\/[^']*)\.ts'/g;
+const relativeTs = /(\bfrom\s*|\bimport\s*\(\s*)(['"])(\.\.?\/[^'"]*)\.ts\2/g;
 function fixDeclarations(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const file = join(dir, entry.name);
     if (entry.isDirectory()) fixDeclarations(file);
     else if (entry.name.endsWith('.d.ts')) {
       const text = readFileSync(file, 'utf8');
-      const fixed = text.replace(relativeTs, "$1'$2.js'");
+      const fixed = text.replace(relativeTs, '$1$2$3.js$2');
       if (fixed !== text) writeFileSync(file, fixed);
     }
   }
