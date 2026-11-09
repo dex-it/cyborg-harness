@@ -167,6 +167,19 @@ export class SectionStore {
     });
   }
 
+  /** Стирает раздел из слоя; `false` - раздела там не было, и файл не тронут. Основа - файл, как у `write`. */
+  async remove(layer: Layer, id: string): Promise<boolean> {
+    if (!this.#layers.includes(layer)) throw new Error(`слоя ${layer} нет`);
+    return this.#serial(async () => {
+      const fresh = await this.#store.load(layer);
+      const { [id]: gone, ...rest } = isRecord(fresh) ? fresh : (this.#documents.get(layer) ?? {});
+      if (gone === undefined) return false;
+      await this.#store.save(layer, rest);
+      this.#documents.set(layer, Object.fromEntries(Object.entries(this.#documents.get(layer) ?? {}).filter(([key]) => key !== id)));
+      return true;
+    });
+  }
+
   #serial<T>(run: () => Promise<T>): Promise<T> {
     const next = this.#queue.then(run);
     this.#queue = next.catch(() => undefined);

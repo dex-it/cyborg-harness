@@ -23,7 +23,7 @@ cd greeter
 ```
 
 :::caution[Пакеты ещё не опубликованы]
-Пакеты `@cyborg-harness/*` и команда `cyborg-plugin` публикуются задачами [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9). Пакеты scope `@cyborg` на npmjs.com к проекту не относятся. До выпуска работайте из репозитория (`npm ci`, `npm start`).
+Пакеты `@cyborg-harness/*` и команда `cyborg-plugin` ещё не в реестре. `@cyborg-harness/contracts` готов к выпуску ([P-01](https://github.com/dex-it/cyborg-harness/issues/29): собирается, упаковывается и ставится в пустой проект из tarball), его выпуск - [P-10](https://github.com/dex-it/cyborg-harness/issues/11); остальное публикуется задачами [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9). Пакеты scope `@cyborg` на npmjs.com к проекту не относятся. До выпуска работайте из репозитория (`npm ci`, `npm start`).
 :::
 
 Команда создаёт манифест, главную часть, вид, схему раздела `config`, тест и настройки сборки. Дальше правим их по порядку.
@@ -123,7 +123,7 @@ npx cyborg-plugin build     # главная часть и вид со свои�
 
 ## 7. Запуск
 
-Положите собранный каталог в каталог плагинов приложения, добавьте `greeter` в `plugins.enabled` и перезапустите окно. В стенде каталог пользователя - `plugins/` в каталоге данных приложения, на Linux это `~/.config/Cyborg Playground/plugins`. После запуска в журнале появится запись `activated`, вид - в каркасе окна, а `Ctrl+Shift+G` (на macOS `Cmd+Shift+G`) вызовет команду.
+Положите собранный каталог в каталог плагинов приложения, добавьте `greeter` в `plugins.enabled` и перезапустите приложение с флагом `--user-plugins` (для стенда `npm start -- --user-plugins`). В стенде каталог пользователя - `plugins/` в каталоге данных приложения, на Linux это `~/.config/Cyborg Playground/plugins`. Без флага каталог не читается: плагин не загрузится, а в журнале будет `not-found` ([политика](/features/plugins/#каталог-пользователя-на-первом-этапе)). С флагом строка плагина в окне помечена «сторонний», в журнале появятся `third-party` и `activated`, вид - в каркасе окна, а `Ctrl+Shift+G` (на macOS `Cmd+Shift+G`) вызовет команду.
 
 :::tip[Если что-то не загрузилось]
 Причина всегда в журнале плагина: ошибки манифеста, недостающий поставщик, несовместимая версия API, отказ права. Журнал не требует отладчика - начинайте с него.

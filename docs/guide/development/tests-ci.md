@@ -7,8 +7,8 @@ description: "Какие проверки гоняет репозиторий, �
 
 | Команда | Что проверяет |
 |---|---|
-| `npm run build` | собирает стенд playground в `playground/dist` |
-| `npm run typecheck` | строгие типы ядра, браузерной части элементов `cy-*` и стенда; в том числе файлы, где строка под `@ts-expect-error` обязана не компилироваться |
+| `npm run build` | собирает стенд playground в `playground/dist`; перед ним, `typecheck`, `lint` и `test` сами идут `build:core` (пакет ядра) и `build:electron` (адаптер Electron) |
+| `npm run typecheck` | строгие типы ядра, браузерной части элементов `cy-*`, адаптера Electron и стенда; в том числе файлы, где строка под `@ts-expect-error` обязана не компилироваться |
 | `npm run lint` | ESLint со `strictTypeChecked`, ноль предупреждений |
 | `npm test` | модульные, сценарные и стресс-тесты на встроенном `node:test` |
 | `npm run smoke` | дымовой тест окна по DevTools Protocol |
@@ -23,20 +23,24 @@ description: "Какие проверки гоняет репозиторий, �
 
 ## Тесты
 
-`npm test` запускает файлы `core/test/*.test.ts`, `playground/src/**/*.test.ts` и `playground/test/*.test.ts` с общим сроком 120 секунд на тест. Зависший тест падает под своим именем и не снимает всю задачу.
+`npm test` запускает файлы `core/test/*.test.ts`, `electron/test/*.test.ts`, `playground/src/**/*.test.ts` и `playground/test/*.test.ts` с общим сроком 120 секунд на тест. Зависший тест падает под своим именем и не снимает всю задачу.
 
 | Что покрыто | Где |
 |---|---|
 | Загрузка: разбор манифеста, граф контрактов, версии, ленивая активация, журнал, безопасный режим, выгрузка с зависимыми | `loader`, `graph`, `registry`, `lifecycle`, `status`, `semver-manifest` |
 | Хосты и сторож: падение, зависание, перезапуск, три страйка | `hosts`, `stress-hosts`, `stress-restart` |
-| Границы доверия: подделка сообщений хоста, недоверенный ввод, шлюз `ctx.os`, права через контракт, значение секрета вне журнала, `config` и `state` | `trust`, `untrusted-input`, `security-gateway`, `via-contract`, `os`, `secrets-journal` |
+| Границы доверия: подделка сообщений хоста, недоверенный ввод, шлюз `ctx.os`, права через контракт и команду, значение секрета вне журнала, `config` и `state` | `trust`, `untrusted-input`, `security-gateway`, `via-contract`, `command-callers`, `os`, `secrets-journal` |
 | Данные: разделы `config` и `state`, миграции, схема, воркспейс | `config`, `json-schema`, `workspace`, `stress-sections`, `stress-workspace` |
 | Терминалы | `pty`, `stress-pty` на поддельном pty |
 | Окно и вид: оболочка вида, слой диалогов и замок, элементы `cy-*`, документы, события | `ui-shell`, `window`, `elements`, `documents`, `events`, `subscriptions` |
 | Канал и данные вызова: клонируемость, подписки | `rpc` |
-| Сторож импортов плагинов: плагин импортирует только `@cyborg-harness/contracts` и свои модули | `plugin-imports` |
+| Сторож импортов плагинов: плагин импортирует только `@cyborg-harness/contracts` и свои модули (на плагинах репозитория) | `plugin-imports` |
+| Проверка плагина вне репозитория `checkPlugin` и `cyborg-plugin check`: манифест, версия API, файлы из манифеста, импорты; разбор импортов сверен с компилятором на коде репозитория | `plugin-check`, `plugin-scan` |
+| Пакет `cyborg-plugin` (`tools/cyborg-plugin`): `check`, `build`, `pack`; плагин с npm-зависимостью собирается и грузится ядром в `forkHosts`, отказы по `node:*` и `electron` в исходнике и в зависимости, по файлам манифеста и `engines.cyborg`, воспроизводимый архив, состав сборки стенда | `tools/cyborg-plugin/test/` |
 | Чистота ядра: нет предметных слов, Electron, импортов вне `core/src` и зависимостей npm | `purity` |
-| Стенд: поиск плагинов, схема `cyborg-plugin://`, мост видов, перетаскивание, билеты терминала, замеры памяти, общий набор тестов `cyborg.agent` | `playground/src/main/*.test.ts`, `playground/test/` |
+| Пакет ядра и публичный API: состав пакета, установка в пустой проект, хосты на собранном пакете, перечень имён по точкам входа, окно без `node:*`, граница playground | `package`, `consumer`, `hosts-dist`, `public-api` |
+| Стенд: поиск плагинов, схема `cyborg-plugin://`, мост видов, перетаскивание, билеты терминала, замеры памяти, общий набор тестов `cyborg.agent` | `electron/test/` (служба плагинов, файлы и навигация видов, терминалы, перетаскивание, каналы, граница, перечень входов, пример из README), `playground/test/` |
+| Тест-кит автора: `startKernel`, поддельные среды, общий набор поставщика на хорошем и плохих поставщиках, состав пакета, установка в пустой проект из архивов | `testing/test/` |
 
 :::note[Проверки чистоты]
 Ядро не знает предметной области, не импортирует Electron и не тянет зависимости из npm. Это проверяют тесты, а не ревью. Отдельные тесты закрепляют, что секрет не попадает в журнал, `config` и `state`, и сверяют публичные экспорты пакетов и снимок API плагина.
@@ -65,6 +69,7 @@ Workflow `.github/workflows/ci.yml` запускается на каждый pul
 |---|---|---|
 | `npm ci` на Node 24 | да | да |
 | `npm run build`, `typecheck`, `lint`, `npm test` | да | да |
+| Пример адаптера Electron из README собирается (`node --test electron/test/example.test.ts`) | да | да |
 | Дымовой тест | `node playground/scripts/smoke.mjs` | `xvfb-run --auto-servernum node playground/scripts/smoke.mjs --no-sandbox` |
 
 Лимит - 15 минут на каждую ОС, права токена - только чтение. Действия закреплены по SHA коммита, новая сборка той же ветки отменяет прежнюю. Матрица идёт с `fail-fast: false`: падение на одной ОС не прячет результат другой.
