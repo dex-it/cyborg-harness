@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { resolveViewRequest, type PluginUi } from './view-files.ts';
+import { resolveViewRequest, type PluginUi } from '../src/view-files.ts';
 
 async function plugin() {
   const root = await mkdtemp(path.join(tmpdir(), 'cyborg-view-'));

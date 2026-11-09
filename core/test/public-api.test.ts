@@ -396,6 +396,7 @@ export function boundaryViolations(file: string, text: string, rel: string): str
 /** Файлы playground, которым внутренности ядра нужны по делу: замер самого ядра. Каждое исключение - с причиной и сроком. */
 const INTERNAL: Readonly<Record<string, string>> = {
   'playground/src/main/spike-gateway.ts': 'замер шлюза берёт net-transport (guardedLookup, isLocalAddress, closePools, transport) из core/src; уедет к замерам ядра вместе с остальными (не T-09)',
+  'electron/test/boundary.test.ts': 'пробные строки проверки границы адаптера намеренно ведут вглубь ядра: проверка должна их ловить',
   'playground/scripts/spike-pty-restore.mjs': 'замер хвоста pty берёт Tail и BACKLOG_LIMIT из core/src/pty.ts; уедет к замерам ядра вместе с остальными (не T-09)',
 };
 
@@ -408,9 +409,9 @@ describe('публичный API ядра: потребители в репоз�
     });
   }
 
-  it('playground берёт ядро только через точки входа пакета и только их именами', () => {
-    const all = files(path.join(root, 'playground'));
-    assert.ok(all.length > 50, `файлов playground: ${all.length}`);
+  it('playground и адаптер Electron берут ядро только через точки входа пакета и только их именами', () => {
+    const all = ['playground', 'electron'].flatMap((dir) => files(path.join(root, dir)));
+    assert.ok(all.length > 70, `файлов playground и electron: ${all.length}`);
     const bad = all.flatMap((f) => (path.relative(root, f) in INTERNAL ? [] : boundaryViolations(f, fs.readFileSync(f, 'utf8'), path.relative(root, f))));
     assert.deepEqual(bad, []);
   });

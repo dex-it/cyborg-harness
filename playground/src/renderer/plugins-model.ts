@@ -1,4 +1,4 @@
-import type { FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot, PluginState } from '../shared/plugins.ts';
+import type { FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot, PluginState } from '@cyborg-harness/electron/window';
 
 export const STATE_LABEL: Record<PluginState, string> = {
   active: 'Работает',

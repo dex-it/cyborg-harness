@@ -43,6 +43,8 @@ jobs:
       - name: contracts (снимок API)
         if: github.event_name != 'pull_request'
         run: npm run check:contracts
+      - name: пример адаптера Electron собирается (README, electron/test/example.test.ts)
+        run: node --test electron/test/example.test.ts
       - name: smoke (macOS)
         if: runner.os == 'macOS'
         run: node playground/scripts/smoke.mjs

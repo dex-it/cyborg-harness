@@ -1,7 +1,7 @@
 // Слой окна (SAD §3.8): диалоги видов поверх всех фреймов и экраны замков. Что показывать, решает ядро; окно только рисует снимок.
 
 import type { ShownDialog, WindowSnapshot } from '@cyborg-harness/core/window';
-import type { PluginRow, Reply } from '../shared/plugins.ts';
+import type { PluginRow, Reply } from './snapshot.ts';
 import { el } from './dom.ts';
 
 export interface WindowPort {
@@ -71,7 +71,9 @@ export class WindowLayerView {
 
   private frameOf(d: ShownDialog): HTMLIFrameElement | null {
     const scope = d.view === 'overlay' ? this.lockLayer : this.main;
-    return scope.querySelector(`[data-plugin="${CSS.escape(d.pluginId)}"] iframe`);
+    // Плагин с несколькими видами: диалог ставится у фрейма своего вида (`data-view` у обёртки вида), а не у первого.
+    const plugin = `[data-plugin="${CSS.escape(d.pluginId)}"]`;
+    return scope.querySelector(`${plugin}[data-view="${CSS.escape(d.view)}"] iframe`) ?? scope.querySelector(`${plugin} iframe`);
   }
 
   private show(d: ShownDialog): void {

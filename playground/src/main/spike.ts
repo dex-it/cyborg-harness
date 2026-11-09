@@ -5,10 +5,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { app, BrowserWindow, ipcMain, type WebFrameMain } from 'electron';
-import { PATH_MIME, viewOrigin, type SpikePing, type SpikeReport } from '../shared/views.ts';
+import type { SpikePing, SpikeReport } from '../shared/spike.ts';
+import { PATH_MIME, viewOrigin } from '@cyborg-harness/electron/window';
 import { pssKb as pss } from './proc-memory.ts';
-import { resolveStaticFile } from './view-files.ts';
-import { framesOf, serveViews } from './views.ts';
+import { framesOf, resolveStaticFile, serveViews } from '@cyborg-harness/electron';
 
 export interface SpikeOptions {
   readonly out: string;

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { WebFrameMain } from 'electron';
-import { navigationAllowed } from './navigation.ts';
+import { navigationAllowed } from '../src/navigation.ts';
 
 const frame = (origin: string) => ({ origin }) as WebFrameMain;
 const page = 'file:///app/renderer/index.html';

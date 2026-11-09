@@ -6,8 +6,15 @@ import path from 'node:path';
 import { inlineHosts } from '@cyborg-harness/core';
 import type { PluginModule } from '@cyborg-harness/core';
 import { WINDOW_OWNER } from '@cyborg-harness/core';
-import type { KeyRow } from '../shared/plugins.ts';
-import { discoverPlugins, PluginsService, readSchemaFile, startPlugins } from './plugins.ts';
+import type { KeyRow } from '../src/snapshot.ts';
+import { discoverPlugins, PluginsService, readSchemaFile, startPlugins } from '../src/plugins.ts';
+
+// Контракт для плагинов-подделок теста: карту контрактов приложения (playground/plugins/contracts.ts) пакет не знает.
+declare module '@cyborg-harness/contracts' {
+  interface Contracts {
+    'demo.echo': { 1: { say(text: string): Promise<string> } };
+  }
+}
 
 function tmp(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'cyborg-plugins-'));
@@ -384,4 +391,48 @@ test('plugins.enabled из файла воркспейса без перезап
   await until('b включён', () => applied === 2);
   assert.deepEqual(kernel.active, ['a', 'b']);
   assert.deepEqual(problems, ['plugins.enabled: c - включатся после перезапуска']);
+});
+
+test('несколько видов: оба адреса в раскладке по порядку манифеста; у плагина без ui видов нет, невключённый помечен', async () => {
+  const userData = tmp();
+  const dir = path.join(userData, 'plugins');
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['duo', 'solo', 'bare'] } }));
+  plugin(dir, 'duo', { ui: { views: { main: './ui/main.js', 'side-tree': './ui/tree.js' } } }, 'export default {}');
+  plugin(dir, 'solo', { ui: { views: { main: './ui/main.js' } } }, 'export default {}');
+  plugin(dir, 'bare', {}, 'export default {}');
+  plugin(dir, 'spare', { ui: { views: { main: './ui/main.js' } } }, 'export default {}');
+  const service = new PluginsService({ changed: () => {}, alert: () => {} }, () => 1);
+  await service.start({ userData, builtinDir: path.join(userData, 'нет'), spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {} });
+  try {
+    const layout = service.snapshot().layout;
+    const of = (id: string) => layout.filter((e) => e.pluginId === id).map((e) => [e.name, e.url, e.mark]);
+    assert.deepEqual(of('duo'), [
+      ['main', 'cyborg-plugin://duo/?view=main', undefined],
+      ['side-tree', 'cyborg-plugin://duo/?view=side-tree', undefined],
+    ]);
+    assert.deepEqual(of('solo'), [['main', 'cyborg-plugin://solo/?view=main', undefined]]);
+    assert.deepEqual(of('bare'), []);
+    assert.deepEqual(of('spare'), [['main', undefined, 'not-enabled']], 'невключённому окно вид не рисует');
+    assert.deepEqual(await service.disable('duo'), {});
+    assert.equal(service.snapshot().layout.filter((e) => e.pluginId === 'duo' && e.mark === 'disabled').length, 2, 'снятому окно рисует заглушку на месте видов');
+  } finally {
+    await service.unload();
+  }
+});
+
+test('заголовок окна: имя приложения задаёт приложение, адаптер без имени подписывает окно «Cyborg»', async () => {
+  const titles: string[] = [];
+  for (const appName of [undefined, 'Мой редактор']) {
+    const userData = tmp();
+    const kernel = await startPlugins({
+      userData,
+      builtinDir: path.join(userData, 'нет'),
+      spawnHost: inlineHosts(async () => ({ activate() {} })),
+      log: () => {},
+      ...(appName !== undefined && { appName }),
+    });
+    titles.push(kernel.window.title);
+    await kernel.unload();
+  }
+  assert.deepEqual(titles, ['workspace.cyborg.json - Cyborg', 'workspace.cyborg.json - Мой редактор']);
 });
