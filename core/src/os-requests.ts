@@ -68,7 +68,7 @@ export function createOsRequests(ctx: KernelContext): OsRequests {
     osEnv.raiseWindow?.();
     // Под чужим замком окно поднимается, а команда не идёт: как и сочетание этого плагина.
     if (!layer.allows(pluginId)) return;
-    const go = () => commands.run(click.command, ...(click.args ?? []));
+    const go = () => commands.runOwn(pluginId, click.command, [...(click.args ?? [])]);
     // Хост перезапускается: команда появится, когда плагин снова поднимется.
     (commands.owners.has(click.command) ? go() : lifecycle.idle().then(go)).catch((error: unknown) => options.onLog?.(pluginId, `клик по уведомлению: ${errorMessage(error)}`));
   }

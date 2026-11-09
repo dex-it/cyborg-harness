@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, it } from 'node:test';
-import type { PluginJournalLine, PluginRow, PluginsSnapshot } from '../src/shared/plugins.ts';
-import { actionsFor, conflictText, journalFor, keyStatus, mergeFeed, sortedPlugins, summary } from '../src/renderer/plugins-model.ts';
+import type { LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot } from '../src/shared/plugins.ts';
+import { actionsFor, conflictText, journalFor, keyStatus, mergeFeed, sortedPlugins, summary, viewMode, viewSlots } from '../src/renderer/plugins-model.ts';
 
 const row = (id: string, state: PluginRow['state'], over: Partial<PluginRow> = {}): PluginRow => ({ id, state, revivable: state === 'stopped', unloaded: false, commands: [], permissions: [], ...over });
-const snapshot = (plugins: PluginRow[], over: Partial<PluginsSnapshot> = {}): PluginsSnapshot => ({ phase: 'ready', safeMode: false, problems: [], plugins, keys: [], feed: [], journal: [], canHang: true, window: { title: '', queued: 0, locks: [] }, documents: [], workspace: { current: '/w.cyborg.json', recent: [] }, ...over });
+const snapshot = (plugins: PluginRow[], over: Partial<PluginsSnapshot> = {}): PluginsSnapshot => ({ phase: 'ready', safeMode: false, problems: [], plugins, layout: [], keys: [], feed: [], journal: [], canHang: true, window: { title: '', queued: 0, locks: [] }, documents: [], workspace: { current: '/w.cyborg.json', recent: [] }, ...over });
 
 describe('окно «Плагины Cyborg»: модель', () => {
   it('выключенные сверху, затем ждущие перезапуска, работающие и невключённые; внутри - по имени', () => {
@@ -59,5 +61,56 @@ describe('окно «Плагины Cyborg»: модель', () => {
       mergeFeed([line(1, 'a'), line(3, 'c')], [line(2, 'b')]).map((l) => l.subject),
       ['a', 'b', 'c'],
     );
+  });
+
+  // K-03: области окна строятся из раскладки ядра, а не из имён плагинов.
+  const view = (pluginId: string, name: string, over: Partial<LayoutRow> = {}): LayoutRow => ({ pluginId, kind: 'view', name, area: 'sidebar', order: 1000, url: `cyborg-plugin://${pluginId}/?view=${name}`, ...over });
+
+  it('виды окна: порядок раскладки ядра, оба вида одного плагина, документы и невидимые без адреса не в счёт', () => {
+    const plugins = [row('a', 'active'), row('b', 'active'), row('c', 'stopped'), row('d', 'disabled'), row('e', 'restarting')];
+    const layout: LayoutRow[] = [
+      view('b', 'tree', { area: 'main', order: 100 }),
+      view('a', 'one', { order: 200 }),
+      view('a', 'two', { area: 'toolbar', order: 200 }),
+      { pluginId: 'a', kind: 'document', name: 'note', area: 'main', order: 300 },
+      view('d', 'main', { order: 400, url: undefined }),
+      view('c', 'main', { order: 500 }),
+      view('e', 'main', { order: 600 }),
+      view('ghost', 'main', { order: 700 }),
+    ];
+    const slots = viewSlots(plugins, layout);
+    assert.deepEqual(
+      slots.map((s) => [s.key, s.entry.area, s.mode]),
+      [
+        ['b/tree', 'main', 'frame'],
+        ['a/one', 'sidebar', 'frame'],
+        ['a/two', 'toolbar', 'frame'],
+        ['c/main', 'sidebar', 'placeholder'],
+        ['e/main', 'sidebar', 'restarting'],
+      ],
+    );
+    assert.equal(viewMode(row('d', 'disabled'), view('d', 'main', { url: undefined })), undefined);
+    // Заглушку определяет метка раскладки ядра, а не состояние строки плагина.
+    assert.equal(viewMode(row('a', 'active'), view('a', 'main', { mark: 'disabled' })), 'placeholder');
+    assert.equal(viewMode(row('a', 'active'), view('a', 'main', { mark: 'out-of-graph' })), 'placeholder');
+    assert.equal(viewMode(row('a', 'disabled'), view('a', 'main', { mark: 'not-enabled', url: undefined })), undefined);
+  });
+
+  it('в renderer нет строковых имён плагинов: области строятся из раскладки ядра', () => {
+    const plugins = path.resolve(import.meta.dirname, '..', 'plugins');
+    const ids = fs
+      .readdirSync(plugins, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && fs.existsSync(path.join(plugins, d.name, 'manifest.json')))
+      .map((d) => (JSON.parse(fs.readFileSync(path.join(plugins, d.name, 'manifest.json'), 'utf8')) as { id: string }).id);
+    assert.ok(ids.includes('sessions') && ids.length > 5, 'каталог плагинов не прочитан');
+    const renderer = path.resolve(import.meta.dirname, '..', 'src', 'renderer');
+    const sources = fs.readdirSync(renderer, { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.ts'));
+    assert.ok(sources.length > 5, 'исходники окна не найдены');
+    const found: string[] = [];
+    for (const file of sources) {
+      const text = fs.readFileSync(path.join(renderer, file), 'utf8');
+      for (const id of ids) if (new RegExp(`(['"\`])${id.replaceAll('-', '\\-')}\\1`).test(text)) found.push(`${file}: '${id}'`);
+    }
+    assert.deepEqual(found, []);
   });
 });

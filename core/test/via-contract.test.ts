@@ -161,3 +161,73 @@ test('via-contract: файл из области записи вызывающе
     await rm(root, { recursive: true, force: true });
   }
 });
+
+// files отдаёт test.guarded; size и read помечены в манифесте как устаревшие, open - нет; read и open ещё и под guard.
+async function deprecatedSetup() {
+  const root = await mkdtemp(path.join(tmpdir(), 'cyborg-deprecated-'));
+  const work = path.join(root, 'work');
+  await mkdir(work, { recursive: true });
+  const file = path.join(work, 'readme.md');
+  await writeFile(file, 'можно');
+  const contexts = new Map<string, PluginContext>();
+  const consumer = (id: string, permissions: Record<string, unknown> = {}) => ({ ...base, id, requires: { 'test.guarded': '^1' }, permissions });
+  const k = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    spawnHost: inlineHosts(async (entry) => ({
+      activate: (ctx: PluginContext) => {
+        contexts.set(entry, ctx);
+        if (entry === 'files') {
+          ctx.contracts.provide('test.guarded', '1.0', {
+            read: (p) => ctx.os.fs.readText(p),
+            open: (spec) => ctx.os.fs.readText(spec.path),
+            size: (p) => ctx.os.fs.stat(p).then((st) => st.size),
+          });
+        }
+      },
+    })),
+    enabled: ['files', 'main', 'viewer', 'nosy'],
+    manifests: [
+      { ...base, id: 'files', provides: { 'test.guarded': { version: '1.0', guard: { read: { 'fs.read': 0 }, open: { 'fs.read': '0.path' } }, deprecated: ['size', 'read'] } }, permissions: { 'fs.read': [work] } },
+      consumer('main', { 'fs.read': [work] }),
+      consumer('viewer', { 'fs.read': [work] }),
+      consumer('nosy'),
+    ],
+    os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp') },
+  });
+  const calls = () => k.journal.flatMap((e) => (e.kind === 'deprecated-call' ? [[e.pluginId, e.provider, e.contract, e.member, e.repeats]] : []));
+  const files = (id: string) => contexts.get(id)!.contracts.get('test.guarded', 1)!;
+  const dispose = async () => {
+    await k.unload();
+    await rm(root, { recursive: true, force: true });
+  };
+  return { k, file, files, calls, [Symbol.asyncDispose]: dispose };
+}
+
+test('@deprecated: вызов помеченного члена из главной части пишет запись, повторы за окно считаются, непомеченный - ничего', async () => {
+  await using s = await deprecatedSetup();
+  assert.deepEqual(s.calls(), [], 'запуск и подписки записей не дают');
+  for (let i = 0; i < 4; i++) await s.files('main').size(s.file);
+  await s.files('main').read(s.file);
+  await s.files('main').open({ path: s.file });
+  assert.deepEqual(s.calls(), [
+    ['main', 'files', 'test.guarded', 'size', undefined],
+    ['main', 'files', 'test.guarded', 'read', undefined],
+  ], 'open не помечен, повторы size ждут закрытия окна');
+  await s.k.unload();
+  assert.deepEqual(s.calls().filter((c) => c[4] !== undefined), [['main', 'files', 'test.guarded', 'size', 3]], 'выгрузка не теряет счёт повторов');
+});
+
+test('@deprecated: вызов из вида (callAs) пишет ту же запись от имени плагина вида', async () => {
+  await using s = await deprecatedSetup();
+  assert.equal(await s.k.callAs('viewer', 'test.guarded', 1, 'size', [s.file]), Buffer.byteLength('можно'));
+  assert.equal(await s.k.callAs('viewer', 'test.guarded', 1, 'open', [{ path: s.file }]), 'можно');
+  assert.deepEqual(s.calls(), [['viewer', 'files', 'test.guarded', 'size', undefined]]);
+});
+
+test('@deprecated: вызов, отклонённый проверкой, не записывается как вызов устаревшего члена', async () => {
+  await using s = await deprecatedSetup();
+  await assert.rejects(s.files('nosy').read(s.file), { code: 'PermissionDenied' });
+  await assert.rejects(s.k.callAs('nosy', 'test.guarded', 1, 'read', [s.file]), { code: 'PermissionDenied' });
+  await assert.rejects(s.k.callAs('nosy', 'test.guarded', 1, 'missing', []), { code: 'Invalid' });
+  assert.deepEqual(s.calls(), []);
+});

@@ -4,7 +4,6 @@ import type { DocumentTable } from './documents.ts';
 import type { CoreError } from './errors.ts';
 import type { ContractGraph } from './graph.ts';
 import type { SectionInput, SystemEvent } from './host-runtime.ts';
-import type { DeniedCollapse } from './journal.ts';
 import type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Keybinding, LoadOptions, UninstallReport } from './kernel-types.ts';
 import type { ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
@@ -114,9 +113,12 @@ export interface Lifecycle {
 
 /** Ленивые плагины, пробуждение и сама активация. */
 export interface Activation {
-  readonly waiting: Set<string>;
-  readonly waking: Map<string, Promise<void>>;
-  readonly activating: Map<string, Promise<void>>;
+  /** Ждущие первого обращения; править их может только activation: снять с ожидания - `forget`. */
+  readonly waiting: ReadonlySet<string>;
+  readonly waking: ReadonlyMap<string, Promise<void>>;
+  readonly activating: ReadonlyMap<string, Promise<void>>;
+  /** Плагин больше не ждёт: его включили или выключили сами, будить его уже не нужно. */
+  forget(pluginId: string): void;
   activate(pluginId: string): Promise<void>;
   wake(pluginId: string): Promise<void>;
   /** Замок окна, затем активация в порядке графа. */
@@ -138,6 +140,7 @@ export interface Commands {
   attach(end: BridgeEnd): void;
   dropFor(pluginId: string): void;
   run(command: string, ...args: unknown[]): Promise<unknown>;
+  runOwn(pluginId: string, command: string, args: unknown[]): Promise<unknown>;
 }
 
 /** Слушатели простоя пользователя. */
@@ -192,7 +195,8 @@ export interface KernelContext {
   readonly options: LoadOptions;
   readonly journal: JournalEntry[];
   readonly record: (entry: JournalEntry) => void;
-  readonly denials: DeniedCollapse;
+  /** Закрывает окна склейки повторов (`denied`, `deprecated-call`): счёт не теряется при выгрузке. */
+  readonly flushRepeats: () => void;
   /** Включённые в `plugins.enabled` при запуске. */
   readonly enabled: ReadonlySet<string>;
   readonly watchdog: { readonly interval: number; readonly timeout: number; readonly strikes: number; readonly window: number };

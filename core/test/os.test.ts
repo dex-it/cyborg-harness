@@ -663,6 +663,7 @@ test('команда ядра cyborg.workspace.reveal: среда показыв
   assert.deepEqual(shown, [file]);
   await assert.rejects(os('reader').fs.readText(file), { code: 'PermissionDenied' }, 'файл воркспейса - защищённый путь');
   await assert.rejects(ctx('reader').commands.run('cyborg.workspace.reveal'), { code: 'PermissionDenied' }, 'команду ядра зовёт приложение');
+  await assert.rejects(k.runOwn('reader', 'cyborg.workspace.reveal'), { code: 'PermissionDenied' }, 'вид и уведомление плагина команду ядра не зовут');
   assert.deepEqual(shown, [file]);
   await k.unload();
 

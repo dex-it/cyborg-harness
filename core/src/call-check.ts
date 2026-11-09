@@ -13,8 +13,13 @@ export function mayUse(ctx: KernelContext, caller: string, provider: string, con
   return many !== undefined && satisfies(version, many);
 }
 
-/** `via-contract`: право вызывающего на аргументы члена, как их объявил поставщик; выполнит вызов поставщик по своим правам. */
+/**
+ * Общая точка вызова члена контракта (`invoke` из главной части и `callAs` из вида).
+ * `via-contract`: право вызывающего на аргументы члена, как их объявил поставщик; выполнит вызов поставщик по своим правам.
+ * Член с `@deprecated` в манифесте поставщика пишется в журнал, когда проверки пройдены: отклонённый вызов ничего не вызвал.
+ */
 export async function checkCall(ctx: KernelContext, caller: string, provider: string, contract: string, member: string, args: readonly unknown[]): Promise<void> {
   const method = `${contract}.${member}`;
   for (const g of guardsOf(ctx.manifestOf(provider).guards, contract, member)) await ctx.gateway.checkFor(ctx.manifestOf(caller), method, g.right, guardedValue(args, g, method));
+  if (own(ctx.manifestOf(provider).deprecated, contract)?.includes(member)) ctx.record({ pluginId: caller, kind: 'deprecated-call', provider, contract, member });
 }

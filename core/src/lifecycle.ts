@@ -112,7 +112,7 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     const { activation, pool } = ctx.parts;
     guard(pluginId);
     userOff.delete(pluginId);
-    activation.waiting.delete(pluginId);
+    activation.forget(pluginId);
     // Идущая активация (wake ленивого) - та же самая: вторая дала бы двойной activate и дубль в active.
     await activation.waking.get(pluginId);
     if (active.includes(pluginId)) return;
@@ -141,7 +141,7 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     const owner = [...(active.includes(pluginId) ? dependents(pluginId) : [pluginId])].find((id) => layer.isOwner(id));
     if (owner !== undefined) throw new CoreError('Invalid', `окно закрыто замком ${owner}: выключить его из-под замка нельзя`);
     userOff.add(pluginId);
-    activation.waiting.delete(pluginId);
+    activation.forget(pluginId);
     await activation.waking.get(pluginId);
     const run = enqueue(async () => {
       if (ctx.unloading) return;
@@ -227,7 +227,7 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     gateway.releaseAllPty();
     layer.clear();
     pool.stopAll();
-    ctx.denials.flush();
+    ctx.flushRepeats();
   }
 
   return {

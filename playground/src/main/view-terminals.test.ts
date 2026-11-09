@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PtyExit } from '@cyborg-harness/contracts';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { TerminalSink } from '../../../core/src/index.ts';
-import { PtyTable, type PtyProcess } from '../../../core/src/pty.ts';
+import type { TerminalSink } from '@cyborg-harness/core';
+import { PtyTable, type PtyProcess } from '@cyborg-harness/core';
 import { ViewTerminals, type TerminalFrame } from './view-terminals.ts';
 
 function frame(routingId: number) {

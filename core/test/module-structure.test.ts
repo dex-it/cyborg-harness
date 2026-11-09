@@ -43,9 +43,15 @@ export function cyclesOf(graph: ReadonlyMap<string, readonly string[]>): string[
 /** Части `load()`: каждая отвечает за своё состояние или шов, который правят разные задачи (раскладка - в SAD, раздел 3.2). */
 const LOADER_PARTS = [
   'activation.ts', 'call-check.ts', 'commands.ts', 'context-build.ts', 'contract-calls.ts', 'host-bridge.ts', 'host-pool.ts', 'idle-watch.ts',
-  'kernel-api.ts', 'kernel-context.ts', 'kernel-types.ts', 'keybindings.ts', 'lifecycle.ts', 'loader.ts', 'manifest-fields.ts', 'manifest-provides.ts',
-  'manifest-ui.ts', 'manifest.ts', 'os-requests.ts', 'sections.ts', 'views-state.ts',
+  'kernel-api.ts', 'kernel-context.ts', 'kernel-types.ts', 'keybindings.ts', 'layout.ts', 'lifecycle.ts', 'loader.ts', 'manifest-fields.ts', 'manifest-layout.ts',
+  'manifest-provides.ts', 'manifest-ui.ts', 'manifest.ts', 'os-requests.ts', 'sections.ts', 'views-state.ts',
 ];
+
+/** Модули, которые импортируют общий контекст, но не названы в списке: предел длины на них не распространился бы. */
+export function unlistedParts(graph: ReadonlyMap<string, readonly string[]>, listed: readonly string[]): string[] {
+  return [...graph].filter(([name, deps]) => deps.includes('kernel-context.ts') && !listed.includes(name)).map(([name]) => name);
+}
+
 const MAX_PART_LINES = 400;
 const MAX_LOAD_LINES = 150;
 
@@ -64,6 +70,18 @@ describe('устройство загрузчика', () => {
     ]);
     assert.deepEqual(cyclesOf(graph), ['a.ts -> b.ts -> c.ts -> a.ts', 'd.ts -> d.ts']);
     assert.deepEqual(cyclesOf(new Map([['a.ts', ['b.ts']], ['b.ts', []]])), []);
+  });
+
+  it('каждый модуль, который импортирует kernel-context.ts, назван в LOADER_PARTS, и все названные есть на диске', () => {
+    const graph = importGraph(src);
+    assert.deepEqual(unlistedParts(graph, LOADER_PARTS), [], 'новая часть загрузчика: допишите её в LOADER_PARTS, на неё распространяется предел длины');
+    assert.deepEqual(LOADER_PARTS.filter((name) => !graph.has(name)), [], 'в LOADER_PARTS названы файлы, которых нет в core/src');
+  });
+
+  it('проверка списка частей ловит модуль с общим контекстом вне списка', () => {
+    const graph = new Map([['a.ts', ['kernel-context.ts']], ['b.ts', ['a.ts']], ['c.ts', ['kernel-context.ts', 'a.ts']]]);
+    assert.deepEqual(unlistedParts(graph, ['a.ts']), ['c.ts']);
+    assert.deepEqual(unlistedParts(graph, ['a.ts', 'c.ts']), []);
   });
 
   it(`часть загрузчика не длиннее ${String(MAX_PART_LINES)} строк, а load() - ${String(MAX_LOAD_LINES)}`, () => {

@@ -1,4 +1,5 @@
 import { CoreError } from './errors.ts';
+import { buildLayout } from './layout.ts';
 import type { KernelContext } from './kernel-context.ts';
 import type { Kernel } from './kernel-types.ts';
 import { KERNEL_OWNER, WINDOW_OWNER } from './window-layer.ts';
@@ -17,6 +18,10 @@ export function buildKernel(ctx: KernelContext): Kernel {
     contracts: ctx.registry,
     callAs: (caller, contract, major, member, args) => contracts.callAs(caller, contract, major, member, args),
     manifests: known,
+    get layout() {
+      const { switchedOff, userOff } = lifecycle;
+      return buildLayout(known, (id) => (ctx.graph.rejected.has(id) ? 'out-of-graph' : !ctx.byId.has(id) ? 'not-enabled' : switchedOff.has(id) || userOff.has(id) ? 'disabled' : undefined));
+    },
     hostOf: ctx.hostOf,
     keybindings: [...keys.values()],
     keybinding(key) {
@@ -61,6 +66,7 @@ export function buildKernel(ctx: KernelContext): Kernel {
     uninstall: (pluginId) => lifecycle.uninstall(pluginId),
     enable: (pluginId) => lifecycle.enable(pluginId),
     run: (command, ...args) => commands.run(command, ...args),
+    runOwn: (pluginId, command, ...args) => commands.runOwn(pluginId, command, args),
     idle: () => lifecycle.idle(),
     reloadSections: (kind, ids) => sections.reload(kind, ids),
     unload: () => lifecycle.shutdown(),

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { BrowserWindow, clipboard, dialog, Notification, safeStorage, shell } from 'electron';
 import * as nodePty from 'node-pty';
-import { groupKilled, type NoticeEvents, type NoticeHandle, type OsEnvironment } from '../../../core/src/index.ts';
+import { groupKilled, type NoticeEvents, type NoticeHandle, type OsEnvironment } from '@cyborg-harness/core';
 import { fileSecrets, type SecretCipher } from './secrets-file.ts';
 
 const safeCipher: SecretCipher = {
