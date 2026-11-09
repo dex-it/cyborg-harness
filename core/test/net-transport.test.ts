@@ -145,3 +145,19 @@ test('isLocalAddress: стенды 192.0.0.0/24 и 198.18.0.0/15, локальн
   for (const a of ['192.0.0.1', '192.0.0.255', '198.18.0.1', '198.19.255.255', '64:ff9b:1::1', '64:ff9b:1:ffff::1']) assert.equal(isLocalAddress(a), true, a);
   for (const a of ['192.0.1.1', '198.17.255.255', '198.20.0.1', '64:ff9b:2::1', '64:ff9a::1']) assert.equal(isLocalAddress(a), false, a);
 });
+
+test('transport: content-encoding при пустом теле (HEAD, пустой объект) - пустой ответ, как у прежнего fetch, а не ошибка распаковки', async () => {
+  using s = await listen((request, response) => {
+    response.writeHead(200, { 'content-encoding': request.url?.slice(1) ?? '', 'content-length': request.method === 'HEAD' ? '25' : '0' });
+    response.end();
+  });
+  for (const encoding of ['gzip', 'deflate', 'br']) {
+    const url = new URL(`http://127.0.0.1:${String(s.port)}/${encoding}`);
+    for (const method of ['HEAD', 'GET']) {
+      const response = await transport(url, base('a', { method }));
+      assert.deepEqual([response.status, await response.text()], [200, ''], `${method} ${encoding}`);
+      assert.equal(response.headers.get('content-length'), null, 'длина сжатого тела не описывает распакованное');
+    }
+  }
+  closePools('a');
+});

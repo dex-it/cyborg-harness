@@ -139,16 +139,21 @@ const FRAMING = new Set(['content-length', 'transfer-encoding', 'connection', 'k
 /** Статусы без тела: конструктор `Response` отвергает тело при них. */
 const NO_BODY = new Set([101, 204, 205, 304]);
 
-/** Распаковка ответа, который сервер сжал вопреки `accept-encoding: identity`; предел размера - у читающего тело. */
+const LENIENT = { flush: zlib.constants.Z_SYNC_FLUSH, finishFlush: zlib.constants.Z_SYNC_FLUSH };
+
+/**
+ * Распаковка ответа, который сервер сжал вопреки `accept-encoding: identity`; предел размера - у читающего тело.
+ * Конец потока без полного блока - как у прежнего fetch (undici): пустое тело при `content-encoding` (HEAD, S3-объект) не ошибка.
+ */
 function decoderFor(encoding: string): zlib.Gunzip | zlib.Inflate | zlib.BrotliDecompress | undefined {
   switch (encoding.trim().toLowerCase()) {
     case 'gzip':
     case 'x-gzip':
-      return zlib.createGunzip();
+      return zlib.createGunzip(LENIENT);
     case 'deflate':
-      return zlib.createInflate();
+      return zlib.createInflate(LENIENT);
     case 'br':
-      return zlib.createBrotliDecompress();
+      return zlib.createBrotliDecompress({ flush: zlib.constants.BROTLI_OPERATION_FLUSH, finishFlush: zlib.constants.BROTLI_OPERATION_FLUSH });
     default:
       return undefined;
   }

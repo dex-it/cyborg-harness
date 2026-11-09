@@ -89,7 +89,7 @@ async function fixture(permissions: Record<string, unknown>, lookup: Lookup, con
     server.close();
     await rm(root, { recursive: true, force: true });
   };
-  return { net, k, port, hits, hung, denied, [Symbol.asyncDispose]: dispose };
+  return { net, k, port, server, hits, hung, denied, [Symbol.asyncDispose]: dispose };
 }
 
 test('net.fetch: хост из права, резолвящийся в локальный или частный адрес, получает отказ до соединения', async () => {
@@ -164,4 +164,15 @@ test('net.fetch: сжатый ответ приходит текстом, рас
   const at = (p: string) => `http://127.0.0.1:${String(f.port)}${p}`;
   assert.equal((await f.net.fetch(at('/gzip'), { headers: { 'Accept-Encoding': 'gzip' } })).body, 'hello');
   await assert.rejects(f.net.fetch(at('/bomb')), { code: 'Remote' });
+});
+
+test('net.fetch: выгрузка плагина закрывает его keep-alive соединения', async () => {
+  const { lookup } = answer({});
+  await using f = await fixture({ net: ['127.0.0.1:$PORT'] }, lookup);
+  await f.net.fetch(`http://127.0.0.1:${String(f.port)}/`);
+  const open = () => new Promise<number>((resolve) => f.server.getConnections((_e, n) => resolve(n)));
+  assert.equal(await open(), 1, 'keep-alive: соединение осталось в пуле');
+  await f.k.unload();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(await open(), 0, 'соединение плагина пережило его выгрузку');
 });
