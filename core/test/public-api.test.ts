@@ -70,6 +70,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'Guard',
       'GuardRight',
       'HostHandle',
+      'Importer',
       'JournalEntry',
       'KeptPty',
       'KeyInput',

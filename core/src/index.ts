@@ -21,7 +21,7 @@ export type { Disposable } from './disposable.ts';
 export type { DocumentRow } from './documents.ts';
 export type { CoreErrorCode } from './errors.ts';
 export type { ContractGraph, Rejection } from './graph.ts';
-export type { SystemEvent } from './host-runtime.ts';
+export type { Importer, SystemEvent } from './host-runtime.ts';
 export type { KeyInput } from './keys.ts';
 export type { LayoutEntry, LayoutMark } from './layout.ts';
 export type { ResourceLimits } from './limits.ts';

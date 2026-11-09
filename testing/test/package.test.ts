@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { satisfies } from '@cyborg-harness/core';
+import { satisfies } from '../../core/src/semver.ts';
 import { COMPUTED, usesOf } from '../../core/test/imports.ts';
 
 // P-08: пакет @cyborg-harness/testing. Состав и форма пакета, граница зависимостей (T-04: в пакете нет импортов из playground) и отсутствие копий подделок в тестах репозитория.
