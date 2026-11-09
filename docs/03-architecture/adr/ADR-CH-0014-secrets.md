@@ -1,7 +1,7 @@
 ---
 id: ADR-CH-0014
 status: proposed
-date: 2026-11-06
+date: 2026-11-08
 relates_to: product, cyborg-harness, ADR-CH-0001, ADR-CH-0002, ADR-CH-0005
 origin: derived
 quality-checks: входных записей нет
@@ -25,7 +25,7 @@ quality-checks: входных записей нет
 
 1. **Хранилище ядра - корень доверия.** `ctx.os.secrets` на `safeStorage`, ключи `<pluginId>/<key>`: плагин видит только свои ключи, работает без плагинов; без шифрования ОС вызов получает `Unavailable`. Проверка: `core/test/os.test.ts` («секреты: ключи своего плагина, $secret, без шифрования ОС - Unavailable, внешний источник по маске»).
 2. **Внешний источник - плагин, поставщик `cyborg.secret-source`.** Кратность `many`, поставщик выбирается по схеме ссылки; два поставщика одной схемы - отказ при загрузке, как при `one`. Свой токен источник держит в хранилище ядра. Проверка: нет - контракт не реализован, см. расхождения.
-3. **В `config` только ссылка** `{ "$secret": "vault://kv/data/jira#token" }`; ссылка без схемы - ключ хранилища ядра вызывающего плагина. Ядро сверяет ссылку с правом `secrets.ref` **вызывающего** до передачи источнику - тот же механизм `via-contract`, что для путей ([ADR-CH-0005](ADR-CH-0005-extension-points.md), п. 8). Проверка: `core/test/os.test.ts` (тот же тест), `core/test/via-contract.test.ts`.
+3. **В `config` только ссылка** `{ "$secret": "vault://kv/data/jira#token" }`; ссылка без схемы - ключ хранилища ядра вызывающего плагина. Ядро сверяет ссылку с правом `secrets.ref` **вызывающего** до передачи источнику - тот же механизм `via-contract`, что для путей ([ADR-CH-0005](ADR-CH-0005-plugin-interaction.md), п. 8). Проверка: `core/test/os.test.ts` (тот же тест), `core/test/via-contract.test.ts`.
 4. **Значение секрета ядро не кэширует и не пишет** в `config`, `state` и журнал; кэш до `expiresAt` - решение потребителя. Значение не проходит через третьи плагины. Проверка: `core/test/secrets-journal.test.ts` (секрет из хранилища, `$secret`, заголовок `net.fetch`, отказы `process`, `net`, `secrets.ref` и `config.set` не оставляют значения в журнале, его описании словами, `onJournal`, `onLog`, файлах воркспейса и `state`).
 
 ## Consequences
