@@ -101,5 +101,5 @@ export function createActivation(ctx: KernelContext): Activation {
     await lifecycle.idle();
   }
 
-  return { waiting, waking, activating, activate, wake, start };
+  return { waiting, waking, activating, forget: (pluginId) => void waiting.delete(pluginId), activate, wake, start };
 }
