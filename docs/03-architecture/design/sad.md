@@ -127,7 +127,31 @@ flowchart TB
 - Безопасный режим выключает все плагины без исключений.
 - Выгрузка и загрузка плагина - без перезапуска окна. Выгрузка снимает плагин и тех, кто требует его через `requires`, в обратном порядке активации; потребители через `optional` остаются и получают `onChange`. Хост, где не осталось плагинов, гасится, поэтому загрузка поднимает код в новом процессе. Сторож выгруженный человеком плагин не поднимает. Процессы агентов выгрузку переживают ([3.6](#36-ресурсы-дольше-плагина-pty)).
 
-**Сделано в ядре.** Загрузка - `core/src/loader.ts`, граф - `core/src/graph.ts`, журнал - `core/src/journal.ts`, причины словами - `core/src/status.ts`. Тесты - `core/test/graph.test.ts` (граф до кода, каскад отказа), `core/test/loader.test.ts` («журнал: невалидный, выключенный, не найденный, отказ графа…», «безопасный режим не запускает хосты», «хуки: граф до кода…»), `core/test/lifecycle.test.ts` (выгрузка и загрузка без перезапуска окна: «disable: требующие выгружаются вместе с поставщиком…»), `core/test/journal.test.ts`, `core/test/status.test.ts`. Окно «Плагины Cyborg» - playground, проверка - `npm run smoke`.
+**Сделано в ядре.** Загрузка - `core/src/loader.ts` (сборка, раскладка модулей - ниже), граф - `core/src/graph.ts`, журнал - `core/src/journal.ts`, причины словами - `core/src/status.ts`. Тесты - `core/test/graph.test.ts` (граф до кода, каскад отказа), `core/test/loader.test.ts` («журнал: невалидный, выключенный, не найденный, отказ графа…», «безопасный режим не запускает хосты», «хуки: граф до кода…»), `core/test/lifecycle.test.ts` (выгрузка и загрузка без перезапуска окна: «disable: требующие выгружаются вместе с поставщиком…»), `core/test/journal.test.ts`, `core/test/status.test.ts`. Окно «Плагины Cyborg» - playground, проверка - `npm run smoke`.
+
+**Раскладка загрузчика (T-08).** `load()` в `core/src/loader.ts` - сборка в пять строк (весь файл - 36): `createContext` собирает общее состояние, `createParts` создаёт части, `activation.start()` запускает плагины, `buildKernel` отдаёт `Kernel`. Общее состояние (журнал и `record`, `active`, `byId`, `registry`, `graph`, `options`, шлюз ОС, слой окна) - один объект `KernelContext` из `kernel-context.ts`, а не замыкание. Каждая часть получает его целиком, держит своё изменяемое состояние у себя и зовёт соседей через `ctx.parts` в момент вызова, поэтому фабрики частей друг друга не импортируют: из `kernel-context.ts` берутся только типы, напрямую - лишь функции без состояния (`assignHosts` и `bump` из `host-pool.ts`, `bindKeys` и `applyUserKeys`, `checkCall` и `mayUse`); кругов нет (проверяет `core/test/module-structure.test.ts`, как и предел в 400 строк на модуль; список частей в тесте ручной, но тест требует, чтобы в нём был каждый модуль, импортирующий `kernel-context.ts`, - такая часть без записи в списке роняет тест; часть без общего контекста, как `manifest-*.ts`, вносится в список руками, иначе предел на неё не распространится). Публичная поверхность не менялась: `load`, `Kernel`, `LoadOptions`, `JournalEntry`, `DisableOptions`, `DisablePreview` по-прежнему экспортируются из `loader.ts`, типы лежат в `kernel-types.ts`.
+
+| Модуль | Состояние и обязанности | Шов задач эпика |
+|---|---|---|
+| `kernel-types.ts` | Публичные типы: `Kernel`, `LoadOptions`, `JournalEntry`, `DisableOptions`, `DisablePreview`, `Keybinding` | - |
+| `kernel-context.ts` | `KernelContext`, `Host`, `Subscription` и интерфейсы частей (`Parts`); только типы | - |
+| `context-build.ts` | Разбор манифестов, граф, раскладка по хостам, сочетания, шлюз ОС, слой окна; порядок записей в журнал при старте | - |
+| `host-pool.ts` | Карта хостов, запуск, остановка, вызовы в хост, сторож (пинг, `hostDown`, перезапуск), `assignHosts` | - |
+| `host-bridge.ts` | Проверка отправителя сообщения хоста (`mine`), разбор сообщений по схеме; сообщения `running`, `exiting`, `rejected`, `log` | - |
+| `contract-calls.ts` | Описатели поставщиков, подписки через границу хоста, `invoke`, `callAs` | K-06, K-09 |
+| `call-check.ts` | `mayUse` (кто вправе звать контракт) и `checkCall` (`via-contract`) | K-06 |
+| `commands.ts` | Владельцы команд, `run`, регистрация команд из хоста | K-22 |
+| `activation.ts` | `waiting`, `waking`, `activating` (соседям - только чтение; снять с ожидания - `forget`), `activate`, `wake`, старт ядра | - |
+| `lifecycle.ts` | Очередь `enqueue`, `strikes`, `switchedOff`, `userOff`, `enable`, `disable`, `setEnabled`, `dropPlugin`, выгрузка | K-10 |
+| `sections.ts` | Что хост получает из `config` и `state`, `section.write`, `reloadSections` | - |
+| `os-requests.ts` | Запросы `documents` и `os` из хоста, уведомления, замок окна | - |
+| `idle-watch.ts` | Слушатели простоя и опрос ОС | - |
+| `views-state.ts` | Память видов `$views`, очередь записей | - |
+| `keybindings.ts` | `bindKeys`, `applyUserKeys` (не путать с `keys.ts` - разбором нажатия) | K-07 |
+| `kernel-api.ts` | `buildKernel`: тонкий слой над частями, своего состояния нет | - |
+| `manifest-provides.ts`, `manifest-ui.ts`, `manifest-fields.ts` | `readProvides` (K-06), `readUi` (K-03) и общие мелочи разбора вынесены из `manifest.ts` | K-06 (provides), K-03 (ui) |
+
+Порядок старта, который держит сборка: журнал и манифесты, граф и `onGraph`, `assignHosts`, `bindKeys` и `applyUserKeys`, части, замок окна, активация. Часть при создании ничего не вызывает.
 
 **Ленивая активация - сделано в ядре.** `"activation": "lazy"` в манифесте: при старте плагин получает состояние «ждёт» (`waiting` в журнале). Будят его первая команда (`run` активирует владельца до вызова; команду плагина, активация которого уже идёт, например после `enable`, `run` тоже ждёт), сочетание (оно перехватывается и у спящего владельца), показ вида (`kernel.wake`, playground зовёт его при первой загрузке файла вида) и активация потребителя: поставщика из `requires` и `optional` ядро поднимает до потребителя, поставщиков `consumes` - без ожидания, иначе встречная пара `consumes` ждала бы сама себя. Выключенный человеком ленивый плагин команда не будит. Тест - `core/test/events.test.ts`, в playground - плагин `later`.
 
@@ -182,7 +206,7 @@ flowchart TB
 
 Ядро ведёт реестр контрактов (`provides` / `requires` / `optional` / `consumes`) и реестр команд и передаёт вызовы: между плагинами, между UI и главной частью одного плагина, между хостами. Для плагина вызов выглядит одинаково, в одном хосте поставщик или в другом. Как плагины этим пользуются - [раздел 4](#4-взаимодействие-плагинов).
 
-**Сделано в ядре.** Реестр контрактов - `core/src/registry.ts`, реестр команд и передача вызовов между хостами - `core/src/loader.ts` поверх канала `core/src/rpc.ts`, право вызывающего через контракт (`guard`) - `core/src/via-contract.ts`. Тесты - `core/test/registry.test.ts`, `core/test/rpc.test.ts`, `core/test/subscriptions.test.ts` (подписка через границу хоста), `core/test/via-contract.test.ts` (в том числе вызов из вида), `core/test/trust.test.ts` (контракт зовёт только связанный графом потребитель, аргументы команды сверяются со схемой), `core/test/loader.test.ts` («команды: запуск из ядра и из другого плагина…»).
+**Сделано в ядре.** Реестр контрактов - `core/src/registry.ts`, реестр команд - `core/src/commands.ts`, передача вызовов между хостами - `core/src/contract-calls.ts` и `core/src/call-check.ts` поверх канала `core/src/rpc.ts`, право вызывающего через контракт (`guard`) - `core/src/via-contract.ts`. Тесты - `core/test/registry.test.ts`, `core/test/rpc.test.ts`, `core/test/subscriptions.test.ts` (подписка через границу хоста), `core/test/via-contract.test.ts` (в том числе вызов из вида), `core/test/trust.test.ts` (контракт зовёт только связанный графом потребитель, аргументы команды сверяются со схемой), `core/test/loader.test.ts` («команды: запуск из ядра и из другого плагина…»).
 
 ### 3.5. Изоляция сбоев: хосты и сторож
 
@@ -212,7 +236,7 @@ flowchart TB
 - Цена - память на каждый процесс хоста: первый ~56 МБ PSS, каждый следующий ~34 МБ; плагины в одном хосте почти не добавляют ([замер](../../04-verification/spike-hosts.md), Linux). На macOS [ресёрч-2](../../research/sad2-validation.md#21-хост-плагинов-в-utilityprocess) намерил около 15 МБ физического следа и 70-100 мс старта на хост: другая ОС и другая мера (`footprint`, а не PSS).
 - У сторожа нет прецедента: в изученных системах зависший локальный хост не перезапускают (VS Code перезапускает только pty-хост и удалённый хост). Поэтому пороги выше заданы замером, а не ориентиром.
 
-**Сделано в ядре.** Хост - `core/src/host-runtime.ts` и `core/src/host-entry.ts`, транспорт - `core/src/transports.ts`, раскладка по хостам и сторож - `core/src/loader.ts` (пинг 1 с, порог 5 с, три сбоя подряд). Тесты - `core/test/hosts.test.ts` (зависание и падение, виновник, выключение после N сбоев), `core/test/loader.test.ts` («хосты: из поставки - по группам, сторонний всегда один в своём хосте»), `core/test/trust.test.ts` («сторонний плагин не делит хост…»), `core/test/stress-hosts.test.ts`, `core/test/stress-restart.test.ts`. Хост в `utilityProcess` и заглушка выключенного плагина с причиной - playground, проверка - `npm run smoke`.
+**Сделано в ядре.** Хост - `core/src/host-runtime.ts` и `core/src/host-entry.ts`, транспорт - `core/src/transports.ts`, раскладка по хостам и сторож - `core/src/host-pool.ts` (пинг 1 с, порог 5 с, три сбоя подряд). Тесты - `core/test/hosts.test.ts` (зависание и падение, виновник, выключение после N сбоев), `core/test/loader.test.ts` («хосты: из поставки - по группам, сторонний всегда один в своём хосте»), `core/test/trust.test.ts` («сторонний плагин не делит хост…»), `core/test/stress-hosts.test.ts`, `core/test/stress-restart.test.ts`. Хост в `utilityProcess` и заглушка выключенного плагина с причиной - playground, проверка - `npm run smoke`.
 
 ### 3.6. Ресурсы дольше плагина: pty
 

@@ -1,12 +1,16 @@
 import { CoreError } from './errors.ts';
 import { isValidRange, parseVersion, satisfies } from './semver.ts';
 import { normalizeKey } from './keys.ts';
+import { isValidId, show, VIEW_NAME } from './manifest-fields.ts';
+import { readProvides } from './manifest-provides.ts';
+import { readUi } from './manifest-ui.ts';
 import { readPermissions, type PluginPermissions } from './permissions.ts';
-import { readGuard, type MemberGuards } from './via-contract.ts';
+import type { MemberGuards } from './via-contract.ts';
 import { isRecord, isWireKind, matchesKind, own, type WireKind } from './wire.ts';
 import { KERNEL_COMMANDS, reservedId, WINDOW_COMMANDS } from './window-layer.ts';
 
 export { isRecord };
+export { isValidId } from './manifest-fields.ts';
 
 export interface ArgSpec {
   readonly kind: WireKind;
@@ -68,16 +72,10 @@ export type ManifestResult =
   | { readonly ok: true; readonly manifest: PluginManifest }
   | { readonly ok: false; readonly id?: string | undefined; readonly errors: readonly string[] };
 
-const ID = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/;
-
 const TOP_LEVEL = new Set([
   '$schema', 'id', 'version', 'engines', 'provides', 'requires', 'optional', 'consumes', 'commands', 'keybindings',
   'config', 'state', 'permissions', 'ui', 'documents', 'host', 'activation', 'lock',
 ]);
-
-export function isValidId(value: string): boolean {
-  return ID.test(value);
-}
 
 /** С `apiVersion` манифест под другой API при ошибках разбора отклоняется одной причиной - версией API. */
 export function parseManifest(raw: unknown, apiVersion?: string): ManifestResult {
@@ -154,40 +152,6 @@ export function parseManifest(raw: unknown, apiVersion?: string): ManifestResult
       ...(documents && { documents }),
     },
   };
-}
-
-interface Provides {
-  readonly provides: Record<string, string[]>;
-  readonly guards?: Record<string, MemberGuards>;
-}
-
-/** Значение - версия, список версий или `{ version, guard? }`. */
-function readProvides(raw: unknown, errors: string[]): Provides {
-  const out: Record<string, string[]> = {};
-  const guards: Record<string, MemberGuards> = {};
-  if (raw === undefined) return { provides: out };
-  if (!isRecord(raw)) {
-    errors.push('provides: ожидается объект');
-    return { provides: out };
-  }
-  for (const [name, entry] of Object.entries(raw)) {
-    if (!isValidId(name)) errors.push(`provides.${name}: недопустимое имя контракта`);
-    const full = isRecord(entry) ? entry : undefined;
-    for (const key of Object.keys(full ?? {})) if (!['version', 'guard'].includes(key)) errors.push(`provides.${name}.${key}: неизвестное поле`);
-    const guard = readGuard(`provides.${name}.guard`, full?.guard, errors);
-    if (guard) guards[name] = guard;
-    const value = full ? full.version : entry;
-    const list: unknown = typeof value === 'string' ? [value] : value;
-    const versions = Array.isArray(list) ? list.filter((v): v is string => typeof v === 'string' && parseVersion(v) !== null) : [];
-    if (!Array.isArray(list) || versions.length === 0 || versions.length !== list.length) {
-      errors.push(`provides.${name}: ожидается версия или список версий, получено ${show(value)}`);
-      continue;
-    }
-    const majors = versions.map((v) => parseVersion(v)?.[0]);
-    if (new Set(majors).size !== majors.length) errors.push(`provides.${name}: две версии одной мажорной`);
-    out[name] = versions;
-  }
-  return { provides: out, ...(Object.keys(guards).length > 0 && { guards }) };
 }
 
 function readRanges(field: string, raw: unknown, errors: string[]): Record<string, string> {
@@ -310,36 +274,6 @@ function readKeybindings(raw: unknown, commands: Readonly<Record<string, Command
   return out;
 }
 
-const VIEW_NAME = /^[a-z][a-z0-9-]*$/;
-// Путь попадает в атрибут страницы-оболочки и в import(): только вниз от каталога плагина, без экранируемых символов.
-const VIEW_ENTRY = /^\.\/(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*\/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\.js$/;
-
-const isEntry = (entry: unknown): entry is string => typeof entry === 'string' && VIEW_ENTRY.test(entry) && !entry.split('/').includes('..');
-
-function readUi(raw: unknown, errors: string[]): { views: Record<string, string>; overlay?: string } | undefined {
-  if (raw === undefined) return undefined;
-  if (!isRecord(raw) || (raw.views !== undefined && !isRecord(raw.views)) || (raw.views === undefined && raw.overlay === undefined)) {
-    errors.push('ui: ожидается { "views": { "<вид>": "./<модуль>.js" } } и/или { "overlay": "./<модуль>.js" }');
-    return undefined;
-  }
-  for (const key of Object.keys(raw)) if (key !== 'views' && key !== 'overlay') errors.push(`ui.${key}: ядро знает только ui.views и ui.overlay`);
-  const views: Record<string, string> = {};
-  const rawViews = isRecord(raw.views) ? raw.views : {};
-  for (const [name, entry] of Object.entries(rawViews)) {
-    if (!VIEW_NAME.test(name)) errors.push(`ui.views.${name}: имя вида - строчные латинские буквы, цифры и дефис`);
-    else if (name === 'overlay') errors.push('ui.views.overlay: имя занято экраном замка, его объявляют как ui.overlay');
-    else if (!isEntry(entry)) errors.push(`ui.views.${name}: ожидается путь "./<модуль>.js" внутри каталога плагина, получено ${show(entry)}`);
-    else views[name] = entry;
-  }
-  if (raw.views !== undefined && Object.keys(rawViews).length === 0) errors.push('ui.views: нет ни одного вида');
-  if (raw.overlay === undefined) return { views };
-  if (!isEntry(raw.overlay)) {
-    errors.push(`ui.overlay: ожидается путь "./<модуль>.js" внутри каталога плагина, получено ${show(raw.overlay)}`);
-    return { views };
-  }
-  return { views, overlay: raw.overlay };
-}
-
 const MAX_DOCUMENT_TYPES = 16;
 
 function readDocuments(raw: unknown, errors: string[]): Record<string, { restorable: boolean }> | undefined {
@@ -388,8 +322,4 @@ function readSchemaVersion(field: string, raw: unknown, errors: string[]): Secti
     return undefined;
   }
   return { version, schema };
-}
-
-function show(value: unknown): string {
-  return value === undefined ? 'ничего' : JSON.stringify(value);
 }
