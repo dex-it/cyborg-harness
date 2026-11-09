@@ -56,7 +56,12 @@ export interface PtyPortMessage {
 
 export const isPortMessage = (m: unknown): m is PtyPortMessage => isRecord(m) && m.t === 'port' && typeof m.viewId === 'string';
 
+/** Столько живёт процесс после SIGHUP, прежде чем его добьёт SIGKILL: shell успевает сохранить историю, `trap '' HUP` - нет. */
+export const END_GRACE = 3000;
+
 export interface PtyHostOptions {
+  /** Срок между SIGHUP завершаемому процессу и SIGKILL, мс. */
+  readonly endGraceMs?: number;
   /** Превращает перенесённый порт в `ViewPort`; по умолчанию - порт `node:worker_threads`. */
   readonly adopt?: (raw: unknown) => ViewPort;
 }
@@ -71,6 +76,8 @@ interface Entry {
   attached: boolean;
   readonly viewers: Map<string, ViewPort>;
   exit?: PtyExit;
+  /** Срок добивания: процесс получил SIGHUP от `end` и ещё не вышел. */
+  reaper?: ReturnType<typeof setTimeout> | undefined;
   pending: string[];
   pendingChars: number;
   flushed: number;
@@ -87,9 +94,12 @@ export class PtyHost {
   readonly #backend: PtyBackend;
   readonly #endpoint: Endpoint;
   readonly #adopt: (raw: unknown) => ViewPort;
+  readonly #endGrace: number;
   readonly #entries = new Map<string, Entry>();
   /** Порты видов, пришедшие раньше запроса `view`. */
   readonly #ports = new Map<string, ViewPort>();
+  /** Завершаемые, но не вышедшие процессы: из таблицы они уже убраны, а порты зрителей закрываются вместе с хостом. */
+  readonly #ending = new Set<Entry>();
   /** Запуски в пути: `end` на них приходит раньше, чем процесс есть. */
   readonly #spawning = new Map<string, { ended: boolean }>();
   #limits: PtyHostInit = { ptyInput: LIMITS.ptyInput, ptyFlushMs: LIMITS.ptyFlushMs, ptyFlushChars: LIMITS.ptyFlushChars, backlog: BACKLOG_LIMIT };
@@ -97,6 +107,7 @@ export class PtyHost {
   constructor(port: Port, backend: PtyBackend, options: PtyHostOptions = {}) {
     this.#backend = backend;
     this.#adopt = options.adopt ?? nodeViewPort;
+    this.#endGrace = options.endGraceMs ?? END_GRACE;
     this.#endpoint = new Endpoint(port);
     port.onMessage((raw, transfer) => this.#received(raw, transfer));
     const e = this.#endpoint;
@@ -137,6 +148,7 @@ export class PtyHost {
   /** Хост закрывается: процессы pty завершаются, порты видов закрыты. */
   dispose(): void {
     for (const key of [...this.#entries.keys()]) this.#end(key);
+    for (const e of this.#ending) for (const view of e.viewers.values()) view.close();
     for (const port of this.#ports.values()) port.close();
     this.#ports.clear();
   }
@@ -164,6 +176,8 @@ export class PtyHost {
     this.#entries.set(p.key, entry);
     proc.onData((data) => this.#output(entry, data));
     proc.onExit(({ exitCode, signal }) => {
+      clearTimeout(entry.reaper);
+      this.#ending.delete(entry);
       this.#flush(entry);
       const exit: PtyExit = { code: exitCode, ...(signal !== undefined && signal !== 0 && { signal }) };
       entry.exit = exit;
@@ -260,7 +274,19 @@ export class PtyHost {
     e.pending = [];
     e.pendingChars = 0;
     // Зрители остаются: убитый процесс сообщит им `exit`, как сам вышедший.
-    if (!e.exit) e.proc.kill();
+    if (e.exit) return;
+    e.proc.kill();
+    // Переживший SIGHUP (`trap '' HUP`) остался бы без учёта, продолжая писать зрителям: добиваем по сроку.
+    this.#ending.add(e);
+    e.reaper = setTimeout(() => this.#reap(e), this.#endGrace);
+    e.reaper.unref();
+  }
+
+  #reap(e: Entry): void {
+    clearTimeout(e.reaper);
+    e.reaper = undefined;
+    if (!this.#ending.delete(e) || e.exit) return;
+    e.proc.kill('SIGKILL');
   }
 
   /** Первый кусок после затишья уходит сразу - эхо клавиши не ждёт; поток под нагрузкой уходит пачками раз в `ptyFlushMs`. */

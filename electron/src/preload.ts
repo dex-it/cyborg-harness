@@ -48,7 +48,10 @@ export function viewBridge(): ViewBridge {
       const reply = (await ipcRenderer.invoke('view:terminal:open', ticket)) as Reply;
       const tid = (reply.value as { tid?: unknown } | undefined)?.tid;
       if (reply.error !== undefined || typeof tid !== 'number') return reply;
-      return (await terminals.connect(tid)) ? reply : { error: `терминал ${String(tid)}: порт от ядра не пришёл` };
+      if (await terminals.connect(tid)) return reply;
+      // Вид получает отказ и не позовёт `terminalClose`: запись терминала и зритель в pty-хосте закрываются здесь.
+      ipcRenderer.send('view:terminal:close', tid);
+      return { error: `терминал ${String(tid)}: порт от ядра не пришёл` };
     },
     terminalWrite: (tid, data) => terminals.request(tid, { op: 'write', data }),
     terminalResize: (tid, cols, rows) => terminals.request(tid, { op: 'resize', cols, rows }),

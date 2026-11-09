@@ -87,3 +87,19 @@ test('порт терминала: закрыт вызовом или потер
   assert.deepEqual(events, [{ tid: 2, exit: { code: -1 } }]);
   assert.deepEqual(await pending, { error: 'терминал 2 закрыт' });
 });
+
+test('порт терминала: не пришёл за срок - отказ, и опоздавший порт закрывается, а не копит вывод (ревью K-01)', async () => {
+  const ports = terminalPorts(20);
+  const events: TerminalEvent[] = [];
+  ports.listen((e) => void events.push(e));
+  assert.equal(await ports.connect(8), false);
+  const late = pair();
+  let closed = 0;
+  const port = { ...late.port, set onmessage(_h: unknown) {}, close: () => (closed++, late.port.close()) } as unknown as PortLike;
+  ports.arrived(8, port);
+  assert.equal(closed, 1, 'опоздавший порт отказанного терминала остался открытым');
+  late.host.postMessage({ data: 'вывод в никуда' });
+  await sleep(20);
+  assert.deepEqual(events, []);
+  assert.deepEqual(await ports.request(8, { op: 'write', data: 'x' }), { error: 'терминал 8 закрыт' });
+});

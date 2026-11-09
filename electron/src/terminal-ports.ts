@@ -20,7 +20,7 @@ interface Open {
 export interface TerminalPorts {
   /** Порт терминала пришёл от главного процесса (может обогнать ответ на `view:terminal:open`). */
   arrived(tid: number, port: PortLike): void;
-  /** Ждёт порт терминала и включает приём; `false` - порт не пришёл за отведённое время. */
+  /** Ждёт порт терминала и включает приём; `false` - порт не пришёл за отведённое время, опоздавший будет закрыт. */
   connect(tid: number): Promise<boolean>;
   /** Ввод или размер: запрос в порт с номером, ответ pty-хоста с тем же номером. */
   request(tid: number, message: Record<string, unknown>): Promise<Reply>;
@@ -33,6 +33,8 @@ export interface TerminalPorts {
 export function terminalPorts(waitMs = 5000): TerminalPorts {
   const open = new Map<number, Open>();
   const arrivedPorts = new Map<number, PortLike>();
+  /** Вид получил отказ: порт, пришедший позже срока, никому не нужен. */
+  const refused = new Set<number>();
   const waiting = new Map<number, (port: PortLike | undefined) => void>();
   const listeners: ((event: TerminalEvent) => void)[] = [];
   const emit = (event: TerminalEvent) => {
@@ -62,6 +64,10 @@ export function terminalPorts(waitMs = 5000): TerminalPorts {
   };
   return {
     arrived(tid, port) {
+      if (refused.delete(tid)) {
+        port.close();
+        return;
+      }
       const wait = waiting.get(tid);
       if (wait) {
         waiting.delete(tid);
@@ -74,6 +80,7 @@ export function terminalPorts(waitMs = 5000): TerminalPorts {
       port ??= await new Promise<PortLike | undefined>((resolve) => {
         const timer = setTimeout(() => {
           waiting.delete(tid);
+          refused.add(tid);
           resolve(undefined);
         }, waitMs);
         waiting.set(tid, (p) => {

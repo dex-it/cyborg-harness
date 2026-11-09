@@ -43,9 +43,12 @@ export class ViewTerminals {
     if (typeof ticket !== 'string') return { error: 'terminal.open: билет - строка от PtyHandle.share()' };
     const tid = ++this.#next;
     const ports = this.#channel();
+    // Канал закрыт, пока шёл `openTerminal`: учёта у терминала ещё нет, а после ответа он уже не нужен.
+    let ended: { lost: PtyExit | undefined } | undefined;
     const channel: TerminalChannel = {
       hostEnd: ports.port1,
       closed: (lost?: PtyExit) => {
+        ended ??= { lost };
         this.#open.delete(tid);
         // Порт молчит, когда pty-хост потерян: о конце вид узнаёт только отсюда. Это событие управления, а не данные.
         if (lost !== undefined) this.#notify(frame, { tid, exit: lost });
@@ -64,13 +67,21 @@ export class ViewTerminals {
       ports.port2.close();
       return { error: 'фрейм вида закрыт' };
     }
+    // Потерянный pty-хост выхода в порт не пошлёт, а событие управления вид не свяжет с терминалом, которого он ещё не открыл.
+    if (ended?.lost !== undefined) {
+      view.close();
+      ports.port1.close();
+      ports.port2.close();
+      return { error: 'pty-хост потерян, пока терминал открывался' };
+    }
     try {
       frame.postMessage('view:terminal:port', { tid }, [ports.port2]);
     } catch (error) {
       view.close();
       return { error: errorMessage(error) };
     }
-    this.#open.set(tid, { frame, view });
+    // Обычный выход порт доставит сам: фрейм получает его и читает выход оттуда.
+    if (ended === undefined) this.#open.set(tid, { frame, view });
     return { value: { id: view.id, pid: view.pid, program: view.program, args: view.args, persist: view.persist, backlog: view.backlog, tid } };
   }
 

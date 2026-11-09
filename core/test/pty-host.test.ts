@@ -269,3 +269,25 @@ test('pty-хост: end пришёл, пока backend ещё поднимал �
   assert.equal(base.procs[0]?.killed, 'SIGHUP', 'процесс отозванного запуска жив');
   host.kill();
 });
+
+test('pty-хост: завершаемый процесс, переживший SIGHUP, добивается SIGKILL по сроку; вышедший сам срока не получает (ревью K-01)', async () => {
+  const backend = fakePty();
+  const host = inlinePtyHost(backend, { endGraceMs: 60 })();
+  const ep = new Endpoint(host.port);
+  await ep.request('init', { ptyInput: 1024, ptyFlushMs: 4, ptyFlushChars: 1024, backlog: 100 });
+  const start = async (key: string) => void (await ep.request('spawn', { key, file: 'sh', args: [], options: { name: 'xterm-256color', env: {}, cols: 80, rows: 24 } }));
+  await start('deaf');
+  await start('polite');
+  const [deaf, polite] = backend.procs as [FakeProc, FakeProc];
+  ep.notify('end', { key: 'deaf' });
+  ep.notify('end', { key: 'polite' });
+  await tick();
+  assert.deepEqual([deaf.killed, polite.killed], ['SIGHUP', 'SIGHUP']);
+  polite.exit(0);
+  polite.killed = 'не трогать';
+  await sleep(120);
+  assert.equal(deaf.killed, 'SIGKILL', 'процесс, не услышавший SIGHUP, жив: завершение не закреплено');
+  assert.equal(polite.killed, 'не трогать', 'вышедшему процессу ушёл SIGKILL');
+
+  host.kill();
+});
