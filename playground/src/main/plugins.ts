@@ -77,9 +77,9 @@ export function discoverPlugins(dirs: readonly string[]): Discovered {
       }
       const id = isRecord(raw) && typeof raw.id === 'string' ? raw.id : undefined;
       // Второй манифест с тем же id ядру не отдаётся: граф отверг бы оба, и встроенный плагин пропал бы вместе с пользовательским.
-      const first = id === undefined ? undefined : found.origins.get(id);
+      const first = id === undefined ? undefined : found.homes.get(id);
       if (id !== undefined && first !== undefined) {
-        found.problems.push(`повтор id ${id} в ${dir}: действует ${first}`);
+        found.problems.push(`повтор id ${id} в ${home}: действует ${first}`);
         continue;
       }
       found.manifests.push(raw);

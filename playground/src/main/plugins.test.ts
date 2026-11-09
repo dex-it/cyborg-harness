@@ -33,11 +33,21 @@ test('поиск: встроенные раньше пользовательск
   assert.match(found.entries.get('notes') ?? '', /notes\/index\.ts$/);
   assert.equal(found.problems.length, 2);
   assert.ok(found.problems.some((p) => p.includes('broken')));
-  assert.ok(found.problems.some((p) => p.includes('повтор id files') && p.includes(user) && p.includes(`действует ${builtin}`)));
+  assert.ok(found.problems.some((p) => p.includes(`повтор id files в ${path.join(user, 'files')}: действует ${path.join(builtin, 'files')}`)));
   assert.deepEqual([...found.origins], [['files', builtin], ['notes', user]]);
 });
 
-test('старт с флагом: встроенный плагин активен при одноимённом пользовательском, второй пропущен с записью в problems', async () => {
+test('поиск: повтор id внутри одного каталога называет оба каталога плагина, действует первый по имени', () => {
+  const user = tmp();
+  fs.mkdirSync(path.join(user, 'b'));
+  fs.writeFileSync(path.join(user, 'b', 'manifest.json'), JSON.stringify({ id: 'z' }));
+  fs.mkdirSync(path.join(user, 'a'));
+  fs.writeFileSync(path.join(user, 'a', 'manifest.json'), JSON.stringify({ id: 'z' }));
+  const found = discoverPlugins([user]);
+  assert.deepEqual(found.problems, [`повтор id z в ${path.join(user, 'b')}: действует ${path.join(user, 'a')}`]);
+});
+
+test('старт с флагом: встроенный плагин активен при одноимённом пользовательском, второй пропущен с записью в problems', async (t) => {
   const userData = tmp();
   const builtinDir = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['pin-lock', 'echo'] } }));
@@ -46,10 +56,24 @@ test('старт с флагом: встроенный плагин активе
   plugin(path.join(userData, 'plugins'), 'echo', {}, 'export default {}');
   const problems: string[] = [];
   const kernel = await startPlugins({ userData, builtinDir, userPlugins: true, spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {}, onProblem: (p) => problems.push(p) });
+  t.after(() => kernel.unload());
   assert.deepEqual([...kernel.active].sort(), ['echo', 'pin-lock']);
   assert.ok(!kernel.journal.some((e) => e.pluginId === 'pin-lock' && e.kind === 'rejected'), 'встроенный не отвергнут');
   assert.ok(problems.some((p) => p.includes('повтор id pin-lock')));
-  await kernel.unload();
+});
+
+test('окно: повтор id пользовательского плагина виден в «Не дошло до ядра», строка встроенного - bundled и active', async (t) => {
+  const userData = tmp();
+  const builtinDir = tmp();
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['pin-lock'] } }));
+  plugin(builtinDir, 'pin-lock', {}, 'export default {}');
+  plugin(path.join(userData, 'plugins'), 'pin-lock', {}, 'export default {}');
+  const service = new PluginsService({ changed: () => {}, alert: () => {} }, () => 1000);
+  await service.start({ userData, builtinDir, userPlugins: true, spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {} });
+  t.after(() => service.unload());
+  const snapshot = service.snapshot();
+  assert.ok(snapshot.problems.some((p) => p.includes('повтор id pin-lock')), 'причина пропуска не дошла до окна');
+  assert.deepEqual(snapshot.plugins.map((r) => [r.id, r.origin, r.state]), [['pin-lock', 'bundled', 'active']]);
 });
 
 test('старт: плагин из каталога пользователя - сторонний и не попадает в общую группу хоста', async () => {
