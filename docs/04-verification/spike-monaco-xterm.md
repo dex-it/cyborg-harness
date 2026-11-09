@@ -1,21 +1,21 @@
 ---
 level: verification
 feature: cyborg-harness
-status: draft
+status: review
 date: 2026-11-08
 origin: derived
-quality-checks: замер снят на одной машине (macOS); разделы «не проверено» открыты
+quality-checks: замер снят на одной машине (macOS); Linux - в журналах CI
 ---
 
 # Пилот PL-05: Monaco и xterm во фреймах на cyborg-plugin://
 
-Задача [#25](https://github.com/dex-it/cyborg-harness/issues/25), остаток [открытого вопроса 11 SAD](../03-architecture/design/sad.md#8-открытые-вопросы). Статус: **часть снята, часть не проверена** (список в конце).
+Задача [#25](https://github.com/dex-it/cyborg-harness/issues/25), остаток [открытого вопроса 11 SAD](../03-architecture/design/sad.md#8-открытые-вопросы). Итог по критериям - в конце документа.
 
 ## Как мерили
 
 - Monaco 0.57.0 (лицензия MIT; в зависимостях `dompurify` 3.4.15 с открытыми advisory `npm audit` - исправления в релизах Monaco нет), собран esbuild в `playground/plugins/editor/ui/ui.js` (ESM, 9,9 МБ без сжатия, 4,5 МБ минифицированный, 1,2 МБ gzip) и `ui.css`; значки - `codicon-*.ttf` рядом. Воркеры - пять отдельных файлов `ui/workers/{editor,json,css,html,ts}.worker.js` (классические скрипты), создаются `new Worker(new URL('./workers/…', import.meta.url))` по `MonacoEnvironment.getWorker`.
 - Пробный плагин `editor` (`playground/plugins/editor`): файлы `settings.json`, `sample.ts` (ошибка типа в конце) и `broken.json` (синтаксическая ошибка) в каталоге данных плагина; команды `editor.files/open/save/check`. Проверку схемы настроек делает главная часть (`check.ts`), вид показывает её ответ маркерами Monaco (владелец `owner`), как в Cyborg для редактора кнопок.
-- Замер: `npm run spike:monaco -- csp` (`playground/scripts/spike-monaco.mjs`): для каждого набора директив запускает playground с `--view-csp=<набор>`, открывает вкладку «Виды», ждёт файл, маркеры от воркеров, шрифт значков и сессию xterm; нарушения CSP берёт из консоли окна. Среда: macOS (Apple Silicon), Electron 45, Node 24.20.
+- Замер: `npm run spike:monaco -- csp` (`playground/scripts/spike-monaco.mjs`): для каждого набора директив запускает playground с `--view-csp=<набор>`, открывает вкладку «Виды», ждёт файл, маркеры от воркеров, шрифт значков и сессию xterm; нарушения CSP берёт из консоли окна. Среда: macOS (Apple Silicon), Electron 45, Node 24.20; те же сценарии идут в smoke на macOS и Linux в CI.
 
 ## CSP: что нужно Monaco и xterm
 
@@ -46,12 +46,49 @@ default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src
 
 ## Проверка владельца
 
-Вид `editor` не знает схему: при изменении текста через 150 мс зовёт `editor.check`, ответ `[{line, column, message}]` ставится маркерами. Проверка схемы настроек покрыта тестом `playground/test/editor-check.test.ts`. Сама цепочка вида в живом окне (правка `fontSize` -> маркер владельца) написана в smoke, но локально **не прогонялась**.
+Вид `editor` не знает схему: при изменении текста через 150 мс зовёт `editor.check`, ответ `[{line, column, message}]` ставится маркерами Monaco (владелец `owner`). Схема настроек покрыта тестами (`playground/test/editor-check.test.ts`, `editor-plugin.test.ts`). В живом окне (smoke): правка `fontSize` до 99 клавишами даёт маркер `owner:2:fontSize - число от 8 до 32`, «Сохранить» уходит командой `editor.save`, повторное открытие файла несёт правку. Файлы `broken.json` и `sample.ts` нарочно с ошибками: маркеры `json:` и `typescript:` приходят из воркеров, то есть воркеры не только запущены, но и отвечают.
 
-## Не проверено (критерии #25 не закрыты)
+## `sandbox` без `allow-same-origin`
 
-- Вариант `sandbox` без `allow-same-origin` для Monaco и xterm: раздел `sandbox` скрипта написан, не запускался.
-- `role: copy/paste` меню Edit и `navigator.clipboard` в терминале (macOS и Linux): шаги написаны в smoke, не запускались, на Linux не гонялись.
-- Память и время открытия вида с Monaco (footprint на macOS, PSS на Linux), сопоставление с ценой фрейма из [spike-iframe-ui.md](spike-iframe-ui.md): раздел `memory` скрипта написан, не запускался. Из замеров есть только размеры сборки (выше) и время «файл нарисован» порядка 1,0-1,1 с от начала навигации фрейма при неминифицированной сборке (диагностические прогоны, не медиана).
-- Smoke с новыми шагами (Monaco и xterm одновременно): не прогонялся; локально smoke падает на шаге фокуса и на чистой базе.
-- Вопрос 11 SAD: остаток назван (sandbox, буфер обмена, память), закрыт не полностью.
+Кадр с `sandbox="allow-scripts"` (`npm run spike:monaco -- sandbox`, macOS):
+
+| Плагин | Результат |
+|---|---|
+| editor (Monaco) | **не работает.** Оболочка вида собралась, но модуль не открылся: «main не открылся - не вид плагина». Главный процесс узнаёт вид по origin кадра; у кадра без `allow-same-origin` origin непрозрачный, и мост его отклоняет. Редактора нет |
+| sessions (xterm) | то же: «не вид плагина», ни списка агентов, ни терминала |
+| оба, `allow-scripts allow-same-origin` (контроль) | работают: Monaco открыл `settings.json`, список агентов виден |
+
+Кроме того, без `allow-same-origin` `localStorage` и IndexedDB бросают `SecurityError` (с ним - работают). Вывод: `sandbox` без `allow-same-origin` для видов с Monaco и xterm не годится, пока мост опознаёт плагин по origin кадра (K-04: изоляция DOM между плагинами группы остаётся статической проверкой, а границей доверия - группа/origin).
+
+## Буфер обмена (macOS; Linux - в журнале CI)
+
+Шаг smoke «буфер обмена» (`playground/scripts/smoke.mjs`) печатает итог на каждой ОС; на macOS:
+
+- **Monaco и xterm принимают `copy` и `paste`**: после выделения (Cmd+A в Monaco, тройной щелчок по строке xterm) `webContents.copy()` кладёт текст в системный буфер, `webContents.paste()` вставляет текст из буфера в Monaco и в pty через xterm. Это то, что делает `role: copy/paste` на Linux и Windows для сфокусированного вложенного кадра.
+- **Сама `role` из меню на macOS в этом прогоне не сработала** (`{"copy":false,"paste":false}`): на macOS role шлёт действие первому ответчику AppKit, а окно под управлением CDP не было ключевым. Это ограничение способа проверки (нажатие настоящего пункта меню живой клавиатурой не снималось), а не вывод о кадре: прямой вызов того же действия работает.
+- **`navigator.clipboard` из кадра вида недоступен**: политика разрешений кадра отвечает `clipboard-read` и `clipboard-write` = нет, и `writeText`/`readText` бросают `NotAllowedError`. С атрибутом `allow="clipboard-read; clipboard-write"` на `<iframe>` результат тот же (`NotAllowedError`: решает разрешение сессии Electron). Терминалу это не мешает: xterm работает через события `copy` и `paste`, которые идут от меню и клавиш. Плагину, которому нужен `navigator.clipboard` (r15 - копирование из терминала по OSC 52), нужен `ctx.os.clipboard` главной части, а не API кадра.
+
+## Память и время открытия (macOS, footprint)
+
+`npm run spike:monaco -- memory`: окно без `editor` и с ним (`editor` открывает `settings.json`), по три запуска, обе сессии открыты, медианы; процессы - все процессы Electron.
+
+| | Без вида editor | С видом editor |
+|---|---|---|
+| Процессов Electron | 15 | 16 |
+| Footprint всех процессов, МБ | 521 | 649 (разброс 585-662; без editor 502-535) |
+| Процесс кадра editor, МБ | - | 96 |
+| Процесс кадра sessions (xterm), МБ | 29 | 29 |
+| От начала навигации кадра до исполнения `mount`, мс | - | 234 |
+| До первого отрисованного файла, мс | - | 314 |
+
+Вид с Monaco стоит ~96 МБ своего процесса рендера против 29 МБ вида с xterm и +13-22 МБ за пустой фрейм из [spike-iframe-ui.md](spike-iframe-ui.md) (macOS footprint: 22-34 МБ за фрейм). То есть Monaco добавляет ещё ~65-75 МБ к цене фрейма; воркеры живут в потоках того же процесса, отдельных процессов не добавляют (15 -> 16: только процесс кадра). Размеры сборки без сжатия: `ui.js` 9,7 МБ (минифицированный 4,5 МБ, gzip 1,2 МБ), `ui.css` 0,2 МБ, воркеры `editor` 0,6, `json` 0,9, `css` 1,9, `html` 1,3, `ts` 12,8 МБ (грузится, только когда открыт файл TypeScript). Время получено при неминифицированной сборке и 15-16 процессах на нагруженной машине; Linux (PSS) снимет шаг CI «пилот» (журнал шага).
+
+## Итог по критериям #25
+
+- Monaco открывает и редактирует файл во фрейме на `cyborg-plugin://`, подсветка и воркеры работают, ошибок CSP нет: закрыто (smoke).
+- xterm и Monaco в одном окне: закрыто (smoke).
+- Минимальный набор директив CSP и типов файлов: закрыто (раздел выше).
+- `sandbox` без `allow-same-origin`: закрыто (не работает, раздел выше).
+- `role: copy/paste` и буфер обмена: macOS снято, Linux - из журнала CI (шаг smoke печатает итог на каждой ОС).
+- Память и время: macOS снято, Linux - из журнала CI (шаг «пилот»).
+- Вопрос 11 SAD обновлён: закрыт (`sandbox` не годится, воркеры работают под строгой CSP).
