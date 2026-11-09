@@ -256,7 +256,8 @@ function unnamedTypes(entryFiles: readonly string[], inside: (file: string) => b
           // Тела и закрытые члены в .d.ts не попадают: только типы подписей.
           if (ts.isBlock(node) || (ts.canHaveModifiers(node) && ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.PrivateKeyword)) || ('name' in node && ts.isPrivateIdentifier(node.name as ts.Node))) return;
           // `typeof KINDS` (значение) в объявления попадает без имени: имя нужно только типам.
-          const reference = ts.isTypeReferenceNode(node) ? node.typeName : ts.isExpressionWithTypeArguments(node) ? node.expression : undefined;
+          // Тип из другого модуля без импорта в этом файле компилятор выписывает как `import("./x.js").T`.
+          const reference = ts.isTypeReferenceNode(node) ? node.typeName : ts.isExpressionWithTypeArguments(node) ? node.expression : ts.isImportTypeNode(node) && !node.isTypeOf ? node.qualifier : undefined;
           if (reference) {
             const raw = checker.getSymbolAtLocation(reference);
             const symbol = raw && resolve(raw);
@@ -281,6 +282,10 @@ describe('публичный API ядра: типы в сигнатурах', ()
       assert.ok(fs.existsSync(file), `нет ${file}: запусти npm run build:core`);
       return file;
     });
+    // Прямой запуск файла минует pretest: без этой сверки тест судит прошлую сборку.
+    const built = Math.min(...entryFiles.map((f) => fs.statSync(f).mtimeMs));
+    const sources = [...fs.readdirSync(path.join(core, 'src'), { recursive: true, encoding: 'utf8' }).map((f) => path.join(core, 'src', f)), path.join(core, 'elements', 'elements.ts')];
+    assert.deepEqual(sources.filter((f) => f.endsWith('.ts') && fs.statSync(f).mtimeMs > built).map((f) => path.relative(core, f)), [], 'core/dist старше исходников: запусти npm run build:core');
     assert.deepEqual(unnamedTypes(entryFiles, (f) => f.startsWith(dist), NOT_NAMED), [], 'безымянный тип в публичной сигнатуре: добавь его в перечень точки входа или убери из сигнатуры');
   });
 
@@ -289,9 +294,10 @@ describe('публичный API ядра: типы в сигнатурах', ()
     try {
       const entry = path.join(work, 'entry.d.ts');
       // Так компилятор выписывает `function leakFn() { return hidden; }`: тип возврата явно, сам тип без экспорта.
-      fs.writeFileSync(entry, 'interface Hidden {\n  a: 1;\n}\nexport declare function leakFn(): Hidden;\nexport {};\n');
-      assert.deepEqual(unnamedTypes([entry], (f) => f.startsWith(work), {}), [`Hidden (${path.relative(core, entry)}) <- leakFn`]);
-      assert.deepEqual(unnamedTypes([entry], (f) => f.startsWith(work), { Hidden: 'проба' }), []);
+      fs.writeFileSync(entry, 'interface Hidden {\n  a: 1;\n}\nexport declare function leakFn(): Hidden;\nexport declare function leakImport(): import("./inner.js").Inner;\nexport {};\n');
+      fs.writeFileSync(path.join(work, 'inner.d.ts'), 'export interface Inner {\n  a: 1;\n}\n');
+      assert.deepEqual(unnamedTypes([entry], (f) => f.startsWith(work), {}), [`Hidden (${path.relative(core, entry)}) <- leakFn`, `Inner (${path.relative(core, path.join(work, 'inner.d.ts'))}) <- leakImport`]);
+      assert.deepEqual(unnamedTypes([entry], (f) => f.startsWith(work), { Hidden: 'проба', Inner: 'проба' }), []);
     } finally {
       fs.rmSync(work, { recursive: true, force: true });
     }
