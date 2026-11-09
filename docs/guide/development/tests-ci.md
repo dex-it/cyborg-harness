@@ -82,7 +82,7 @@ Workflow `.github/workflows/ci.yml` запускается на каждый pul
 | Шаг | macOS (`macos-latest`) | Linux (`ubuntu-24.04`) |
 |---|---|---|
 | `npm ci` на Node 24 | да | да |
-| Бинарник Electron: кэш по lock-файлу и скачивание с повтором (`node_modules/electron/install.js`, 4 попытки) | да | да |
+| Бинарник Electron, кэш по lock-файлу и скачивание с повтором (`node_modules/electron/install.js`, 4 попытки) | да | да |
 | `npm run build`, `typecheck`, `lint`, `npm test` | да | да |
 | Пример адаптера Electron из README собирается (`node --test electron/test/example.test.ts`) | да | да |
 | Дымовой тест | `node playground/scripts/smoke.mjs` | `xvfb-run --auto-servernum node playground/scripts/smoke.mjs --no-sandbox` |

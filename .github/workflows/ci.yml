@@ -36,7 +36,7 @@ jobs:
             ~/Library/Caches/electron
             ~/.cache/electron
           key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-      - name: Electron (бинарник: кэш и повтор скачивания)
+      - name: Electron (бинарник, кэш и повтор скачивания)
         timeout-minutes: 6
         run: |
           for attempt in 1 2 3 4; do
