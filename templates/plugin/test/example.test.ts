@@ -14,7 +14,7 @@ const load: StartKernelOptions['load'] = { schema: (_manifest, file) => JSON.par
 
 describe('плагин example', () => {
   it('проверка состава: манифест, файлы, правило импортов - без замечаний, прав не просит', async () => {
-    const report = await checkPlugin(home);
+    const report = await checkPlugin(home, { ignore: ['dist'] });
     assert.deepEqual(report.problems, []);
     assert.deepEqual(report.permissions, []);
   });

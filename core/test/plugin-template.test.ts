@@ -35,12 +35,12 @@ async function start(layers: Record<string, Record<string, unknown>> = {}): Prom
 describe('шаблон плагина templates/plugin', () => {
   it('checkPlugin: замечаний нет ни как есть, ни как под сборку; прав не просит', async () => {
     for (const bundled of [false, true]) {
-      const report = await checkPlugin(home, { bundled });
+      const report = await checkPlugin(home, { bundled, ignore: ['dist'] });
       assert.deepEqual(report.problems, [], `bundled: ${String(bundled)}`);
       assert.equal(report.ok, true);
       assert.equal(report.id, 'example');
       assert.deepEqual(report.permissions, []);
-      assert.equal(report.files, 3, 'index.ts, contracts.ts, ui/ui.ts; test/ в проверку не входит');
+      assert.equal(report.files, 3, 'index.ts, contracts.ts, ui/ui.ts; test/ и результат локальной сборки dist/ в проверку не входят');
     }
   });
 
