@@ -115,5 +115,5 @@ quality-checks: входных записей нет
 - **Требование:** вид плагина - браузерный бандл без Node в `<iframe>` своего origin под CSP: скрипты только `'self'`, стили - `'self'` и инлайн; DOM соседей ему недоступен. Окно и элементы ядра выводят данные плагинов текстом, а не разметкой. Мост выдаётся по origin документа: чужая страница внутри вида моста не получает.
 - **traced from:** BR-CH-005.
 - **источник:** [SAD, 3.8](../../03-architecture/design/sad.md#38-изоляция-рендера); `electron/src/view-files.ts`.
-- **verification:** испытание - `electron/test/view-files.test.ts` («вид: origin называет плагин, чужая схема и мусор - не вид»), `core/test/plugin-imports.test.ts` (вид без `node:*` и `electron`); дымовой тест - «элементы ядра: определены до mount, стили под CSP вида…»; осмотр - `innerHTML` в `core/` и `playground/src` нет. Статической проверки на `innerHTML` нет.
+- **verification:** испытание - `electron/test/view-files.test.ts` («вид: origin называет плагин, чужая схема и мусор - не вид»), `core/test/plugin-imports.test.ts` (вид без `node:*` и `electron`); дымовой тест - «элементы ядра: определены до mount, стили под CSP вида…»; осмотр - `innerHTML` в `core/`, `electron/src` и `playground/src` нет. Статической проверки на `innerHTML` нет.
 - **класс:** Security.

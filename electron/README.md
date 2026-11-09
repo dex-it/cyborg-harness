@@ -57,6 +57,7 @@ Peer-зависимости: `@cyborg-harness/core`, `@cyborg-harness/contracts`
 ```ts
 // file: main.ts
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, powerMonitor } from 'electron';
 import {
   bindWindow,
@@ -89,7 +90,7 @@ void app.whenReady().then(async () => {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegrationInSubFrames: true },
   });
   const page = path.join(__dirname, 'index.html');
-  guardNavigation(win.webContents, `file://${page}`, (pluginId, url) => plugins.viewDenied(pluginId, url));
+  guardNavigation(win.webContents, pathToFileURL(page).href, (pluginId, url) => plugins.viewDenied(pluginId, url));
   bindWindow(win, plugins);
   watchPower(plugins);
   void win.loadFile(page);
@@ -129,13 +130,27 @@ const api = (window as unknown as { app: WindowApi }).app;
 const layer = new WindowLayerView(api, document.body, document.getElementById('locks') ?? document.body);
 const views = document.getElementById('views') ?? document.body;
 
+let shown = '';
+
 async function refresh(): Promise<void> {
   const snapshot: PluginsSnapshot = await api.pluginsSnapshot();
-  views.replaceChildren(
-    ...snapshot.plugins.flatMap((row) =>
-      (row.views ?? []).map((v) => Object.assign(document.createElement('iframe'), { src: v.url, title: `${row.id}: ${v.name}` })),
-    ),
-  );
+  // Фреймы пересоздаются только при смене состава видов: снятый с документа iframe теряет состояние.
+  const layout = JSON.stringify(snapshot.plugins.map((row) => [row.id, (row.views ?? []).map((v) => v.url)]));
+  if (layout !== shown) {
+    shown = layout;
+    views.replaceChildren(
+      ...snapshot.plugins.map((row) => {
+        const box = document.createElement('div');
+        box.dataset.plugin = row.id;
+        for (const v of row.views ?? []) {
+          const frame = Object.assign(document.createElement('iframe'), { src: v.url, title: `${row.id}: ${v.name}` });
+          frame.dataset.view = v.name;
+          box.append(frame);
+        }
+        return box;
+      }),
+    );
+  }
   layer.sync(snapshot.window, snapshot.plugins);
 }
 
@@ -153,7 +168,7 @@ esbuild main.ts --bundle --platform=node --format=cjs --external:electron --exte
 # preload: песочница даёт только electron
 esbuild preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/preload.js
 # файл хоста для utilityProcess: ESM (в cjs esbuild заменил бы import() плагина на require)
-echo "import '@cyborg-harness/electron/host-entry';" | esbuild --bundle --platform=node --format=esm --resolve-dir=. --outfile=dist/plugin-host.mjs
+echo "import '@cyborg-harness/electron/host-entry';" | esbuild --bundle --platform=node --format=esm --outfile=dist/plugin-host.mjs
 # окно и оболочка вида (готовые файлы пакета кладутся рядом с окном)
 esbuild renderer.ts --bundle --platform=browser --format=iife --outfile=dist/renderer.js
 cp node_modules/@cyborg-harness/electron/dist/shell/shell.{js,js.map,css} dist/shell/
