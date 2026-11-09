@@ -9,7 +9,7 @@ import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
 import { describePermissions } from '../src/permissions.ts';
 import type { NoticeEvents } from '../src/notices.ts';
-import { memorySecrets } from '@cyborg-harness/testing';
+import { memorySecrets } from '../../testing/src/memory.ts';
 import type { OsEnvironment } from '../src/os-gateway.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';

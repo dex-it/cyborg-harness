@@ -114,7 +114,18 @@ describe('тесты репозитория берут подделки из т�
   });
 
   it('никто не импортирует поддельный pty из core/test', () => {
-    const bad = files.filter((f) => /from\s+'[^']*fake-pty(?:\.ts)?'/.test(fs.readFileSync(f, 'utf8'))).map((f) => path.relative(root, f));
+    const gone = path.join(root, 'core', 'test', 'fake-pty.ts');
+    const bad = files.flatMap((f) =>
+      [...fs.readFileSync(f, 'utf8').matchAll(/from\s+'(\.[^']*fake-pty(?:\.ts)?)'/g)]
+        .filter((m) => path.resolve(path.dirname(f), m[1] ?? '').replace(/(?:\.ts)?$/, '.ts') === gone)
+        .map(() => path.relative(root, f)),
+    );
+    assert.deepEqual(bad, []);
+  });
+
+  it('тесты ядра не требуют сборки тест-кита: подделки берутся из testing/src, а не из пакета', () => {
+    // CLAUDE.md: «тесты идут на Node без сборки». Пакет ведёт в testing/dist, а тот при загрузке поднимает ещё core/dist.
+    const bad = files.filter((f) => f.startsWith(path.join(root, 'core', 'test')) && /from\s+'@cyborg-harness\/testing'/.test(fs.readFileSync(f, 'utf8'))).map((f) => path.relative(root, f));
     assert.deepEqual(bad, []);
   });
 });

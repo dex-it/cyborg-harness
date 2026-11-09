@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { memoryStore as memory } from '@cyborg-harness/testing';
+import { memoryStore as memory } from '../../testing/src/memory.ts';
 import { deepMerge, resolveSection, SectionStore } from '../src/config.ts';
 
 test('слияние: объекты по ключам, массивы целиком', () => {

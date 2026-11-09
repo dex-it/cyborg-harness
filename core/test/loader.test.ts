@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { memoryStore as memory } from '@cyborg-harness/testing';
+import { memoryStore as memory } from '../../testing/src/memory.ts';
 import { SectionStore } from '../src/config.ts';
 import { toDisposable } from '../src/disposable.ts';
 import { load, type LoadOptions } from '../src/loader.ts';
