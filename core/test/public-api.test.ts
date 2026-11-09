@@ -33,9 +33,11 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'PtyTable',
       'RecentWorkspaces',
       'SectionStore',
+      'MENU_OWNER',
       'WINDOW_OWNER',
       'appendBounded',
       'describeEntry',
+      'describeOpenCommands',
       'describePermissions',
       'entryLevel',
       'entryPlugins',
@@ -50,6 +52,8 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
     ],
     types: [
       'ArgSpec',
+      'Area',
+      'CommandCallers',
       'CommandHandler',
       'CommandSpec',
       'ContractGraph',
@@ -59,6 +63,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'DisableOptions',
       'DisablePreview',
       'Disposable',
+      'DocumentDecl',
       'DocumentRow',
       'EnabledChange',
       'GrantStore',
@@ -68,12 +73,16 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'JournalEntry',
       'KeptPty',
       'KeyInput',
+      'KeyPress',
       'Kernel',
       'Keybinding',
       'KeybindingSpec',
       'Layer',
       'LayerStore',
+      'LayoutEntry',
+      'LayoutMark',
       'LoadOptions',
+      'Lookup',
       'ManifestResult',
       'MemberGuards',
       'MigrateWorkspace',
@@ -91,6 +100,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'PluginState',
       'PluginStatus',
       'PluginsList',
+      'Placement',
       'Provider',
       'PtyBackend',
       'PtyProcess',
@@ -108,6 +118,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'SystemEvent',
       'TerminalSink',
       'TerminalView',
+      'UninstallReport',
       'UserKeybinding',
       'WatchdogOptions',
       'WindowLock',
@@ -126,7 +137,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
     values: ['connectView', 'keepFocus', 'mountModule'],
     types: ['FocusRoot', 'FocusWindow', 'TerminalEvent', 'TerminalOpened', 'ViewBridge', 'ViewTarget'],
   },
-  './window': { source: 'src/index-window.ts', values: ['WINDOW_OWNER'], types: ['DisablePreview', 'DocumentRow', 'ShownDialog', 'WindowLock', 'WindowSnapshot', 'WindowTitle'] },
+  './window': { source: 'src/index-window.ts', values: ['WINDOW_OWNER'], types: ['Area', 'DisablePreview', 'DocumentRow', 'LayoutEntry', 'ShownDialog', 'WindowLock', 'WindowSnapshot', 'WindowTitle'] },
   './elements': { source: 'elements/elements.ts', values: ['defineElements'], types: [] },
 };
 
@@ -382,6 +393,7 @@ export function boundaryViolations(file: string, text: string, rel: string): str
 
 /** Файлы playground, которым внутренности ядра нужны по делу: замер самого ядра. Каждое исключение - с причиной и сроком. */
 const INTERNAL: Readonly<Record<string, string>> = {
+  'playground/src/main/spike-gateway.ts': 'замер шлюза берёт net-transport (guardedLookup, isLocalAddress, closePools, transport) из core/src; уедет к замерам ядра вместе с остальными (не T-09)',
   'playground/scripts/spike-pty-restore.mjs': 'замер хвоста pty берёт Tail и BACKLOG_LIMIT из core/src/pty.ts; уедет к замерам ядра вместе с остальными (не T-09)',
 };
 
