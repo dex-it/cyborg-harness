@@ -4,7 +4,7 @@ import path from 'node:path';
 import { SectionStore, type Layer, type LayerStore } from './config.ts';
 import { toDisposable, type Disposable } from './disposable.ts';
 import { isRecord } from './manifest.ts';
-import type { UserKeybinding } from './loader.ts';
+import type { UserKeybinding } from './kernel-types.ts';
 
 /** Формат главного конфига; документ без поля `cyborg` - старый формат приложения, его переводит хук `migrate`. */
 export const CONFIG_FORMAT = 2;

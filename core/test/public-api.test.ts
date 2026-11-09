@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { isBuiltin } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
@@ -32,16 +33,19 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'PtyTable',
       'RecentWorkspaces',
       'SectionStore',
+      'MENU_OWNER',
       'WINDOW_OWNER',
       'appendBounded',
       'claimInstance',
       'describeEntry',
+      'describeOpenCommands',
       'describePermissions',
       'entryLevel',
       'entryPlugins',
       'forkHosts',
       'groupKilled',
       'inlineHosts',
+      'inlinePtyHost',
       'keyOfInput',
       'load',
       'openWorkspace',
@@ -53,6 +57,8 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
     types: [
       'ArgSpec',
       'Claim',
+      'Area',
+      'CommandCallers',
       'CommandHandler',
       'CommandSpec',
       'ContractGraph',
@@ -62,6 +68,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'DisableOptions',
       'DisablePreview',
       'Disposable',
+      'DocumentDecl',
       'DocumentRow',
       'EnabledChange',
       'FileLockOptions',
@@ -70,15 +77,20 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'GuardRight',
       'HostHandle',
       'InstanceOptions',
+      'Importer',
       'JournalEntry',
       'KeptPty',
       'KeyInput',
+      'KeyPress',
       'Kernel',
       'Keybinding',
       'KeybindingSpec',
       'Layer',
       'LayerStore',
+      'LayoutEntry',
+      'LayoutMark',
       'LoadOptions',
+      'Lookup',
       'ManifestResult',
       'MemberGuards',
       'MigrateWorkspace',
@@ -96,6 +108,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'PluginState',
       'PluginStatus',
       'PluginsList',
+      'Placement',
       'Provider',
       'PtyBackend',
       'PtyProcess',
@@ -110,9 +123,11 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'ShowNotice',
       'ShownDialog',
       'SpawnHost',
+      'SpawnPtyHost',
       'SystemEvent',
-      'TerminalSink',
+      'TerminalChannel',
       'TerminalView',
+      'UninstallReport',
       'UserKeybinding',
       'WatchdogOptions',
       'WindowLock',
@@ -125,13 +140,15 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
   },
   './host': { source: 'src/index-host.ts', values: ['runHost'], types: ['HostOptions', 'Importer', 'Port'] },
   './host-entry': { source: 'src/host-entry.ts', values: [], types: [] },
+  './pty-host': { source: 'src/index-pty-host.ts', values: ['groupKilled', 'nodeViewPort', 'runPtyHost'], types: ['Port', 'PtyBackend', 'PtyHost', 'PtyHostOptions', 'PtyProcess', 'ViewPort'] },
   './keys': { source: 'src/index-keys.ts', values: ['keyOfInput'], types: ['KeyInput'] },
   './ui-shell': {
     source: 'src/index-ui-shell.ts',
     values: ['connectView', 'keepFocus', 'mountModule'],
     types: ['FocusRoot', 'FocusWindow', 'TerminalEvent', 'TerminalOpened', 'ViewBridge', 'ViewTarget'],
   },
-  './window': { source: 'src/index-window.ts', values: ['WINDOW_OWNER'], types: ['DisablePreview', 'DocumentRow', 'ShownDialog', 'WindowLock', 'WindowSnapshot', 'WindowTitle'] },
+  './plugin-check': { source: 'src/index-plugin-check.ts', values: ['CHECKED_KEYS', 'ENTRY_FILES', 'checkPlugin', 'formatProblem', 'isTestPath'], types: ['CheckOptions', 'CheckReport', 'FileRef', 'ImportRules', 'Problem'] },
+  './window': { source: 'src/index-window.ts', values: ['WINDOW_OWNER'], types: ['Area', 'DisablePreview', 'DocumentRow', 'LayoutEntry', 'ShownDialog', 'WindowLock', 'WindowSnapshot', 'WindowTitle'] },
   './elements': { source: 'elements/elements.ts', values: ['defineElements'], types: [] },
 };
 
@@ -143,10 +160,12 @@ const NOT_NAMED: Readonly<Record<string, string>> = {
   Endpoint: 'возврат runHost: приложение его не использует, состав методов не обещан',
   AskHost: 'позиционный параметр конструктора OsGateway: класс отдан для замеров и тестов, не для встраивания',
   Denial: 'позиционный параметр конструктора OsGateway (там же)',
+  ConfigView: 'возврат позиционного параметра конструктора OsGateway (там же): слои config для права net, ADR-CH-0015',
   PtyExpiry: 'позиционный параметр конструктора OsGateway (там же)',
   PushMethod: 'позиционный параметр конструктора OsGateway (там же)',
-  PtyLimits: 'позиционный параметр конструктора PtyTable: класс отдан для замеров и тестов, не для встраивания',
-  PtyOrphan: 'позиционный параметр конструктора PtyTable (там же)',
+  PtyTableOptions: 'позиционный параметр конструктора PtyTable: класс отдан для замеров и тестов, не для встраивания',
+  PtyHostEvents: 'часть параметров конструктора PtyTable и OsGateway (там же)',
+  PtyWatchdog: 'часть параметров конструктора PtyTable (там же)',
 };
 
 const manifest = JSON.parse(fs.readFileSync(path.join(core, 'package.json'), 'utf8')) as { exports: Record<string, string | { default: string }> };
@@ -236,38 +255,76 @@ describe('публичный API ядра: точки входа', () => {
   });
 });
 
-describe('публичный API ядра: типы в сигнатурах', () => {
-  it('всё, что торчит из публичных объявлений, тоже имеет имя в какой-то точке входа', () => {
-    const named = new Set<ts.Symbol>();
-    for (const entry of Object.values(ENTRIES)) for (const target of exportsOf(entry).targets) named.add(target);
-    const leaks = new Set<string>();
-    for (const entry of Object.values(ENTRIES)) {
-      const program = programFor(entry);
-      const checker = program.getTypeChecker();
-      const file = program.getSourceFile(path.join(core, entry.source));
-      const module = file && checker.getSymbolAtLocation(file);
-      for (const exported of module ? checker.getExportsOfModule(module) : []) {
-        const own = exported.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(exported) : exported;
-        for (const declaration of own.declarations ?? []) {
-          const visit = (node: ts.Node): void => {
-            // Тела и закрытые члены в .d.ts не попадают: только типы подписей.
-            if (ts.isBlock(node) || (ts.canHaveModifiers(node) && ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.PrivateKeyword)) || ('name' in node && ts.isPrivateIdentifier(node.name as ts.Node))) return;
-            // `typeof KINDS` (значение) в объявления попадает без имени: имя нужно только типам.
-            const reference = ts.isTypeReferenceNode(node) ? node.typeName : ts.isExpressionWithTypeArguments(node) ? node.expression : undefined;
-            if (reference) {
-              const raw = checker.getSymbolAtLocation(reference);
-              const symbol = raw && raw.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(raw) : raw;
-              const where = symbol?.declarations?.[0]?.getSourceFile().fileName ?? '';
-              const mine = where.startsWith(path.join(core, 'src') + path.sep) || where.startsWith(path.join(core, 'elements') + path.sep);
-              if (symbol && mine && !named.has(symbol) && !(symbol.flags & ts.SymbolFlags.TypeParameter) && !(symbol.name in NOT_NAMED)) leaks.add(`${symbol.name} (${path.relative(core, where)}) <- ${exported.name}`);
-            }
-            ts.forEachChild(node, visit);
-          };
-          visit(declaration);
-        }
+/**
+ * Типы, которые торчат из объявлений входов, но имени ни в одном входе не имеют: `Имя (файл) <- экспорт`.
+ * Обход идёт по `.d.ts`, а не по исходникам: выведенный тип возврата (`function f() { return hidden; }`) в исходнике не записан,
+ * а в объявлении компилятор выписывает его явно - это то, что видит потребитель пакета.
+ */
+function unnamedTypes(entryFiles: readonly string[], inside: (file: string) => boolean, allowed: Readonly<Record<string, string>>): string[] {
+  const program = ts.createProgram([...entryFiles], { noEmit: true, skipLibCheck: true, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext, types: [] });
+  const checker = program.getTypeChecker();
+  const resolve = (s: ts.Symbol) => (s.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s);
+  const modules = entryFiles.map((f) => {
+    const file = program.getSourceFile(f);
+    assert.ok(file, `нет ${f}`);
+    const symbol = checker.getSymbolAtLocation(file);
+    assert.ok(symbol, `${f}: не модуль`);
+    return checker.getExportsOfModule(symbol);
+  });
+  const named = new Set(modules.flatMap((m) => m.map(resolve)));
+  const leaks = new Set<string>();
+  for (const exports of modules) {
+    for (const exported of exports) {
+      for (const declaration of resolve(exported).declarations ?? []) {
+        const visit = (node: ts.Node): void => {
+          // Тела и закрытые члены в .d.ts не попадают: только типы подписей.
+          if (ts.isBlock(node) || (ts.canHaveModifiers(node) && ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.PrivateKeyword)) || ('name' in node && ts.isPrivateIdentifier(node.name as ts.Node))) return;
+          // `typeof KINDS` (значение) в объявления попадает без имени: имя нужно только типам.
+          // Тип из другого модуля без импорта в этом файле компилятор выписывает как `import("./x.js").T`.
+          const reference = ts.isTypeReferenceNode(node) ? node.typeName : ts.isExpressionWithTypeArguments(node) ? node.expression : ts.isImportTypeNode(node) && !node.isTypeOf ? node.qualifier : undefined;
+          if (reference) {
+            const raw = checker.getSymbolAtLocation(reference);
+            const symbol = raw && resolve(raw);
+            const where = symbol?.declarations?.[0]?.getSourceFile().fileName ?? '';
+            if (symbol && inside(where) && !named.has(symbol) && !(symbol.flags & ts.SymbolFlags.TypeParameter) && !(symbol.name in allowed)) leaks.add(`${symbol.name} (${path.relative(core, where)}) <- ${exported.name}`);
+          }
+          ts.forEachChild(node, visit);
+        };
+        visit(declaration);
       }
     }
-    assert.deepEqual([...leaks].sort(), [], 'безымянный тип в публичной сигнатуре: добавь его в перечень точки входа или убери из сигнатуры');
+  }
+  return [...leaks].sort();
+}
+
+describe('публичный API ядра: типы в сигнатурах', () => {
+  const dist = path.join(core, 'dist') + path.sep;
+
+  it('всё, что торчит из публичных объявлений (core/dist/**/*.d.ts), тоже имеет имя в какой-то точке входа', () => {
+    const entryFiles = Object.keys(ENTRIES).map((name) => {
+      const file = path.join(core, defaultOf(manifest.exports[name]).replace(/\.js$/, '.d.ts'));
+      assert.ok(fs.existsSync(file), `нет ${file}: запусти npm run build:core`);
+      return file;
+    });
+    // Прямой запуск файла минует pretest: без этой сверки тест судит прошлую сборку.
+    const built = Math.min(...entryFiles.map((f) => fs.statSync(f).mtimeMs));
+    const sources = [...fs.readdirSync(path.join(core, 'src'), { recursive: true, encoding: 'utf8' }).map((f) => path.join(core, 'src', f)), path.join(core, 'elements', 'elements.ts')];
+    assert.deepEqual(sources.filter((f) => f.endsWith('.ts') && fs.statSync(f).mtimeMs > built).map((f) => path.relative(core, f)), [], 'core/dist старше исходников: запусти npm run build:core');
+    assert.deepEqual(unnamedTypes(entryFiles, (f) => f.startsWith(dist), NOT_NAMED), [], 'безымянный тип в публичной сигнатуре: добавь его в перечень точки входа или убери из сигнатуры');
+  });
+
+  it('проверка ловит безымянный тип, в том числе выведенный (в исходнике его нет)', () => {
+    const work = fs.mkdtempSync(path.join(os.tmpdir(), 'cyborg-leak-'));
+    try {
+      const entry = path.join(work, 'entry.d.ts');
+      // Так компилятор выписывает `function leakFn() { return hidden; }`: тип возврата явно, сам тип без экспорта.
+      fs.writeFileSync(entry, 'interface Hidden {\n  a: 1;\n}\nexport declare function leakFn(): Hidden;\nexport declare function leakImport(): import("./inner.js").Inner;\nexport {};\n');
+      fs.writeFileSync(path.join(work, 'inner.d.ts'), 'export interface Inner {\n  a: 1;\n}\n');
+      assert.deepEqual(unnamedTypes([entry], (f) => f.startsWith(work), {}), [`Hidden (${path.relative(core, entry)}) <- leakFn`, `Inner (${path.relative(core, path.join(work, 'inner.d.ts'))}) <- leakImport`]);
+      assert.deepEqual(unnamedTypes([entry], (f) => f.startsWith(work), { Hidden: 'проба', Inner: 'проба' }), []);
+    } finally {
+      fs.rmSync(work, { recursive: true, force: true });
+    }
   });
 });
 
@@ -331,9 +388,13 @@ export function boundaryViolations(file: string, text: string, rel: string): str
   }
   // Путь, собранный из частей (`join(repo, 'core', 'src', …)`), статика импортов не видит.
   text.split('\n').forEach((l, i) => {
-    if (/'core',\s*'(src|dist|elements)'/.test(l)) found.push(`${rel}:${i + 1} путь в core/${/'core',\s*'(\w+)'/.exec(l)?.[1] ?? ''} собран из частей`);
+    if (/(['"`])core\1\s*,\s*(['"`])(src|dist|elements)\2/.test(l)) found.push(`${rel}:${i + 1} путь в core/${/['"`]core['"`]\s*,\s*['"`](\w+)['"`]/.exec(l)?.[1] ?? ''} собран из частей`);
     // `new URL('…/core/src/…', import.meta.url)` - тоже путь мимо пакета, но не импорт.
     if (/new URL\(\s*['"`][^'"`]*core\/(src|dist|elements)\//.test(l)) found.push(`${rel}:${i + 1} путь в core/ через new URL`);
+  });
+  // Любая другая строка с путём в core/src, dist или elements (fork, readFile, spawn): тоже мимо пакета. Строки, уже названные выше, не дублируем.
+  text.split('\n').forEach((l, i) => {
+    if (/['"`][^'"`\n]*core\/(src|dist|elements)\//.test(l) && !found.some((f) => f.startsWith(`${rel}:${i + 1} `))) found.push(`${rel}:${i + 1} путь в core/ строкой`);
   });
   for (const { spec, name, line } of coreImports(file, text)) {
     if (spec !== PACKAGE && !spec.startsWith(`${PACKAGE}/`)) continue;
@@ -345,6 +406,8 @@ export function boundaryViolations(file: string, text: string, rel: string): str
 
 /** Файлы playground, которым внутренности ядра нужны по делу: замер самого ядра. Каждое исключение - с причиной и сроком. */
 const INTERNAL: Readonly<Record<string, string>> = {
+  'playground/src/main/spike-gateway.ts': 'замер шлюза берёт net-transport (guardedLookup, isLocalAddress, closePools, transport) из core/src; уедет к замерам ядра вместе с остальными (не T-09)',
+  'electron/test/boundary.test.ts': 'пробные строки проверки границы адаптера намеренно ведут вглубь ядра: проверка должна их ловить',
   'playground/scripts/spike-pty-restore.mjs': 'замер хвоста pty берёт Tail и BACKLOG_LIMIT из core/src/pty.ts; уедет к замерам ядра вместе с остальными (не T-09)',
 };
 
@@ -381,14 +444,16 @@ describe('публичный API ядра: потребители в репоз�
       "import { x } from '@cyborg-harness/core/dist/src/index.js';",
       "import { y } from '@cyborg-harness/core/nothing';",
       "import type { WindowSnapshot } from '@cyborg-harness/core/window';",
-      "import { FakePty } from '../../core/test/fake-pty.ts';",
+      "import { FakePty } from '../../testing/src/fake-pty.ts';",
       "export { runHost } from '@cyborg-harness/core/host';",
       "import { elements } from '../../core/elements/elements.ts';",
       "const { Tail } = await import(join(repo, 'core', 'src', 'pty.ts'));",
       "const entry = fileURLToPath(new URL('../../core/src/host-entry.ts', import.meta.url));",
       "const fixture = new URL(`../../core/test/fixtures/x.ts`, import.meta.url);",
+      "const host = fork('../../core/src/host-entry.ts');",
+      "await readFile('core/dist/src/index.js');",
     ].join('\n');
     const found = boundaryViolations('/x.ts', text, 'x.ts').map((v) => Number(/:(\d+) /.exec(v)?.[1]));
-    assert.deepEqual(found.sort((a, b) => a - b), [2, 3, 4, 5, 6, 10, 11, 12]);
+    assert.deepEqual(found.sort((a, b) => a - b), [2, 3, 4, 5, 6, 10, 11, 12, 14, 15]);
   });
 });

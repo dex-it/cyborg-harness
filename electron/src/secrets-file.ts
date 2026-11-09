@@ -55,5 +55,17 @@ export function fileSecrets(file: string, cipher: SecretCipher): SecretStore {
       update((data) => Object.fromEntries(Object.entries(data).filter(([k]) => k !== key)));
       return Promise.resolve();
     },
+    // Расшифровывать для стирания нечего: ключи в файле открытые, поэтому работает и без шифрования ОС.
+    // Файла, которого нет или который не разобрать, не создаём и не переписываем: стирать нечего.
+    deletePrefix: (prefix) => {
+      let removed = 0;
+      withFileLock(file, () => {
+        const all = read();
+        const kept = Object.entries(all).filter(([k]) => !k.startsWith(prefix));
+        removed = Object.keys(all).length - kept.length;
+        if (removed > 0) write(Object.fromEntries(kept));
+      });
+      return Promise.resolve(removed);
+    },
   };
 }

@@ -1,4 +1,4 @@
-import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, PluginState } from '@cyborg-harness/electron/window';
+import type { FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot, PluginState } from '@cyborg-harness/electron/window';
 
 export const STATE_LABEL: Record<PluginState, string> = {
   active: 'Работает',
@@ -13,6 +13,42 @@ const ORDER: Record<PluginState, number> = { stopped: 0, restarting: 1, active: 
 
 export function sortedPlugins(rows: readonly PluginRow[]): PluginRow[] {
   return [...rows].sort((a, b) => ORDER[a.state] - ORDER[b.state] || a.id.localeCompare(b.id));
+}
+
+/** Метка строки стороннего плагина: права словами рядом, но проверки кода на этапе 1 нет, поэтому это предупреждение, а не защита. */
+export function originNote(row: PluginRow): string | undefined {
+  if (row.origin !== 'user') return undefined;
+  return 'сторонний плагин из каталога пользователя: код не проверен, на этапе 1 исполняется в обычном процессе Node и может обойти шлюз ctx.os; права ниже - то, что он заявил, а не то, что ему можно';
+}
+
+/** Плашка над списком: каталог пользователя включён запуском, и всё, что в нём лежит, исполняется. */
+export function userPluginsNotice(snapshot: PluginsSnapshot): string | undefined {
+  return snapshot.userPlugins ? 'Запуск с --user-plugins: плагины из каталога пользователя загружаются, их код не проверен. Без флага они не читаются.' : undefined;
+}
+
+/** Что показать на месте вида: фрейм, фрейм под плашкой или заглушку. */
+export function viewMode(row: PluginRow, entry: LayoutRow): 'frame' | 'restarting' | 'placeholder' | undefined {
+  if (entry.url === undefined) return undefined;
+  if (entry.mark !== undefined || row.state === 'stopped') return 'placeholder';
+  return row.state === 'restarting' ? 'restarting' : 'frame';
+}
+
+export interface ViewSlot {
+  /** Плагин и вид: у плагина их может быть несколько. */
+  readonly key: string;
+  readonly row: PluginRow;
+  readonly entry: LayoutRow;
+  readonly mode: NonNullable<ReturnType<typeof viewMode>>;
+}
+
+/** Виды раскладки в порядке ядра; документы, виды без адреса и плагины, которых нет в списке, окно не рисует. */
+export function viewSlots(plugins: readonly PluginRow[], layout: readonly LayoutRow[]): ViewSlot[] {
+  const rows = new Map(plugins.map((p) => [p.id, p]));
+  return layout.flatMap((entry) => {
+    const row = rows.get(entry.pluginId);
+    const mode = row && entry.kind === 'view' ? viewMode(row, entry) : undefined;
+    return row && mode ? [{ key: `${entry.pluginId}/${entry.name}`, row, entry, mode }] : [];
+  });
 }
 
 export type Action = 'run' | 'disable' | 'enable' | 'crash' | 'hang' | 'journal';

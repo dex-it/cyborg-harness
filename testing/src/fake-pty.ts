@@ -1,4 +1,4 @@
-import type { PtyBackend, PtyProcess } from '../src/pty.ts';
+import type { PtyBackend, PtyProcess } from '@cyborg-harness/core';
 
 export interface FakeProc extends PtyProcess {
   readonly file: string;
@@ -11,8 +11,11 @@ export interface FakeProc extends PtyProcess {
   exit(code: number): void;
 }
 
+/** `spawn` у подделки синхронный: ядро принимает и промис (pty-хост в другом процессе), тесту удобнее сразу процесс. */
+export type FakePty = Omit<PtyBackend, 'spawn'> & { spawn(...args: Parameters<PtyBackend['spawn']>): FakeProc; procs: FakeProc[] };
+
 /** Псевдотерминал без ОС: тест сам пишет вывод и завершает процесс. */
-export function fakePty(): PtyBackend & { procs: FakeProc[] } {
+export function fakePty(): FakePty {
   const procs: FakeProc[] = [];
   return {
     procs,

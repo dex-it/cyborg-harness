@@ -2,7 +2,7 @@
 import { performance } from 'node:perf_hooks';
 import { createRequire } from 'node:module';
 import { cpus, platform, arch, release } from 'node:os';
-import { PtyTable } from '@cyborg-harness/core';
+import { inlinePtyHost, PtyTable } from '@cyborg-harness/core';
 
 const require = createRequire(import.meta.url);
 const nodePty = require('node-pty');
@@ -20,8 +20,9 @@ const stats = (xs) => ({ n: xs.length, p50: +pct(xs, 50).toFixed(2), p95: +pct(x
 
 function table(flushMs, onData) {
   const pushed = { messages: 0, chars: 0, pushMs: 0 };
+  // Хост pty в том же процессе: тот же протокол, что у отдельного процесса, но без его изоляции (K-01).
   const t = new PtyTable(
-    { spawn: (file, args, o) => nodePty.spawn(file, args, o) },
+    inlinePtyHost({ spawn: (file, args, o) => nodePty.spawn(file, args, o) }),
     (_, method, params) => {
       if (method !== 'pty.data') return;
       const started = performance.now();
@@ -32,8 +33,6 @@ function table(flushMs, onData) {
       pushed.chars += params.data.length;
       onData(params.data, started);
     },
-    undefined,
-    undefined,
     { ptyFlushMs: flushMs },
   );
   return { t, pushed };
@@ -58,7 +57,7 @@ async function echo(flushMs) {
       resolveEcho?.(performance.now());
     }
   });
-  const wire = t.spawn('spike', spawnOpts('/bin/cat', []));
+  const wire = await t.spawn('spike', spawnOpts('/bin/cat', []));
   await sleep(200);
   const lat = [];
   for (let i = 0; i < WARMUP + SAMPLES; i++) {
@@ -98,7 +97,7 @@ async function stream(name, code, ms, flushMs) {
     tail = text.slice(end).slice(-32);
     if (text.includes('#DONE#')) done();
   });
-  const wire = t.spawn('spike', spawnOpts(process.execPath, ['-e', code.replace('DURATION', String(ms))]));
+  const wire = await t.spawn('spike', spawnOpts(process.execPath, ['-e', code.replace('DURATION', String(ms))]));
   await Promise.race([finished, sleep(ms + 5000)]);
   await exited(t, wire.id);
   t.release('spike');

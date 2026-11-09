@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { JournalEntry } from '../src/loader.ts';
-import { describeEntry, entryLevel, pluginStatuses } from '../src/status.ts';
+import { describeEntry, entryLevel, entryPlugins, pluginStatuses } from '../src/status.ts';
 
 const view = (journal: JournalEntry[]) => pluginStatuses(journal).map((s) => `${s.id}:${s.state}:${s.cause?.kind}:${s.revivable ? 'R' : '-'}`);
 
@@ -46,4 +46,19 @@ test('запись журнала словами и уровень', () => {
     describeEntry({ pluginId: 'cyborg.x', kind: 'rejected', reasons: [{ kind: 'reserved', what: 'id', name: 'cyborg.x', prefix: 'cyborg.' }] }),
     'id cyborg.x из пространства cyborg.* - только у встроенных плагинов',
   );
+});
+
+test('вызов устаревшего члена: словами с вызывающим, поставщиком и повторами, уровень warn, состояние плагинов не меняет, виден обоим', () => {
+  const call: JournalEntry = { pluginId: 'tabs', kind: 'deprecated-call', provider: 'sessions', contract: 'cyborg.sessions', member: 'list' };
+  assert.equal(describeEntry(call), 'tabs вызывает устаревший cyborg.sessions.list поставщика sessions');
+  assert.equal(describeEntry({ ...call, repeats: 41 }), 'tabs вызывает устаревший cyborg.sessions.list поставщика sessions - ещё 41 раз за 5 с');
+  assert.equal(entryLevel(call), 'warn');
+  assert.deepEqual(entryPlugins(call), ['tabs', 'sessions']);
+  const journal: JournalEntry[] = [
+    { pluginId: 'tabs', kind: 'activated', hostId: 'h', ms: 1 },
+    { pluginId: 'sessions', kind: 'activated', hostId: 'h', ms: 1 },
+    call,
+  ];
+  assert.deepEqual(view(journal), ['tabs:active:activated:-', 'sessions:active:activated:-']);
+  assert.deepEqual(view([call]), [], 'запись о вызове сама плагин в списке не заводит');
 });

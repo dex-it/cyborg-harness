@@ -17,6 +17,7 @@
           <span>Безопасный режим: код плагинов не запускается.</span>
           <button id="safe-mode-exit" type="button">Выйти из безопасного режима</button>
         </div>
+        <div id="user-plugins" class="safe-mode user-plugins" role="status" hidden></div>
         <div class="workspace">
           <span id="workspace-current" class="workspace-current"></span>
           <button id="workspace-open" type="button">Открыть…</button>
@@ -26,9 +27,11 @@
       </header>
 
       <section class="pane pane-session" aria-labelledby="session-title">
-        <h2 id="session-title">Сессия агента</h2>
+        <h2 id="session-title">Основная область</h2>
+        <div id="toolbar-view" class="views views-toolbar" aria-label="Панель инструментов"></div>
         <div id="main-view" class="views views-main"></div>
       </section>
+      <div id="popup-view" class="views views-popup" aria-label="Всплывающие виды"></div>
 
       <div class="side">
         <div id="side-tabs" class="side-tabs" role="tablist" aria-label="Панели">

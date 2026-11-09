@@ -13,6 +13,7 @@ const tsc = path.join(root, 'node_modules', 'typescript7', 'bin', 'tsc');
 
 let work = '';
 let project = '';
+let corePack = '';
 /** Команда с пределом времени: зависшая npm не должна держать весь `npm test`; при отказе в сообщение идёт её вывод. */
 function run(cmd: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = {}): string {
   try {
@@ -23,9 +24,13 @@ function run(cmd: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = 
   }
 }
 
-/** Упаковывает пакет в `work` и возвращает путь архива. */
-function pack(dir: string): string {
-  const [out] = JSON.parse(run('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', work], dir)) as [{ filename: string }];
+/**
+ * Упаковывает пакет в `work` и возвращает путь архива. Жизненный цикл пакета (`prepack`) идёт как у настоящей публикации:
+ * если контракты собирают `dist` в `prepack` (P-01, #102), без него в архиве не было бы объявлений.
+ * `ignoreScripts` - для копии пакета, где собирать нечего (проверка версии).
+ */
+function pack(dir: string, ignoreScripts = false): string {
+  const [out] = JSON.parse(run('npm', ['pack', '--json', ...(ignoreScripts ? ['--ignore-scripts'] : []), '--pack-destination', work], dir)) as [{ filename: string }];
   return path.join(work, out.filename);
 }
 
@@ -35,7 +40,8 @@ describe('потребитель вне репозитория', { timeout: 180_
     work = fs.mkdtempSync(path.join(os.tmpdir(), 'cyborg-consumer-'));
     project = path.join(work, 'app');
     fs.mkdirSync(project);
-    const tarballs = [pack(path.join(root, 'contracts')), pack(core)];
+    corePack = pack(core);
+    const tarballs = [pack(path.join(root, 'contracts')), corePack];
     fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'consumer', private: true, type: 'module' }));
     run('npm', ['install', '--offline', '--no-audit', '--no-fund', '--ignore-scripts', ...tarballs], project);
     fs.cpSync(path.join(core, 'examples'), path.join(project, 'examples'), { recursive: true });
@@ -49,12 +55,29 @@ describe('потребитель вне репозитория', { timeout: 180_
     fs.rmSync(work, { recursive: true, force: true });
   });
 
-  it('пакеты стоят по номерам версий, ядро не принесло зависимостей', () => {
+  it('архивы ставятся, ядро не принесло зависимостей, peer на контракты удовлетворён', () => {
     const lock = JSON.parse(fs.readFileSync(path.join(project, 'package-lock.json'), 'utf8')) as { packages: Record<string, { version?: string }> };
     const names = Object.keys(lock.packages).filter((k) => k !== '');
     assert.deepEqual(names.sort(), ['node_modules/@cyborg-harness/contracts', 'node_modules/@cyborg-harness/core']);
     const own = JSON.parse(fs.readFileSync(path.join(core, 'package.json'), 'utf8')) as { version: string };
+    // Версия в lock - из того же package.json, поэтому «по номерам версий» здесь не проверяется (это даст реестр, P-10); проверяется другое:
+    // npm не нашёл неудовлетворённого peer (`npm ls` падает на invalid) и контракты встали в той версии, что лежит в репозитории.
     assert.equal(lock.packages['node_modules/@cyborg-harness/core']?.version, own.version);
+    const contractsOwn = JSON.parse(fs.readFileSync(path.join(root, 'contracts', 'package.json'), 'utf8')) as { version: string };
+    assert.equal(lock.packages['node_modules/@cyborg-harness/contracts']?.version, contractsOwn.version);
+    run('npm', ['ls', '--all', '--offline'], project);
+  });
+
+  it('peer на контракты принимает предрелиз: 1.0.0-dev из P-01 (#102) ставится рядом с ядром без реестра', () => {
+    const copy = path.join(work, 'contracts-prerelease');
+    fs.cpSync(path.join(root, 'contracts'), copy, { recursive: true, filter: (src) => path.basename(src) !== 'node_modules' && path.basename(src) !== 'dist' });
+    const file = path.join(copy, 'package.json');
+    fs.writeFileSync(file, JSON.stringify({ ...(JSON.parse(fs.readFileSync(file, 'utf8')) as object), version: '1.0.0-dev' }));
+    const other = path.join(work, 'app-prerelease');
+    fs.mkdirSync(other);
+    fs.writeFileSync(path.join(other, 'package.json'), JSON.stringify({ name: 'consumer-prerelease', private: true, type: 'module' }));
+    run('npm', ['install', '--offline', '--no-audit', '--no-fund', '--ignore-scripts', pack(copy, true), corePack], other);
+    run('npm', ['ls', '--all', '--offline'], other);
   });
 
   it('import { load } из пакета собирается tsc: типы читаются из .d.ts', () => {
@@ -78,6 +101,27 @@ describe('потребитель вне репозитория', { timeout: 180_
     fs.writeFileSync(path.join(project, 'plugins', 'hello.ts'), plugin);
     fs.writeFileSync(path.join(project, 'readme-example.ts'), main);
     assert.equal(run(process.execPath, ['readme-example.ts'], project).trim(), 'hello');
+  });
+
+  it('checkPlugin из @cyborg-harness/core/plugin-check: чистый плагин без нарушений, запрещённый импорт с файлом и строкой (P-09)', () => {
+    const make = (name: string, code: string) => {
+      const dir = path.join(project, 'checked', name);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ id: 'acme.hello', version: '1.0.0', engines: { cyborg: '^1' } }));
+      fs.writeFileSync(path.join(dir, 'index.js'), code);
+      return dir;
+    };
+    // Командная строка cyborg-plugin живёт в своём пакете (P-06, tools/cyborg-plugin); здесь проверяется программный вход ядра.
+    fs.writeFileSync(
+      path.join(project, 'check.mjs'),
+      "import { checkPlugin, formatProblem } from '@cyborg-harness/core/plugin-check';\nconst r = await checkPlugin(process.argv[2]);\nconsole.log(JSON.stringify({ ok: r.ok, problems: r.problems.map(formatProblem) }));\n",
+    );
+    const check = (dir: string) => JSON.parse(run(process.execPath, ['check.mjs', dir], project)) as { ok: boolean; problems: string[] };
+    assert.deepEqual(check(make('good', 'export default {};\n')), { ok: true, problems: [] });
+    assert.deepEqual(check(make('bad', "import fs from 'node:fs';\nexport default {};\n")), {
+      ok: false,
+      problems: ["index.js:1: 'node:fs': только @cyborg-harness/contracts и свои модули"],
+    });
   });
 
   it('сценарий core/examples идёт на пакете: хосты в дочерних процессах из dist/host-entry.js', () => {

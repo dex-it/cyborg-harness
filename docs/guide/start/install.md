@@ -10,7 +10,7 @@ npm install @cyborg-harness/core @cyborg-harness/electron @cyborg-harness/contra
 ```
 
 :::caution[Пакеты ещё не опубликованы]
-Пакеты `@cyborg-harness/*` и команда `cyborg-plugin` публикуются задачами [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9). Пакеты scope `@cyborg` на npmjs.com к проекту не относятся. До выпуска работайте из репозитория (`npm ci`, `npm start`).
+Пакеты `@cyborg-harness/*` и команда `cyborg-plugin` ещё не в реестре. `@cyborg-harness/contracts` готов к выпуску ([P-01](https://github.com/dex-it/cyborg-harness/issues/29): собирается, упаковывается и ставится в пустой проект из tarball), его выпуск - [P-10](https://github.com/dex-it/cyborg-harness/issues/11); остальное публикуется задачами [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9). Пакеты scope `@cyborg` на npmjs.com к проекту не относятся. До выпуска работайте из репозитория (`npm ci`, `npm start`).
 :::
 
 ## Что делает каждый пакет
@@ -60,7 +60,7 @@ electron-rebuild -f -w node-pty
 Встроенные плагины приложение складывает в каталог поставки: по подкаталогу на плагин, в каждом `manifest.json` и точка входа главной части. Ядро читает манифесты, строит граф контрактов и только потом запускает код. Плагин, который нашёлся в каталоге поставки, считается встроенным и получает общий хост `builtin`.
 
 :::note[Каталог пользователя]
-Приложение само решает, читать ли ещё и каталог плагинов пользователя (`plugins/` в каталоге данных приложения). Плагин оттуда всегда получает собственный хост: на встроенный общий хост он не попадёт, даже если его назвали в группе `plugins.hosts`. Политика загрузки описана на странице [Плагины](/features/plugins/).
+Каталог плагинов пользователя (`plugins/` в каталоге данных приложения) читается только при запуске с флагом `--user-plugins`. Плагин оттуда сторонний: он получает собственный хост, на встроенный общий хост он не попадёт, даже если его назвали в группе `plugins.hosts`, и помечен в окне. Политика описана на странице [Плагины](/features/plugins/#каталог-пользователя-на-первом-этапе).
 :::
 
 ## Какие плагины включены

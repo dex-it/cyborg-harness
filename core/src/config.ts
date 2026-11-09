@@ -7,6 +7,9 @@ export type { Layer, SectionResult, SectionSpec };
 
 export const VERSION_KEY = '$version';
 
+/** Слой, значения которого вправе расширять права плагина (ADR-CH-0015); файл воркспейса приходит из репозитория команды, и его значения права не расширяют. */
+export const TRUSTED_LAYER: Layer = 'user';
+
 interface Resolved { readonly result: SectionResult; readonly layers: ReadonlyMap<Layer, Record<string, unknown>> }
 
 /** Слой новее манифеста - откат плагина: раздел не читается, чтобы старый код не затёр новые данные. */
@@ -169,6 +172,19 @@ export class SectionStore {
       }
       // В памяти - только свой раздел: правку извне разделам сообщит reload по слежению.
       this.#documents.set(layer, { ...this.#documents.get(layer), [id]: section });
+    });
+  }
+
+  /** Стирает раздел из слоя; `false` - раздела там не было, и файл не тронут. Основа - файл, как у `write`. */
+  async remove(layer: Layer, id: string): Promise<boolean> {
+    if (!this.#layers.includes(layer)) throw new Error(`слоя ${layer} нет`);
+    return this.#serial(async () => {
+      const fresh = await this.#store.load(layer);
+      const { [id]: gone, ...rest } = isRecord(fresh) ? fresh : (this.#documents.get(layer) ?? {});
+      if (gone === undefined) return false;
+      await this.#store.save(layer, rest);
+      this.#documents.set(layer, Object.fromEntries(Object.entries(this.#documents.get(layer) ?? {}).filter(([key]) => key !== id)));
+      return true;
     });
   }
 

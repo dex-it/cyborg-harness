@@ -71,6 +71,8 @@ function rejection(r: Rejection): string {
       return `${r.contract}: поставщиков несколько (${r.providers.join(', ')}), а кратность one`;
     case 'cycle':
       return `цикл зависимостей: ${r.members.join(' -> ')}`;
+    case 'command':
+      return `команда ${r.command} объявлена и в манифесте ${r.with.join(', ')}`;
     case 'reserved':
       return `${r.what === 'id' ? 'id' : 'контракт'} ${r.name} из пространства поставки ${r.prefix}*, а плагин сторонний`;
   }
@@ -130,8 +132,12 @@ function journalLine(e: JournalEntry): string {
       return `${yellow('↻')} ${id} включён снова`;
     case 'denied':
       return `${yellow('⛔')} ${id} отказ ctx.os: ${e.detail}`;
+    case 'deprecated-call':
+      return `${yellow('⚠')} ${id} вызывает устаревший ${e.contract}.${e.member} поставщика ${e.provider}`;
     case 'unloaded':
       return `${dim('⏏')} ${id} выгружен${e.by === e.pluginId ? '' : ` вместе с ${e.by}`}${e.error ? `, ошибка: ${e.error}` : ''}`;
+    case 'uninstalled':
+      return `${e.error ? red('✖') : dim('␡')} ${id} удалён; стёрто: ${e.erased.join(', ') || 'ничего'}${e.error ? `; не удалось: ${e.error}` : ''}`;
     case 'pty-expired':
       return `${yellow('⚠')} ${id} терминал ${e.id} (${e.program}) завершён: не подхвачен за ${String(e.graceMs / 1000)} с`;
     case 'key-conflict':
@@ -140,6 +146,8 @@ function journalLine(e: JournalEntry): string {
       return `${yellow('⌨')} plugins.keybindings: ${e.key} -> ${String(e.command)} не применено: ${e.reason}`;
     case 'host-isolated':
       return `${yellow('◌')} ${id} сторонний: группа ${e.group} не действует, свой хост ${e.hostId}`;
+    case 'third-party':
+      return `${yellow('◌')} ${id} сторонний: код не из поставки, не проверен`;
     case 'host-own-grouped':
       return `${yellow('◌')} ${id} просит свой хост, но группа ${e.group} сажает его к ${e.neighbours.join(', ')}`;
   }

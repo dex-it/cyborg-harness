@@ -28,13 +28,13 @@ Peer-зависимости: `@cyborg-harness/core`, `@cyborg-harness/contracts`
 
 - хосты плагинов процессами `utilityProcess` со сторожем ядра: `utilityHosts(entry)` и файл `host-entry`;
 - среду `ctx.os` на Electron: секреты в файле под `safeStorage`, pty через `node-pty` с убийством группы, `shell`, `dialog`, `clipboard`, уведомления ОС;
-- службу плагинов для окна: поиск плагинов в каталогах, старт ядра, снимок (`PluginsSnapshot`: плагины, виды, клавиши, лента, журнал, слой окна, документы), команды, выключение и включение;
+- службу плагинов для окна: поиск плагинов в каталогах, старт ядра, снимок (`PluginsSnapshot`: плагины, раскладка видов, клавиши, лента, журнал, слой окна, документы), команды, выключение и включение;
 - схему `cyborg-plugin://<плагин>/`: свой origin на плагин, оболочка и файлы вида, строгая CSP, защита от выхода за каталог плагина и от симлинков, запрет новых окон и ухода окна со своих адресов (`guardNavigation`);
 - каналы IPC: окно -> служба плагинов и вид -> служба плагинов (плагин всегда берётся из origin фрейма, не из аргументов), терминалы видов, перетаскивание файлов между видами, тема видов;
 - перехват клавиш ядром раньше страницы, события фокуса окна, сна, пробуждения и блокировки экрана, выход с ожиданием `onBeforeQuit` плагинов, одиночный экземпляр;
 - перезапуск приложения при смене воркспейса и безопасного режима с вопросом о живых pty;
 - слой окна: диалоги видов и экраны замков из снимка ядра (`WindowLayerView`);
-- несколько видов плагина: `PluginRow.views` - все `ui.views` манифеста по порядку, у каждого свой адрес.
+- раскладку видов: `PluginsSnapshot.layout` (`LayoutRow`) - упорядоченный снимок `Kernel.layout` (область, `order`, заголовок), у вида плагина свой адрес для `<iframe>`; плагин с несколькими видами показывает все.
 
 Делает приложение (в playground это `playground/src/main/main.ts` и `playground/src/renderer`):
 
@@ -46,7 +46,7 @@ Peer-зависимости: `@cyborg-harness/core`, `@cyborg-harness/contracts`
 - каналы, специфичные для приложения: `workspace:open` и `app:safe-mode` в playground регистрируются через `windowChannel` поверх `restarts()`;
 - решение, что показывать на заблокированном экране, сверх того, что отдаёт ядро, и любую предметную область: адаптер её не знает.
 
-Контракт разметки окна для `WindowLayerView` и перетаскивания: фрейм вида лежит в элементе с `data-plugin="<id плагина>"`, у фрейма `data-view="<имя вида>"` (диалог вида встаёт у своего фрейма), фреймы видов внутри элемента `.views`; экран замка - в слое замков, который приложение передаёт в `WindowLayerView`.
+Контракт разметки окна для `WindowLayerView` и перетаскивания: фрейм вида лежит в элементе с `data-plugin="<id плагина>"`, у того же элемента `data-view="<имя вида>"` (диалог вида встаёт у фрейма своего вида), фреймы видов внутри элемента `.views`; экран замка - в слое замков, который приложение передаёт в `WindowLayerView`.
 
 ## Минимальный пример: окно и ядро
 
@@ -135,18 +135,16 @@ let shown = '';
 async function refresh(): Promise<void> {
   const snapshot: PluginsSnapshot = await api.pluginsSnapshot();
   // Фреймы пересоздаются только при смене состава видов: снятый с документа iframe теряет состояние.
-  const layout = JSON.stringify(snapshot.plugins.map((row) => [row.id, (row.views ?? []).map((v) => v.url)]));
+  const wanted = snapshot.layout.filter((e) => e.kind === 'view' && e.url !== undefined);
+  const layout = JSON.stringify(wanted.map((e) => [e.pluginId, e.name, e.url]));
   if (layout !== shown) {
     shown = layout;
     views.replaceChildren(
-      ...snapshot.plugins.map((row) => {
+      ...wanted.map((e) => {
         const box = document.createElement('div');
-        box.dataset.plugin = row.id;
-        for (const v of row.views ?? []) {
-          const frame = Object.assign(document.createElement('iframe'), { src: v.url, title: `${row.id}: ${v.name}` });
-          frame.dataset.view = v.name;
-          box.append(frame);
-        }
+        box.dataset.plugin = e.pluginId;
+        box.dataset.view = e.name;
+        box.append(Object.assign(document.createElement('iframe'), { src: e.url, title: `${e.pluginId}: ${e.name}` }));
         return box;
       }),
     );
@@ -167,6 +165,8 @@ void refresh();
 esbuild main.ts --bundle --platform=node --format=cjs --external:electron --external:node-pty --outfile=dist/main.js
 # preload: песочница даёт только electron
 esbuild preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/preload.js
+# процесс pty-хоста (utilityProcess с node-pty): cjs, node-pty снаружи
+echo "import '@cyborg-harness/electron/pty-host-entry';" | esbuild --bundle --platform=node --format=cjs --external:electron --external:node-pty --resolve-dir=. --outfile=dist/pty-host.js
 # файл хоста для utilityProcess: ESM (в cjs esbuild заменил бы import() плагина на require)
 echo "import '@cyborg-harness/electron/host-entry';" | esbuild --bundle --platform=node --format=esm --outfile=dist/plugin-host.mjs
 # окно и оболочка вида (готовые файлы пакета кладутся рядом с окном)
@@ -182,8 +182,8 @@ cp node_modules/@cyborg-harness/electron/dist/shell/shell.{js,js.map,css} dist/s
 
 | Задача | Точка |
 |---|---|
-| K-01, pty-хост отдельным процессом ядра | `electronOs({ pty })`: вместо `node-pty` в главном процессе подставляется `OsEnvironment['pty']` с другой реализацией |
-| K-04, группы рендера (origin по группе) | origin вида строится в одном месте - `viewOrigin` и `pluginOfOrigin` в `view-protocol.ts`; адрес вида в `PluginRow.views[].url` |
+| K-01, pty-хост отдельным процессом ядра | сделано: `electronOs({ ptyHost: utilityPtyHost('dist/pty-host.js').spawn })`, точка входа процесса - `@cyborg-harness/electron/pty-host-entry`; без `ptyHost` pty остаются в главном процессе (`pty` или `node-pty`). `ViewTerminals` раздаёт виду порт `MessageChannelMain`, preload принимает его сам |
+| K-04, группы рендера (origin по группе) | origin вида строится в одном месте - `viewOrigin` и `pluginOfOrigin` в `view-protocol.ts`; адрес вида в `LayoutRow.url` |
 | K-05, строгая CSP вида | `serveViews(resolve, shellDir, { csp })`: строка или функция от плагина из адреса запроса; по умолчанию `VIEW_CSP` |
 | K-09, K-13, каналы «главная часть - вид», отмена запросов | `viewChannel(channel, handler)`: канал, который принимает только вид плагина, плагин берётся из origin фрейма; `windowChannel` - то же для документа окна. Имена каналов приложения не пересекаются с `plugins:`, `view:`, `window:`, `documents:`, `views:` |
 | K-11, переключатель безопасного режима | `restarts({ flags })` и канал `app:safe-mode` приложения; флаг и вопрос о живых pty - в пакете |

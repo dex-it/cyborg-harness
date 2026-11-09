@@ -36,6 +36,8 @@ export class DocumentTable {
   readonly #restorable: TypeLookup;
   readonly #changed: () => void;
   #docs: StoredDocument[];
+  /** Строки, которых нет в памяти, но есть в файле до первой успешной записи: владелец -> сколько. */
+  readonly #unread = new Map<string, number>();
   #writes: Promise<unknown> = Promise.resolve();
 
   constructor(persistence: DocumentPersistence | undefined, restorable: TypeLookup, changed: () => void = () => undefined) {
@@ -43,7 +45,9 @@ export class DocumentTable {
     this.#restorable = restorable;
     this.#changed = changed;
     // Тип, у которого обновлённый владелец снял restorable или который убрал, поднимать некому.
-    this.#docs = parseStored(persistence?.read()).filter((d) => kept(this.#restorable(d.pluginId, d.type)));
+    const stored = parseStored(persistence?.read());
+    this.#docs = stored.filter((d) => kept(this.#restorable(d.pluginId, d.type)));
+    for (const d of stored) if (!this.#docs.includes(d)) this.#unread.set(d.pluginId, (this.#unread.get(d.pluginId) ?? 0) + 1);
   }
 
   list(pluginId: string): DocumentInfo[] {
@@ -88,6 +92,23 @@ export class DocumentTable {
     return doc;
   }
 
+  /** Плагин удалён: все его строки уходят, и новый плагин с тем же id их не получит; число стёртых. Строки, отброшенные при чтении, но лежащие в файле, тоже уходят и считаются. */
+  async removeOf(pluginId: string): Promise<number> {
+    const gone = this.#docs.filter((d) => d.pluginId === pluginId);
+    const unread = this.#unread.get(pluginId) ?? 0;
+    if (gone.length + unread === 0) return 0;
+    this.#docs = this.#docs.filter((d) => d.pluginId !== pluginId);
+    try {
+      await this.#commit();
+    } catch (error) {
+      // Файл ещё хранит строки: повтор uninstall должен записать их стирание, а не найти пустую память и счесть стёртыми.
+      this.#docs.push(...gone);
+      this.#changed();
+      throw error;
+    }
+    return gone.length + unread;
+  }
+
   /** Чужой документ для плагина не существует. */
   #own(pluginId: string, id: unknown): [number, StoredDocument] {
     const at = this.#docs.findIndex((d) => d.id === id && d.pluginId === pluginId);
@@ -101,7 +122,11 @@ export class DocumentTable {
     const persistence = this.#persistence;
     if (!persistence) return Promise.resolve();
     // Снимок берётся в момент записи, а записи идут по очереди: поздняя не обгонит раннюю.
-    const write = this.#writes.then(() => persistence.write(this.#docs.filter((d) => kept(this.#restorable(d.pluginId, d.type)))));
+    const write = this.#writes.then(async () => {
+      await persistence.write(this.#docs.filter((d) => kept(this.#restorable(d.pluginId, d.type))));
+      // Файл переписан по памяти: отброшенных при чтении строк в нём больше нет.
+      this.#unread.clear();
+    });
     this.#writes = write.catch(() => undefined);
     return write;
   }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { pluginOfOrigin, viewOrigin } from '../src/view-protocol.ts';
+import { pluginOfOrigin, viewOfUrl, viewOrigin } from '../src/view-protocol.ts';
 import { themeTokens } from '../src/theme.ts';
 import { cspOf, resolveStaticFile, resolveViewRequest, VIEW_CSP, type PluginUi } from '../src/view-files.ts';
 
@@ -12,7 +12,7 @@ const base = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-view-files
 after(() => rm(base, { recursive: true, force: true }));
 const root = path.join(base, 'alice');
 const probe = path.join(base, 'probe');
-for (const file of [path.join(root, 'ui', 'ui.js'), path.join(root, 'bob', 'ui', 'ui.js'), path.join(probe, 'index.html')]) {
+for (const file of [path.join(root, 'ui', 'ui.js'), path.join(root, 'bob', 'ui', 'ui.js'), path.join(probe, 'index.html'), ...['codicon.ttf', 'codicon.woff2', 'ui.js.map', 'ui.wasm'].map((n) => path.join(root, 'ui', n))]) {
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, '');
 }
@@ -23,6 +23,9 @@ test('вид: origin называет плагин, чужая схема и м�
   assert.equal(pluginOfOrigin('cyborg-plugin://cyborg.files'), 'cyborg.files');
   assert.equal(pluginOfOrigin('file://'), undefined);
   assert.equal(pluginOfOrigin('cyborg-plugin://Alice:80'), undefined);
+  assert.equal(viewOfUrl('cyborg-plugin://alice/?view=tree'), 'tree');
+  assert.equal(viewOfUrl('cyborg-plugin://alice/'), undefined);
+  assert.equal(viewOfUrl('не адрес'), undefined);
 });
 
 test('вид: корень - оболочка с модулем из манифеста, /.cyborg/ - файлы ядра, прочее - только из каталога своего плагина', () => {
@@ -44,6 +47,11 @@ test('вид: корень - оболочка с модулем из маниф�
   assert.equal(resolveViewRequest('cyborg-plugin://bob/', uiOf), undefined, 'у плагина нет ui');
   assert.equal(resolveViewRequest('cyborg-plugin://alice/manifest.json', uiOf), undefined, 'неизвестный тип не отдаётся');
   assert.equal(resolveViewRequest('cyborg-plugin://alice/%E0%A4%A', uiOf), undefined);
+});
+
+test('вид: шрифт значков Monaco (.ttf) отдаётся своим типом, другие расширения шрифтов и карты - нет', () => {
+  assert.deepEqual(resolveViewRequest('cyborg-plugin://alice/ui/codicon.ttf', uiOf), { kind: 'file', file: path.join(root, 'ui', 'codicon.ttf'), type: 'font/ttf' });
+  for (const name of ['codicon.woff2', 'ui.js.map', 'ui.wasm']) assert.equal(resolveViewRequest(`cyborg-plugin://alice/ui/${name}`, uiOf), undefined, name);
 });
 
 test('статика спайка: корень - index.html каталога, выход за каталог закрыт', () => {

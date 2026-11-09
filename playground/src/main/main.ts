@@ -21,7 +21,9 @@ import {
   restarts,
   serveViews,
   showWindow,
+  USER_PLUGINS_FLAG,
   utilityHosts,
+  utilityPtyHost,
   watchPower,
   watchTheme,
   windowChannel,
@@ -30,6 +32,7 @@ import {
   workspaceInstance,
 } from '@cyborg-harness/electron';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
+import { quietPipes } from './quiet-pipes.ts';
 import { runSpike } from './spike.ts';
 import { runHostsSpike } from './spike-hosts.ts';
 import { runGatewaySpike } from './spike-gateway.ts';
@@ -52,9 +55,13 @@ const workspaceFile = process.argv.includes('--no-workspace')
   : workspaceArg !== undefined
     ? path.resolve(workspaceArg)
     : (recent.list()[0] ?? path.join(app.getPath('userData'), 'workspace.cyborg.json'));
+/** `--view-csp=<строка>`: CSP видов вместо `VIEW_CSP` - так пилот PL-05 (`npm run spike:monaco`) проверяет наборы директив; в Cyborg её задаёт приложение (K-05). */
+const viewCsp = process.argv.find((a) => a.startsWith('--view-csp='))?.slice('--view-csp='.length);
 const spiking = spikeOut !== undefined || hostsSpikeOut !== undefined || gatewaySpikeOut !== undefined;
 /** `--safe-mode` (BR-CH-005): манифесты разобраны, код плагинов не запускается; смена воркспейса флаг сохраняет, снимает его только «Выйти из безопасного режима». */
 const safeMode = process.argv.includes('--safe-mode');
+/** `--user-plugins` (SAD 6.1): читать каталог плагинов пользователя; без флага грузятся только плагины из поставки. Флаг только в командной строке: файл воркспейса может лежать в репозитории. Смена воркспейса и безопасного режима его сохраняет (перезапуск берёт argv). */
+const userPlugins = process.argv.includes(USER_PLUGINS_FLAG);
 
 let win: BrowserWindow | undefined;
 
@@ -68,19 +75,21 @@ isolateSession(app.getPath('userData'), workspaceFile);
  */
 const owner = spiking
   ? Promise.resolve(true)
-  : workspaceInstance(app.getPath('userData'), workspaceFile, { safeMode }, (data) => {
-      const asked = data as { safeMode?: unknown } | null;
+  : workspaceInstance(app.getPath('userData'), workspaceFile, { safeMode, userPlugins }, (data) => {
+      const asked = data as { safeMode?: unknown; userPlugins?: unknown } | null;
       showWindow(win);
       if (!Notification.isSupported()) return;
       const say = (body: string) => alertNotification(APP_NAME, body, () => showWindow(win));
       // Запрошенный режим вторым запуском не применяется: ядро решает про него один раз, до первого хоста.
       if ((asked?.safeMode === true) !== safeMode) say(safeMode ? 'Безопасный режим уже включён; выйти из него можно пунктом окна «Выйти из безопасного режима».' : 'Безопасный режим не включён: закройте приложение или выберите в окне «Перезапустить в безопасном режиме».');
+      // Каталог пользователя, как и безопасный режим, решается один раз при старте ядра.
+      if ((asked?.userPlugins === true) !== userPlugins) say(userPlugins ? `Каталог плагинов пользователя уже включён (${USER_PLUGINS_FLAG}); снять его можно, закрыв приложение и запустив без флага.` : `Каталог плагинов пользователя не включён: чтобы загрузить сторонние плагины, закройте приложение и запустите его с ${USER_PLUGINS_FLAG}.`);
     });
 
 /** Первый запуск: alice и bob делят хост c - видно, как падение одного процесса снимает обоих, а чат в хосте b живёт. */
 const DEFAULT_CONFIG = {
   plugins: {
-    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions', 'sessions', 'pin-lock'],
+    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions', 'sessions', 'pin-lock', 'panels', 'editor'],
     hosts: { a: ['echo'], b: ['chat'], c: ['alice', 'bob'], d: ['flaky'], agents: ['agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions'] },
   },
 };
@@ -122,6 +131,8 @@ app.on('window-all-closed', () => {
   if (!spiking) app.quit();
 });
 
+quietPipes();
+
 const start = () => {
   if (gatewaySpikeOut !== undefined) {
     void runGatewaySpike({ out: gatewaySpikeOut, hostEntry: path.join(__dirname, 'plugin-host.mjs'), benchDir: path.join(__dirname, 'bench') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
@@ -139,7 +150,7 @@ const start = () => {
     void runSpike({ out: spikeOut, preload: path.join(__dirname, 'preload.js'), rendererDir: path.join(__dirname, 'renderer') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
     return;
   }
-  serveViews((url) => resolveViewRequest(url, (id) => plugins.uiOf(id, true)), path.join(__dirname, 'renderer', 'shell'));
+  serveViews((url) => resolveViewRequest(url, (id) => plugins.uiOf(id, true)), path.join(__dirname, 'renderer', 'shell'), viewCsp === undefined ? {} : { csp: viewCsp });
   watchTheme(() => win);
   const userData = app.getPath('userData');
   const config = path.join(userData, 'cyborg.json');
@@ -158,17 +169,20 @@ const start = () => {
     return;
   }
   const hosts = utilityHosts(path.join(__dirname, 'plugin-host.mjs'));
+  // node-pty живёт в своём процессе ядра: его зависание не замораживает окно (K-01).
+  const ptyHost = utilityPtyHost(path.join(__dirname, 'pty-host.js'));
   void plugins.start({
     userData,
     workspace: workspaceFile,
     appName: APP_NAME,
     migrate: migrateLegacyWorkspace,
     safeMode,
+    userPlugins,
     builtinDir: path.join(__dirname, 'plugins'),
     spawnHost: hosts.spawn,
     pidOf: hosts.pidOf,
     idleSeconds: () => powerMonitor.getSystemIdleTime(),
-    os: electronOs({ userData, roots: () => [workspace], protectedPaths: [workspaceFile, `${workspaceFile}.lock`], workspaceFile, raiseWindow: () => showWindow(win) }),
+    os: electronOs({ userData, roots: () => [workspace], protectedPaths: [workspaceFile, `${workspaceFile}.lock`], workspaceFile, raiseWindow: () => showWindow(win), ptyHost: ptyHost.spawn }),
     // Короче, чем в Cyborg: зависание по кнопке «Повесить хост» видно через пару секунд.
     watchdog: { interval: 500, timeout: 2500 },
     // eslint-disable-next-line no-console -- журнал ядра в главном процессе - это stderr приложения
