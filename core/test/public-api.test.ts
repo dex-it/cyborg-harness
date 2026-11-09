@@ -344,6 +344,7 @@ export function boundaryViolations(file: string, text: string, rel: string): str
 /** Файлы playground, которым внутренности ядра нужны по делу: замер самого ядра. Каждое исключение - с причиной и сроком. */
 const INTERNAL: Readonly<Record<string, string>> = {
   'playground/scripts/spike-pty-restore.mjs': 'замер хвоста pty берёт Tail и BACKLOG_LIMIT из core/src/pty.ts; уедет к замерам ядра вместе с остальными (не T-09)',
+  'playground/src/main/spike-gateway.ts': 'замер шлюза берёт guardedLookup, isLocalAddress и transport из core/src/net-transport.ts; уедет к замерам ядра вместе с остальными (не T-09)',
 };
 
 describe('публичный API ядра: потребители в репозитории', () => {

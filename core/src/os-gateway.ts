@@ -9,7 +9,7 @@ import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, Pr
 import { CoreError } from './errors.ts';
 import { limitsOf, type ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
-import { closePools, guardedLookup, isLocalAddress, transport, type Lookup } from './net-transport.ts';
+import { closePools, guardedLookup, isLocalAddress, transport } from './net-transport.ts';
 import type { NotifyLimits, ShowNotice } from './notices.ts';
 import { ANY_PATH, LOGIN_SHELL } from './permissions.ts';
 import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type KeptPty, type PtyExpiry, type PtyHostEvents, type TerminalChannel, type TerminalView } from './pty.ts';
@@ -54,7 +54,7 @@ export interface OsEnvironment {
    */
   readonly fetch?: typeof fetch;
   /** Резолв имён для `net.fetch`; по умолчанию `dns.lookup`. Адрес из его ответа проверяет шлюз: локальные и частные отвергаются. */
-  readonly lookup?: Lookup;
+  readonly lookup?: typeof dns.lookup;
   readonly watch?: typeof watchFs;
   /** Псевдотерминал в этом же процессе: ядро запускает над ним pty-хост без изоляции (тесты, замеры). Нет ни `pty`, ни `ptyHost` - `ctx.os.pty` отвечает `Unavailable`. */
   readonly pty?: PtyBackend;
