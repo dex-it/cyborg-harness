@@ -56,6 +56,14 @@ export interface ProcessResult {
   readonly stderr: string;
 }
 
+// Пакет собирается без lib DOM и @types/node (потребитель может не ставить ни то, ни другое): объявляем минимум `AbortSignal`.
+// Слияние с настоящим `AbortSignal` из DOM или Node безвредно: поле то же.
+declare global {
+  interface AbortSignal {
+    readonly aborted: boolean;
+  }
+}
+
 export interface ProcessOptions {
   readonly cwd?: string;
   /** Только имена из `env` правила `process`; база - PATH, HOME, локаль. Значения - данные, а не ссылки `$secret`. */

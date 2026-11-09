@@ -190,11 +190,17 @@ export interface ProcessResult {
     readonly stdout: string;
     readonly stderr: string;
 }
+declare global {
+    interface AbortSignal {
+        readonly aborted: boolean;
+    }
+}
 export interface ProcessOptions {
     readonly cwd?: string;
     readonly env?: Readonly<Record<string, string>>;
     readonly input?: string;
     readonly timeoutMs?: number;
+    readonly signal?: AbortSignal;
 }
 export interface HttpRequest {
     readonly method?: string;
@@ -394,7 +400,7 @@ export interface Provider<T> {
     readonly version: string;
     readonly impl: T;
 }
-export type CoreErrorCode = 'NotDeclared' | 'AlreadyProvided' | 'Unavailable' | 'NotCloneable' | 'Invalid' | 'CommandNotFound' | 'CommandConflict' | 'HostGone' | 'Timeout' | 'Remote' | 'PermissionDenied' | 'NotFound';
+export type CoreErrorCode = 'NotDeclared' | 'AlreadyProvided' | 'Unavailable' | 'NotCloneable' | 'Invalid' | 'CommandNotFound' | 'CommandConflict' | 'HostGone' | 'Timeout' | 'Cancelled' | 'Remote' | 'PermissionDenied' | 'NotFound';
 export interface PluginContext {
     readonly pluginId: string;
     readonly subscriptions: DisposableStore;
