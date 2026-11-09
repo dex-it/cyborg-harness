@@ -28,12 +28,28 @@ test('поиск: встроенные раньше пользовательск
   fs.mkdirSync(path.join(user, 'broken'));
   fs.writeFileSync(path.join(user, 'broken', 'manifest.json'), '{ нет');
   const found = discoverPlugins([builtin, user, path.join(user, 'нет-каталога')]);
-  assert.equal(found.manifests.length, 3);
+  assert.equal(found.manifests.length, 2, 'манифест второго files не передаётся ядру: иначе граф откажет обоим');
   assert.match(found.entries.get('files') ?? '', new RegExp(`${path.basename(builtin)}/files/index\\.mjs$`));
   assert.match(found.entries.get('notes') ?? '', /notes\/index\.ts$/);
-  assert.equal(found.problems.length, 1);
-  assert.match(found.problems[0] ?? '', /broken/);
+  assert.equal(found.problems.length, 2);
+  assert.ok(found.problems.some((p) => /broken/.test(p)));
+  assert.ok(found.problems.some((p) => p.includes('повтор id files') && p.includes(user) && p.includes(`действует ${builtin}`)));
   assert.deepEqual([...found.origins], [['files', builtin], ['notes', user]]);
+});
+
+test('старт с флагом: встроенный плагин активен при одноимённом пользовательском, второй пропущен с записью в problems', async () => {
+  const userData = tmp();
+  const builtinDir = tmp();
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['pin-lock', 'echo'] } }));
+  plugin(builtinDir, 'pin-lock', {}, 'export default {}');
+  plugin(path.join(userData, 'plugins'), 'pin-lock', {}, 'export default {}');
+  plugin(path.join(userData, 'plugins'), 'echo', {}, 'export default {}');
+  const problems: string[] = [];
+  const kernel = await startPlugins({ userData, builtinDir, userPlugins: true, spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {}, onProblem: (p) => problems.push(p) });
+  assert.deepEqual([...kernel.active].sort(), ['echo', 'pin-lock']);
+  assert.ok(!kernel.journal.some((e) => e.pluginId === 'pin-lock' && e.kind === 'rejected'), 'встроенный не отвергнут');
+  assert.ok(problems.some((p) => p.includes('повтор id pin-lock')));
+  await kernel.unload();
 });
 
 test('старт: плагин из каталога пользователя - сторонний и не попадает в общую группу хоста', async () => {

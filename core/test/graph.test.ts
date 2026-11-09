@@ -96,9 +96,12 @@ test('consumes не создаёт ребра: циклические consumes �
   assert.deepEqual(g.order, ['a', 'b']);
 });
 
-test('повтор id - отказ второму', () => {
-  const g = resolveGraph([m('a'), m('a')], '1.0.0');
+// Ядро отвергает id целиком: оба плагина не загружаются. Чтобы встроенный пережил одноимённый пользовательский, приложение
+// не передаёт ядру второй манифест (playground/src/main/plugins.test.ts, «поиск: …» и «старт с флагом: …»).
+test('повтор id в манифестах - отказ id, ни один из двух не загружается', () => {
+  const g = resolveGraph([m('a'), m('a'), m('b')], '1.0.0');
   assert.deepEqual(g.rejected.get('a'), [{ kind: 'duplicate' }]);
+  assert.deepEqual(g.order, ['b']);
 });
 
 // ADR-CH-0002 п. 6: без закрепления один сторонний манифест с provides cyborg.agent делал встроенного потребителя ambiguous.

@@ -45,7 +45,7 @@ function countDirs(dir: string): number {
 
 export interface Discovered {
   readonly manifests: unknown[];
-  /** id -> file URL точки входа; при повторе id остаётся первый, второму граф откажет. */
+  /** id -> file URL точки входа; при повторе id остаётся первый, второй манифест пропущен с записью в `problems`. */
   readonly entries: Map<string, string>;
   /** id -> каталог, где найден первым. */
   readonly origins: Map<string, string>;
@@ -75,11 +75,17 @@ export function discoverPlugins(dirs: readonly string[]): Discovered {
         found.problems.push(`${home}: manifest.json не прочитан - ${(error as Error).message}`);
         continue;
       }
-      found.manifests.push(raw);
       const id = isRecord(raw) && typeof raw.id === 'string' ? raw.id : undefined;
+      // Второй манифест с тем же id ядру не отдаётся: граф отверг бы оба, и встроенный плагин пропал бы вместе с пользовательским.
+      const first = id === undefined ? undefined : found.origins.get(id);
+      if (id !== undefined && first !== undefined) {
+        found.problems.push(`повтор id ${id} в ${dir}: действует ${first}`);
+        continue;
+      }
+      found.manifests.push(raw);
       const entry = ENTRY_FILES.map((f) => path.join(home, f)).find((f) => fs.existsSync(f));
-      if (id && entry && !found.entries.has(id)) found.entries.set(id, pathToFileURL(entry).href);
-      if (id && !found.origins.has(id)) {
+      if (id && entry) found.entries.set(id, pathToFileURL(entry).href);
+      if (id) {
         found.origins.set(id, dir);
         found.homes.set(id, home);
         if (isRecord(raw) && raw.ui !== undefined) found.views.set(id, home);
