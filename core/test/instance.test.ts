@@ -7,16 +7,16 @@ import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { claimInstance, instanceAddress } from '../src/instance.ts';
+import { claimInstance, instanceAddress, instanceDir } from '../src/instance.ts';
 
 // K-20: по экземпляру на воркспейс. Второй запуск того же воркспейса просит первого поднять окно и уходит; разные воркспейсы не мешают друг другу.
 
 const claimer = fileURLToPath(new URL('./fixtures/instance-claimer.ts', import.meta.url));
 const posix = process.platform !== 'win32';
 
-async function sandbox() {
+async function sandbox(base = tmpdir()) {
   // Короткий путь: адрес сокета unix ограничен ~104 байтами.
-  const dir = await realpath(await mkdtemp(path.join(tmpdir(), 'ci-')));
+  const dir = await realpath(await mkdtemp(path.join(base, 'ci-')));
   return { dir, [Symbol.asyncDispose]: () => rm(dir, { recursive: true, force: true }) };
 }
 
@@ -80,8 +80,8 @@ test('адрес не перепутан между воркспейсами и 
   if (first.kind === 'owner') first.close();
 });
 
-const start = (dir: string, label: string) => {
-  const child = spawn(process.execPath, ['--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', claimer, dir, key, label], { stdio: ['pipe', 'pipe', 'inherit'] });
+const start = (dir: string, label: string, holdMs?: number) => {
+  const child = spawn(process.execPath, ['--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', claimer, dir, key, label, ...(holdMs === undefined ? [] : [String(holdMs)])], { stdio: ['pipe', 'pipe', 'inherit'] });
   const lines: string[] = [];
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', (chunk: string) => lines.push(...chunk.split('\n').filter(Boolean)));
@@ -131,5 +131,123 @@ test('сокет остался от убитого процесса: из ше�
   assert.deepEqual(kinds.filter((k) => k === 'owner').length, 1, `владельцев не один: ${kinds.join(',')}`);
   assert.deepEqual(kinds.filter((k) => k === 'handed').length, 5, `остальные не передали запрос: ${kinds.join(',')}`);
   procs[kinds.indexOf('owner')]?.child.stdin.end();
+  await Promise.all(procs.map((p) => p.exited));
+});
+
+/** Подменяет окружение на время `run`; undefined снимает переменную. */
+async function withEnv<T>(vars: Record<string, string | undefined>, run: () => Promise<T> | T): Promise<T> {
+  const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+  for (const [k, v] of Object.entries(vars)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  try {
+    return await run();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
+test('каталог адресов: XDG_RUNTIME_DIR (абсолютный) первым; без него личный `<home>/run`, а не общий tmp; длинный home или его отсутствие - tmpdir', { skip: !posix }, async () => {
+  await withEnv({ XDG_RUNTIME_DIR: '/run/user/1000' }, () => {
+    assert.equal(path.dirname(instanceDir('/home/a/.config/App')), '/run/user/1000');
+  });
+  await withEnv({ XDG_RUNTIME_DIR: undefined }, () => {
+    assert.equal(instanceDir('/home/a/.config/App'), '/home/a/.config/App/run', 'без XDG_RUNTIME_DIR адреса должны лежать у пользователя, а не в предсказуемом каталоге общего tmp');
+    const far = `/home/a/${'очень-длинный-каталог/'.repeat(8)}App`;
+    assert.equal(path.dirname(instanceDir(far)), tmpdir(), 'адрес не влезает в предел sun_path - запасной tmpdir');
+    assert.equal(path.dirname(instanceDir()), tmpdir(), 'home не задан - tmpdir');
+  });
+  await withEnv({ XDG_RUNTIME_DIR: 'относительный/путь' }, () => {
+    assert.equal(instanceDir('/home/a/.config/App'), '/home/a/.config/App/run', 'относительный XDG_RUNTIME_DIR недействителен');
+  });
+});
+
+test('claimInstance с home: каталог адресов создаётся в home и закрыт для других; заранее занятый чужой /tmp-каталог ему не мешает', { skip: !posix }, async () => {
+  // Путь `home` + `/run/<ключ>.sock` должен влезть в предел адреса: на macOS `tmpdir()` для этого длинноват.
+  await using box = await sandbox('/tmp');
+  const home = box.dir;
+  await withEnv({ XDG_RUNTIME_DIR: undefined }, async () => {
+    const claim = await claimInstance(key, {}, () => undefined, { home });
+    assert.equal(claim.kind, 'owner');
+    assert.equal(statSync(path.join(home, 'run')).mode & 0o777, 0o700);
+    assert.ok(existsSync(path.join(home, 'run', `${key}.sock`)));
+    if (claim.kind === 'owner') claim.close();
+  });
+});
+
+test('ошибка сервера владельца после запуска (например EMFILE на accept) не становится неперехваченной', async (t) => {
+  await using box = await sandbox();
+  const real = net.createServer;
+  let captured: net.Server | undefined;
+  (net as { createServer: typeof net.createServer }).createServer = ((...args: Parameters<typeof net.createServer>) => (captured = real(...args))) as typeof net.createServer;
+  t.after(() => ((net as { createServer: typeof net.createServer }).createServer = real));
+  const claim = await claimInstance(key, {}, () => undefined, { dir: box.dir });
+  assert.ok(captured);
+  assert.doesNotThrow(() => captured?.emit('error', Object.assign(new Error('accept EMFILE'), { code: 'EMFILE' })));
+  if (claim.kind === 'owner') claim.close();
+});
+
+test('EEXIST при привязке - адрес занят, а не сбой: процесс идёт спрашивать владельца', { skip: !posix }, async (t) => {
+  await using box = await sandbox();
+  const real = net.createServer;
+  let first = true;
+  (net as { createServer: typeof net.createServer }).createServer = ((...args: Parameters<typeof net.createServer>) => {
+    const server = real(...args);
+    if (first) {
+      first = false;
+      // Файл сокета появился между проверкой и привязкой: так сообщает об этом часть платформ.
+      server.listen = (() => {
+        queueMicrotask(() => server.emit('error', Object.assign(new Error('EEXIST'), { code: 'EEXIST' })));
+        return server;
+      }) as typeof server.listen;
+    }
+    return server;
+  }) as typeof net.createServer;
+  t.after(() => ((net as { createServer: typeof net.createServer }).createServer = real));
+  const claim = await claimInstance(key, {}, () => undefined, { dir: box.dir });
+  assert.equal(claim.kind, 'owner', 'EEXIST принят за сбой привязки');
+  if (claim.kind === 'owner') claim.close();
+});
+
+/** Файл сокета, оставшийся от убитого владельца: лежит, но никто не слушает. */
+async function leaveStaleSocket(dir: string): Promise<void> {
+  const dead = start(dir, 'dead');
+  await until('первый владелец', () => dead.lines.includes('owner'));
+  dead.child.kill('SIGKILL');
+  await dead.exited;
+  assert.ok(existsSync(instanceAddress(key, dir)), 'нет устаревшего сокета для проверки');
+}
+
+test('свежий файл сокета без слушателя - владелец ещё запускается (bind уже был, listen нет): не снимается раньше срока запуска', { skip: !posix }, async () => {
+  await using box = await sandbox();
+  await leaveStaleSocket(box.dir);
+  const address = instanceAddress(key, box.dir);
+  const created = statSync(address).ctimeMs;
+  const claim = await claimInstance(key, {}, () => undefined, { dir: box.dir });
+  const age = Date.now() - created;
+  assert.equal(claim.kind, 'owner');
+  assert.ok(age >= 480, `свежий сокет снят через ${String(age)} мс после создания, раньше срока запуска владельца (500 мс)`);
+  if (claim.kind === 'owner') claim.close();
+});
+
+test('снятие устаревшего сокета: между проверкой и удалением в окне не больше одного процесса (под замком)', { skip: !posix }, async (t) => {
+  await using box = await sandbox();
+  await leaveStaleSocket(box.dir);
+  // Замок привязан к pid: взаимное исключение проверяется только между процессами, не между вызовами одного.
+  const procs = Array.from({ length: 3 }, (_, i) => start(box.dir, `p${String(i)}`, 150));
+  t.after(() => {
+    for (const p of procs) p.child.kill('SIGKILL');
+  });
+  const decided = (p: ReturnType<typeof start>) => p.lines.find((l) => l === 'owner' || l === 'handed' || l === 'unresponsive');
+  await until('все определились', () => procs.every((p) => decided(p) !== undefined));
+  const windows = procs.flatMap((p) => p.lines.filter((l) => l.startsWith('window ')).map((l) => l.split(' ').slice(1).map(Number) as [number, number])).sort((a, b) => a[0] - b[0]);
+  assert.ok(windows.length >= 1, 'ни один процесс не снимал сокет');
+  for (let i = 1; i < windows.length; i++) assert.ok((windows[i]?.[0] ?? 0) >= (windows[i - 1]?.[1] ?? Infinity), `окна «проверил - удалил» пересеклись: ${JSON.stringify(windows)}`);
+  assert.deepEqual(procs.map(decided).sort(), ['handed', 'handed', 'owner']);
+  procs.find((p) => decided(p) === 'owner')?.child.stdin.end();
   await Promise.all(procs.map((p) => p.exited));
 });

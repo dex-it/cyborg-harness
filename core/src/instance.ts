@@ -17,24 +17,49 @@ export type Claim =
   | { readonly kind: 'unresponsive' };
 
 export interface InstanceOptions {
-  /** Каталог адреса (unix-сокет); по умолчанию личный каталог в `XDG_RUNTIME_DIR` или `tmpdir`. На Windows адрес - именованный канал. */
+  /** Каталог адреса (unix-сокет); по умолчанию личный (см. `instanceDir`). На Windows адрес - именованный канал. */
   readonly dir?: string;
+  /**
+   * Личный каталог пользователя (в приложении - `userData`). Без `XDG_RUNTIME_DIR` адреса кладутся в `<home>/run`, а не в общий `/tmp`,
+   * где предсказуемый каталог заранее занимает любой локальный пользователь и не даёт приложению запуститься.
+   */
+  readonly home?: string;
   /** Сколько ждать ответа владельца, мс; по умолчанию 3 с. */
   readonly askTimeoutMs?: number;
+  /** Шов для тестов: вызывается в `removeStale` после «сокет мёртв», до удаления файла; в нём должен быть не больше одного процесса. */
+  readonly afterStaleCheck?: () => void | Promise<void>;
 }
 
 const MAX_MESSAGE = 64 * 1024;
 const STARTUP_GRACE_MS = 500;
 
-/** Каталог адресов: личный, не общий. Длинный путь `userData` в адрес сокета не годится (предел около 104 байт на macOS). */
-export function instanceDir(): string {
+// Предел `sun_path`: 104 байта на macOS, 108 на Linux; берём с запасом. Самый длинный ключ - окно без воркспейса (`no-workspace-<12>`).
+const SOCKET_PATH_LIMIT = 100;
+const LONGEST_ADDRESS = 'no-workspace-0123456789ab.sock';
+
+/**
+ * Каталог адресов: личный, не общий. Порядок: `XDG_RUNTIME_DIR`, если он абсолютный (его создаёт и закрывает система; пустое и относительное значение
+ * недействительны по XDG Base Directory); иначе `<home>/run`, если адрес в него влезает (`home` - `userData`, создан самим пользователем,
+ * заранее его не подсунуть); иначе `tmpdir`: на macOS он личный (`/var/folders/...`), на других unix общий, и предсказуемый каталог там может занять
+ * заранее любой, - `privateDir` тогда отказывает, а приложение запускается без контроля экземпляров (см. `workspaceInstance`).
+ */
+export function instanceDir(home?: string): string {
   const uid = process.getuid?.();
-  // XDG Base Directory: пустое или относительное значение недействительно, иначе каталог адресов окажется в текущем каталоге процесса.
+  const name = `cyborg-harness${uid === undefined ? '' : `-${String(uid)}`}`;
   const runtime = process.env.XDG_RUNTIME_DIR;
-  const base = runtime !== undefined && path.isAbsolute(runtime) ? runtime : os.tmpdir();
-  return path.join(base, `cyborg-harness${uid === undefined ? '' : `-${String(uid)}`}`);
+  if (runtime !== undefined && path.isAbsolute(runtime)) return path.join(runtime, name);
+  if (home !== undefined) {
+    const own = path.join(path.resolve(home), 'run');
+    if (path.join(own, LONGEST_ADDRESS).length <= SOCKET_PATH_LIMIT) return own;
+  }
+  return path.join(os.tmpdir(), name);
 }
 
+/**
+ * Адрес владельца. Windows: имя именованного канала общее для всех сессий машины, а ключ выводится из пути воркспейса, поэтому чужой процесс,
+ * занявший имя первым, получит запрос второго запуска или не даст стать владельцем. Windows вне v1 (D-00, строка 7, принято по поручению
+ * владельца 2026-11-09), оговорка записана в SAD 3.1 и threat-model §5.6; для поддержки нужен канал с дескриптором безопасности текущего пользователя.
+ */
 export function instanceAddress(key: string, dir: string = instanceDir()): string {
   return process.platform === 'win32' ? `\\\\.\\pipe\\cyborg-harness-${key}` : path.join(dir, `${key}.sock`);
 }
@@ -77,6 +102,8 @@ function listen(address: string, onAsked: (data: unknown) => void, conns: Set<ne
     server.once('error', (error: NodeJS.ErrnoException) => (error.code === 'EADDRINUSE' || error.code === 'EEXIST' ? resolve('busy') : reject(error)));
     server.listen(address, () => {
       server.removeAllListeners('error');
+      // Ошибка принятия соединения (например EMFILE) не должна стать неперехваченной в главном процессе: владелец жив, следующее соединение примет.
+      server.on('error', () => undefined);
       if (process.platform !== 'win32') fs.chmodSync(address, 0o600);
       // Сокет не должен удерживать процесс, который собрался выйти.
       server.unref();
@@ -129,7 +156,7 @@ function ask(address: string, data: Record<string, unknown> | undefined, timeout
 }
 
 /** Устаревший файл сокета снимает один процесс: под замком и после повторной проверки, что слушателя нет. */
-async function removeStale(address: string, timeoutMs: number): Promise<void> {
+async function removeStale(address: string, timeoutMs: number, afterStaleCheck: InstanceOptions['afterStaleCheck']): Promise<void> {
   const lock = lockWorkspace(address);
   if (!lock.ok) {
     await sleep(20);
@@ -145,7 +172,10 @@ async function removeStale(address: string, timeoutMs: number): Promise<void> {
       // Файла уже нет: снимать нечего, следующая попытка займёт адрес.
     }
     if (young) await sleep(25);
-    else if ((await ask(address, undefined, timeoutMs)) === 'stale') fs.rmSync(address, { force: true });
+    else if ((await ask(address, undefined, timeoutMs)) === 'stale') {
+      await afterStaleCheck?.();
+      fs.rmSync(address, { force: true });
+    }
   } finally {
     lock.release();
   }
@@ -158,7 +188,7 @@ async function removeStale(address: string, timeoutMs: number): Promise<void> {
 export async function claimInstance(key: string, data: Record<string, unknown>, onAsked: (data: unknown) => void, options: InstanceOptions = {}): Promise<Claim> {
   const timeoutMs = options.askTimeoutMs ?? 3000;
   const win = process.platform === 'win32';
-  const dir = options.dir ?? instanceDir();
+  const dir = options.dir ?? instanceDir(options.home);
   if (!win) privateDir(dir);
   const address = instanceAddress(key, dir);
   for (let attempt = 0; attempt < 200; attempt++) {
@@ -178,7 +208,7 @@ export async function claimInstance(key: string, data: Record<string, unknown>, 
     if (answer === 'acked') return { kind: 'handed' };
     if (answer === 'timeout') return { kind: 'unresponsive' };
     if (win) await sleep(20);
-    else await removeStale(address, timeoutMs);
+    else await removeStale(address, timeoutMs, options.afterStaleCheck);
   }
   return { kind: 'unresponsive' };
 }
