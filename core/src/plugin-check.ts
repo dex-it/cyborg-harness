@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import { isBuiltin } from 'node:module';
 import path from 'node:path';
@@ -95,6 +96,22 @@ const inside = (dir: string, target: string) => target === dir || target.startsW
 /** Путь без расширения исходника: `../contracts.js` в импорте называет `contracts.ts` рядом. */
 const stem = (p: string) => p.replace(/\.(?:m|c)?[tj]s$/, '');
 
+/**
+ * Реальный путь, как его видит загрузчик node: ссылки раскрыты. Если пути ещё нет (`./x.js` при `x.ts` на диске), раскрывается ближайший существующий предок.
+ * Сравнение «внутри каталога плагина» по буквальному пути пропустило бы ссылку наружу.
+ */
+function realish(p: string): string {
+  const tail: string[] = [];
+  for (let cur = path.resolve(p); ; cur = path.dirname(cur)) {
+    try {
+      return path.join(realpathSync(cur), ...tail);
+    } catch {
+      if (path.dirname(cur) === cur) return path.resolve(p);
+      tail.unshift(path.basename(cur));
+    }
+  }
+}
+
 /** Тесты и вспомогательные файлы к ним: в поставку не идут, и правило импортов к ним не применяется. */
 export function isTestPath(rel: string): boolean {
   const parts = rel.split(/[\\/]/);
@@ -105,6 +122,9 @@ export function isTestPath(rel: string): boolean {
 export function importProblems(file: string, text: string, rules: ImportRules): Problem[] {
   const found: Problem[] = [];
   const rel = toPosix(path.relative(rules.home, file));
+  // Node грузит модуль по реальному пути: относительные импорты считаются от настоящего места файла, а «внутри плагина» - по реальному каталогу.
+  const home = realish(rules.home);
+  const from = path.dirname(realish(file));
   // Вид - браузерный бандл во фрейме без Node (SAD §3.8): пакеты вроде xterm шлюз не обходят, а встроенные модули и electron - да.
   const view = inside(path.join(rules.home, 'ui'), file);
   const declarations = rules.declarations.map((d) => stem(path.resolve(d)));
@@ -125,10 +145,12 @@ export function importProblems(file: string, text: string, rules: ImportRules): 
       } else report(`${quoted}: только ${CONTRACTS} и свои модули${view ? ' (вид: без node:* и electron)' : ''}`);
       continue;
     }
-    const target = path.resolve(path.dirname(file), use.spec);
-    if (inside(rules.home, target)) {
-      if (isTestPath(path.relative(rules.home, target))) report(`${quoted}: тестовый модуль в коде плагина`);
-    } else if (declarations.includes(stem(target))) {
+    const target = path.resolve(from, use.spec);
+    if (inside(home, target) && inside(home, realish(target))) {
+      if (isTestPath(path.relative(home, target))) report(`${quoted}: тестовый модуль в коде плагина`);
+    } else if (inside(home, target)) {
+      report(`${quoted}: ведёт за пределы каталога плагина (символическая ссылка)`);
+    } else if (declarations.includes(stem(realish(target)))) {
       if (!use.typeOnly) report(`${quoted}: пакет объявлений - только import type`);
     } else report(`${quoted}: модуль вне каталога плагина`);
   }
@@ -144,22 +166,49 @@ export function formatProblem(p: Problem): string {
   return `${p.file}${p.line === undefined ? '' : `:${String(p.line)}`}: ${p.message}`;
 }
 
-/** Исходники плагина: без `node_modules`, скрытых каталогов, тестов и `.d.ts`; порядок не зависит от ОС. */
-async function sources(home: string, unreadable: (dir: string, error: unknown) => void): Promise<string[]> {
+/**
+ * Исходники плагина: без `node_modules`, скрытых каталогов, тестов и `.d.ts`; порядок не зависит от ОС.
+ * Ссылки раскрываются: цель вне каталога плагина - нарушение `outside` (загрузчик возьмёт файл оттуда, а проверка его не видит);
+ * каталог внутри плагина обходится один раз (по реальному пути), поэтому цикл ссылок не зацикливает обход.
+ */
+async function sources(home: string, unreadable: (path: string, error: unknown, what: string) => void, outside: (full: string) => void): Promise<string[]> {
   const out: string[] = [];
+  const seenDirs = new Set<string>([home]);
+  const seenFiles = new Set<string>();
   const walk = async (dir: string): Promise<void> => {
     let entries;
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
     } catch (error) {
-      unreadable(dir, error);
+      unreadable(dir, error, 'каталог');
       return;
     }
     for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
       const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (entry.name !== 'node_modules' && !entry.name.startsWith('.') && !isTestPath(entry.name)) await walk(full);
-      } else if (/\.(?:m|c)?[tj]s$/.test(entry.name) && !entry.name.endsWith('.d.ts') && !isTestPath(entry.name)) out.push(full);
+      let directory = entry.isDirectory();
+      let real = full;
+      if (entry.isSymbolicLink()) {
+        try {
+          real = await fs.realpath(full);
+          directory = (await fs.stat(real)).isDirectory();
+        } catch (error) {
+          // Битая ссылка: Node её не загрузит, но молча пропускать нельзя.
+          if (directory || /\.(?:m|c)?[tj]s$/.test(entry.name)) unreadable(full, error, 'ссылка');
+          continue;
+        }
+        if (!inside(home, real)) {
+          if (directory ? !entry.name.startsWith('.') && entry.name !== 'node_modules' && !isTestPath(entry.name) : /\.(?:m|c)?[tj]s$/.test(entry.name) && !isTestPath(entry.name)) outside(full);
+          continue;
+        }
+      }
+      if (directory) {
+        if (entry.name === 'node_modules' || entry.name.startsWith('.') || isTestPath(entry.name) || seenDirs.has(real)) continue;
+        seenDirs.add(real);
+        await walk(full);
+      } else if (/\.(?:m|c)?[tj]s$/.test(entry.name) && !entry.name.endsWith('.d.ts') && !isTestPath(entry.name) && !seenFiles.has(real)) {
+        seenFiles.add(real);
+        out.push(full);
+      }
     }
   };
   await walk(home);
@@ -251,7 +300,11 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
   // Пути через realpath, как корень плагина: иначе `/var` и `/private/var` на macOS дали бы разные пути одного файла.
   const declarations = await Promise.all((options.declarations ?? []).map((d) => fs.realpath(d).catch(() => path.resolve(d))));
   const rules: ImportRules = { home: root, declarations, packages: options.declarationPackages ?? [] };
-  const files = await sources(root, (d, error) => at(toPosix(path.relative(root, d)) || '.', `каталог не прочитан - ${error instanceof Error ? error.message : String(error)}`));
+  const files = await sources(
+    root,
+    (d, error, what) => at(toPosix(path.relative(root, d)) || '.', `${what} не прочитан${what === 'ссылка' ? 'а' : ''} - ${error instanceof Error ? error.message : String(error)}`),
+    (full) => at(toPosix(path.relative(root, full)), 'ссылка ведёт за пределы каталога плагина'),
+  );
   for (const file of files) {
     try {
       problems.push(...importProblems(file, await fs.readFile(file, 'utf8'), rules));
