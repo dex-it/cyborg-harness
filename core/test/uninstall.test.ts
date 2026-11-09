@@ -6,7 +6,7 @@ import path from 'node:path';
 import type { PluginContext } from '@cyborg-harness/contracts';
 import { SectionStore, type LayerStore } from '../src/config.ts';
 import { load } from '../src/loader.ts';
-import type { SecretStore } from '../src/os-gateway.ts';
+import { memorySecrets } from '../../testing/src/memory.ts';
 import { describeEntry, entryLevel, pluginStatuses } from '../src/status.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
@@ -24,16 +24,6 @@ const manifest = (id: string, extra: object = {}) => ({
   config: { version: 1 },
   ...extra,
 });
-
-function memorySecrets(): SecretStore & { map: Map<string, string> } {
-  const map = new Map<string, string>();
-  const deletePrefix = async (prefix: string) => {
-    const keys = [...map.keys()].filter((k) => k.startsWith(prefix));
-    for (const k of keys) map.delete(k);
-    return keys.length;
-  };
-  return { map, available: () => true, get: async (k) => map.get(k), set: async (k, v) => void map.set(k, v), delete: async (k) => void map.delete(k), deletePrefix };
-}
 
 /** Всё, что переживает перезапуск ядра: каталоги, секреты и документы воркспейса. */
 async function world(dialog?: () => Promise<readonly string[]>) {
