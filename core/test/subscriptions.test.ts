@@ -224,6 +224,8 @@ test('ответ, обогнавший отмену: ядро уже ответ�
             listener(1);
             return { dispose: () => void listeners.delete(listener) };
           },
+          slow: async () => 'x',
+          listeners: () => listeners.size,
         });
         return undefined;
       },
