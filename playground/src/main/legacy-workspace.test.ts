@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { openWorkspace } from '../../../core/src/index.ts';
+import { openWorkspace } from '@cyborg-harness/core';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
 
 const json = async (file: string): Promise<unknown> => JSON.parse(await readFile(file, 'utf8'));

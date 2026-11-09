@@ -110,9 +110,12 @@ export interface Lifecycle {
 
 /** Ленивые плагины, пробуждение и сама активация. */
 export interface Activation {
-  readonly waiting: Set<string>;
-  readonly waking: Map<string, Promise<void>>;
-  readonly activating: Map<string, Promise<void>>;
+  /** Ждущие первого обращения; править их может только activation: снять с ожидания - `forget`. */
+  readonly waiting: ReadonlySet<string>;
+  readonly waking: ReadonlyMap<string, Promise<void>>;
+  readonly activating: ReadonlyMap<string, Promise<void>>;
+  /** Плагин больше не ждёт: его включили или выключили сами, будить его уже не нужно. */
+  forget(pluginId: string): void;
   activate(pluginId: string): Promise<void>;
   wake(pluginId: string): Promise<void>;
   /** Замок окна, затем активация в порядке графа. */
