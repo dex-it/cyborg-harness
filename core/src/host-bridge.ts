@@ -1,6 +1,5 @@
 import { CoreError, errorMessage } from './errors.ts';
 import type { Bridge, BridgeEnd, Host, KernelContext } from './kernel-context.ts';
-import { LOG_LEVELS } from './log-text.ts';
 import type { PluginManifest } from './manifest.ts';
 import { parseWire, type Parsed, type WireSpec } from './wire.ts';
 
@@ -36,13 +35,14 @@ export function createBridge(ctx: KernelContext): Bridge {
     };
     const end: BridgeEnd = { host, mine, live, onRequest, onNote };
 
-    const { contracts, commands, keyRegistry, idleWatch, sections, osRequests } = ctx.parts;
+    const { contracts, commands, keyRegistry, idleWatch, sections, osRequests, logs } = ctx.parts;
     contracts.attach(end);
     commands.attach(end);
     keyRegistry.attach(end);
     idleWatch.attach(end);
     sections.attach(end);
     osRequests.attach(end);
+    logs.attach(end);
     attachHostState(ctx, end);
   }
 
@@ -51,7 +51,6 @@ export function createBridge(ctx: KernelContext): Bridge {
 
 /** Сообщения хоста о том, чей код выполняется, и о сбоях: из них сторож называет виновника. */
 function attachHostState(ctx: KernelContext, { host, mine, onNote }: BridgeEnd): void {
-  const { options } = ctx;
   onNote('running', { pluginId: 'string' }, (p) => {
     host.running = mine(p.pluginId).id;
     host.notes++;
@@ -60,21 +59,11 @@ function attachHostState(ctx: KernelContext, { host, mine, onNote }: BridgeEnd):
     host.exiting = mine(p.pluginId).id;
   });
   onNote('rejected', { pluginId: 'string', error: 'string' }, (p) => {
-    const { lifecycle, activation } = ctx.parts;
+    const { lifecycle } = ctx.parts;
     const id = mine(p.pluginId).id;
     // Хвост отклонений уже выключенного плагина, пока его снимают, - не новые сбои.
     if (lifecycle.switchedOff.has(id) || ctx.unloading) return;
     ctx.record({ pluginId: id, kind: 'unhandled-rejection', error: p.error });
-    if (!lifecycle.strike(id)) return;
-    lifecycle
-      .enqueue(async () => {
-        await activation.activating.get(id);
-        if (!ctx.unloading && ctx.active.includes(id)) await lifecycle.unloadPlugin(id);
-      })
-      .catch((error: unknown) => options.onLog?.(id, `снятие после выключения не удалось: ${errorMessage(error)}`, 'error'));
-  });
-  onNote('log', { pluginId: 'string', message: 'string', level: LOG_LEVELS }, (p) => {
-    mine(p.pluginId);
-    options.onLog?.(p.pluginId, p.message, p.level);
+    if (lifecycle.strike(id)) lifecycle.unloadSwitchedOff(id);
   });
 }

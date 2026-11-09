@@ -386,6 +386,8 @@ export class OsGateway {
   /** Выбор человека в `dialog`: область `granted` плагина, с `GrantStore` - и после перезапуска. */
   readonly #granted = new Map<string, Set<string>>();
   readonly #grants: GrantStore | undefined;
+  /** Значения секретов, которые прошли через шлюз в этом запуске (`<плагин>/<ключ>` -> значение): ядро вычёркивает их из строк плагинов (FR-CH-4018, K-29). */
+  readonly #secretValues = new Map<string, string>();
   #grantWrites: Promise<unknown> = Promise.resolve();
   readonly #serves: HttpServes;
   // Каталоги приложения ведёт ядро, а не человек: ссылка, подложенная на их место позже, по снятому realpath область не расширит.
@@ -479,9 +481,24 @@ export class OsGateway {
     return erased;
   }
 
+  /**
+   * Значения секретов `pluginId` (без аргумента - всех плагинов), которые шлюз выдал, принял или стёр в этом запуске.
+   * Значение, которое плагин не получал через `ctx.os.secrets` и `ctx.secrets`, плагину неоткуда взять, поэтому в его строки оно попасть не может.
+   */
+  secretValues(pluginId?: string): string[] {
+    return [...this.#secretValues].filter(([key]) => pluginId === undefined || key.startsWith(`${pluginId}/`)).map(([, value]) => value);
+  }
+
+  #seen<V extends string | undefined>(key: string, value: V): V {
+    if (value === undefined || value === '') this.#secretValues.delete(key);
+    else this.#secretValues.set(key, value);
+    return value;
+  }
+
   /** Ключи `<id>/` в хранилище секретов; шифрование ОС для стирания не нужно, поэтому `available()` не спрашивается. Число стёртых. */
   async eraseSecrets(pluginId: string): Promise<number> {
     assertOwnId(pluginId);
+    for (const key of [...this.#secretValues.keys()]) if (key.startsWith(`${pluginId}/`)) this.#secretValues.delete(key);
     return (await this.#env.secrets?.deletePrefix(`${pluginId}/`)) ?? 0;
   }
 
@@ -932,8 +949,14 @@ export class OsGateway {
       case 'secrets.delete': {
         const store = await this.#store();
         const key = `${m.id}/${str(method, args[0], 'ключ')}`;
-        if (method === 'secrets.get') return store.get(key);
-        if (method === 'secrets.set') return store.set(key, str(method, args[1], 'значение'));
+        if (method === 'secrets.get') return this.#seen(key, await store.get(key));
+        if (method === 'secrets.set') {
+          const value = str(method, args[1], 'значение');
+          await store.set(key, value);
+          this.#seen(key, value);
+          return undefined;
+        }
+        this.#seen(key, undefined);
         return store.delete(key);
       }
       case 'secrets.resolve':
@@ -1009,6 +1032,7 @@ export class OsGateway {
     if (scheme === undefined) {
       const value = await (await this.#store()).get(`${m.id}/${ref}`);
       if (value === undefined) throw new CoreError('Unavailable', `секрета ${ref} нет`);
+      this.#seen(`${m.id}/${ref}`, value);
       return { value };
     }
     if (!this.refAllowed(m, ref)) throw this.#denied(m, 'secrets.resolve', `ссылка вне secrets.ref: ${ref}`);

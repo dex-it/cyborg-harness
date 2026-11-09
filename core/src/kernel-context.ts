@@ -100,6 +100,10 @@ export interface Lifecycle {
   idle(): Promise<void>;
   /** Сбой плагина; череда подряд выключает его, а снять выключенного с хоста - дело вызывающего. */
   strike(id: string): boolean;
+  /** Выключает плагин, чей поток строк не стихает (FR-CH-4018): запись `switched-off` с `reason: 'log-flood'`, снятие с живого хоста. */
+  switchOffFlood(id: string): void;
+  /** Выключенного сторожем плагина снимает с живого хоста в очереди операций; соседи по хосту не перезапускаются. */
+  unloadSwitchedOff(id: string): void;
   affected(gone: readonly string[]): string[];
   dropPlugin(pluginId: string, pty?: PtyDrop): number;
   forgetOs(pluginId: string, pty?: PtyDrop): number;
@@ -184,6 +188,15 @@ export interface ViewsState {
   forget(pluginId: string): Promise<number>;
 }
 
+/** Строки плагинов и вывод хостов: уровень, предел длины и частоты, вычёркивание секретов, дальше - `LoadOptions.onLog`. */
+export interface PluginLog {
+  attach(end: BridgeEnd): void;
+  /** Плагин снят: начатый интервал дописывается сводной записью, счёт строк начинается заново. */
+  drop(pluginId: string): void;
+  /** Выгрузка ядра: то же для всех источников. */
+  flush(): void;
+}
+
 /** Обработчики сообщений хоста. */
 export interface Bridge {
   attach(host: Host): void;
@@ -200,6 +213,7 @@ export interface Parts {
   readonly sections: Sections;
   readonly osRequests: OsRequests;
   readonly views: ViewsState;
+  readonly logs: PluginLog;
   readonly bridge: Bridge;
 }
 

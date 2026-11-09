@@ -70,10 +70,18 @@ export type JournalEntry =
   | {
       readonly pluginId: string;
       readonly kind: 'switched-off';
+      /** Сбоев подряд; при `reason: 'log-flood'` сбоев не было - 0. */
       readonly strikes: number;
       /** Активные плагины, которые брали его контракты. */
       readonly affects: readonly string[];
+      /** `log-flood` - поток строк `ctx.log` и вывода хоста дольше `LIMITS.logFloodMs` выше `LIMITS.logRate`; без поля - сбои сторожа. */
+      readonly reason?: 'log-flood';
     }
+  /**
+   * Строки плагина сверх предела частоты за интервал (`LIMITS.logRate` за `LIMITS.logWindowMs`): по одной они в журнал не идут, в конце интервала пишется эта запись.
+   * Состояния плагина она не меняет. `lastError` - последняя пропущенная строка уровня `error`, обрезанная до предела длины.
+   */
+  | { readonly pluginId: string; readonly kind: 'log-summary'; readonly skipped: number; readonly errors: number; readonly lastError?: string }
   | {
       readonly pluginId?: undefined;
       readonly kind: 'host-down';

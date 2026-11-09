@@ -710,7 +710,7 @@ function context(
     pluginId,
     subscriptions: loaded.store,
     log: (message, level = 'info') => {
-      if (!LOG_LEVELS.includes(level)) throw new CoreError('Invalid', `${pluginId}: ctx.log ждёт уровень ${LOG_LEVELS.join(', ')}, получено ${String(level)}`);
+      if (!LOG_LEVELS.includes(level)) throw new CoreError('Invalid', `${pluginId}: ctx.log ждёт уровень ${LOG_LEVELS.join(', ')}, получено ${JSON.stringify(level)}`);
       endpoint.notify('log', { pluginId, message, level });
     },
     os: osOf(endpoint, pluginId, manifest.permissions, paths, ptys, watches, serves),

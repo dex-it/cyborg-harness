@@ -55,7 +55,8 @@ export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[]
         case 'host-isolated':
         case 'host-own-grouped':
         case 'third-party':
-          // Ни конфликт сочетаний, ни отказ шлюза, ни вызов устаревшего члена, ни удержанное хостом отклонение, ни завершённый по сроку pty, ни выбор хоста о работе плагина ничего не говорят: плагин работает как обычно.
+        case 'log-summary':
+          // Ни конфликт сочетаний, ни отказ шлюза, ни вызов устаревшего члена, ни удержанное хостом отклонение, ни завершённый по сроку pty, ни выбор хоста, ни сводная запись о строках сверх предела о работе плагина ничего не говорят: плагин работает как обычно.
           break;
         case 'host-restart':
           // Причиной остаётся падение: «перезапуск» без «почему» человеку ничего не говорит.
@@ -164,7 +165,10 @@ export function describeEntry(e: JournalEntry): string {
       return `необработанное отклонение промиса: ${e.error}`;
     case 'host-own-grouped':
       return `манифест просит свой хост, но группа ${e.group} из plugins.hosts сажает его к ${list(e.neighbours)}: его зависание перезапустит и их`;
+    case 'log-summary':
+      return `строк сверх предела за интервал: ${String(e.skipped)}, из них error: ${String(e.errors)}` + (e.lastError === undefined ? '' : `; последняя error: ${e.lastError}`);
     case 'switched-off':
+      if (e.reason === 'log-flood') return 'выключен: поток строк ctx.log и вывода хоста выше предела не стихает' + (e.affects.length ? `; его контракты брали: ${list(e.affects)}` : '');
       return `выключен, сбоев подряд: ${e.strikes}` + (e.affects.length ? `; его контракты брали: ${list(e.affects)}` : '');
     case 'host-down': {
       const what = e.reason === 'hang' ? 'завис' : 'упал';
@@ -198,6 +202,7 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
     case 'denied':
     case 'deprecated-call':
     case 'pty-expired':
+    case 'log-summary':
       return 'warn';
     case 'deactivated':
       return e.error ? 'warn' : 'info';
