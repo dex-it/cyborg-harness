@@ -185,7 +185,8 @@ test('process.run: тайм-аут программы, глушащей SIGTERM,
   // Иначе упавшая проверка оставит наблюдатель или программу живыми, и процесс файла не выйдет до срока job.
   t.after(() => k.unload());
   const started = Date.now();
-  const got = await os('runner').process!.run(process.execPath, ['-e', `process.on('SIGTERM',()=>{});setInterval(()=>{},1000)`], { timeoutMs: 200 });
+  // Тайм-аут с запасом на запуск node: на занятом раннере SIGTERM приходил раньше, чем программа успевала заглушить его, и она умирала по SIGTERM, а не по SIGKILL.
+  const got = await os('runner').process!.run(process.execPath, ['-e', `process.on('SIGTERM',()=>{});setInterval(()=>{},1000)`], { timeoutMs: 1500 });
   assert.deepEqual([got.signal, got.truncated], ['SIGKILL', false]);
   assert.ok(Date.now() - started < 8000, 'не ждали вечно');
 });
