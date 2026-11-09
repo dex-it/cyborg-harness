@@ -200,15 +200,14 @@ async function real(p: string): Promise<string> {
   }
 }
 
-/** Ближайший существующий предок после realpath плюс несуществующий хвост: так проверяется путь, которого ещё нет. */
+/** Ближайший раскрываемый предок после realpath плюс хвост, который раскрыть не удалось: так проверяется путь, которого ещё нет, и путь, который ОС не раскрывает (ENOENT, ENOTDIR, ELOOP, EACCES). Любая ошибка `realpath` идёт вверх, а не наружу: иначе её код дошёл бы до плагина раньше проверки области и выдал бы файл вне неё. Область решает по раскрытому пути; ошибка ОС достаётся плагину только из операции внутри области. */
 async function realOrParent(p: string): Promise<string> {
   const rest: string[] = [];
   let current = path.resolve(p);
   for (;;) {
     try {
       return path.join(await fs.realpath(current), ...rest.reverse());
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    } catch {
       const parent = path.dirname(current);
       if (parent === current) return path.resolve(p);
       rest.push(path.basename(current));
@@ -638,7 +637,11 @@ export class OsGateway {
       case 'fs.list': {
         await this.#ownDirs(m.id);
         const dir = await this.#checkPath(m, method, args[0], false);
-        const entries = await fs.readdir(dir, { withFileTypes: true });
+        const entries = await fs.readdir(dir, { withFileTypes: true }).catch(async (error: unknown) => {
+          // ENOTDIR самого пути при существующем пути: он есть, но не каталог. ENOTDIR предка (`файл/x`) уйдёт как «нет такого пути».
+          if ((error as NodeJS.ErrnoException).code === 'ENOTDIR' && (await fs.lstat(dir).then(() => true, () => false))) throw new CoreError('Invalid', `${method}: не каталог: ${String(args[0])}`);
+          throw error;
+        });
         return entries.map((e): DirEntry => ({ name: e.name, kind: e.isFile() ? 'file' : e.isDirectory() ? 'dir' : e.isSymbolicLink() ? 'link' : 'other' }));
       }
       case 'fs.stat': {
@@ -649,8 +652,10 @@ export class OsGateway {
       }
       case 'fs.realpath': {
         await this.#ownDirs(m.id);
-        // Путь уже после realpath и внутри области; ссылка наружу отказана раньше, поэтому ответ областью ограничен.
-        return fs.realpath(await this.#checkPath(m, method, args[0], false));
+        // Ответ - сам проверенный путь, а не результат второго `realpath`: ссылка, подложенная между проверкой и ответом, вывела бы наружу область. Второе обращение к ОС нужно только за существованием.
+        const target = await this.#checkPath(m, method, args[0], false);
+        await fs.lstat(target);
+        return target;
       }
       case 'fs.writeText': {
         await this.#ownDirs(m.id);

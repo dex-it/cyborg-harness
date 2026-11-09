@@ -347,6 +347,49 @@ test('NotFound: нет файла, каталога или программы - 
   await k.unload();
 });
 
+test('вне области любая ошибка ОС при раскрытии пути (ENOTDIR, ELOOP, EACCES) - PermissionDenied: файл вне области не выдаёт себя ни кодом, ни текстом', async () => {
+  await using box = await sandbox();
+  const secret = path.join(box.outside, 'secret');
+  await writeFile(secret, 'x');
+  await symlink(path.join(box.outside, 'loop'), path.join(box.outside, 'loop'));
+  const locked = path.join(box.outside, 'locked');
+  await mkdir(path.join(locked, 'dir'), { recursive: true });
+  const { k, os, denied } = await kernel({ reader: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  const fs = os('reader').fs;
+  const paths = { 'под файлом (ENOTDIR)': path.join(secret, 'child'), 'под файлом глубже': path.join(secret, 'a', 'b'), 'петля ссылок (ELOOP)': path.join(box.outside, 'loop'), 'под петлёй': path.join(box.outside, 'loop', 'x') };
+  const calls = (p: string) => ({ stat: () => fs.stat(p), readText: () => fs.readText(p), readSlice: () => fs.readSlice(p, 0, 16), list: () => fs.list(p), realpath: () => fs.realpath(p), watch: () => fs.watch(p, () => undefined) });
+  let count = 0;
+  for (const [name, p] of Object.entries(paths)) for (const [method, call] of Object.entries(calls(p))) {
+    await assert.rejects(call(), { code: 'PermissionDenied' }, `${method} ${name}`);
+    count++;
+  }
+  if (process.platform !== 'win32' && process.getuid?.() !== 0) {
+    await chmod(locked, 0);
+    try {
+      for (const [method, call] of Object.entries(calls(path.join(locked, 'dir', 'x')))) {
+        await assert.rejects(call(), { code: 'PermissionDenied' }, `${method} под каталогом без доступа (EACCES)`);
+        count++;
+      }
+    } finally {
+      await chmod(locked, 0o700);
+    }
+  }
+  assert.equal(denied().length, count, 'каждый отказ - запись в журнале');
+  assert.deepEqual(new Set(denied()), new Set(['reader:fs.stat', 'reader:fs.readText', 'reader:fs.readSlice', 'reader:fs.list', 'reader:fs.realpath', 'reader:fs.watch']));
+  await k.unload();
+});
+
+test('fs.list на существующем файле - Invalid «не каталог», а не NotFound; нет пути под файлом - по-прежнему NotFound', async () => {
+  await using box = await sandbox();
+  await writeFile(path.join(box.work, 'file.txt'), 'x');
+  const { k, os } = await kernel({ reader: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  const fs = os('reader').fs;
+  await assert.rejects(fs.list(path.join(box.work, 'file.txt')), { code: 'Invalid', message: /не каталог/ });
+  await assert.rejects(fs.list(path.join(box.work, 'file.txt', 'child')), { code: 'NotFound' });
+  await assert.rejects(fs.list(path.join(box.work, 'gone')), { code: 'NotFound' });
+  await k.unload();
+});
+
 test('fs.realpath: настоящий путь внутри области - ссылки раскрыты; нет пути - NotFound; ссылка наружу и чужой путь - PermissionDenied с записью в журнале', async () => {
   await using box = await sandbox();
   await mkdir(path.join(box.work, 'real'));
