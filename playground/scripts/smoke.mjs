@@ -484,11 +484,6 @@ async function main() {
     if (!worked) await main(`process.mainModule.require('electron').webContents.getAllWebContents().find((w) => w.getType() === 'window').${action}()`);
     viaRole[action] = (viaRole[action] ?? true) && worked;
   };
-  const chord = async (key, code, windowsVirtualKeyCode) => {
-    const modifiers = process.platform === 'darwin' ? 4 : 2;
-    await ev.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', modifiers, key, code, windowsVirtualKeyCode });
-    await ev.send('Input.dispatchKeyEvent', { type: 'keyUp', modifiers, key, code, windowsVirtualKeyCode });
-  };
   await setClipboard('');
   await focusEditor();
   await clickIn('editor', '.monaco-editor .view-lines');
