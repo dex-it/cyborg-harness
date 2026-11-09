@@ -126,15 +126,22 @@ async function runSandbox() {
       const before = (await h.main('globalThis.pilotLog.length')) ?? 0;
       await h.ev(`(() => { const f = document.createElement('iframe'); if (${JSON.stringify(sandbox)}) f.sandbox = ${JSON.stringify(sandbox)}; if (${JSON.stringify(allow ?? '')}) f.allow = ${JSON.stringify(allow ?? '')}; f.src = 'cyborg-plugin://${plugin}/?${tag}=1'; f.style.cssText = 'position:fixed;left:0;top:0;width:700px;height:500px;z-index:99'; f.id = ${JSON.stringify(tag)}; document.body.append(f); })()`);
       await sleep(7000);
+      // navigator.clipboard без фокуса документа отвечает NotAllowedError независимо от политики: фокус ставится программно, как в smoke.
+      await h.ev.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+      await h.ev(`document.getElementById(${JSON.stringify(tag)}).focus()`);
+      await h.main("process.mainModule.require('electron').webContents.getAllWebContents().find((w) => w.getType() === 'window').focus()");
       const probe = `(async () => {
-        const out = { origin: location.origin, bridge: typeof window.cyborgView, mounted: !!document.querySelector('#cyborg-view > *') };
+        window.focus();
+        const out = { origin: self.origin, bridge: typeof window.cyborgView, mounted: !!document.querySelector('#cyborg-view > :not(.cyborg-view-error)'), failed: document.querySelector('.cyborg-view-error')?.textContent ?? null };
         try { localStorage.setItem('k', 'v'); out.localStorage = 'работает'; } catch (e) { out.localStorage = e.name; }
         try { out.indexedDB = typeof indexedDB.open === 'function' ? 'есть' : 'нет'; await new Promise((res, rej) => { const r = indexedDB.open('pilot'); r.onsuccess = res; r.onerror = () => rej(r.error); }); } catch (e) { out.indexedDB = e.name; }
         out.editor = document.getElementById('editor-state')?.textContent ?? null;
         out.screen = !!document.querySelector('.xterm') || !!document.querySelector('.monaco-editor');
         out.text = document.body.innerText.replace(/\\s+/g, ' ').slice(0, 140);
         out.agents = document.querySelectorAll('#agents cy-button').length;
-        try { await navigator.clipboard.writeText('pilot'); out.clipboard = 'записал'; } catch (e) { out.clipboard = e.name; }
+        out.focused = document.hasFocus();
+        try { await navigator.clipboard.writeText('pilot'); out.clipboard = 'записал'; } catch (e) { out.clipboard = e.name + ': ' + e.message; }
+        try { out.clipboardRead = await navigator.clipboard.readText(); } catch (e) { out.clipboardRead = e.name + ': ' + e.message; }
         return out;
       })()`;
       const found = await h.main(`(async () => {
@@ -226,8 +233,8 @@ else {
     for (const r of result.csp) console.log(`  ${r.name} | ${yes(r.mounted)} | ${yes(r.opened)} | ${r.tokenClasses ?? '-'} | ${r.workers || '-'} | ${yes(r.jsonMarker)} | ${yes(r.tsMarker)} | ${r.fonts === undefined ? '-' : r.fonts > 0 ? 'загружен' : 'нет'} | ${yes(r.xterm)} | ${r.blobWorker ?? '-'} | ${r.blocked || '-'}${r.error ? ` | ОШИБКА ${r.error}` : ''}`);
   }
   if (result.sandbox) {
-    console.log('\nsandbox: плагин | sandbox | origin кадра | мост | вид собран | localStorage | indexedDB | clipboard | консоль');
-    for (const r of result.sandbox) console.log(r.error ? `  ОШИБКА ${r.error}` : `  ${r.plugin} | ${r.sandbox} | ${r.frame?.origin ?? '-'} | ${r.frame?.bridge ?? '-'} | ${yes(r.frame?.mounted)} | ${r.frame?.localStorage ?? '-'} | ${r.frame?.indexedDB ?? '-'} | ${r.frame?.clipboard ?? '-'} | ${r.console.join(' // ') || '-'}`);
+    console.log('\nsandbox: плагин | sandbox | origin документа | мост | вид собран | отказ оболочки | localStorage | indexedDB | clipboard запись / чтение | консоль');
+    for (const r of result.sandbox) console.log(r.error ? `  ОШИБКА ${r.error}` : `  ${r.plugin} | ${r.sandbox} | ${r.frame?.origin ?? '-'} | ${r.frame?.bridge ?? '-'} | ${yes(r.frame?.mounted)} | ${r.frame?.failed ?? '-'} | ${r.frame?.localStorage ?? '-'} | ${r.frame?.indexedDB ?? '-'} | ${r.frame?.clipboard ?? '-'} / ${r.frame?.clipboardRead ?? '-'} | ${r.console.join(' // ') || '-'}`);
   }
   if (result.memory) {
     console.log(`\nПамять (${result.memory.metric}) и время, медиана из трёх запусков:`);

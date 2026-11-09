@@ -66,8 +66,14 @@ export async function launch({ config, args = [] } = {}) {
   const sockets = [];
   // Приложение не должно пережить скрипт ни при отказе подключения, ни при падении самого скрипта.
   const killApp = () => app.kill('SIGKILL');
+  const quit = () => process.exit(1);
+  // Пилот поднимает приложение больше десяти раз за прогон: слушатели снимаются в stop, иначе Node предупреждает об утечке.
+  const unlisten = () => {
+    process.removeListener('exit', killApp);
+    for (const signal of ['SIGINT', 'SIGTERM']) process.removeListener(signal, quit);
+  };
   process.once('exit', killApp);
-  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => process.exit(1));
+  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, quit);
   let ev, main;
   try {
     const port = await waitFor('порт DevTools', () => /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//.exec(stderr)?.[1]);
@@ -76,6 +82,7 @@ export async function launch({ config, args = [] } = {}) {
     main = await connect(await waitFor('инспектор главного процесса', () => /Debugger listening on (ws:\/\/\S+)/.exec(stderr)?.[1]), sockets);
   } catch (error) {
     killApp();
+    unlisten();
     rmSync(userData, { recursive: true, force: true });
     throw error;
   }
@@ -106,7 +113,7 @@ export async function launch({ config, args = [] } = {}) {
     app.kill('SIGTERM');
     await Promise.race([new Promise((r) => app.once('exit', r)), sleep(8000)]);
     if (app.exitCode === null) killApp();
-    process.removeListener('exit', killApp);
+    unlisten();
     rmSync(userData, { recursive: true, force: true });
   };
   return { app, ev, main, inView, clickIn, focusIn, stop, stderr: () => stderr };

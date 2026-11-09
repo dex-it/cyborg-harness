@@ -518,12 +518,12 @@ async function main() {
   // navigator.clipboard из фрейма на другом origin: политика разрешений фрейма решает, пустят ли.
   await setClipboard('до');
   const nav = JSON.parse(await inView('sessions', `(async () => {
-    const out = { policy: { write: document.featurePolicy?.allowsFeature('clipboard-write'), read: document.featurePolicy?.allowsFeature('clipboard-read') } };
-    try { await navigator.clipboard.writeText('после'); out.write = 'записал'; } catch (e) { out.write = e.name; }
-    try { out.read = await navigator.clipboard.readText(); } catch (e) { out.read = e.name; }
+    const out = { focused: document.hasFocus(), policy: { write: document.featurePolicy?.allowsFeature('clipboard-write'), read: document.featurePolicy?.allowsFeature('clipboard-read') } };
+    try { await navigator.clipboard.writeText('после'); out.write = 'записал'; } catch (e) { out.write = e.name + ': ' + e.message; }
+    try { out.read = await navigator.clipboard.readText(); } catch (e) { out.read = e.name + ': ' + e.message; }
     return JSON.stringify(out);
   })()`));
-  log(`буфер обмена на ${process.platform}: copy/paste в Monaco и xterm работают (role меню Edit сама сработала: ${JSON.stringify(viaRole)}, иначе - webContents.copy()/paste()); navigator.clipboard из фрейма xterm - ${JSON.stringify(nav)}, в буфере ОС после записи «${await clipboardText()}»${clipboardSkipped ? `; copy/paste в Monaco и xterm на macOS в CI не проверены: ${clipboardSkipped}` : ''}`);
+  log(`буфер обмена на ${process.platform}: ${clipboardSkipped ? 'copy/paste в Monaco и xterm не проверены' : 'copy/paste в Monaco и xterm работают'} (role меню Edit сама сработала: ${JSON.stringify(viaRole)}, иначе - webContents.copy()/paste()); navigator.clipboard из фрейма xterm - ${JSON.stringify(nav)}, в буфере ОС после записи «${await clipboardText()}»${clipboardSkipped ? `; причина (macOS в CI): ${clipboardSkipped}` : ''}`);
   await ev.send('Emulation.setFocusEmulationEnabled', { enabled: false });
   await ev("document.getElementById('tab-plugins').click()");
 

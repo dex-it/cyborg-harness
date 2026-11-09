@@ -83,6 +83,8 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const changed = editor.onDidChangeModelContent(() => {
+    // Ответ проверки на прежний текст несёт строки, которых в новом тексте может не быть.
+    checking++;
     state(editor.getValue() === saved ? `${current ?? ''}: сохранён` : `${current ?? ''}: изменён`);
     clearTimeout(timer);
     timer = setTimeout(() => void check().catch(failed), 150);
@@ -93,8 +95,12 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
     saved = text;
     const old = editor.getModel();
     const extension = name.slice(name.lastIndexOf('.'));
-    editor.setModel(monaco.editor.createModel(text, LANGUAGES[extension], monaco.Uri.parse(`cyborg-plugin://${ctx.pluginId}/files/${name}`)));
-    old?.dispose();
+    const uri = monaco.Uri.parse(`cyborg-plugin://${ctx.pluginId}/files/${name}`);
+    // Модель с тем же адресом уже есть, если файл открыт: createModel на неё бросает.
+    const model = monaco.editor.getModel(uri) ?? monaco.editor.createModel(text, LANGUAGES[extension], uri);
+    model.setValue(text);
+    editor.setModel(model);
+    if (old !== model) old?.dispose();
     state(`${name}: открыт`);
     report();
     if (root.dataset.openedMs === undefined) requestAnimationFrame(() => requestAnimationFrame(() => (root.dataset.openedMs = String(Math.round(performance.now())))));
