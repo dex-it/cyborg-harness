@@ -18,8 +18,8 @@ import { framesOf, fromWindow, registerViewScheme, senderPlugin, serveViews, vie
 import { themeTokens } from './theme.ts';
 import { resolveViewRequest } from './view-files.ts';
 import { ViewTerminals, type TerminalFrame } from './view-terminals.ts';
-import { isRecord } from '../../../core/src/manifest.ts';
-import { RecentWorkspaces } from '../../../core/src/recent.ts';
+import { isRecord } from '@cyborg-harness/core';
+import { RecentWorkspaces } from '@cyborg-harness/core';
 
 // Своя папка данных: cyborg.json и пользовательские плагины playground не смешиваются с настройками Cyborg.
 app.setName('Cyborg Playground');
