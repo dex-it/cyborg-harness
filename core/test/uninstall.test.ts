@@ -49,12 +49,14 @@ async function world() {
   const secrets = memorySecrets();
   const dirs = { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp') };
 
-  async function start(plugins: readonly string[], options: { enabled?: readonly string[]; manifests?: Record<string, object> } = {}) {
+  async function start(plugins: readonly string[], options: { enabled?: readonly string[]; manifests?: Record<string, object>; bundled?: readonly string[]; safeMode?: boolean } = {}) {
     const contexts = new Map<string, PluginContext>();
     const k = await load({
       apiVersion: PLUGIN_API_VERSION,
       spawnHost: inlineHosts(async (entry) => ({ state: { defaults: {} }, config: { defaults: {} }, activate: (c: PluginContext) => void contexts.set(entry, c) })),
       enabled: options.enabled ?? plugins,
+      ...(options.bundled && { bundled: options.bundled }),
+      ...(options.safeMode && { safeMode: true }),
       manifests: plugins.map((id) => manifest(id, options.manifests?.[id])),
       os: { ...dirs, secrets, dialog: { open: async () => [picked] } },
       state: await SectionStore.open(store, ['workspace']),
@@ -230,4 +232,70 @@ test('uninstall: ядро выгружено - Unavailable', async () => {
   await k.disable('jira');
   await k.unload();
   await assert.rejects(k.uninstall('jira'), { code: 'Unavailable', message: /выгружается/ });
+});
+
+test('uninstall: снятый плагин общего хоста не пересоздаёт стёртое: os, documents и section.write отказывают, пока он не active', async () => {
+  await using w = await world();
+  const { k, ctx } = await w.start(['jira', 'other'], { bundled: ['jira', 'other'] });
+  const jira = ctx('jira');
+  await w.leaveTraces(k, jira);
+  await k.disable('jira');
+  await k.uninstall('jira');
+
+  // Хост builtin жив из-за other: сохранённый ctx jira по-прежнему доходит до ядра.
+  const fs = jira.os.fs.writeText(path.join(jira.os.paths.data, 'again.txt'), 'снова');
+  await assert.rejects(fs, { code: 'Unavailable' });
+  await assert.rejects(jira.os.secrets.set('token', 'снова'), { code: 'Unavailable' });
+  await assert.rejects(jira.documents.open('note', { title: 'снова', data: {} }), { code: 'Unavailable' });
+  await assert.rejects(jira.state?.set('workspace', { memory: 'снова' }) ?? Promise.reject(new Error('нет state')), { code: 'Unavailable' });
+
+  assert.deepEqual([...w.secrets.map.keys()], []);
+  assert.deepEqual(await ownTree(w.dirs.dataDir), []);
+  assert.deepEqual(k.documents, []);
+  assert.equal(k.active.includes('other'), true);
+  await k.unload();
+});
+
+test('uninstall: общий хост - соседа по хосту отказ не задевает, а включённый заново плагин снова может писать', async () => {
+  await using w = await world();
+  const { k, ctx } = await w.start(['jira', 'other'], { bundled: ['jira', 'other'] });
+  await k.disable('jira');
+  await ctx('other').os.secrets.set('token', 'сосед');
+  await k.enable('jira');
+  await ctx('jira').os.secrets.set('token', 'вернулся');
+  assert.deepEqual([...w.secrets.map.keys()].sort(), ['jira/token', 'other/token']);
+  await k.unload();
+});
+
+test('uninstall: безопасный режим - включённый в списке плагин удаляется без disable (хосты не подняты, вернуть его некому)', async () => {
+  await using w = await world();
+  const first = await w.start(['jira']);
+  await w.leaveTraces(first.k, first.ctx('jira'));
+  await first.k.unload();
+
+  const { k } = await w.start(['jira'], { safeMode: true });
+  assert.deepEqual(k.active, []);
+  const report = await k.uninstall('jira');
+  assert.ok(report.erased.includes('секреты: 1'));
+  assert.equal(w.secrets.map.size, 0);
+  await k.unload();
+});
+
+test('uninstall: документ типа, у которого владелец снял restorable, не доживает до нового плагина с тем же id', async () => {
+  await using w = await world();
+  const first = await w.start(['jira']);
+  await first.ctx('jira').documents.open('note', { title: 'secret note', data: { token: 'old' } });
+  await first.k.unload();
+
+  // Обновлённый jira объявляет note без restorable: из памяти строка отброшена, в файле осталась.
+  const second = await w.start(['jira'], { manifests: { jira: { documents: { note: {} } } } });
+  await second.k.disable('jira');
+  const report = await second.k.uninstall('jira');
+  assert.ok(report.erased.includes('документы: 1'), report.erased.join(', '));
+  await second.k.unload();
+  assert.doesNotMatch(JSON.stringify(w.docs.workspace.$documents), /old|secret/);
+
+  const third = await w.start(['jira']);
+  assert.deepEqual(await third.ctx('jira').documents.list(), []);
+  await third.k.unload();
 });

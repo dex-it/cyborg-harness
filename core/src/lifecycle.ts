@@ -177,6 +177,7 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
       const { activation, views } = ctx.parts;
       const running = active.includes(pluginId) || activation.waiting.has(pluginId) || activation.waking.has(pluginId) || activation.activating.has(pluginId);
       // Плагин в графе, но не выключен ни человеком, ни сторожем: хост может вернуть его, и он пересоздал бы стёртое.
+      // Снятый плагин общего хоста, который жив ради соседей, пересоздать не может: шлюз (`live` в host-bridge) отказывает в os, documents и section.write всем, кто не active.
       // В безопасном режиме хостов нет и enable/disable недоступны: ждать нечего, а удалить сломанный плагин нужно именно здесь (BR-CH-005).
       if (running || (!options.safeMode && graph.order.includes(pluginId) && !userOff.has(pluginId) && !switchedOff.has(pluginId))) {
         throw new CoreError('Invalid', `${pluginId} работает или ждёт запуска: сначала disablePreview и disable`);

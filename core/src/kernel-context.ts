@@ -67,6 +67,8 @@ export interface Subscription {
 export interface BridgeEnd {
   readonly host: Host;
   readonly mine: (pluginId: string) => PluginManifest;
+  /** `mine` плюс плагин active или активируется: снятый плагин общего хоста (хост жив ради соседей) ничего не пишет в ядро. */
+  readonly live: (pluginId: string) => PluginManifest;
   /** Запрос с ответом: недоверенный вход сверяется со схемой до обработчика. */
   readonly onRequest: <const S extends WireSpec>(method: string, spec: S, handler: (p: Parsed<S>) => unknown) => void;
   /** Уведомление: отказ идёт в лог, потому что вернуть его отправителю некому. */
