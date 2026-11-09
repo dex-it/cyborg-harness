@@ -53,6 +53,9 @@ const variants: readonly Variant[] = [
   { name: 'js-in-node-modules', files: { 'node_modules/plugin/package.json': MODULE, 'node_modules/plugin/index.js': ESM }, home: 'node_modules/plugin', entry: 'index.js' },
   { name: 'mjs-in-node-modules', files: { 'node_modules/plugin/index.mjs': ESM }, home: 'node_modules/plugin', entry: 'index.mjs' },
   { name: 'entry-missing', files: { 'readme.txt': 'нет точки входа' }, entry: 'index.mjs', fails: 'Cannot find module' },
+  { name: 'ts-sibling-import', files: { 'package.json': MODULE, 'index.ts': "import { name } from './helper.ts';\nexport default { activate(): string { return name; } };\n", 'helper.ts': 'export const name: string = "helper";\n' }, entry: 'index.ts' },
+  { name: 'ts-extensionless-import', files: { 'package.json': MODULE, 'index.ts': "import { name } from './helper';\nexport default { activate(): string { return name; } };\n", 'helper.ts': 'export const name: string = "helper";\n' }, entry: 'index.ts', fails: 'Cannot find module' },
+  { name: 'ts-dependency-in-node-modules', files: { 'package.json': MODULE, 'index.ts': "import { name } from './node_modules/dep/index.ts';\nexport default { activate(): string { return name; } };\n", 'node_modules/dep/index.ts': 'export const name: string = "dep";\n' }, entry: 'index.ts', fails: 'node_modules' },
   { name: 'js-no-default-export', files: { 'package.json': MODULE, 'index.js': 'export const activate = 1;\n' }, entry: 'index.js', fails: 'export default' },
 ];
 
