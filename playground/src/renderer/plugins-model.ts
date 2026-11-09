@@ -18,7 +18,7 @@ export function sortedPlugins(rows: readonly PluginRow[]): PluginRow[] {
 /** Что показать на месте вида: фрейм, фрейм под плашкой или заглушку. */
 export function viewMode(row: PluginRow, entry: LayoutRow): 'frame' | 'restarting' | 'placeholder' | undefined {
   if (entry.url === undefined) return undefined;
-  if (row.state === 'stopped') return 'placeholder';
+  if (entry.mark !== undefined || row.state === 'stopped') return 'placeholder';
   return row.state === 'restarting' ? 'restarting' : 'frame';
 }
 

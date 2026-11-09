@@ -42,7 +42,7 @@ export interface KeptPtyRow {
   readonly exitCode?: number;
 }
 
-/** Строка раскладки ядра (`Kernel.layout`); у вида `url` - адрес для <iframe>: есть, пока плагин не отключён в настройках; у снятого окно рисует заглушку вместо фрейма. */
+/** Строка раскладки ядра (`Kernel.layout`); у вида `url` - адрес для <iframe>: нет у метки `not-enabled` (плагин не включён в настройках); у снятого (`disabled`) и отвергнутого графом (`out-of-graph`) окно рисует заглушку вместо фрейма. */
 export type LayoutRow = LayoutEntry & { readonly url?: string | undefined };
 
 export interface KeyRow {

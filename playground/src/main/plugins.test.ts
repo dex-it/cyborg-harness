@@ -97,7 +97,7 @@ test('служба окна: снимок с причиной и журнало�
   const userData = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['disk'], hosts: { io: ['disk'] } } }));
   plugin(path.join(userData, 'plugins'), 'disk', {}, 'export default {}');
-  plugin(path.join(userData, 'plugins'), 'spare', {}, 'export default {}');
+  plugin(path.join(userData, 'plugins'), 'spare', { ui: { views: { main: './ui/ui.js' } } }, 'export default {}');
   fs.mkdirSync(path.join(userData, 'plugins', 'broken'));
   let broken = true;
   let changes = 0;
@@ -121,6 +121,8 @@ test('служба окна: снимок с причиной и журнало�
     { id: 'spare', state: 'disabled', revivable: false, unloaded: false, commands: [], permissions: [], version: '1.0.0', reason: 'не включён в настройках (plugins.enabled)' },
     { id: 'disk', state: 'stopped', revivable: true, unloaded: false, commands: [], permissions: [], version: '1.0.0', host: 'io', reason: 'не поднялся в хосте io: нет диска' },
   ]);
+  // Не включённому в настройках плагину фрейма нет, метка раскладки не склеена с «выключен».
+  assert.deepEqual(before.layout, [{ pluginId: 'spare', kind: 'view', name: 'main', area: 'sidebar', order: 1000, mark: 'not-enabled' }]);
   assert.deepEqual(before.journal.at(-1), { at: 1000, subject: 'disk', plugins: ['disk'], text: 'не поднялся в хосте io: нет диска', level: 'error' });
 
   broken = false;

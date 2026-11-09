@@ -20,7 +20,7 @@ export function buildKernel(ctx: KernelContext): Kernel {
     manifests: known,
     get layout() {
       const { switchedOff, userOff } = lifecycle;
-      return buildLayout(known, (id) => (ctx.graph.rejected.has(id) ? 'out-of-graph' : !ctx.byId.has(id) || switchedOff.has(id) || userOff.has(id) ? 'disabled' : undefined));
+      return buildLayout(known, (id) => (ctx.graph.rejected.has(id) ? 'out-of-graph' : !ctx.byId.has(id) ? 'not-enabled' : switchedOff.has(id) || userOff.has(id) ? 'disabled' : undefined));
     },
     hostOf: ctx.hostOf,
     keybindings: [...keys.values()],

@@ -493,9 +493,9 @@ test('раскладка: невключённые, выключенные и п
     },
   );
   const marks = () => Object.fromEntries(k.layout.map((e) => [e.pluginId, e.mark ?? 'ok']));
-  assert.deepEqual(marks(), { on: 'ok', orphan: 'out-of-graph', user: 'ok', off: 'disabled' });
+  assert.deepEqual(marks(), { on: 'ok', orphan: 'out-of-graph', user: 'ok', off: 'not-enabled' });
   await k.disable('user');
-  assert.deepEqual(marks(), { on: 'ok', orphan: 'out-of-graph', user: 'disabled', off: 'disabled' });
+  assert.deepEqual(marks(), { on: 'ok', orphan: 'out-of-graph', user: 'disabled', off: 'not-enabled' });
   await k.enable('user');
   assert.equal(marks().user, 'ok');
   assert.deepEqual(layoutOf(k), ['off/main', 'on/main', 'orphan/main', 'user/main'], 'помеченные стоят на своём месте по order и id');

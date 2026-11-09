@@ -90,6 +90,10 @@ describe('окно «Плагины Cyborg»: модель', () => {
       ],
     );
     assert.equal(viewMode(row('d', 'disabled'), view('d', 'main', { url: undefined })), undefined);
+    // Заглушку определяет метка раскладки ядра, а не состояние строки плагина.
+    assert.equal(viewMode(row('a', 'active'), view('a', 'main', { mark: 'disabled' })), 'placeholder');
+    assert.equal(viewMode(row('a', 'active'), view('a', 'main', { mark: 'out-of-graph' })), 'placeholder');
+    assert.equal(viewMode(row('a', 'disabled'), view('a', 'main', { mark: 'not-enabled', url: undefined })), undefined);
   });
 
   it('в renderer нет строковых имён плагинов: области строятся из раскладки ядра', () => {

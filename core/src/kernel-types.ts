@@ -166,7 +166,7 @@ export interface Kernel {
   callAs(caller: string, contract: string, major: number, member: string, args: readonly unknown[]): Promise<unknown>;
   /** Разобранные манифесты, включённые и нет. */
   readonly manifests: readonly PluginManifest[];
-  /** Раскладка по манифестам: виды и типы документов по `order`, при равенстве по id плагина; выключенные и вне графа помечены (`mark`). Каждое чтение собирает снимок заново. */
+  /** Раскладка по манифестам: виды и типы документов по `order`, при равенстве по id плагина; не включённые, выключенные и вне графа помечены по-разному (`mark`: `not-enabled`, `disabled`, `out-of-graph`). Каждое чтение собирает снимок заново. */
   readonly layout: readonly LayoutEntry[];
   hostOf(pluginId: string): string | undefined;
   /** Все сочетания из манифестов принятых плагинов, `key` - под платформу, как его даёт `keyOfInput`. */

@@ -477,9 +477,8 @@ export class PluginsService {
         }),
       };
     });
-    // Фрейм вида есть у каждого вида включённого плагина; у снятого окно рисует заглушку на том же месте.
-    const framed = new Set(plugins.filter((p) => p.state !== 'disabled' && this.views.has(p.id)).map((p) => p.id));
-    const layout: LayoutRow[] = (kernel?.layout ?? []).map((e) => ({ ...e, ...(e.kind === 'view' && framed.has(e.pluginId) && { url: `${viewOrigin(e.pluginId)}/?view=${e.name}` }) }));
+    // Адрес вида решает метка раскладки ядра: у не включённого в настройках плагина вида нет, у снятого окно рисует заглушку на том же месте.
+    const layout: LayoutRow[] = (kernel?.layout ?? []).map((e) => ({ ...e, ...(e.kind === 'view' && e.mark !== 'not-enabled' && this.views.has(e.pluginId) && { url: `${viewOrigin(e.pluginId)}/?view=${e.name}` }) }));
     const keys: KeyRow[] = (kernel?.keybindings ?? []).map((k) => ({
       key: k.key,
       command: k.command,

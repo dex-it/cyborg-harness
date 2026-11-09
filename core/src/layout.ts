@@ -11,8 +11,11 @@ const DEFAULT_AREA = { view: 'sidebar', document: 'main' } as const satisfies Re
 /** Конец диапазона встроенных плагинов (0-1000 с шагом 100, D-00 строка 2): не объявившие порядок идут за ними. */
 export const DEFAULT_ORDER = 1000;
 
-/** `disabled` - плагин не включён, выключен человеком или сторожем; `out-of-graph` - граф контрактов его отверг. */
-export type LayoutMark = 'disabled' | 'out-of-graph';
+/**
+ * Почему плагин сейчас не работает. `not-enabled` - его нет в `plugins.enabled`: места вида окно не резервирует, фрейма и заглушки нет;
+ * `disabled` - включён в настройках, но выключен человеком или сторожем: окно ставит заглушку с возвратом; `out-of-graph` - граф контрактов его отверг.
+ */
+export type LayoutMark = 'not-enabled' | 'disabled' | 'out-of-graph';
 
 export interface LayoutEntry {
   readonly pluginId: string;
@@ -22,7 +25,7 @@ export interface LayoutEntry {
   readonly area: Area;
   readonly order: number;
   readonly title?: string;
-  /** Есть, когда места вида пустовать не должно, а плагин не работает: окно ставит заглушку. */
+  /** Есть, когда плагин не работает; что с этим делать окну, зависит от метки (см. `LayoutMark`). */
   readonly mark?: LayoutMark;
 }
 
