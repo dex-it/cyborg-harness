@@ -69,13 +69,13 @@ export async function readDelivery(root: string): Promise<DeliveryManifest | und
     text = await fs.readFile(path.join(root, DELIVERY_FILE), 'utf8');
   } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined;
-    throw new Error(`${DELIVERY_FILE} не прочитан - ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`${DELIVERY_FILE} не прочитан - ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
   let raw: unknown;
   try {
     raw = JSON.parse(text);
   } catch (error) {
-    throw new Error(`${DELIVERY_FILE} не разобран - ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`${DELIVERY_FILE} не разобран - ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
   if (!isRecord(raw)) throw new Error(`${DELIVERY_FILE}: ожидался объект`);
   if (raw.format !== 1) throw new Error(`${DELIVERY_FILE}: формат ${JSON.stringify(raw.format)} не поддерживается (ожидался 1)`);
