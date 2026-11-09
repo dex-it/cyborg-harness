@@ -227,6 +227,9 @@ void claim.then((kind) => {
   const message = 'Воркспейс уже открыт другим процессом, но тот не отвечает. Закройте его или завершите вручную и запустите приложение снова.';
   // eslint-disable-next-line no-console -- до окна сообщить больше некуда
   console.error(message);
-  dialog.showErrorBox(APP_NAME, message);
-  app.exit(3);
+  // До `ready` на Linux showErrorBox пишет только в stderr, а у процесса «в новом окне» stdio закрыт - диалог только после готовности.
+  void app.whenReady().then(() => {
+    dialog.showErrorBox(APP_NAME, message);
+    app.exit(3);
+  });
 });
