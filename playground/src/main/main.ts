@@ -9,6 +9,7 @@ import { electronOs } from './os-env.ts';
 import { utilityHosts } from './plugin-hosts.ts';
 import { guardNavigation } from './navigation.ts';
 import { PluginsService } from './plugins.ts';
+import { quietPipes } from './quiet-pipes.ts';
 import { runSpike } from './spike.ts';
 import { runHostsSpike } from './spike-hosts.ts';
 import { runGatewaySpike } from './spike-gateway.ts';
@@ -288,6 +289,8 @@ app.on('before-quit', (event) => {
 app.on('window-all-closed', () => {
   if (!spiking) app.quit();
 });
+
+quietPipes();
 
 void app.whenReady().then(() => {
   if (gatewaySpikeOut !== undefined) {
