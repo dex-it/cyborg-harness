@@ -23,9 +23,9 @@ import {
   type TerminalSink,
   type TerminalView,
   type WatchdogOptions,
-} from '../../../core/src/index.ts';
-import { isRecord } from '../../../core/src/manifest.ts';
-import { WINDOW_OWNER, type WindowSnapshot } from '../../../core/src/window-layer.ts';
+} from '@cyborg-harness/core';
+import { isRecord } from '@cyborg-harness/core';
+import { WINDOW_OWNER, type WindowSnapshot } from '@cyborg-harness/core';
 import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from '../shared/plugins.ts';
 import { viewOrigin } from '../shared/views.ts';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';

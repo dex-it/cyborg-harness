@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { inlineHosts } from '../../../core/src/transports.ts';
-import type { PluginModule } from '../../../core/src/plugin.ts';
-import { WINDOW_OWNER } from '../../../core/src/window-layer.ts';
+import { inlineHosts } from '@cyborg-harness/core';
+import type { PluginModule } from '@cyborg-harness/core';
+import { WINDOW_OWNER } from '@cyborg-harness/core';
 import type { KeyRow } from '../shared/plugins.ts';
 import { discoverPlugins, PluginsService, readSchemaFile, startPlugins } from './plugins.ts';
 

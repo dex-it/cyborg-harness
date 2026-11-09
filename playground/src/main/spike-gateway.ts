@@ -3,9 +3,11 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import type { LookupFunction } from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { safeStorage } from 'electron';
-import { load, OsGateway, parseManifest, PLUGIN_API_VERSION, type JournalEntry, type OsEnvironment, type PluginManifest } from '../../../core/src/index.ts';
+import { load, OsGateway, parseManifest, PLUGIN_API_VERSION, type JournalEntry, type OsEnvironment, type PluginManifest } from '@cyborg-harness/core';
+import { closePools, guardedLookup, isLocalAddress, transport, type Lookup } from '../../../core/src/net-transport.ts';
 import { measure, PTY_SCRIPT, SAMPLES, WARMUP, type ProbeOs, type ProbePath, type Sampled } from '../../bench/gateway-probe.ts';
 import { electronOs } from './os-env.ts';
 import { utilityHosts } from './plugin-hosts.ts';
@@ -122,6 +124,34 @@ function gatewayOs(env: OsEnvironment, m: PluginManifest, denied: string[]): Pro
   };
 }
 
+/**
+ * Ветка `net.fetch` с проверкой адреса (K-25, замечание ревью): хост назван именем, резолв идёт через `guardedLookup` и `isLocalAddress`,
+ * соединение берётся из пула `checked`. Адрес сервера замера - 127.0.0.1, поэтому вердикт проверки отбрасывается (иначе отказ). Резолв и проверка
+ * идут один раз на соединение keep-alive: в цену вызова они не входят, мерится установившийся режим. Идёт через `transport`, без шлюза и канала хоста:
+ * в `голое` - тот же транспорт без проверки.
+ */
+function checkedOs(port: number, checked: boolean): ProbeOs {
+  const unsupported = () => Promise.reject(new Error('этот вариант меряет только net.fetch'));
+  const toLoopback = ((_host: string, options: { all?: boolean }, callback: (error: null, result: unknown, family?: number) => void) => {
+    if (options.all) callback(null, [{ address: '127.0.0.1', family: 4 }]);
+    else callback(null, '127.0.0.1', 4);
+  }) as unknown as Lookup;
+  const lookup = checked ? guardedLookup(toLoopback, (address) => void isLocalAddress(address)) : (toLoopback as unknown as LookupFunction);
+  return {
+    readText: unsupported,
+    watch: unsupported,
+    pty: unsupported,
+    setSecret: unsupported,
+    secret: unsupported,
+    fetch: async (url) => {
+      const target = new URL(url);
+      target.host = `bench-checked.example:${String(port)}`;
+      const response = await transport(target, { method: 'GET', headers: {}, signal: AbortSignal.timeout(10_000), lookup, local: !checked, owner: ID });
+      return response.text();
+    },
+  };
+}
+
 function serve(): Promise<http.Server> {
   const bodies = new Map(SIZES.map((size) => [`/${String(size)}`, 'n'.repeat(size)]));
   const server = http.createServer((request, response) => {
@@ -197,6 +227,11 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
     await each('pty.write', SIZES, () => '');
     await each('secrets.get', SIZES, (_v, size) => `key-${String(size)}`);
     await each('net.fetch', SIZES, (_v, size) => `http://${host}/${String(size)}`);
+    // Ветка с проверкой адреса в плагине не мерится: имя хоста с адресом 127.0.0.1 шлюз отверг бы. Бюджет сверяется по `шлюз`.
+    for (const size of SIZES) {
+      for (const variant of ['голое', 'шлюз'] as const) rows.push(row('net.fetch.checked', variant, size, await measure(checkedOs(port, variant === 'шлюз'), 'net.fetch.checked', `http://${host}/${String(size)}`, size)));
+    }
+    closePools(ID);
     report.rows = rows;
     await kernel.unload();
     if (denied.length > 0) throw new Error(`шлюз отказал: ${denied.join('; ')}`);
