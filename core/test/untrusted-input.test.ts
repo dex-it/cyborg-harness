@@ -1,7 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { CoreError } from '../src/errors.ts';
+import { load } from '../src/loader.ts';
+import { inlineHosts } from '../src/transports.ts';
 import { resolveGraph } from '../src/graph.ts';
 import { normalizeKey } from '../src/keys.ts';
 import { parseManifest, type PluginManifest } from '../src/manifest.ts';
@@ -78,6 +84,44 @@ test('канал: сообщение хоста не по форме не даё
   });
   assert.deepEqual(seen, []);
   assert.ok(settled instanceof CoreError, String(settled));
+});
+
+test('uninstall: недопустимый id (../, абсолютный путь, NUL, регистр) - Invalid, ни каталог рядом с данными, ни сами каталоги не тронуты', async () => {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-uninstall-id-')));
+  try {
+    const dataDir = path.join(root, 'data');
+    const tempDir = path.join(root, 'temp');
+    const precious = [path.join(root, 'precious.txt'), path.join(root, 'outside', 'keep.txt'), path.join(dataDir, 'jira', 'own.txt'), path.join(tempDir, 'jira', 'own.txt')];
+    for (const f of precious) {
+      await mkdir(path.dirname(f), { recursive: true });
+      await writeFile(f, 'цело');
+    }
+    const deleted: string[] = [];
+    const k = await load({
+      apiVersion: PLUGIN_API_VERSION,
+      spawnHost: inlineHosts(async () => ({ activate: () => undefined })),
+      enabled: [],
+      manifests: [],
+      os: {
+        dataDir,
+        tempDir,
+        secrets: { available: () => true, get: async () => undefined, set: async () => undefined, delete: async () => undefined, deletePrefix: async (prefix) => {
+            deleted.push(prefix);
+            return 0;
+          },
+        },
+      },
+    });
+    for (const id of ['..', '../outside', '../../etc', 'jira/..', 'jira/../..', '/etc/passwd', '', '.', 'jira\0', 'JIRA', 'jira x', `${dataDir}/jira`]) {
+      await assert.rejects(k.uninstall(id), { code: 'Invalid' }, JSON.stringify(id));
+    }
+    for (const f of precious) assert.equal(await readFile(f, 'utf8'), 'цело', f);
+    assert.deepEqual(deleted, [], 'в хранилище секретов недопустимый id не дошёл');
+    assert.equal(k.journal.some((e) => e.kind === 'uninstalled'), false);
+    await k.unload();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('serve: клиент оборвал тело запроса - сервер живёт, необработанных отказов нет', async () => {

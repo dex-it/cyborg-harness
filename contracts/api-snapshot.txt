@@ -1,0 +1,561 @@
+// @cyborg-harness/contracts 1.0.0-dev
+// Снимок публичных деклараций без комментариев; правила - README.md, раздел «Установка и версии». Обновление: npm run snapshot:contracts после повышения версии в package.json.
+// ---- agent.d.ts
+import type { PtyExit } from './os.js';
+import type { Subscription } from './index.js';
+export interface Agent {
+    facts(): Promise<AgentFacts>;
+    launch(request: LaunchRequest): Promise<LaunchSpec>;
+    watch(sessionId: string, listener: (event: AgentEvent) => void): Subscription;
+    ended(sessionId: string, exit: PtyExit): Promise<RecoveryHint | null>;
+    history(cwd: string): Promise<HistoryEntry[]>;
+}
+export interface AgentFacts {
+    readonly id: string;
+    readonly title: string;
+    readonly found: boolean;
+    readonly version?: string;
+    readonly capabilities: {
+        readonly resume: boolean;
+        readonly history: boolean;
+        readonly events: boolean;
+    };
+}
+export interface LaunchRequest {
+    readonly sessionId: string;
+    readonly cwd: string;
+    readonly extraDirs?: readonly string[];
+    readonly prompt?: string;
+    readonly resumeId?: string;
+    readonly promptFragments?: readonly string[];
+    readonly tools?: AgentToolsEndpoint;
+}
+export interface AgentToolsEndpoint {
+    readonly url: string;
+    readonly token: string;
+}
+export interface AgentTool {
+    tools(): readonly AgentToolSpec[] | Promise<readonly AgentToolSpec[]>;
+    call(name: string, input: unknown, session: AgentToolSession): Promise<AgentToolResult>;
+}
+export interface AgentToolSpec {
+    readonly name: string;
+    readonly description: string;
+    readonly inputSchema: Readonly<Record<string, unknown>>;
+}
+export interface AgentToolSession {
+    readonly sessionId: string;
+}
+export interface AgentToolResult {
+    readonly text: string;
+    readonly isError?: boolean;
+    readonly actions?: readonly SessionAction[];
+}
+export interface SessionAction {
+    readonly label: string;
+    readonly text: string;
+    readonly submit?: boolean;
+}
+export interface LaunchSpec {
+    readonly program: string;
+    readonly args: readonly string[];
+    readonly cwd: string;
+    readonly env: Readonly<Record<string, string>>;
+}
+export type AgentEvent = {
+    readonly type: 'cwd';
+    readonly cwd: string;
+} | {
+    readonly type: 'session';
+    readonly resumeId: string;
+} | {
+    readonly type: 'activity';
+    readonly tool?: string;
+} | {
+    readonly type: 'prompt';
+} | {
+    readonly type: 'turnEnd';
+    readonly text?: string;
+    readonly background: boolean;
+} | {
+    readonly type: 'waiting';
+    readonly reason: string;
+};
+export interface RecoveryHint {
+    readonly kind: 'notFound' | 'authRequired' | 'rateLimited' | 'resumeFailed';
+    readonly message: string;
+}
+export interface HistoryEntry {
+    readonly id: string;
+    readonly cwd: string;
+    readonly title: string;
+    readonly updated: number;
+}
+// ---- elements.d.ts
+export interface ListItem {
+    readonly id: string;
+    readonly label: string;
+    readonly detail?: string;
+}
+export interface TreeItem {
+    readonly id: string;
+    readonly label: string;
+    readonly children?: readonly TreeItem[];
+}
+export interface TabItem {
+    readonly id: string;
+    readonly label: string;
+}
+export interface ItemEventDetail {
+    readonly id: string;
+}
+export interface ToggleEventDetail {
+    readonly id: string;
+    readonly expanded: boolean;
+}
+export type ElementTag = 'cy-button' | 'cy-field' | 'cy-list' | 'cy-tree' | 'cy-tabs' | 'cy-empty' | 'cy-spinner';
+// ---- index.d.ts
+import type { Agent, AgentTool } from './agent.js';
+export interface Contracts {
+    'cyborg.agent': {
+        1: Agent;
+    };
+    'cyborg.agent-tool': {
+        1: AgentTool;
+    };
+    'cyborg.session-prompt': {
+        1: SessionPrompt;
+    };
+}
+export type * from './plugin.js';
+export type * from './view.js';
+export type * from './os.js';
+export type * from './agent.js';
+export type * from './elements.js';
+export interface Subscription {
+    dispose(): void;
+}
+export interface SessionPrompt {
+    fragment(): string;
+}
+export type ContractName = Extract<keyof Contracts, string>;
+export type Major<K extends ContractName> = keyof Contracts[K] & number;
+export type VersionOf<K extends ContractName> = `${Major<K>}.${number}`;
+export type MajorOf<V extends string> = V extends `${infer M extends number}.${string}` ? M : never;
+export type ContractType<K extends ContractName, M extends Major<K>> = Contracts[K][M];
+export type Remote<T> = {
+    readonly [P in keyof T]: RemoteMember<T[P]>;
+};
+type RemoteMember<X> = X extends (...args: infer A) => infer R ? (...args: A) => Promise<Awaited<R>> : X;
+// ---- os.d.ts
+import type { Disposable } from './plugin.js';
+export type ProgramRule = string | {
+    readonly program: string;
+    readonly args: readonly string[];
+    readonly env?: readonly string[];
+};
+export interface PluginPermissions {
+    readonly 'fs.read'?: readonly string[];
+    readonly 'fs.write'?: readonly string[];
+    readonly shell?: readonly string[];
+    readonly process?: readonly ProgramRule[];
+    readonly pty?: readonly ProgramRule[];
+    readonly launch?: readonly ProgramRule[];
+    readonly net?: readonly string[];
+    readonly env?: readonly string[];
+    readonly notify?: boolean;
+    readonly clipboard?: readonly ('read' | 'write')[];
+    readonly 'secrets.ref'?: readonly string[];
+    readonly 'security.roots'?: boolean;
+    readonly 'ui.lock'?: boolean;
+    readonly serve?: boolean;
+}
+export interface DirEntry {
+    readonly name: string;
+    readonly kind: 'file' | 'dir' | 'link' | 'other';
+}
+export interface FileStat {
+    readonly kind: 'file' | 'dir' | 'other';
+    readonly size: number;
+    readonly mtimeMs: number;
+}
+export interface FileSlice {
+    readonly text: string;
+    readonly bytes: number;
+    readonly size: number;
+}
+export interface ProcessResult {
+    readonly code: number | null;
+    readonly signal: string | null;
+    readonly stdout: string;
+    readonly stderr: string;
+}
+export interface ProcessOptions {
+    readonly cwd?: string;
+    readonly env?: Readonly<Record<string, string>>;
+    readonly input?: string;
+    readonly timeoutMs?: number;
+}
+export interface HttpRequest {
+    readonly method?: string;
+    readonly headers?: Readonly<Record<string, string>>;
+    readonly body?: string;
+    readonly timeoutMs?: number;
+}
+export interface HttpResponse {
+    readonly status: number;
+    readonly headers: Readonly<Record<string, string>>;
+    readonly body: string;
+}
+export interface ServeRequest {
+    readonly method: string;
+    readonly path: string;
+    readonly headers: Readonly<Record<string, string>>;
+    readonly body: string;
+}
+export interface ServeResponse {
+    readonly status: number;
+    readonly headers?: Readonly<Record<string, string>>;
+    readonly body?: string;
+}
+export interface HttpServer {
+    readonly url: string;
+    dispose(): void;
+}
+export interface OsFs {
+    readText(path: string): Promise<string>;
+    list(dir: string): Promise<DirEntry[]>;
+    stat(path: string): Promise<FileStat>;
+    readSlice(path: string, offset: number, maxBytes: number): Promise<FileSlice>;
+    watch(path: string, listener: (names: readonly string[]) => void, onClose?: (reason: string) => void): Promise<Disposable>;
+    writeText(path: string, text: string): Promise<void>;
+    mkdir(path: string): Promise<void>;
+    remove(path: string): Promise<void>;
+}
+export interface OsSecrets {
+    get(key: string): Promise<string | undefined>;
+    set(key: string, value: string): Promise<void>;
+    delete(key: string): Promise<void>;
+}
+export interface PtySpawnOptions {
+    readonly program: string;
+    readonly args?: readonly string[];
+    readonly cwd?: string;
+    readonly env?: Readonly<Record<string, string>>;
+    readonly cols?: number;
+    readonly rows?: number;
+    readonly persist?: boolean;
+    readonly describedBy?: string;
+}
+export interface PtyExit {
+    readonly code: number;
+    readonly signal?: number;
+}
+export interface PtyInfo {
+    readonly id: string;
+    readonly pid: number;
+    readonly program: string;
+    readonly args: readonly string[];
+    readonly persist: boolean;
+    readonly exit?: PtyExit;
+}
+export interface PtyHandle extends PtyInfo {
+    readonly backlog: string;
+    onData(listener: (chunk: string) => void): Disposable;
+    onExit(listener: (exit: PtyExit) => void): Disposable;
+    write(data: string): Promise<void>;
+    resize(cols: number, rows: number): Promise<void>;
+    kill(signal?: 'SIGTERM' | 'SIGKILL' | 'SIGINT' | 'SIGHUP'): Promise<void>;
+    share(): Promise<PtyTicket>;
+}
+export type PtyTicket = string;
+export interface OsPty {
+    spawn(options: PtySpawnOptions): Promise<PtyHandle>;
+    list(): Promise<PtyInfo[]>;
+    attach(id: string): Promise<PtyHandle>;
+}
+export interface NotifyClick {
+    readonly command: string;
+    readonly args?: readonly unknown[];
+}
+export interface NotifyOptions {
+    readonly onClick?: NotifyClick;
+}
+export interface OsNotify {
+    show(title: string, body?: string, options?: NotifyOptions): Promise<string>;
+    close(id: string): Promise<void>;
+}
+export interface PluginOs {
+    readonly paths: {
+        readonly data: string;
+        readonly temp: string;
+        readonly home: string;
+    };
+    readonly fs: OsFs;
+    readonly pty?: OsPty;
+    readonly process?: {
+        run(program: string, args: readonly string[], options?: ProcessOptions): Promise<ProcessResult>;
+    };
+    readonly net?: {
+        fetch(url: string, request?: HttpRequest): Promise<HttpResponse>;
+    };
+    readonly env?: {
+        get(name: string): Promise<string | undefined>;
+    };
+    readonly notify?: OsNotify;
+    readonly clipboard?: {
+        readText?(): Promise<string>;
+        writeText?(text: string): Promise<void>;
+    };
+    readonly secrets: OsSecrets;
+    readonly security?: {
+        setRoots(paths: readonly string[]): Promise<void>;
+    };
+    readonly ui?: OsUi;
+    readonly serve?: {
+        http(handler: (request: ServeRequest) => ServeResponse | Promise<ServeResponse>): Promise<HttpServer>;
+    };
+    readonly shell?: {
+        openPath?(path: string): Promise<void>;
+        openExternal?(url: string): Promise<void>;
+    };
+    readonly dialog: OsDialog;
+}
+export interface OpenDialogOptions {
+    readonly title?: string;
+    readonly directory?: boolean;
+    readonly multiple?: boolean;
+}
+export interface OsDialog {
+    open(options?: OpenDialogOptions): Promise<string[]>;
+}
+export interface OsUi {
+    lock(options?: {
+        readonly hideNotifications?: boolean;
+    }): Promise<UiLock>;
+}
+export interface UiLock {
+    release(): Promise<void>;
+}
+export interface SecretValue {
+    readonly value: string;
+    readonly expiresAt?: number;
+}
+export interface SecretRef {
+    readonly $secret: string;
+}
+export interface PluginSecrets {
+    resolve(ref: string | SecretRef): Promise<SecretValue>;
+}
+// ---- plugin.d.ts
+import type { ContractName, ContractType, Major, MajorOf, Remote, VersionOf } from './index.js';
+import type { PluginOs, PluginSecrets } from './os.js';
+export interface Disposable {
+    dispose(): void;
+}
+export interface DisposableStore extends Disposable {
+    readonly disposed: boolean;
+    add(...items: Disposable[]): void;
+}
+export type CommandHandler = (...args: unknown[]) => unknown;
+export type Layer = string;
+export interface SectionSpec {
+    readonly version: number;
+    readonly defaults?: Readonly<Record<string, unknown>>;
+    readonly migrate?: (fromVersion: number, data: Record<string, unknown>) => Record<string, unknown>;
+    readonly validate?: (value: Readonly<Record<string, unknown>>) => readonly string[];
+}
+export type SectionResult = {
+    readonly status: 'ok';
+    readonly value: Record<string, unknown>;
+    readonly migrated: readonly Layer[];
+} | {
+    readonly status: 'newer';
+    readonly layer: Layer;
+    readonly found: number;
+    readonly expected: number;
+} | {
+    readonly status: 'migrate-error';
+    readonly layer: Layer;
+    readonly from: number;
+    readonly error: string;
+} | {
+    readonly status: 'invalid';
+    readonly errors: readonly string[];
+};
+export interface PluginSection {
+    readonly result: SectionResult;
+    get(): Record<string, unknown>;
+    set(layer: string, data: Record<string, unknown>): Promise<Record<string, unknown>>;
+    onChange(listener: (value: Record<string, unknown>) => void): Disposable;
+}
+export interface Provider<T> {
+    readonly pluginId: string;
+    readonly version: string;
+    readonly impl: T;
+}
+export type CoreErrorCode = 'NotDeclared' | 'AlreadyProvided' | 'Unavailable' | 'NotCloneable' | 'Invalid' | 'CommandNotFound' | 'CommandConflict' | 'HostGone' | 'Timeout' | 'Remote' | 'PermissionDenied' | 'NotFound';
+export interface PluginContext {
+    readonly pluginId: string;
+    readonly subscriptions: DisposableStore;
+    readonly contracts: {
+        provide<K extends ContractName, V extends VersionOf<K>>(contract: K, version: V, impl: ContractType<K, MajorOf<V> & Major<K>>): Disposable;
+        get<K extends ContractName, M extends Major<K>>(contract: K, major: M): Remote<ContractType<K, M>> | undefined;
+        all<K extends ContractName, M extends Major<K>>(contract: K, major: M): Provider<Remote<ContractType<K, M>>>[];
+        onChange(contract: ContractName, listener: () => void): Disposable;
+    };
+    readonly commands: {
+        register(name: string, handler: CommandHandler): Disposable;
+        run(name: string, ...args: unknown[]): Promise<unknown>;
+    };
+    readonly keys: PluginKeys;
+    readonly config?: PluginSection;
+    readonly state?: PluginSection;
+    readonly os: PluginOs;
+    readonly secrets: PluginSecrets;
+    readonly window: PluginWindow;
+    readonly system: PluginSystem;
+    readonly documents: PluginDocuments;
+    log(message: string): void;
+}
+export interface KeyWhen {
+    readonly repeat?: boolean;
+    readonly dialog?: boolean;
+    readonly input?: 'any' | 'not-text';
+    readonly visible?: boolean;
+}
+export interface KeyBinding {
+    readonly key: string;
+    readonly command: string;
+    readonly args?: readonly unknown[];
+    readonly when?: KeyWhen;
+}
+export interface KeyRegistration extends Disposable {
+    readonly active: boolean;
+    readonly winner?: string;
+}
+export interface PluginKeys {
+    register(binding: KeyBinding): Promise<KeyRegistration>;
+}
+export interface DocumentInfo {
+    readonly id: string;
+    readonly type: string;
+    readonly title: string;
+    readonly data?: unknown;
+}
+export interface DocumentInit {
+    readonly title: string;
+    readonly data?: unknown;
+}
+export interface DocumentChange {
+    readonly title?: string;
+    readonly data?: unknown;
+}
+export interface PluginDocuments {
+    list(): Promise<DocumentInfo[]>;
+    open(type: string, init: DocumentInit): Promise<string>;
+    save(id: string, change: DocumentChange): Promise<void>;
+    close(id: string): Promise<void>;
+    onClose(listener: (id: string) => void): Disposable;
+}
+export interface PluginWindow {
+    onFocusChange(listener: (focused: boolean) => void): Disposable;
+    setTitle(segment: string | undefined): Promise<void>;
+}
+export interface PluginSystem {
+    onSuspend(listener: () => void): Disposable;
+    onResume(listener: () => void): Disposable;
+    onScreenLock(listener: () => void): Disposable;
+    onIdle(seconds: number, listener: () => void): Disposable;
+    onBeforeQuit(listener: () => void | Promise<void>): Disposable;
+}
+export interface PluginModule {
+    readonly config?: Omit<SectionSpec, 'version'>;
+    readonly state?: Omit<SectionSpec, 'version'>;
+    activate(ctx: PluginContext): Disposable | undefined | Promise<Disposable | undefined>;
+}
+// ---- view.d.ts
+import type { ContractName, ContractType, Major } from './index.js';
+import type { PtyExit, PtyInfo, PtyTicket } from './os.js';
+import type { Disposable } from './plugin.js';
+export interface FeedLine {
+    readonly at: number;
+    readonly kind: 'log' | 'key' | 'window' | 'error';
+    readonly subject: string;
+    readonly text: string;
+}
+export interface Reply {
+    readonly error?: string;
+    readonly value?: unknown;
+}
+export interface ViewDrop {
+    readonly from: string;
+    readonly path: string;
+}
+export type ThemeTokens = Readonly<Record<`--cy-${string}`, string>>;
+export type UiRemote<T> = {
+    readonly [P in keyof T as NonNullable<T[P]> extends (...args: never[]) => unknown ? P : never]: NonNullable<T[P]> extends (...args: infer A) => infer R ? (...args: A) => Promise<Awaited<R>> : never;
+};
+export interface UiTerminal extends PtyInfo {
+    readonly backlog: string;
+    onData(listener: (chunk: string) => void): Disposable;
+    onExit(listener: (exit: PtyExit) => void): Disposable;
+    write(data: string): Promise<void>;
+    resize(cols: number, rows: number): Promise<void>;
+    close(): void;
+}
+export interface DialogChoice {
+    readonly id: string;
+    readonly label: string;
+}
+export type DialogSpec = {
+    readonly kind: 'ask';
+    readonly title: string;
+    readonly message?: string;
+    readonly buttons: readonly DialogChoice[];
+} | {
+    readonly kind: 'menu';
+    readonly items: readonly DialogChoice[];
+    readonly at: {
+        readonly x: number;
+        readonly y: number;
+    };
+};
+export interface UiContext {
+    readonly pluginId: string;
+    readonly view: string;
+    readonly commands: {
+        run(command: string, ...args: unknown[]): Promise<unknown>;
+    };
+    readonly contracts: {
+        get<K extends ContractName, M extends Major<K>>(contract: K, major: M): Promise<UiRemote<ContractType<K, M>> | undefined>;
+    };
+    readonly theme: {
+        readonly tokens: ThemeTokens;
+        onChange(listener: (tokens: ThemeTokens) => void): Disposable;
+    };
+    readonly visible: boolean;
+    onVisibilityChange(listener: (visible: boolean) => void): Disposable;
+    logs(): Promise<readonly FeedLine[]>;
+    onLog(listener: (line: FeedLine) => void): Disposable;
+    readonly terminal: {
+        open(ticket: PtyTicket): Promise<UiTerminal>;
+    };
+    readonly state: {
+        readonly value: unknown;
+        set(value: unknown): Promise<void>;
+    };
+    readonly dialogs: {
+        show(spec: DialogSpec): Promise<string | undefined>;
+    };
+    readonly keys: {
+        of(command: string): string | undefined;
+    };
+    readonly drag: {
+        start(path: string): void;
+        drop(): Promise<ViewDrop | null>;
+    };
+}
+export interface UiModule<Root> {
+    mount(root: Root, ctx: UiContext): Disposable | undefined;
+}

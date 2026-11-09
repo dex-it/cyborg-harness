@@ -47,7 +47,7 @@ flowchart LR
 | Модуль | За что отвечает |
 |---|---|
 | `manifest`, `semver`, `json-schema` | Разбор манифеста с перечнем всех ошибок сразу, версии, схемы разделов |
-| `graph`, `registry`, `via-contract` | Граф контрактов до запуска кода, реестр контрактов и команд, права вызывающего через `guard` |
+| `graph`, `registry`, `via-contract` | Граф контрактов до запуска кода, реестр контрактов и команд, права вызывающего через `guard`, кому открыта команда (`callers`) |
 | `loader` и его части (`context-build`, `host-pool`, `host-bridge`, `lifecycle`, `activation`, `contract-calls`, `commands`, `sections`, `kernel-api`), `host-runtime`, `host-entry`, `transports`, `rpc`, `wire` | Загрузка и выгрузка, активация, хосты и сторож, канал вызовов и проверка данных; раскладка частей `loader` - в SAD, раздел 3.2 |
 | `config`, `workspace`, `recent` | Разделы `config` и `state` по слоям, воркспейс и замок, «Недавние» |
 | `os-gateway`, `permissions`, `serve` | Шлюз `ctx.os`, права и их описание словами, `serve.http` |

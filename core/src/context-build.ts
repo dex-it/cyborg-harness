@@ -5,7 +5,7 @@ import { CoreError } from './errors.ts';
 import { resolveGraph } from './graph.ts';
 import { DocumentTable } from './documents.ts';
 import { assignHosts } from './host-pool.ts';
-import { appendBounded, DeniedCollapse } from './journal.ts';
+import { appendBounded, DeniedCollapse, DeprecatedCollapse } from './journal.ts';
 import type { KernelContext, Parts } from './kernel-context.ts';
 import type { JournalEntry, LoadOptions } from './kernel-types.ts';
 import { applyUserKeys, bindKeys } from './keybindings.ts';
@@ -40,9 +40,15 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
   };
   // Плагин в цикле отказов иначе раздул бы журнал ядра и снимок окна без предела.
   const denials = new DeniedCollapse(write);
+  const deprecations = new DeprecatedCollapse(write);
   const record = (entry: JournalEntry) => {
     if (entry.kind === 'denied') denials.record(entry);
+    else if (entry.kind === 'deprecated-call') deprecations.record(entry);
     else write(entry);
+  };
+  const flushRepeats = () => {
+    denials.flush();
+    deprecations.flush();
   };
   const enabled = new Set(options.enabled);
   const watchdog = { interval: 1000, timeout: 5000, strikes: 3, window: 10 * 60_000, ...options.watchdog };
@@ -112,7 +118,7 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
     () => options.onDocuments?.(),
   );
 
-  const reserved = options.bundled && options.reservedPrefixes ? { prefixes: options.reservedPrefixes, bundled: new Set(options.bundled) } : undefined;
+  const reserved = options.bundled ? { prefixes: options.reservedPrefixes ?? [], bundled: new Set(options.bundled) } : undefined;
   const graph = resolveGraph(manifests, options.apiVersion, reserved);
   for (const [pluginId, reasons] of graph.rejected) record({ pluginId, kind: 'rejected', reasons });
   await options.onGraph?.(graph);
@@ -128,7 +134,7 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
   const hostIds = assignHosts(manifests, options.hosts ?? {}, new Set(options.bundled ?? []), record);
   const accepted = graph.order.map(manifestOf);
   const platform = options.platform ?? process.platform;
-  const keys = bindKeys(accepted, new Set(options.bundled ?? []), platform, record);
+  const keys = bindKeys(accepted, new Set(options.bundled ?? []), platform, record, options.menuKeys);
   applyUserKeys(keys, options.keybindings ?? [], accepted, platform, record);
 
   const built: { parts?: Parts } = {};
@@ -136,7 +142,7 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
     options,
     journal,
     record,
-    denials,
+    flushRepeats,
     enabled,
     watchdog,
     activationTimeout: options.activationTimeout ?? 10_000,

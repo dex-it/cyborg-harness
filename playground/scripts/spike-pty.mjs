@@ -2,7 +2,7 @@
 import { performance } from 'node:perf_hooks';
 import { createRequire } from 'node:module';
 import { cpus, platform, arch, release } from 'node:os';
-import { PtyTable } from '../../core/src/pty.ts';
+import { PtyTable } from '@cyborg-harness/core';
 
 const require = createRequire(import.meta.url);
 const nodePty = require('node-pty');

@@ -54,3 +54,22 @@ export const stoppable: PluginModule = {
     void ctx.os.process?.run('git', ['status'], { signal: true });
   },
 };
+
+export const keyed: PluginModule = {
+  async activate(ctx) {
+    const reg = await ctx.keys.register({ key: 'F1', command: 'x.run', args: ['build'], when: { repeat: false, dialog: false, input: 'not-text', visible: true } });
+    const active: boolean = reg.active;
+    reg.dispose();
+    ctx.log(`${String(active)} ${reg.winner ?? ''}`);
+    // @ts-expect-error команда обязательна
+    await ctx.keys.register({ key: 'F1' });
+    // @ts-expect-error незнакомое условие
+    await ctx.keys.register({ key: 'F1', command: 'x.run', when: { focus: true } });
+    // @ts-expect-error input - 'any' или 'not-text'
+    await ctx.keys.register({ key: 'F1', command: 'x.run', when: { input: 'text' } });
+    // @ts-expect-error регистрация асинхронна: ядро может отказать
+    const sync: { active: boolean } = ctx.keys.register({ key: 'F1', command: 'x.run' });
+    ctx.log(String(sync.active));
+    return undefined;
+  },
+};

@@ -77,6 +77,7 @@ export interface PluginContext {
     register(name: string, handler: CommandHandler): Disposable;
     run(name: string, ...args: unknown[]): Promise<unknown>;
   };
+  readonly keys: PluginKeys;
   readonly config?: PluginSection;
   readonly state?: PluginSection;
   /** Доступ к ОС через шлюз ядра по правам из манифеста. */
@@ -86,6 +87,48 @@ export interface PluginContext {
   readonly system: PluginSystem;
   readonly documents: PluginDocuments;
   log(message: string): void;
+}
+
+/**
+ * Условия срабатывания динамического сочетания: закрытый список, выражений нет. Поле не названо - действует умолчание.
+ * Автоповтор, поле ввода и видимость вида ядру сообщает приложение; открытый диалог ядро знает само.
+ */
+export interface KeyWhen {
+  /** Срабатывать на автоповтор удерживаемой клавиши. Умолчание: нет. */
+  readonly repeat?: boolean;
+  /** Срабатывать, пока на экране диалог вида. Умолчание: нет. */
+  readonly dialog?: boolean;
+  /** `not-text` - не срабатывать в поле ввода (терминал полем ввода не считается); `any` - везде. Умолчание: `not-text`. */
+  readonly input?: 'any' | 'not-text';
+  /** Срабатывать, только пока вид плагина виден; у плагина без вида - `Invalid`. Умолчание: нет. */
+  readonly visible?: boolean;
+}
+
+/** Сочетание, которое плагин регистрирует во время работы; ту же команду манифест привязывает статически (`keybindings`). */
+export interface KeyBinding {
+  /** Запись как в манифесте: `CmdOrCtrl+Shift+K`, `F5`; без модификатора годится только F1-F24. */
+  readonly key: string;
+  /** Своя команда из `commands` манифеста. */
+  readonly command: string;
+  /** Аргументы команды при нажатии: JSON до 4 КиБ, проверяются по объявлению команды сразу. */
+  readonly args?: readonly unknown[];
+  readonly when?: KeyWhen;
+}
+
+/** `dispose()` снимает регистрацию; выгрузка плагина и откат активации - тоже. */
+export interface KeyRegistration extends Disposable {
+  /** Нет - сочетание держит `winner`, нажатие получит он, а конфликт записан в журнал (`key-conflict`). */
+  readonly active: boolean;
+  readonly winner?: string;
+}
+
+export interface PluginKeys {
+  /**
+   * Динамическое сочетание. Старшинство: `plugins.keybindings` человека (он может забрать и сочетание окна или меню, или освободить его через `null`), затем окно и меню приложения, манифесты и динамические по порядку регистрации.
+   * Сочетание окна и меню занять нельзя - `CommandConflict`; проигрыш манифестному или другому динамическому - `active: false`.
+   * Проигравший победителя не заменяет, если тот ушёл: регистрацию повторяет плагин. Не больше 128 регистраций на плагин.
+   */
+  register(binding: KeyBinding): Promise<KeyRegistration>;
 }
 
 /** Документ плагина в окне; тип - из `documents` манифеста. */

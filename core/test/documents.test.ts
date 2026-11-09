@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PluginContext } from '@cyborg-harness/contracts';
 import { SectionStore, type LayerStore } from '../src/config.ts';
+import { DocumentTable } from '../src/documents.ts';
 import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
 import { inlineHosts } from '../src/transports.ts';
@@ -88,6 +89,72 @@ test('документы: человек закрывает вкладку - в�
   await k.closeDocument(b);
   assert.deepEqual(k.documents, []);
   await k.unload();
+});
+
+test('таблица документов: removeOf уносит строки одного плагина, в том числе без манифеста, и пишет на диск один раз', async () => {
+  const writes: unknown[][] = [];
+  let changes = 0;
+  const saved = [
+    { id: 'a1', pluginId: 'gone', type: 'note', title: 'Заметка' },
+    { id: 'a2', pluginId: 'gone', type: 'note', title: 'Вторая' },
+    { id: 'b1', pluginId: 'stay', type: 'note', title: 'Чужая' },
+  ];
+  const table = new DocumentTable({ read: () => saved, write: async (list) => void writes.push([...list]) }, () => true, () => {
+    changes++;
+  });
+  assert.equal(await table.removeOf('gone'), 2);
+  assert.deepEqual(table.rows(() => true).map((d) => d.id), ['b1']);
+  assert.deepEqual(writes.map((w) => w.map((d) => (d as { id: string }).id)), [['b1']]);
+  assert.equal(changes, 1, 'окно перерисовано');
+  assert.equal(await table.removeOf('gone'), 0);
+  assert.equal(writes.length, 1, 'нечего стирать - нечего писать');
+  assert.equal(changes, 1);
+});
+
+test('таблица документов: removeOf при сбое записи возвращает строки в память, повтор пишет стирание', async () => {
+  let fail = true;
+  const writes: string[][] = [];
+  const saved = [
+    { id: 'a1', pluginId: 'gone', type: 'note', title: 'Заметка' },
+    { id: 'b1', pluginId: 'stay', type: 'note', title: 'Чужая' },
+  ];
+  const table = new DocumentTable({
+    read: () => saved,
+    write: async (list) => {
+      if (fail) throw new Error('диск полон');
+      writes.push(list.map((d) => d.id));
+    },
+  }, () => true);
+  await assert.rejects(table.removeOf('gone'), /диск полон/);
+  assert.deepEqual(table.list('gone').map((d) => d.id), ['a1'], 'строка не стёрта из файла - остаётся и в памяти');
+  fail = false;
+  assert.equal(await table.removeOf('gone'), 1);
+  assert.deepEqual(writes, [['b1']]);
+});
+
+test('таблица документов: строки, отброшенные при чтении (restorable снят), removeOf тоже стирает из файла и называет в счёте', async () => {
+  const writes: string[][] = [];
+  const saved = [
+    { id: 'a1', pluginId: 'gone', type: 'note', title: 'Секретная', data: { token: 'old' } },
+    { id: 'a2', pluginId: 'gone', type: 'plain', title: 'Открытая' },
+    { id: 'b1', pluginId: 'stay', type: 'plain', title: 'Чужая' },
+  ];
+  // У gone тип note больше не restorable: в памяти строки нет, в файле она есть до первой записи.
+  let fail = true;
+  const table = new DocumentTable({
+    read: () => saved,
+    write: async (list) => {
+      if (fail) throw new Error('диск полон');
+      writes.push(list.map((d) => d.id));
+    },
+  }, (pluginId, type) => !(pluginId === 'gone' && type === 'note'));
+  assert.deepEqual(table.list('gone').map((d) => d.id), ['a2']);
+  await assert.rejects(table.removeOf('gone'), /диск полон/);
+  fail = false;
+  assert.equal(await table.removeOf('gone'), 2, 'и отброшенная при чтении строка названа');
+  assert.deepEqual(writes, [['b1']], 'файл переписан без строк gone');
+  assert.equal(await table.removeOf('gone'), 0);
+  assert.equal(writes.length, 1, 'после записи отброшенных не осталось: повтор не пишет');
 });
 
 test('манифест: documents - имя типа и только restorable', () => {

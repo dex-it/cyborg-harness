@@ -1,1 +1,24 @@
-{ "type": "module" }
+{
+  "name": "@cyborg-harness/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ядро плагинов Cyborg Harness: загрузчик, граф контрактов, хосты со сторожем, журнал; без npm-зависимостей",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": { "node": ">=24" },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" },
+    "./host": { "types": "./dist/src/host-runtime.d.ts", "default": "./dist/src/host-runtime.js" },
+    "./host-entry": { "types": "./dist/src/host-entry.d.ts", "default": "./dist/src/host-entry.js" },
+    "./keys": { "types": "./dist/src/keys.d.ts", "default": "./dist/src/keys.js" },
+    "./ui-shell": { "types": "./dist/src/ui-shell.d.ts", "default": "./dist/src/ui-shell.js" },
+    "./elements": { "types": "./dist/elements/elements.d.ts", "default": "./dist/elements/elements.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md"],
+  "peerDependencies": {
+    "@cyborg-harness/contracts": ">=1.0.0-0 <2.0.0"
+  }
+}

@@ -14,6 +14,12 @@ export function createBridge(ctx: KernelContext): Bridge {
       if (!m || host.down || ctx.hostOf(pluginId) !== host.id) throw new CoreError('Unavailable', `${pluginId} не в этом хосте`);
       return m;
     };
+    // Общий хост после disable не гасится, пока в нём есть соседи: код снятого плагина ещё жив и пересоздал бы стёртое.
+    const live = (pluginId: string): PluginManifest => {
+      const m = mine(pluginId);
+      if (!ctx.active.includes(m.id) && !ctx.parts.activation.activating.has(m.id)) throw new CoreError('Unavailable', `${pluginId} не активен`);
+      return m;
+    };
     const onRequest = <const S extends WireSpec>(method: string, spec: S, handler: (p: Parsed<S>, signal: AbortSignal) => unknown) => {
       endpoint.handle(method, (raw: unknown, signal: AbortSignal) => handler(parseWire(method, raw, spec), signal));
     };
@@ -27,11 +33,12 @@ export function createBridge(ctx: KernelContext): Bridge {
         }
       });
     };
-    const end: BridgeEnd = { host, mine, onRequest, onNote };
+    const end: BridgeEnd = { host, mine, live, onRequest, onNote };
 
-    const { contracts, commands, idleWatch, sections, osRequests } = ctx.parts;
+    const { contracts, commands, keyRegistry, idleWatch, sections, osRequests } = ctx.parts;
     contracts.attach(end);
     commands.attach(end);
+    keyRegistry.attach(end);
     idleWatch.attach(end);
     sections.attach(end);
     osRequests.attach(end);

@@ -3,6 +3,7 @@ import type { SectionResult, SectionStore } from './config.ts';
 import type { DocumentRow } from './documents.ts';
 import type { ContractGraph, Rejection } from './graph.ts';
 import type { SystemEvent } from './host-runtime.ts';
+import type { LayoutEntry } from './layout.ts';
 import type { ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { OsEnvironment } from './os-gateway.ts';
@@ -26,18 +27,32 @@ export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'revived' }
   /** `activation: "lazy"`: ждёт первой команды, сочетания, показа вида или потребителя своего контракта. */
   | { readonly pluginId: string; readonly kind: 'waiting' }
-  /** Шлюз `ctx.os` отказал: вызов вне прав манифеста; `reason: 'window'` - окно не пустило вид на чужой адрес. */
+  /** Шлюз `ctx.os` отказал: вызов вне прав манифеста; `reason: 'window'` - окно не пустило вид на чужой адрес; `reason: 'command-callers'` - команда не открыта главным частям других плагинов. */
   | {
       readonly pluginId: string;
       readonly kind: 'denied';
       readonly method: string;
       readonly detail: string;
-      readonly reason?: 'via-contract' | 'window';
+      readonly reason?: 'via-contract' | 'window' | 'command-callers';
       /** Столько таких же отказов склеено за окно после первого. */
+      readonly repeats?: number;
+    }
+  /**
+   * Плагин `pluginId` вызвал член контракта `contract` поставщика `provider`, помеченный `@deprecated` в его манифесте (`provides.<контракт>.deprecated`).
+   * Пишется после проверок вызова; повторы склеиваются за окно, `repeats` - сколько их было после первой записи.
+   */
+  | {
+      readonly pluginId: string;
+      readonly kind: 'deprecated-call';
+      readonly provider: string;
+      readonly contract: string;
+      readonly member: string;
       readonly repeats?: number;
     }
   /** Снят по disable: сам (`by` - он же) или вместе с поставщиком, которого требовал. */
   | { readonly pluginId: string; readonly kind: 'unloaded'; readonly by: string; readonly error?: string; readonly keptPty?: number }
+  /** `Kernel.uninstall`: что стёрто и что ядро оставило, словами; `error` - шаги, которые не удались (повтор доделает). */
+  | { readonly pluginId: string; readonly kind: 'uninstalled'; readonly erased: readonly string[]; readonly left: readonly string[]; readonly error?: string }
   /** pty без владельца не взят через `attach` за льготное время после падения хоста или активации плагина и завершён. */
   | { readonly pluginId: string; readonly kind: 'pty-expired'; readonly id: string; readonly program: string; readonly graceMs: number }
   /** Сочетание объявлено и другим плагином; нажатие получает `winner`. */
@@ -105,6 +120,8 @@ export interface LoadOptions {
   readonly entry?: ((manifest: PluginManifest) => string) | undefined;
   /** `plugins.hosts`: группа -> плагины; не названный идёт в `builtin` или в свой хост по `host: "own"`. */
   readonly hosts?: Readonly<Record<string, readonly string[]>> | undefined;
+  /** Акселераторы меню приложения: id пункта -> сочетание. Заняты наравне с командами окна: манифест проигрывает с `key-conflict`, динамически занять нельзя. */
+  readonly menuKeys?: Readonly<Record<string, string>> | undefined;
   /** `plugins.keybindings` пользователя: перекрывают манифесты; `command: null` освобождает сочетание для окна. */
   readonly keybindings?: readonly UserKeybinding[] | undefined;
   /** Плагины из поставки Cyborg; только они делят хост. Не названный здесь - сторонний и всегда один в своём хосте. */
@@ -155,6 +172,15 @@ export interface DisablePreview {
   readonly ptys: readonly (PtyInfo & { readonly pluginId: string })[];
 }
 
+/** Итог `Kernel.uninstall`: те же строки идут в запись журнала `uninstalled`. */
+export interface UninstallReport {
+  readonly pluginId: string;
+  /** Что стёрто, словами. */
+  readonly erased: readonly string[];
+  /** Что осталось и почему: человек читает это до того, как поставит плагин с тем же id. */
+  readonly left: readonly string[];
+}
+
 export interface Kernel {
   readonly journal: readonly JournalEntry[];
   /** Активные сейчас, в порядке активации. */
@@ -165,20 +191,40 @@ export interface Kernel {
   callAs(caller: string, contract: string, major: number, member: string, args: readonly unknown[]): Promise<unknown>;
   /** Разобранные манифесты, включённые и нет. */
   readonly manifests: readonly PluginManifest[];
+  /** Раскладка по манифестам: виды и типы документов по `order`, при равенстве по id плагина; не включённые, выключенные и вне графа помечены по-разному (`mark`: `not-enabled`, `disabled`, `out-of-graph`). Каждое чтение собирает снимок заново. */
+  readonly layout: readonly LayoutEntry[];
   hostOf(pluginId: string): string | undefined;
-  /** Все сочетания из манифестов принятых плагинов, `key` - под платформу, как его даёт `keyOfInput`. */
+  /** Все сочетания: окна и меню, манифесты принятых плагинов, выбор человека и динамические `ctx.keys.register`; `key` - под платформу, как его даёт `keyOfInput`. */
   readonly keybindings: readonly Keybinding[];
-  /** Синхронно, чтобы главный процесс успел отменить нажатие; владелец не активен - undefined. */
-  keybinding(key: string): Keybinding | undefined;
+  /**
+   * Синхронно, чтобы главный процесс успел отменить нажатие; владелец не активен - undefined.
+   * С `press` проверяются условия: автоповтор не получает никто, кроме динамических с `when.repeat`, а остальные `when` касаются только динамических.
+   * Без `press` условия не проверяются - так спрашивает список сочетаний.
+   * Сочетание меню (`MENU_OWNER`) ядро отдаёт как есть: перехватывать его приложению не надо.
+   */
+  keybinding(key: string, press?: KeyPress): Keybinding | undefined;
+  /** Приложение сообщает, виден ли вид плагина: от этого зависят сочетания с `when.visible`. Признак - состояние окна, выгрузка плагина его не сбрасывает; плагина нет - `Unavailable`. */
+  setViewVisible(pluginId: string, visible: boolean): void;
   /** Выгружает плагин и тех, кто требует его через requires; хост без плагинов гасится, сторож и enable без явной просьбы их не поднимают. `keepPty` - живые pty не завершаются и ждут `attach` вернувшегося плагина. */
   disable(pluginId: string, options?: DisableOptions): Promise<void>;
   /** Что выключение заберёт с собой: плагины по requires и их живые pty - о них приложение спрашивает человека до `disable`. */
   disablePreview(pluginId: string): DisablePreview;
+  /**
+   * Удаление плагина после `disable`: стирает его данные и temp (`ctx.os.paths`), секреты `<id>/*`, выбранные человеком пути (`granted`),
+   * память видов, документы и раздел `state` текущего воркспейса, завершает оставленные pty. Раздел `config` остаётся в файлах человека.
+   * Активный (или ждущий первого вызова, или ещё не снятый после сбоя) плагин - `Invalid`: сначала `disablePreview` и вопрос о pty, затем `disable`.
+   * Плагин, которого нет в графе (не включён в настройках, убран с диска), чистится без `disable`. Недопустимый id - `Invalid`, ничего не стёрто.
+   * Какой-то шаг не удался - остальные всё равно выполнены, в журнале запись с `error`, вызов бросает `Unavailable`; повтор доделывает.
+   * Код плагина на диске ядро не трогает.
+   */
+  uninstall(pluginId: string): Promise<UninstallReport>;
   /** «Включить снова»: сбрасывает счёт сбоев, активирует плагин, его пропущенных потребителей и снятых вместе с ним. */
   enable(pluginId: string): Promise<void>;
   /** `plugins.enabled` поменяли в файле: убранные выключаются, вернувшиеся включаются; ответ - кого нет в графе запуска и кто ждёт перезапуска. */
   setEnabled(next: readonly string[]): Promise<EnabledChange>;
   run(command: string, ...args: unknown[]): Promise<unknown>;
+  /** Команда по просьбе вида плагина `pluginId`: исполняет её только он, чужую (в том числе объявленную и им) ядро не запускает - `PermissionDenied`. `callers` не проверяется: вид зовёт как пользователь. */
+  runOwn(pluginId: string, command: string, ...args: unknown[]): Promise<unknown>;
   /** Раздел поменялся извне (файл воркспейса правили руками): активные владельцы получают `onChange`, не прошедший проверку - запись в журнал. */
   reloadSections(kind: 'config' | 'state', ids: readonly string[]): Promise<void>;
   /** Дожидается перезапусков хостов, начатых сторожем, и ленивых активаций. */
@@ -222,10 +268,21 @@ export interface UserKeybinding {
   readonly command: string | null;
 }
 
+/** Что приложение знает о нажатии: ядру это недоступно (`before-input-event` не видит DOM фрейма). */
+export interface KeyPress {
+  readonly repeat?: boolean;
+  /** Фокус: `text` - поле ввода, `terminal` - терминал (он поле ввода не считается), остальное - `other` или не названо. */
+  readonly focus?: 'text' | 'terminal' | 'other';
+}
+
 export interface Keybinding {
   readonly key: string;
   readonly command: string;
   readonly pluginId: string;
+  /** Зарегистрировано `ctx.keys.register`; в манифесте и у человека такого сочетания нет. */
+  readonly dynamic?: true;
+  /** Аргументы команды при нажатии (только динамические). */
+  readonly args?: readonly unknown[];
   /** Привязку задал пользователь в `plugins.keybindings`. */
   readonly user?: true;
   /** Проигравшие в конфликте: то же сочетание у других плагинов. */

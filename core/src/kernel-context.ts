@@ -4,8 +4,7 @@ import type { DocumentTable } from './documents.ts';
 import type { CoreError } from './errors.ts';
 import type { ContractGraph } from './graph.ts';
 import type { SectionInput, SystemEvent } from './host-runtime.ts';
-import type { DeniedCollapse } from './journal.ts';
-import type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Keybinding, LoadOptions } from './kernel-types.ts';
+import type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Keybinding, KeyPress, LoadOptions, UninstallReport } from './kernel-types.ts';
 import type { ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { Notices } from './notices.ts';
@@ -67,6 +66,8 @@ export interface Subscription {
 export interface BridgeEnd {
   readonly host: Host;
   readonly mine: (pluginId: string) => PluginManifest;
+  /** `mine` плюс плагин active или активируется: снятый плагин общего хоста (хост жив ради соседей) ничего не пишет в ядро. */
+  readonly live: (pluginId: string) => PluginManifest;
   /** Запрос с ответом: недоверенный вход сверяется со схемой до обработчика. */
   readonly onRequest: <const S extends WireSpec>(method: string, spec: S, handler: (p: Parsed<S>, signal: AbortSignal) => unknown) => void;
   /** Уведомление: отказ идёт в лог, потому что вернуть его отправителю некому. */
@@ -107,14 +108,18 @@ export interface Lifecycle {
   disable(pluginId: string, options?: DisableOptions): Promise<void>;
   setEnabled(next: readonly string[]): Promise<EnabledChange>;
   disablePreview(pluginId: string): DisablePreview;
+  uninstall(pluginId: string): Promise<UninstallReport>;
   shutdown(): Promise<void>;
 }
 
 /** Ленивые плагины, пробуждение и сама активация. */
 export interface Activation {
-  readonly waiting: Set<string>;
-  readonly waking: Map<string, Promise<void>>;
-  readonly activating: Map<string, Promise<void>>;
+  /** Ждущие первого обращения; править их может только activation: снять с ожидания - `forget`. */
+  readonly waiting: ReadonlySet<string>;
+  readonly waking: ReadonlyMap<string, Promise<void>>;
+  readonly activating: ReadonlyMap<string, Promise<void>>;
+  /** Плагин больше не ждёт: его включили или выключили сами, будить его уже не нужно. */
+  forget(pluginId: string): void;
   activate(pluginId: string): Promise<void>;
   wake(pluginId: string): Promise<void>;
   /** Замок окна, затем активация в порядке графа. */
@@ -136,6 +141,17 @@ export interface Commands {
   attach(end: BridgeEnd): void;
   dropFor(pluginId: string): void;
   run(command: string, ...args: unknown[]): Promise<unknown>;
+  runOwn(pluginId: string, command: string, args: unknown[]): Promise<unknown>;
+}
+
+/** Динамические сочетания рядом со статической таблицей `ctx.keys`; нажатие и список читают обе через эту часть. */
+export interface KeyRegistry {
+  attach(end: BridgeEnd): void;
+  dropFor(pluginId: string): void;
+  /** Владелец не работает или условия не прошли - undefined; без `press` условия не проверяются. */
+  lookup(key: string, press?: KeyPress): Keybinding | undefined;
+  rows(): Keybinding[];
+  setVisible(pluginId: string, visible: boolean): void;
 }
 
 /** Слушатели простоя пользователя. */
@@ -164,6 +180,8 @@ export interface ViewsState {
   viewKey(pluginId: string, view: string): string;
   viewState(pluginId: string, view: string): unknown;
   setViewState(pluginId: string, view: string, value: unknown): Promise<void>;
+  /** Плагин удалён: стирает все ключи `<плагин>/*`, манифест не нужен; число стёртых. */
+  forget(pluginId: string): Promise<number>;
 }
 
 /** Обработчики сообщений хоста. */
@@ -177,6 +195,7 @@ export interface Parts {
   readonly activation: Activation;
   readonly contracts: ContractCalls;
   readonly commands: Commands;
+  readonly keyRegistry: KeyRegistry;
   readonly idleWatch: IdleWatch;
   readonly sections: Sections;
   readonly osRequests: OsRequests;
@@ -188,7 +207,8 @@ export interface KernelContext {
   readonly options: LoadOptions;
   readonly journal: JournalEntry[];
   readonly record: (entry: JournalEntry) => void;
-  readonly denials: DeniedCollapse;
+  /** Закрывает окна склейки повторов (`denied`, `deprecated-call`): счёт не теряется при выгрузке. */
+  readonly flushRepeats: () => void;
   /** Включённые в `plugins.enabled` при запуске. */
   readonly enabled: ReadonlySet<string>;
   readonly watchdog: { readonly interval: number; readonly timeout: number; readonly strikes: number; readonly window: number };

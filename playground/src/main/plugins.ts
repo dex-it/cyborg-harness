@@ -3,6 +3,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   describeEntry,
+  describeOpenCommands,
   describePermissions,
   entryLevel,
   errorMessage,
@@ -16,16 +17,17 @@ import {
   type JournalEntry,
   type Kernel,
   type KeyInput,
+  type KeyPress,
   type OsEnvironment,
   type SpawnHost,
   type SystemEvent,
   type TerminalSink,
   type TerminalView,
   type WatchdogOptions,
-} from '../../../core/src/index.ts';
-import { isRecord } from '../../../core/src/manifest.ts';
-import { WINDOW_OWNER, type WindowSnapshot } from '../../../core/src/window-layer.ts';
-import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from '../shared/plugins.ts';
+} from '@cyborg-harness/core';
+import { isRecord } from '@cyborg-harness/core';
+import { MENU_OWNER, WINDOW_OWNER, type WindowSnapshot } from '@cyborg-harness/core';
+import type { FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from '../shared/plugins.ts';
 import { viewOrigin } from '../shared/views.ts';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
 import type { PluginUi } from './view-files.ts';
@@ -190,6 +192,9 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     get documents() {
       return kernel.documents;
     },
+    get layout() {
+      return kernel.layout;
+    },
     workspace: ws.file,
     async unload() {
       watching.dispose();
@@ -353,7 +358,7 @@ export class PluginsService {
     if (!Array.isArray(args)) return Promise.resolve({ error: `${command}: аргументы - не массив` });
     const own = this.kernel?.manifests.find((m) => m.id === pluginId)?.commands ?? {};
     if (!Object.hasOwn(own, command)) return Promise.resolve({ error: `${command}: не команда плагина ${pluginId}` });
-    return this.run(command, args);
+    return this.run(command, args, pluginId);
   }
 
   /** Терминал вида по билету `share()` его главной части; плагин - из origin фрейма. */
@@ -461,9 +466,8 @@ export class PluginsService {
         revivable: (s.revivable || s.cause?.kind === 'safe-mode') && kernel !== undefined,
         unloaded: s.cause?.kind === 'unloaded' && s.cause.by === s.id,
         commands,
-        permissions: manifest ? describePermissions(manifest.permissions) : [],
+        permissions: manifest ? [...describePermissions(manifest.permissions), ...describeOpenCommands(manifest.commands)] : [],
         ...(manifest && { version: manifest.version }),
-        ...(s.state !== 'disabled' && manifest?.ui && Object.keys(manifest.ui.views).length > 0 && this.views.has(s.id) && { view: `${viewOrigin(s.id)}/` }),
         ...(manifest?.ui?.overlay !== undefined && this.views.has(s.id) && { overlay: `${viewOrigin(s.id)}/?view=overlay` }),
         ...(host !== undefined && { host }),
         ...(pid !== undefined && { pid }),
@@ -475,6 +479,8 @@ export class PluginsService {
         }),
       };
     });
+    // Адрес вида решает метка раскладки ядра: у не включённого в настройках плагина вида нет, у снятого окно рисует заглушку на том же месте.
+    const layout: LayoutRow[] = (kernel?.layout ?? []).map((e) => ({ ...e, ...(e.kind === 'view' && e.mark !== 'not-enabled' && this.views.has(e.pluginId) && { url: `${viewOrigin(e.pluginId)}/?view=${e.name}` }) }));
     const keys: KeyRow[] = (kernel?.keybindings ?? []).map((k) => ({
       key: k.key,
       command: k.command,
@@ -496,6 +502,7 @@ export class PluginsService {
       ...(this.error !== undefined && { error: this.error }),
       problems: [...this.problems],
       plugins,
+      layout,
       keys,
       feed: [...this.feed],
       journal,
@@ -506,22 +513,40 @@ export class PluginsService {
     };
   }
 
+  /** Где сейчас фокус ввода, по сообщениям страниц: `before-input-event` DOM не видит, а решать надо синхронно. */
+  #focus: NonNullable<KeyPress['focus']> = 'other';
+
+  setInputFocus(kind: unknown): void {
+    if (kind === 'text' || kind === 'terminal' || kind === 'other') this.#focus = kind;
+  }
+
+  /** Окно сообщает, виден ли вид плагина (`when.visible` у динамических сочетаний); плагина нет или ядро не запущено - молча. */
+  setViewVisible(pluginId: string, visible: boolean): void {
+    try {
+      this.kernel?.setViewVisible(pluginId, visible);
+    } catch {
+      // Вид, которого ядро не знает, сочетаниям не нужен.
+    }
+  }
+
   /** Синхронно, иначе `preventDefault` в `before-input-event` опоздает: сочетание активного плагина страница не получает. */
-  press(input: KeyInput): boolean {
+  press(input: KeyInput, repeat = false): boolean {
     const key = keyOfInput(input);
     const kernel = this.kernel;
-    const binding = key === undefined ? undefined : kernel?.keybinding(key);
-    if (!binding) return false;
+    const binding = key === undefined ? undefined : kernel?.keybinding(key, { repeat, focus: this.#focus });
+    // Акселератор меню обрабатывает меню ОС, ядру его не отнять.
+    if (!binding || binding.pluginId === MENU_OWNER) return false;
     this.say({ kind: 'key', subject: binding.key, text: `→ ${binding.command} (${binding.pluginId})` });
     if (binding.pluginId === WINDOW_OWNER) this.events.windowCommand?.(binding.command);
-    else void this.run(binding.command);
+    else void this.run(binding.command, binding.args);
     return true;
   }
 
-  run(command: unknown, args: readonly unknown[] = []): Promise<Reply> {
+  /** `onBehalfOf` - плагин, от имени которого зовёт его вид: ядро исполняет только его команду, даже если то же имя объявил другой плагин. */
+  run(command: unknown, args: readonly unknown[] = [], onBehalfOf?: string): Promise<Reply> {
     return this.act(command, 'нет имени команды', async (kernel, name) => {
       try {
-        return await kernel.run(name, ...args);
+        return await (onBehalfOf === undefined ? kernel.run(name, ...args) : kernel.runOwn(onBehalfOf, name, ...args));
       } catch (error) {
         this.say({ kind: 'error', subject: name, text: errorMessage(error) });
         throw error;

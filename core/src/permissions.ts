@@ -91,6 +91,12 @@ const AREA_WORDS: Readonly<Record<string, string>> = {
 };
 const areaWords = (areas: readonly string[]) => areas.map((a) => AREA_WORDS[a] ?? a).join(', ');
 
+/** Чужие плагины получают от этого плагина не право, а возможность: его команды с `callers: "plugins"`. Рядом с правами, теми же словами. */
+export function describeOpenCommands(commands: Readonly<Record<string, { readonly callers?: string }>>): string[] {
+  const open = Object.entries(commands).filter(([, spec]) => spec.callers === 'plugins');
+  return open.length === 0 ? [] : [`другие плагины могут звать команды: ${open.map(([name]) => name).join(', ')}`];
+}
+
 /** Права словами: те же строки покажет окно согласия второго этапа. */
 export function describePermissions(p: PluginPermissions): string[] {
   const out: string[] = [];
