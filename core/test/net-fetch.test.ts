@@ -4,6 +4,7 @@ import http from 'node:http';
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { gzipSync } from 'node:zlib';
 import type { AddressInfo } from 'node:net';
 import type { PluginContext } from '@cyborg-harness/contracts';
 import { load } from '../src/loader.ts';
@@ -61,6 +62,9 @@ async function fixture(permissions: Record<string, unknown>, lookup: Lookup, con
       }
       if (request.url === '/redirect') response.writeHead(302, { location: 'http://elsewhere.example/' }).end();
       else if (request.url === '/empty') response.writeHead(204).end();
+      else if (request.url === '/weird') response.writeHead(999).end();
+      else if (request.url === '/gzip') response.writeHead(200, { 'content-encoding': 'gzip' }).end(gzipSync('hello'));
+      else if (request.url === '/bomb') response.writeHead(200, { 'content-encoding': 'gzip' }).end(gzipSync(Buffer.alloc(17 * 1024 * 1024, 'a')));
       else if (request.url === '/echo') response.writeHead(200).end(JSON.stringify({ method: request.method, body: Buffer.concat(chunks).toString(), ua: request.headers['user-agent'], custom: request.headers['x-custom'] }));
       else response.writeHead(200, { 'content-type': 'text/plain', 'x-a': '1' }).end('hello');
     });
@@ -137,4 +141,20 @@ test('net.fetch по node:http: метод, тело и заголовки до�
   await pending;
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(f.hung.length, 2, 'сервер не увидел обрыва соединений: по тайм-ауту и по выгрузке плагина');
+});
+
+test('net.fetch: ответ со статусом вне 200-599 - Remote сразу, без зависания и исключения в процессе', async () => {
+  const { lookup } = answer({});
+  await using f = await fixture({ net: ['127.0.0.1:$PORT'] }, lookup);
+  const started = Date.now();
+  await assert.rejects(f.net.fetch(`http://127.0.0.1:${String(f.port)}/weird`), { code: 'Remote' });
+  assert.ok(Date.now() - started < 5000, 'ждал тайм-аут вместо ошибки');
+});
+
+test('net.fetch: сжатый ответ приходит текстом, распакованное тело больше 16 МиБ обрывается Remote; accept-encoding плагина не мешает', async () => {
+  const { lookup } = answer({});
+  await using f = await fixture({ net: ['127.0.0.1:$PORT'] }, lookup);
+  const at = (p: string) => `http://127.0.0.1:${String(f.port)}${p}`;
+  assert.equal((await f.net.fetch(at('/gzip'), { headers: { 'Accept-Encoding': 'gzip' } })).body, 'hello');
+  await assert.rejects(f.net.fetch(at('/bomb')), { code: 'Remote' });
 });

@@ -2,7 +2,8 @@ import type dns from 'node:dns';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
-import { Readable } from 'node:stream';
+import { pipeline, Readable } from 'node:stream';
+import zlib from 'node:zlib';
 
 /** Резолв имени; подменяется в тестах и в средах со своим резолвером. */
 export type Lookup = typeof dns.lookup;
@@ -31,7 +32,7 @@ function v6Bytes(text: string): number[] | undefined {
   });
 }
 
-function localV4([a = 0, b = 0]: readonly number[]): boolean {
+function localV4([a = 0, b = 0, c = 0]: readonly number[]): boolean {
   return (
     a === 0 || // 0.0.0.0/8: «этот хост», на Linux и macOS соединяется с самим собой
     a === 10 ||
@@ -40,6 +41,8 @@ function localV4([a = 0, b = 0]: readonly number[]): boolean {
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
     (a === 192 && b === 168) ||
+    (a === 192 && b === 0 && c === 0) || // 192.0.0.0/24: служебные назначения IETF
+    (a === 198 && (b === 18 || b === 19)) || // 198.18.0.0/15: стенды замеров, в сети не маршрутизируются
     a >= 224 // многоадресные, зарезервированные и 255.255.255.255
   );
 }
@@ -51,6 +54,7 @@ function localV6(bytes: readonly number[]): boolean {
   if (zeros(0, 12)) return localV4(bytes.slice(12)); // ::/96, в том числе :: и ::1
   if (zeros(0, 10) && bytes[10] === 255 && bytes[11] === 255) return localV4(bytes.slice(12)); // ::ffff:0:0/96
   if (b0 === 0 && b1 === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b && zeros(4, 12)) return localV4(bytes.slice(12)); // 64:ff9b::/96, NAT64
+  if (b0 === 0 && b1 === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b && bytes[4] === 0 && bytes[5] === 1) return true; // 64:ff9b:1::/48: локальный NAT64 (RFC 8215), адрес не несёт публичный IPv4
   if (b0 === 0x20 && b1 === 0x02) return localV4(bytes.slice(2, 6)); // 2002::/16, 6to4
   return (
     (b0 & 0xfe) === 0xfc || // fc00::/7
@@ -94,33 +98,89 @@ export interface TransportRequest {
   readonly body?: string;
   readonly signal: AbortSignal;
   readonly lookup: net.LookupFunction;
-  /** Локальный адрес этому запросу разрешён: пул соединений у таких запросов свой, см. `pools`. */
+  /** Локальный адрес этому запросу разрешён: пул соединений у таких запросов свой, см. `poolFor`. */
   readonly local: boolean;
+  /** Чей запрос (id плагина): пулы соединений у плагинов свои, чужой запрос не пойдёт по сокету этого. */
+  readonly owner: string;
+}
+
+const pools = new Map<string, http.Agent | https.Agent>();
+
+/**
+ * Пул соединений по плагину, протоколу и режиму проверки. Соединение, открытое без проверки адреса (хост назван в праве),
+ * не должно обслужить запрос с проверкой, а сокет одного плагина - запрос другого (ADR-CH-0014 п. 4: секрет не проходит через третьих).
+ * Простаивающие сокеты агент не держит живыми для процесса.
+ */
+function poolFor(secure: boolean, local: boolean, owner: string): http.Agent | https.Agent {
+  const key = `${owner}\0${secure ? 'https' : 'http'}\0${local ? 'named' : 'checked'}`;
+  let pool = pools.get(key);
+  if (!pool) {
+    pool = secure ? new https.Agent({ keepAlive: true }) : new http.Agent({ keepAlive: true });
+    pools.set(key, pool);
+  }
+  return pool;
+}
+
+/** Плагин выгружен: его соединения закрываются, пулы уходят. */
+export function closePools(owner: string): void {
+  for (const [key, pool] of pools) {
+    if (!key.startsWith(`${owner}\0`)) continue;
+    pool.destroy();
+    pools.delete(key);
+  }
 }
 
 /**
- * Пулы соединений по протоколу и режиму проверки. Соединение, открытое без проверки адреса (хост назван в праве),
- * не должно обслужить запрос с проверкой, поэтому режимы не делят пул. Простаивающие сокеты агент не держит живыми для процесса.
+ * Заголовки разметки сообщения и соединения задаёт `node:http`, а не плагин: `content-length` не по телу оставил бы в keep-alive сокете
+ * хвост - начало чужого запроса. `host` - это хост из права, по которому запрос проверен; свой `host` отправил бы запрос на другой виртуальный хост.
  */
-const pools = {
-  http: { checked: new http.Agent({ keepAlive: true }), named: new http.Agent({ keepAlive: true }) },
-  https: { checked: new https.Agent({ keepAlive: true }), named: new https.Agent({ keepAlive: true }) },
-};
+const FRAMING = new Set(['content-length', 'transfer-encoding', 'connection', 'keep-alive', 'upgrade', 'expect', 'te', 'trailer', 'proxy-connection', 'host']);
 
 /** Статусы без тела: конструктор `Response` отвергает тело при них. */
 const NO_BODY = new Set([101, 204, 205, 304]);
 
+/** Распаковка ответа, который сервер сжал вопреки `accept-encoding: identity`; предел размера - у читающего тело. */
+function decoderFor(encoding: string): zlib.Gunzip | zlib.Inflate | zlib.BrotliDecompress | undefined {
+  switch (encoding.trim().toLowerCase()) {
+    case 'gzip':
+    case 'x-gzip':
+      return zlib.createGunzip();
+    case 'deflate':
+      return zlib.createInflate();
+    case 'br':
+      return zlib.createBrotliDecompress();
+    default:
+      return undefined;
+  }
+}
+
 /** Запрос по `node:http(s)`, чтобы резолв шёл через свой `lookup`; ответ - обычный `Response`. Переадресация не идёт. */
 export function transport(url: URL, init: TransportRequest): Promise<Response> {
   return new Promise((resolve, reject) => {
-    const send = url.protocol === 'https:' ? https.request : http.request;
-    const headers = { accept: '*/*', 'user-agent': 'node', 'accept-encoding': 'identity', ...Object.fromEntries(Object.entries(init.headers).map(([k, v]) => [k.toLowerCase(), v])) };
-    const request = send(url, { method: init.method, headers, signal: init.signal, lookup: init.lookup, agent: pools[url.protocol === 'https:' ? 'https' : 'http'][init.local ? 'named' : 'checked'] }, (incoming) => {
-      const out = new Headers();
-      for (let i = 0; i + 1 < incoming.rawHeaders.length; i += 2) out.append(incoming.rawHeaders[i] ?? '', incoming.rawHeaders[i + 1] ?? '');
-      const status = incoming.statusCode ?? 502;
-      if (NO_BODY.has(status)) incoming.resume();
-      resolve(new Response(NO_BODY.has(status) ? null : (Readable.toWeb(incoming) as ReadableStream<Uint8Array>), { status, statusText: incoming.statusMessage ?? '', headers: out }));
+    const secure = url.protocol === 'https:';
+    const send = secure ? https.request : http.request;
+    const own = Object.entries(init.headers).flatMap(([k, v]): [string, string][] => (FRAMING.has(k.toLowerCase()) ? [] : [[k.toLowerCase(), v]]));
+    // identity после заголовков плагина: сжатое тело пришло бы текстом-мусором.
+    const headers = { accept: '*/*', 'user-agent': 'node', ...Object.fromEntries(own), 'accept-encoding': 'identity' };
+    const request = send(url, { method: init.method, headers, signal: init.signal, lookup: init.lookup, agent: poolFor(secure, init.local, init.owner) }, (incoming) => {
+      // Ответ сервера - чужие данные: `Response` бросает на статусе вне 200-599, и брошенное здесь ушло бы мимо промиса в процесс.
+      try {
+        const out = new Headers();
+        for (let i = 0; i + 1 < incoming.rawHeaders.length; i += 2) out.append(incoming.rawHeaders[i] ?? '', incoming.rawHeaders[i + 1] ?? '');
+        const status = incoming.statusCode ?? 502;
+        if (NO_BODY.has(status)) incoming.resume();
+        const decoder = NO_BODY.has(status) ? undefined : decoderFor(incoming.headers['content-encoding'] ?? '');
+        if (decoder) {
+          out.delete('content-encoding');
+          out.delete('content-length');
+          pipeline(incoming, decoder, () => undefined);
+        }
+        const source = decoder ?? incoming;
+        resolve(new Response(NO_BODY.has(status) ? null : (Readable.toWeb(source) as ReadableStream<Uint8Array>), { status, statusText: incoming.statusMessage ?? '', headers: out }));
+      } catch (error) {
+        incoming.destroy();
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     });
     request.once('error', reject);
     request.end(init.body);

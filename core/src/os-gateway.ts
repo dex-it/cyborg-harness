@@ -9,7 +9,7 @@ import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, Pr
 import { CoreError } from './errors.ts';
 import { limitsOf, type ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
-import { guardedLookup, isLocalAddress, transport, type Lookup } from './net-transport.ts';
+import { closePools, guardedLookup, isLocalAddress, transport, type Lookup } from './net-transport.ts';
 import type { NotifyLimits, ShowNotice } from './notices.ts';
 import { ANY_PATH, LOGIN_SHELL } from './permissions.ts';
 import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type KeptPty, type PtyExpiry, type TerminalSink, type TerminalView } from './pty.ts';
@@ -350,6 +350,7 @@ export class OsGateway {
     for (const [key, close] of this.#watches) if (key.startsWith(`${pluginId}\0`)) close();
     for (const cancel of this.#pending.get(pluginId) ?? []) cancel();
     this.#pending.delete(pluginId);
+    closePools(pluginId);
     this.#runs.delete(pluginId);
     this.#serves.forget(pluginId);
     if (pty === 'park') return this.#pty?.park(pluginId) ?? 0;
@@ -910,6 +911,7 @@ export class OsGateway {
             headers,
             signal: abort.signal,
             local,
+            owner: m.id,
             // Проверка на том же резолве, по которому идёт соединение: отдельный `dns.lookup` до запроса мог бы получить другой ответ.
             lookup: local ? real : guardedLookup(real, (address) => (isLocalAddress(address) ? this.#denied(m, method, `адрес ${address} локальный: ${url.host}`) : undefined)),
             ...body,
