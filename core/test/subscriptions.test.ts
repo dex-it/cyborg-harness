@@ -210,3 +210,47 @@ test('callTimeout во время открытия подписки: Timeout, п
   sub.dispose();
   await kernel.unload();
 });
+
+test('ответ, обогнавший отмену: ядро уже ответило, хост потребителя шлёт release - подписка у поставщика снята, место свободно', async () => {
+  const listeners = new Set<(n: number) => void>();
+  let ctx!: PluginContext;
+  const table: Record<string, PluginModule> = {
+    provider: {
+      activate(c) {
+        c.contracts.provide('test.cancel', '1.0', {
+          // Колбэк до ответа: уведомление callback обгоняет ответ ядра, и потребитель отменяет вызов, когда ядро уже ответило.
+          async watch(listener: (n: number) => void) {
+            listeners.add(listener);
+            listener(1);
+            return { dispose: () => void listeners.delete(listener) };
+          },
+        });
+        return undefined;
+      },
+    },
+    user: { activate: (c) => void (ctx = c) },
+  };
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['provider', 'user'],
+    manifests: [manifest('provider', { provides: { 'test.cancel': '1.0' } }), manifest('user', { requires: { 'test.cancel': '^1' } })],
+    hosts: { p: ['provider'], u: ['user'] },
+    limits: { subscriptions: 1 },
+    spawnHost: inlineHosts(async (entry) => {
+      const mod = table[entry];
+      if (!mod) throw new Error(`нет модуля ${entry}`);
+      return mod;
+    }),
+  });
+  const api = ctx.contracts.get('test.cancel', 1) as unknown as {
+    watch(listener: (n: number) => void, signal?: AbortSignal): Promise<Subscription>;
+  };
+  const abort = new AbortController();
+  await assert.rejects(api.watch(() => abort.abort(), abort.signal), { code: 'Cancelled' });
+  await sleep(100);
+  assert.equal(listeners.size, 0, 'подписка, открытая обогнавшим ответом, снята');
+  const sub = await api.watch(() => undefined);
+  assert.equal(listeners.size, 1, 'при пределе 1 место освободилось');
+  sub.dispose();
+  await kernel.unload();
+});
