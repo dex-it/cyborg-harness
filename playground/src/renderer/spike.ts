@@ -1,6 +1,6 @@
 // Страница замера: ставит пробные виды во фреймы, отвечает на ping и пересылает его во фрейм через postMessage.
 
-import type { SpikeBridge } from '../shared/views.ts';
+import type { SpikeBridge } from '../shared/spike.ts';
 import { byId } from './dom.ts';
 
 const spike = (window as unknown as { spike: SpikeBridge }).spike;

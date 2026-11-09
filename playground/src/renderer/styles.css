@@ -77,7 +77,7 @@ button:focus-visible {
   outline-offset: 1px;
 }
 
-/* Сессия агента - рабочее место, ей вся высота; отладочные панели и демо-виды - в колонке справа со своей прокруткой. */
+/* Основная область - рабочее место, ей вся высота; отладочные панели и демо-виды - в колонке справа со своей прокруткой. */
 .playground {
   display: grid;
   grid-template-columns: minmax(560px, 1.8fr) minmax(380px, 1fr);
@@ -159,6 +159,49 @@ button:focus-visible {
   flex: 1;
 }
 
+/* Панель инструментов основной области: полоса над документами; без видов она пуста и места не занимает. */
+.views-toolbar {
+  display: flex;
+  gap: 12px;
+}
+
+.views-toolbar:empty {
+  display: none;
+}
+
+.views-toolbar .view {
+  flex: 1;
+  height: 110px;
+}
+
+/* Всплывающий слой: виды поверх остального окна, справа внизу. */
+.views-popup {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 320px;
+}
+
+.views-popup:empty {
+  display: none;
+}
+
+.views-popup .view {
+  height: 220px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.view-title {
+  font-size: 12px;
+}
+
 .view {
   display: flex;
   flex-direction: column;
@@ -183,6 +226,7 @@ button:focus-visible {
   position: relative;
   display: flex;
   flex: 1;
+  gap: 6px;
   min-height: 0;
 }
 

@@ -3,9 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { load, type JournalEntry, type Kernel, type WatchdogOptions } from '../../../core/src/index.ts';
-import { PLUGIN_API_VERSION } from '../../../core/src/index.ts';
-import { utilityHosts, type UtilityHosts } from './plugin-hosts.ts';
+import { load, type JournalEntry, type Kernel, type WatchdogOptions } from '@cyborg-harness/core';
+import { PLUGIN_API_VERSION } from '@cyborg-harness/core';
+import { utilityHosts, type UtilityHosts } from '@cyborg-harness/electron';
 import { pssKb, rssKb } from './proc-memory.ts';
 
 export interface HostsSpikeOptions {

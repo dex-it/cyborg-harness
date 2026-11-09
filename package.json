@@ -2,20 +2,40 @@
   "name": "cyborg-harness",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "contracts",
+    "core",
+    "electron",
+    "testing",
+    "tools/cyborg-plugin"
+  ],
   "description": "Ядро плагинов Cyborg Harness и playground-приложение на Electron для проверки его вживую",
   "main": "playground/dist/main.js",
   "scripts": {
+    "build:core": "node core/scripts/build.mjs",
+    "build:testing": "node testing/scripts/build.mjs",
+    "build:electron": "node electron/scripts/build.mjs",
+    "build:tools": "node tools/cyborg-plugin/scripts/build.mjs",
+    "build:packages": "npm run build:core && npm run build:testing && npm run build:electron && npm run build:tools",
+    "prebuild": "npm run build:packages",
     "build": "node playground/scripts/build.mjs",
     "start": "npm run build && electron .",
-    "typecheck": "node node_modules/typescript7/bin/tsc --noEmit -p core && node node_modules/typescript7/bin/tsc --noEmit -p core/elements && node node_modules/typescript7/bin/tsc --noEmit -p playground",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-timeout=120000 'core/test/*.test.ts' 'playground/src/**/*.test.ts' 'playground/test/*.test.ts'",
+    "pretypecheck": "npm run build:packages",
+    "typecheck": "node node_modules/typescript7/bin/tsc --noEmit -p core && node node_modules/typescript7/bin/tsc --noEmit -p core/elements && node node_modules/typescript7/bin/tsc --noEmit -p testing && node node_modules/typescript7/bin/tsc --noEmit -p electron && node node_modules/typescript7/bin/tsc --noEmit -p tools/cyborg-plugin && node node_modules/typescript7/bin/tsc --noEmit -p playground",
+    "pretest": "npm run build:packages",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-timeout=120000 'core/test/*.test.ts' 'contracts/test/*.test.ts' 'testing/test/*.test.ts' 'electron/test/*.test.ts' 'playground/src/**/*.test.ts' 'playground/test/*.test.ts' 'tools/cyborg-plugin/test/*.test.ts'",
     "demo": "node core/examples/run.ts",
     "smoke": "npm run build && node playground/scripts/smoke.mjs",
     "spike": "npm run build && node playground/scripts/spike-iframe.mjs",
     "spike:hosts": "npm run build && node playground/scripts/spike-hosts.mjs",
     "spike:gateway": "npm run build && node playground/scripts/spike-gateway.mjs",
+    "spike:monaco": "npm run build && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON playground/scripts/spike-monaco.mjs",
     "spike:pty": "node playground/scripts/spike-pty.mjs",
     "spike:pty-restore": "node playground/scripts/spike-pty-restore.mjs",
+    "prelint": "npm run build:packages",
+    "build:contracts": "node contracts/scripts/build.ts",
+    "check:contracts": "node contracts/scripts/check-api.ts",
+    "snapshot:contracts": "node contracts/scripts/check-api.ts --update",
     "lint": "eslint --max-warnings 0 .",
     "postinstall": "electron-rebuild -f -w node-pty"
   },
@@ -37,6 +57,7 @@
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "monaco-editor": "^0.57.0",
     "node-pty": "^1.1.0"
   }
 }

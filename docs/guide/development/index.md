@@ -30,8 +30,9 @@ flowchart LR
 | `core/test/` | Тесты ядра на `node:test`; общие подделки и фикстуры |
 | `core/examples/` | Сценарии ядра в консоли (`npm run demo`) и демо-плагины на вымышленных контрактах |
 | `contracts/` | Пакет `@cyborg-harness/contracts`: карта контрактов, API плагина и вида, данные элементов. Типы без кода |
-| `playground/src/main/` | Склейка ядра с Electron: хосты в `utilityProcess`, адаптер ОС, схема `cyborg-plugin://`, мост видов, `PluginsService` |
-| `playground/src/renderer/` | Окно стенда: сессия слева, справа вкладки плагинов, видов, документов, сообщений, журнала и клавиш |
+| `electron/` | Пакет `@cyborg-harness/electron`: адаптер Electron для ядра - хосты в `utilityProcess`, среда `ctx.os`, схема `cyborg-plugin://`, мост видов, каналы IPC, `PluginsService`, слой окна, оболочка вида; описание - `electron/README.md` |
+| `playground/src/main/` | Приложение стенда поверх адаптера: аргументы, воркспейс, окно, замеры |
+| `playground/src/renderer/` | Раскладка окна стенда: сессия слева, справа вкладки плагинов, видов, документов, сообщений, журнала и клавиш |
 | `playground/plugins/` | Базовые плагины и демо (см. ниже) |
 | `playground/scripts/` | Сборка, дымовой тест, замеры фреймов и хостов |
 | `playground/bench/` | Плагины для замера цены вызова |
@@ -47,8 +48,8 @@ flowchart LR
 | Модуль | За что отвечает |
 |---|---|
 | `manifest`, `semver`, `json-schema` | Разбор манифеста с перечнем всех ошибок сразу, версии, схемы разделов |
-| `graph`, `registry`, `via-contract` | Граф контрактов до запуска кода, реестр контрактов и команд, права вызывающего через `guard` |
-| `loader`, `host-runtime`, `host-entry`, `transports`, `rpc`, `wire` | Загрузка и выгрузка, активация, хосты и сторож, канал вызовов и проверка данных |
+| `graph`, `registry`, `via-contract` | Граф контрактов до запуска кода, реестр контрактов и команд, права вызывающего через `guard`, кому открыта команда (`callers`) |
+| `loader` и его части (`context-build`, `host-pool`, `host-bridge`, `lifecycle`, `activation`, `contract-calls`, `commands`, `sections`, `kernel-api`), `host-runtime`, `host-entry`, `transports`, `rpc`, `wire` | Загрузка и выгрузка, активация, хосты и сторож, канал вызовов и проверка данных; раскладка частей `loader` - в SAD, раздел 3.2 |
 | `config`, `workspace`, `recent` | Разделы `config` и `state` по слоям, воркспейс и замок, «Недавние» |
 | `os-gateway`, `permissions`, `serve` | Шлюз `ctx.os`, права и их описание словами, `serve.http` |
 | `pty` | Псевдотерминалы, которые живут дольше плагина |

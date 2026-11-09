@@ -1,14 +1,13 @@
 // Окно playground: плагины с кнопками над ядром, сочетания клавиш, лента сообщений плагинов и журнал ядра (SAD §3.2, §3.5).
 
-import { keyOfInput } from '../../../core/src/keys.ts';
-import type { FeedLine, KeptPtyRow, KeyRow, PluginRow, PluginsSnapshot, Reply } from '../shared/plugins.ts';
-import type { DisablePreview } from '../../../core/src/loader.ts';
+import { keyOfInput } from '@cyborg-harness/core/keys';
+import { WindowLayerView, type FeedLine, type KeptPtyRow, type KeyRow, type PluginRow, type PluginsSnapshot, type Reply } from '@cyborg-harness/electron/window';
+import type { DisablePreview } from '@cyborg-harness/core/window';
 import { byId, el } from './dom.ts';
 import { ViewsPanel } from './views-panel.ts';
 import { moveFocus } from './focus.ts';
 import { SideTabs } from './side-tabs.ts';
-import { WindowLayerView } from './window-layer.ts';
-import { actionsFor, clock, conflictText, journalFor, keyStatus, mergeFeed, originNote, sortedPlugins, STATE_LABEL, summary, userPluginsNotice, type ActionButton } from './plugins-model.ts';
+import { actionsFor, clock, conflictText, journalFor, keyStatus, mergeFeed, originNote, sortedPlugins, STATE_LABEL, summary, userPluginsNotice, viewSlots, type ActionButton } from './plugins-model.ts';
 
 export interface PluginsPort {
   pluginsSnapshot(): Promise<PluginsSnapshot>;
@@ -20,7 +19,7 @@ export interface PluginsPort {
   hangHost(id: string): Promise<Reply>;
   runCommand(command: string): Promise<Reply>;
   onPluginsChanged(listener: () => void): void;
-  setViewVisible(id: string, visible: boolean): Promise<void>;
+  setViewVisible(id: string, view: string, visible: boolean): Promise<void>;
   answerDialog(id: number, choice: string | undefined): Promise<Reply>;
   closeDocument(id: string): Promise<Reply>;
   /** Без файла - системный диалог выбора; смена воркспейса перезапускает приложение. */
@@ -63,10 +62,14 @@ export class PluginsPanel {
   constructor(port: PluginsPort) {
     this.port = port;
     this.layer = new WindowLayerView(port, byId('playground', HTMLElement), byId('lock-layer', HTMLElement));
-    this.views = new ViewsPanel(byId('views', HTMLElement), {
-      setViewVisible: (id, visible) => port.setViewVisible(id, visible),
-      actions: (row) => actionsFor(row, false).filter((b) => b.action === 'enable' || b.action === 'journal').map((b) => this.button(row.id, b)),
-    }, { id: 'sessions', root: byId('main-view', HTMLElement) });
+    // Область вида задаёт раскладка ядра: окно знает свои места, а не плагины.
+    this.views = new ViewsPanel(
+      { sidebar: byId('views', HTMLElement), main: byId('main-view', HTMLElement), toolbar: byId('toolbar-view', HTMLElement), popup: byId('popup-view', HTMLElement) },
+      {
+        setViewVisible: (id, view, visible) => port.setViewVisible(id, view, visible),
+        actions: (row) => actionsFor(row, false).filter((b) => b.action === 'enable' || b.action === 'journal').map((b) => this.button(row.id, b)),
+      },
+    );
     this.journalAll.addEventListener('click', () => this.showJournal(null));
     byId('workspace-open', HTMLButtonElement).addEventListener('click', () => void port.openWorkspace());
     this.safeModeEnter.addEventListener('click', () => void port.setSafeMode(true));
@@ -127,7 +130,7 @@ export class PluginsPanel {
     this.documentsEl.replaceChildren(...(snapshot.documents.length ? snapshot.documents.map((row) => this.documentRow(row)) : [el('li', 'empty', 'Документов нет')]));
     this.renderFeed();
     this.renderJournal();
-    this.views.sync(snapshot.plugins);
+    this.views.sync(viewSlots(snapshot.plugins, snapshot.layout));
     this.layer.sync(snapshot.window, snapshot.plugins);
   }
 

@@ -2,16 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { PluginContext } from '@cyborg-harness/contracts';
-import { resolveSection, SectionStore, type LayerStore } from '../src/config.ts';
+import { memoryStore as memory } from '../../testing/src/memory.ts';
+import { resolveSection, SectionStore } from '../src/config.ts';
 import { load } from '../src/loader.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
-
-function memory(initial: Record<string, Record<string, unknown>> = {}) {
-  const docs = new Map(Object.entries(initial));
-  const store: LayerStore = { load: async (l) => structuredClone(docs.get(l)), save: async (l, d) => void docs.set(l, structuredClone(d)) };
-  return { docs, store };
-}
 
 test('stress-sections: setViewState и documents.open одновременно - оба раздела ядра остаются в state', async () => {
   const { docs, store } = memory();
