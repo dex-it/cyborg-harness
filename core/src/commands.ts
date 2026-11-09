@@ -32,6 +32,7 @@ export function createCommands(ctx: KernelContext): Commands {
   /** `caller` - плагин, чья главная часть зовёт команду, его назвал канал хоста; без него зовёт пользователь: палитра, клавиши, меню. `only` - плагин, от имени которого зовёт его вид. */
   async function execute(command: string, args: unknown[], caller?: string, only?: string): Promise<unknown> {
     const { activation, pool } = ctx.parts;
+    if (only !== undefined && isKernelCommand(command)) throw new CoreError('PermissionDenied', `${command}: команда ядра, а не плагина ${only}`);
     if (command === KERNEL_COMMANDS.revealWorkspace) return ctx.gateway.revealWorkspace();
     const declares = (id: string) => Object.hasOwn(ctx.manifestOf(id).commands, command);
     if (!owners.has(command)) {

@@ -112,7 +112,7 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
     () => options.onDocuments?.(),
   );
 
-  const reserved = options.bundled && options.reservedPrefixes ? { prefixes: options.reservedPrefixes, bundled: new Set(options.bundled) } : undefined;
+  const reserved = options.bundled ? { prefixes: options.reservedPrefixes ?? [], bundled: new Set(options.bundled) } : undefined;
   const graph = resolveGraph(manifests, options.apiVersion, reserved);
   for (const [pluginId, reasons] of graph.rejected) record({ pluginId, kind: 'rejected', reasons });
   await options.onGraph?.(graph);

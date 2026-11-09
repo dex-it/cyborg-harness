@@ -176,6 +176,13 @@ test('отказ по callers раньше, чем ядро будит спящ�
   assert.equal(await user, 'ok:slow.go');
 });
 
+test('runOwn: чужая команда спящего плагина - отказ раньше пробуждения', async () => {
+  await using s = await setup();
+  await assert.rejects(s.k.runOwn('nosy', 'lazy.go'), { code: 'PermissionDenied' });
+  assert.equal(s.k.journal.some((e) => e.pluginId === 'lazy' && e.kind === 'activated'), false, 'вид чужого плагина не будит спящего');
+  assert.equal(await s.k.runOwn('lazy', 'lazy.go'), 'ok:lazy.go', 'свой вид будит как раньше');
+});
+
 test('callers: "plugins" - чужая главная часть вызывает, схема аргументов по-прежнему сверяется', async () => {
   await using s = await setup();
   assert.equal(await s.run('nosy', 'sessions.actions', 'ticket', 3), 'ok:sessions.actions');
@@ -240,6 +247,27 @@ test('команда в двух манифестах: сторонний отв
     await assert.rejects(k.runOwn('other', 'a.b.run'), { code: 'PermissionDenied' }, 'чужая команда');
     await assert.rejects(k.runOwn('a', 'a.nothing'), { code: 'CommandNotFound' });
     assert.deepEqual(ran, ['a:a.b.run:[]'], 'чужие вызовы обработчик не достали');
+  } finally {
+    await k.unload();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('команда в двух манифестах: встроенный остаётся владельцем и без reservedPrefixes - поставку задаёт bundled', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'cyborg-callers-'));
+  const k = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    spawnHost: inlineHosts(async () => ({ activate: () => undefined })),
+    enabled: ['a', 'a.b'],
+    bundled: ['a'],
+    manifests: [
+      { ...base, id: 'a', commands: ['a.b.run'] },
+      { ...base, id: 'a.b', commands: ['a.b.run'] },
+    ],
+    os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp') },
+  });
+  try {
+    assert.deepEqual(k.journal.filter((e) => e.kind === 'rejected').map((e) => e.pluginId), ['a.b']);
   } finally {
     await k.unload();
     await rm(root, { recursive: true, force: true });
