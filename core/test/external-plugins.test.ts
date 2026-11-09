@@ -110,8 +110,9 @@ describe('плагин вне репозитория', () => {
         assert.equal(reason, undefined);
         assert.ok(kernel.active.includes(variant.name), 'не активен');
       } else {
-        assert.ok(reason?.includes(variant.fails), `причина «${reason ?? 'нет записи failed'}»`);
-        assert.ok(reason.includes('точка входа'), 'причина называет точку входа');
+        const text = reason ?? '';
+        assert.ok(text.includes(variant.fails), `причина «${reason ?? 'нет записи failed'}»`);
+        assert.ok(text.includes('точка входа'), 'причина называет точку входа');
         assert.ok(!kernel.active.includes(variant.name), 'активен вопреки отказу');
       }
     });
