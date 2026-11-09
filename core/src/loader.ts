@@ -1295,7 +1295,8 @@ export async function load(options: LoadOptions): Promise<Kernel> {
       await idle();
       unloading = true;
       syncIdleTimer();
-      for (const pluginId of [...active].reverse()) {
+      const unloaded = [...active].reverse();
+      for (const pluginId of unloaded) {
         try {
           await callHost(liveHost(pluginId), pluginId, 'deactivate', { pluginId }, activationTimeout);
           record({ pluginId, kind: 'deactivated' });
@@ -1305,6 +1306,9 @@ export async function load(options: LoadOptions): Promise<Kernel> {
         dropPlugin(pluginId);
       }
       await gateway.releaseAllPty();
+      // Пока ждали pty-хост, хосты плагинов ещё живы: вызов, который плагин успел отправить после своей выгрузки (слежение, pty), мог занять ресурс заново.
+      // Хосты останавливаются следом в том же такте, поэтому вторая зачистка последняя и ничего не оставляет.
+      for (const pluginId of unloaded) forgetOs(pluginId);
       layer.clear();
       for (const host of [...hosts.values()]) stopHost(host, new CoreError('HostGone', 'ядро выгружено'));
       denials.flush();
