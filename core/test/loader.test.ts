@@ -327,6 +327,94 @@ test('пространство поставки: отказ стороннему
   await open.unload();
 });
 
+// K-04: группы рендера - origin и процесс рендера на группу; граница доверия видов - группа, поэтому сторонний не делит её ни с кем.
+test('группы рендера: ui.group - рекомендация, plugins.uiGroups её перекрывает, без группы - id плагина, без ui группы нет', async () => {
+  const noop: PluginModule = { activate: () => undefined };
+  const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
+  const ids = ['a', 'b', 'c', 'd', 'e', 'logic'];
+  const k = await kernel(Object.fromEntries(ids.map((id) => [id, noop])), {
+    enabled: ids,
+    manifests: [manifest('a', view('panels')), manifest('b', view('panels')), manifest('c', view('panels')), manifest('d', view()), manifest('e', view('panels')), manifest('logic')],
+    bundled: ids,
+    uiGroups: { solo: ['c'], tools: ['d', 'e'] },
+  });
+  assert.deepEqual(
+    ids.map((id) => [id, k.groupOf(id)]),
+    [
+      ['a', 'panels'],
+      ['b', 'panels'],
+      ['c', 'solo'],
+      ['d', 'tools'],
+      ['e', 'tools'],
+      ['logic', undefined],
+    ],
+  );
+  assert.equal(k.groupOf('nobody'), undefined);
+  assert.deepEqual(
+    k.journal.filter((e) => e.kind === 'group-isolated'),
+    [],
+  );
+  await k.unload();
+  const plain = await kernel({ a: noop, b: noop }, { enabled: ['a', 'b'], manifests: [manifest('a', view()), manifest('b', view())], bundled: ['a', 'b'] });
+  assert.deepEqual([plain.groupOf('a'), plain.groupOf('b')], ['a', 'b'], 'без группы - своя, по id плагина');
+  await plain.unload();
+});
+
+test('группы рендера: сторонний всегда один в своей группе, запись group-isolated только если ему было с кем делить', async () => {
+  const noop: PluginModule = { activate: () => undefined };
+  const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
+  const ids = ['files', 'tree', 'x', 'y', 'z', 'w'];
+  const k = await kernel(Object.fromEntries(ids.map((id) => [id, noop])), {
+    enabled: ids,
+    // x просит группу tools из конфига пользователя, y - из своего манифеста, z называет id плагина поставки, а не группу, w просит группу, где он один: делить обоим нечего.
+    manifests: [manifest('files', view('panels')), manifest('tree', view('panels')), manifest('x', view()), manifest('y', view('panels')), manifest('z', view('files')), manifest('w', view('mine'))],
+    bundled: ['files', 'tree'],
+    uiGroups: { panels: ['x'] },
+  });
+  assert.deepEqual(
+    ids.map((id) => [id, k.groupOf(id)]),
+    [
+      ['files', 'panels'],
+      ['tree', 'panels'],
+      ['x', 'x'],
+      ['y', 'y'],
+      ['z', 'z'],
+      ['w', 'w'],
+    ],
+  );
+  assert.deepEqual(
+    k.journal.filter((e) => e.kind === 'group-isolated'),
+    [
+      { pluginId: 'x', kind: 'group-isolated', group: 'panels', renderGroup: 'x', reason: 'third-party' },
+      { pluginId: 'y', kind: 'group-isolated', group: 'panels', renderGroup: 'y', reason: 'third-party' },
+    ],
+  );
+  assert.equal(pluginStatuses(k.journal.filter((e) => e.kind === 'group-isolated')).length, 0, 'запись о группе состояния плагину не даёт');
+  const entry = k.journal.find((e) => e.kind === 'group-isolated');
+  assert.ok(entry);
+  assert.match(describeEntry(entry), /сторонний плагин не делит группу рендера: группа panels не действует, работает в своей x/);
+  assert.equal(entryLevel(entry), 'warn');
+  await k.unload();
+
+  const open = await kernel({ x: noop, y: noop }, { enabled: ['x', 'y'], manifests: [manifest('x', view('shared')), manifest('y', view('shared'))] });
+  assert.deepEqual([open.groupOf('x'), open.groupOf('y')], ['x', 'y'], 'без bundled все сторонние');
+  assert.equal(open.journal.filter((e) => e.kind === 'group-isolated').length, 2);
+  await open.unload();
+});
+
+test('группы рендера: плагин поставки не садится в группу, чьё имя - id стороннего плагина', async () => {
+  const noop: PluginModule = { activate: () => undefined };
+  const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
+  const k = await kernel({ files: noop, guest: noop }, { enabled: ['files', 'guest'], manifests: [manifest('files', view('guest')), manifest('guest', view())], bundled: ['files'] });
+  assert.deepEqual([k.groupOf('files'), k.groupOf('guest')], ['files', 'guest'], 'origin стороннего плагина остаётся его одного');
+  assert.deepEqual(
+    k.journal.filter((e) => e.kind === 'group-isolated'),
+    [{ pluginId: 'files', kind: 'group-isolated', group: 'guest', renderGroup: 'files', reason: 'taken' }],
+  );
+  assert.match(describeEntry(k.journal.find((e) => e.kind === 'group-isolated')!), /группа guest занята сторонним плагином: плагин работает в своей files/);
+  await k.unload();
+});
+
 test('хосты: из поставки - по группам, сторонний всегда один в своём хосте', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const ids = ['a', 'b', 'x', 'y', 'z', 'w'];

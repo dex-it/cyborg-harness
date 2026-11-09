@@ -146,6 +146,8 @@ function journalLine(e: JournalEntry): string {
       return `${yellow('⌨')} plugins.keybindings: ${e.key} -> ${String(e.command)} не применено: ${e.reason}`;
     case 'host-isolated':
       return `${yellow('◌')} ${id} сторонний: группа ${e.group} не действует, свой хост ${e.hostId}`;
+    case 'group-isolated':
+      return `${yellow('◌')} ${id} ${e.reason === 'taken' ? `группа рендера ${e.group} занята сторонним` : `сторонний: группа рендера ${e.group} не действует`}, своя ${e.renderGroup}`;
     case 'third-party':
       return `${yellow('◌')} ${id} сторонний: код не из поставки, не проверен`;
     case 'host-own-grouped':
