@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { realpathSync } from 'node:fs';
 import { runCommand, tryCommand } from './run-command.ts';
 
 const node = (script: string) => ['-e', script];
@@ -29,4 +30,15 @@ test('tryCommand: ненулевой выход - код и склеенный �
   assert.deepEqual(tryCommand(process.execPath, node('process.stdout.write("x")')), { code: 0, out: 'x' });
   assert.throws(() => tryCommand(process.execPath, node('setInterval(()=>{},1000)'), { timeout: 300 }), /ETIMEDOUT|timed out|SIGKILL/);
   assert.throws(() => tryCommand('cyborg-такой-программы-нет', []), /ENOENT/);
+});
+
+test('runCommand: cwd и env доходят до команды, окружение процесса теста сохраняется под добавленным', () => {
+  const script = 'process.stdout.write(process.cwd()+"|"+process.env.CYBORG_T13+"|"+(process.env.PATH===undefined?"нет PATH":"есть PATH"))';
+  const out = runCommand(process.execPath, node(script), { cwd: import.meta.dirname, env: { CYBORG_T13: 'x' } });
+  assert.equal(out, `${realpathSync(import.meta.dirname)}|x|есть PATH`);
+});
+
+test('runCommand: без cwd сообщение об отказе не называет каталог; сигнал убитой команды попадает в сообщение', () => {
+  assert.throws(() => runCommand(process.execPath, node('process.exit(2)')), (e: Error) => e.message.includes('код выхода 2') && !e.message.includes('cwd'));
+  assert.throws(() => runCommand(process.execPath, node('process.kill(process.pid,"SIGTERM");setInterval(()=>{},1000)')), (e: Error) => /SIGTERM/.test(e.message));
 });
