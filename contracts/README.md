@@ -211,6 +211,8 @@ export interface Clock {
 
 После импорта этого пакета `ctx.contracts.get('acme.clock', 1)` возвращает `Remote<Clock>`.
 
+Готовый образец - [`templates/plugin`](../templates/plugin): поставщик контракта `example.greeting`, его объявления в `contracts.ts` рядом с плагином, потребитель в тесте. Скопируйте его, переименуйте `example` и замените контракт своим; порядок - в руководстве «Первый плагин» (`docs/guide/start/first-plugin.md`).
+
 ## Что проверяет компилятор, а что ядро
 
 | Проверка | Кто | Когда |
