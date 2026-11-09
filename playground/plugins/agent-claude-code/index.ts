@@ -107,7 +107,8 @@ const plugin: PluginModule = {
     const sessions = `${paths.data}/sessions`;
     await fs.mkdir(sessions);
     const hooks = Object.fromEntries(HOOK_EVENTS.map((event) => [event, [{ ...(event === 'PostToolUse' ? { matcher: '*' } : {}), hooks: [{ type: 'command', command: HOOK_COMMAND }] }]]));
-    // Инструменты сервера cyborg дали плагины, которые человек включил: вопрос о разрешении на каждый вызов был бы лишним.
+    // Сервер cyborg отдаёт только инструменты плагинов поставки (cyborg.agent-tool сторонним закрыт, K-15): вопрос на каждый вызов лишний.
+    // Больше ничего не разрешается и режим не задаётся: остальные инструменты агента подчиняются настройкам человека (SAD 3.7).
     await fs.writeText(settings, JSON.stringify({ hooks, permissions: { allow: [`mcp__${MCP_SERVER}`] } }, null, 2));
     const eventsFile = (sessionId: string) => {
       if (!SESSION_ID.test(sessionId)) throw new Error(`id сессии не годится для имени файла: ${sessionId}`);

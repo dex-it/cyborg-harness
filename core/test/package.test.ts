@@ -77,7 +77,7 @@ describe('собранный пакет (core/dist)', () => {
   it('JS и .d.ts без .ts-расширений в импортах и без чужих зависимостей', () => {
     const code = files.filter((f) => f.endsWith('.js') || f.endsWith('.d.ts'));
     assert.ok(code.length > 30, `файлов в dist: ${code.length}`);
-    const specs = /(?:from|import)\s*\(?\s*'([^']+)'/g;
+    const specs = /(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g;
     for (const file of code) {
       const text = fs.readFileSync(file, 'utf8');
       for (const m of text.matchAll(specs)) {

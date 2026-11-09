@@ -8,6 +8,7 @@ export type Rejection =
   | { readonly kind: 'missing'; readonly contract: string; readonly range: string }
   | { readonly kind: 'ambiguous'; readonly contract: string; readonly providers: readonly string[] }
   | { readonly kind: 'cycle'; readonly members: readonly string[] }
+  | { readonly kind: 'command'; readonly command: string; readonly with: readonly string[] }
   | { readonly kind: 'reserved'; readonly what: 'id' | 'provides'; readonly name: string; readonly prefix: string };
 
 /** Пространства имён, которые занимают только плагины из поставки: `provides` и `id` с таким префиксом у стороннего - отказ. */
@@ -44,6 +45,8 @@ export function resolveGraph(manifests: readonly PluginManifest[], apiVersion: s
     if (reserved && !reserved.bundled.has(m.id)) for (const r of trespasses(m, reserved.prefixes)) reject(m.id, r);
   }
 
+  rejectSharedCommands([...byId.values()].filter((m) => !rejected.has(m.id)), reserved, reject);
+
   const alive = () => [...byId.values()].filter((m) => !rejected.has(m.id));
   let bindings: Map<string, Map<string, string>>;
 
@@ -56,6 +59,22 @@ export function resolveGraph(manifests: readonly PluginManifest[], apiVersion: s
   }
 
   return { order: topoOrder(alive(), bindings), rejected, bindings };
+}
+
+/**
+ * Команду объявил один плагин. Пространство имён проверяется префиксом `${id}.`, поэтому `a` и `a.b` оба могут объявить `a.b.run`;
+ * кто зарегистрирует первым, тот владелец, а вид, клик по уведомлению и сочетание второго запустили бы команду первого. Отказ обоим;
+ * если один из них встроенный, а остальные нет - отвергаются только остальные, иначе сторонний плагин снимал бы чужую поставку.
+ */
+function rejectSharedCommands(plugins: readonly PluginManifest[], reserved: Reserved | undefined, reject: (id: string, r: Rejection) => void): void {
+  const declared = new Map<string, string[]>();
+  for (const m of plugins) for (const command of Object.keys(m.commands)) declared.set(command, [...(declared.get(command) ?? []), m.id]);
+  for (const [command, ids] of declared) {
+    if (ids.length < 2) continue;
+    const bundled = ids.filter((id) => reserved?.bundled.has(id));
+    const losers = bundled.length === 1 ? ids.filter((id) => !bundled.includes(id)) : ids;
+    for (const id of losers) reject(id, { kind: 'command', command, with: ids.filter((other) => other !== id) });
+  }
 }
 
 function* trespasses(m: PluginManifest, prefixes: readonly string[]): Generator<Rejection> {

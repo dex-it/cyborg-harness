@@ -156,7 +156,8 @@ async function main() {
       return frame ? frame.executeJavaScript(${JSON.stringify(expression)}) : null;
     })()`);
   const viewLog = (id) => inView(id, "[...document.querySelectorAll('#log li')].map((l) => l.textContent).join('\\n')");
-  const views = () => ev("[...document.querySelectorAll('.views iframe')].map((f) => f.closest('[data-plugin]').dataset.plugin).sort().join(',')");
+  // Вид плагина - пара «плагин/вид»: у panels два вида в разных областях.
+  const views = () => ev("[...document.querySelectorAll('.views iframe')].map((f) => { const v = f.closest('[data-plugin]').dataset; return v.plugin + '/' + v.view; }).sort().join(',')");
   const viewVar = (id, name) => inView(id, `getComputedStyle(document.documentElement).getPropertyValue(${JSON.stringify(name)}).trim()`);
   const theme = (source) => main(`process.mainModule.require('electron').nativeTheme.themeSource = ${JSON.stringify(source)}`);
   const states = async (expected) => {
@@ -165,7 +166,7 @@ async function main() {
   };
 
   await waitFor('демо-плагины работают, flaky выключен с причиной', async () =>
-    (await states({ echo: 'active', chat: 'active', alice: 'active', bob: 'active', flaky: 'stopped', 'agent-claude-code': 'active', 'agent-shell': 'active', 'session-isolation': 'active', 'next-actions': 'active', sessions: 'active' })) &&
+    (await states({ echo: 'active', chat: 'active', alice: 'active', bob: 'active', flaky: 'stopped', 'agent-claude-code': 'active', 'agent-shell': 'active', 'session-isolation': 'active', 'next-actions': 'active', sessions: 'active', panels: 'active' })) &&
     /всегда падает/.test(await text('#plugins-list [data-plugin="flaky"] .plugin-reason')),
   );
   await waitFor('alice и bob подписаны на чат', () => lines().includes('[plugins] chat: подписчиков: 2'));
@@ -188,7 +189,20 @@ async function main() {
   await waitFor('свободное сочетание дошло до окна', () => feedHas(re('Z', 'до окна дошло')));
   log('перехват клавиш, конфликт, обмен сообщениями через три хоста');
 
-  await waitFor('виды echo, alice и bob во фреймах', async () => (await views()) === 'alice,bob,echo,pin-lock,sessions' && (await inView('bob', "document.readyState")) === 'complete');
+  await waitFor('виды echo, alice и bob во фреймах', async () => (await views()) === 'alice/main,bob/main,echo/main,panels/bar,panels/panel,pin-lock/main,sessions/main' && (await inView('bob', "document.readyState")) === 'complete');
+  // Область вида задаёт манифест, окно раскладывает по раскладке ядра: оба вида panels на своих местах, у каждого свой ctx.view.
+  const area = (selector) => ev(`[...document.querySelectorAll(${JSON.stringify(selector + ' [data-plugin]')})].map((f) => f.dataset.plugin + '/' + f.dataset.view).sort().join(',')`);
+  assert.equal(await area('#main-view'), 'sessions/main', 'основная область не по манифесту');
+  assert.equal(await area('#toolbar-view'), 'panels/bar', 'панель инструментов не по манифесту');
+  assert.equal(await area('#views'), 'alice/main,bob/main,echo/main,panels/panel,pin-lock/main', 'боковая колонка не по манифесту');
+  const panelsText = () =>
+    main(`(async () => {
+      const { webContents } = process.mainModule.require('electron');
+      const page = webContents.getAllWebContents().find((w) => w.getType() === 'window');
+      const frames = page.mainFrame.framesInSubtree.filter((f) => f.origin === 'cyborg-plugin://panels');
+      return (await Promise.all(frames.map((f) => f.executeJavaScript("document.getElementById('which')?.textContent ?? ''")))).sort().join('|');
+    })()`);
+  await waitFor('оба вида panels показаны, каждый со своим именем', async () => (await panelsText()) === 'panels/bar: панель инструментов|panels/panel: боковая колонка');
   assert.equal(await inView('alice', 'typeof window.playground'), 'undefined', 'вид получил мост окна');
   await inView('alice', "document.getElementById('hello').click()");
   await waitFor('вид alice → чат → вид bob', async () => /→ привет, bob/.test(await viewLog('alice')) && /← alice: привет, bob/.test(await viewLog('bob')));
@@ -241,7 +255,7 @@ async function main() {
     (await states({ chat: 'stopped', alice: 'stopped', bob: 'active' })) && lines().includes('[plugins] bob: чат пропал'),
   );
   assert.match(await text('#plugins-list [data-plugin="alice"] .plugin-reason'), /выгружен вместе с chat/);
-  await waitFor('на месте вида снятой alice - заглушка с причиной', async () => (await views()) === 'bob,echo,pin-lock,sessions' && /выгружен вместе с chat/.test(await text('#views [data-plugin="alice"] .view-reason')));
+  await waitFor('на месте вида снятой alice - заглушка с причиной', async () => (await views()) === 'bob/main,echo/main,panels/bar,panels/panel,pin-lock/main,sessions/main' && /выгружен вместе с chat/.test(await text('#views [data-plugin="alice"] .view-reason')));
   assert.ok(await ev(`[...document.querySelectorAll('#views [data-plugin="alice"] button')].some((b) => b.textContent === 'Журнал')`), 'у заглушки нет «Журнал»');
   assert.equal((await keyRow(combo('A')))?.live, 'false');
   await press(combo('A'));
@@ -251,7 +265,7 @@ async function main() {
     (await states({ chat: 'active', alice: 'active' })) && lines().includes('[plugins] bob: чат вернулся, подписываюсь снова'),
   );
   assert.notEqual(await pid('chat'), chatPid, 'после выгрузки chat должен подняться в новом процессе');
-  await waitFor('вид alice вернулся', async () => (await views()) === 'alice,bob,echo,pin-lock,sessions');
+  await waitFor('вид alice вернулся', async () => (await views()) === 'alice/main,bob/main,echo/main,panels/bar,panels/panel,pin-lock/main,sessions/main');
   await waitFor('новый документ alice помнит приветы из state воркспейса', async () => (await inView('alice', "document.getElementById('greeted')?.textContent")) === 'приветов: 1');
   log('выгрузка с зависимыми, загрузка в новый процесс, переподписка');
 
@@ -385,7 +399,8 @@ async function main() {
   await press('F6');
   await waitFor('F6: фокус на первой панели', async () => /pane-plugins/.test(await focusedArea()));
   await press('F6');
-  await waitFor('F6: скрытые вкладки пропущены, следом вид сессии', async () => (await focusedArea()) === 'вид sessions');
+  // Порядок обхода - порядок окна: панель инструментов основной области (вид bar плагина panels) стоит над основной областью.
+  await waitFor('F6: скрытые вкладки пропущены, следом первый вид окна - панель инструментов', async () => (await focusedArea()) === 'вид panels');
   await press('Shift+F6');
   await press('Shift+F6');
   await waitFor('Shift+F6 с первой панели - на последний вид', async () => /^вид /.test(await focusedArea()));
