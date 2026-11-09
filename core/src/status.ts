@@ -80,6 +80,8 @@ function rejection(r: Rejection): string {
       return `несколько поставщиков ${r.contract}: ${r.providers.join(', ')}`;
     case 'cycle':
       return `цикл зависимостей: ${r.members.join(' → ')}`;
+    case 'command':
+      return `команду ${r.command} объявил и ${list(r.with)}: владельца нет, пока команда в двух манифестах`;
     case 'reserved':
       return r.what === 'id'
         ? `id ${r.name} из пространства ${r.prefix}* - только у встроенных плагинов`
@@ -132,7 +134,8 @@ export function describeEntry(e: JournalEntry): string {
     case 'revived':
       return 'включён снова';
     case 'denied': {
-      const what = `${e.reason === 'window' ? 'отказ окна' : 'отказ ctx.os'}: ${e.detail}`;
+      const source = e.reason === 'window' ? 'отказ окна' : e.reason === 'command-callers' ? 'отказ команды' : 'отказ ctx.os';
+      const what = `${source}: ${e.detail}`;
       return e.repeats ? `${what} - ещё ${String(e.repeats)} раз за ${String(DENIED_WINDOW_MS / 1000)} с` : what;
     }
     case 'deprecated-call': {

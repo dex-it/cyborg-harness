@@ -3,6 +3,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   describeEntry,
+  describeOpenCommands,
   describePermissions,
   entryLevel,
   errorMessage,
@@ -353,7 +354,7 @@ export class PluginsService {
     if (!Array.isArray(args)) return Promise.resolve({ error: `${command}: аргументы - не массив` });
     const own = this.kernel?.manifests.find((m) => m.id === pluginId)?.commands ?? {};
     if (!Object.hasOwn(own, command)) return Promise.resolve({ error: `${command}: не команда плагина ${pluginId}` });
-    return this.run(command, args);
+    return this.run(command, args, pluginId);
   }
 
   /** Терминал вида по билету `share()` его главной части; плагин - из origin фрейма. */
@@ -461,7 +462,7 @@ export class PluginsService {
         revivable: (s.revivable || s.cause?.kind === 'safe-mode') && kernel !== undefined,
         unloaded: s.cause?.kind === 'unloaded' && s.cause.by === s.id,
         commands,
-        permissions: manifest ? describePermissions(manifest.permissions) : [],
+        permissions: manifest ? [...describePermissions(manifest.permissions), ...describeOpenCommands(manifest.commands)] : [],
         ...(manifest && { version: manifest.version }),
         ...(s.state !== 'disabled' && manifest?.ui && Object.keys(manifest.ui.views).length > 0 && this.views.has(s.id) && { view: `${viewOrigin(s.id)}/` }),
         ...(manifest?.ui?.overlay !== undefined && this.views.has(s.id) && { overlay: `${viewOrigin(s.id)}/?view=overlay` }),
@@ -518,10 +519,11 @@ export class PluginsService {
     return true;
   }
 
-  run(command: unknown, args: readonly unknown[] = []): Promise<Reply> {
+  /** `onBehalfOf` - плагин, от имени которого зовёт его вид: ядро исполняет только его команду, даже если то же имя объявил другой плагин. */
+  run(command: unknown, args: readonly unknown[] = [], onBehalfOf?: string): Promise<Reply> {
     return this.act(command, 'нет имени команды', async (kernel, name) => {
       try {
-        return await kernel.run(name, ...args);
+        return await (onBehalfOf === undefined ? kernel.run(name, ...args) : kernel.runOwn(onBehalfOf, name, ...args));
       } catch (error) {
         this.say({ kind: 'error', subject: name, text: errorMessage(error) });
         throw error;

@@ -5,7 +5,7 @@ import { isValidId, show, VIEW_NAME } from './manifest-fields.ts';
 import { readProvides } from './manifest-provides.ts';
 import { readUi } from './manifest-ui.ts';
 import { readPermissions, type PluginPermissions } from './permissions.ts';
-import type { MemberGuards } from './via-contract.ts';
+import { readRights, type Guard, type MemberGuards } from './via-contract.ts';
 import { isRecord, isWireKind, matchesKind, own, type WireKind } from './wire.ts';
 import { KERNEL_COMMANDS, reservedId, WINDOW_COMMANDS } from './window-layer.ts';
 
@@ -17,10 +17,17 @@ export interface ArgSpec {
   readonly optional: boolean;
 }
 
+/** Кому открыта команда: `user` - палитре, клавишам, меню и виду своего плагина; `plugins` - ещё и главным частям других плагинов. */
+export type CommandCallers = 'user' | 'plugins';
+
 /** Аргументы команды: позиционные, необязательные только в хвосте; `rest` - вид всех остальных. */
 export interface CommandSpec {
   readonly args: readonly ArgSpec[];
   readonly rest?: WireKind;
+  /** Не объявлено - `user`. */
+  readonly callers?: CommandCallers;
+  /** Право чужого вызывающего на аргумент; только при `callers: "plugins"`. Ядро проверяет его до передачи вызова, как `guard` члена контракта. */
+  readonly guard?: readonly Guard[];
 }
 
 /** Сочетание клавиш -> своя команда без обязательных аргументов; `key` уже в записи `normalizeKey`. */
@@ -202,9 +209,45 @@ function readCommands(raw: unknown, id: string | undefined, errors: string[]): R
 function readCommandSpec(name: string, raw: unknown, errors: string[]): CommandSpec | undefined {
   const where = `commands.${name}`;
   if (!isRecord(raw)) {
-    errors.push(`${where}: ожидается объект { args, rest }`);
+    errors.push(`${where}: ожидается объект { args, rest, callers, guard }`);
     return undefined;
   }
+  const callers = readCallers(where, raw.callers, errors);
+  const guard = readCommandGuard(where, raw.guard, callers, errors);
+  const shape = readCommandShape(where, raw, errors);
+  if (shape && guard) checkGuardKinds(where, shape, guard, errors);
+  return shape && { ...shape, ...(callers !== undefined && { callers }), ...(guard !== undefined && { guard }) };
+}
+
+function readCallers(where: string, raw: unknown, errors: string[]): CommandCallers | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === 'user' || raw === 'plugins') return raw;
+  errors.push(`${where}.callers: ожидается "user" или "plugins", получено ${show(raw)}`);
+  return undefined;
+}
+
+/** `guard` защищает исполнителя от чужого вызывающего; у команды только для своих он ничего бы не проверял, поэтому без `callers: "plugins"` это ошибка. */
+function readCommandGuard(where: string, raw: unknown, callers: CommandCallers | undefined, errors: string[]): readonly Guard[] | undefined {
+  if (raw === undefined) return undefined;
+  if (callers !== 'plugins') {
+    errors.push(`${where}.guard: проверяет аргумент для чужих главных частей - нужен callers: "plugins"`);
+    return undefined;
+  }
+  return readRights(`${where}.guard`, raw, errors);
+}
+
+/** Ядро берёт под проверку строку: без поля - сам аргумент, с полем - поле объекта. Схема команды должна допускать такой аргумент, иначе каждый чужой вызов получит `Invalid`. */
+function checkGuardKinds(where: string, spec: CommandSpec, guard: readonly Guard[], errors: string[]): void {
+  for (const g of guard) {
+    const at = `${where}.guard.${g.right}`;
+    const kind = spec.args[g.arg]?.kind ?? (g.arg >= spec.args.length ? spec.rest : undefined);
+    if (kind === undefined) errors.push(`${at}: аргумента ${g.arg} нет в args и rest`);
+    else if (g.field === undefined && kind !== 'string' && kind !== 'any') errors.push(`${at}: аргумент ${g.arg} - ${kind}, а право без поля проверяет строку: нужен string или any`);
+    else if (g.field !== undefined && kind !== 'record' && kind !== 'any') errors.push(`${at}: аргумент ${g.arg} - ${kind}, а поле ${g.field} есть только у record: нужен record или any`);
+  }
+}
+
+function readCommandShape(where: string, raw: Record<string, unknown>, errors: string[]): CommandSpec | undefined {
   const list = raw.args ?? [];
   if (!Array.isArray(list) || !list.every((a) => typeof a === 'string')) {
     errors.push(`${where}.args: ожидается список видов, например ["string", "number?"]`);

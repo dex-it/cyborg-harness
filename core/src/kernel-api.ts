@@ -60,6 +60,7 @@ export function buildKernel(ctx: KernelContext): Kernel {
     disablePreview: (pluginId) => lifecycle.disablePreview(pluginId),
     enable: (pluginId) => lifecycle.enable(pluginId),
     run: (command, ...args) => commands.run(command, ...args),
+    runOwn: (pluginId, command, ...args) => commands.runOwn(pluginId, command, args),
     idle: () => lifecycle.idle(),
     reloadSections: (kind, ids) => sections.reload(kind, ids),
     unload: () => lifecycle.shutdown(),

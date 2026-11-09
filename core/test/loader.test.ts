@@ -112,7 +112,7 @@ test('команды: запуск из ядра и из другого плаг
         },
       },
     },
-    { enabled: ['lock', 'menu'], manifests: [manifest('lock', { commands: { 'lock.now': { args: ['string'] } } }), manifest('menu', { commands: ['menu.press'] })] },
+    { enabled: ['lock', 'menu'], manifests: [manifest('lock', { commands: { 'lock.now': { args: ['string'], callers: 'plugins' } } }), manifest('menu', { commands: ['menu.press'] })] },
   );
   assert.equal(await k.run('lock.now', 'idle'), 'locked:idle');
   assert.equal(await k.run('menu.press'), 'locked:menu');

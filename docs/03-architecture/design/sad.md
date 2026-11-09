@@ -208,7 +208,7 @@ flowchart TB
 
 Ядро ведёт реестр контрактов (`provides` / `requires` / `optional` / `consumes`) и реестр команд и передаёт вызовы: между плагинами, между UI и главной частью одного плагина, между хостами. Для плагина вызов выглядит одинаково, в одном хосте поставщик или в другом. Как плагины этим пользуются - [раздел 4](#4-взаимодействие-плагинов).
 
-**Сделано в ядре.** Реестр контрактов - `core/src/registry.ts`, реестр команд - `core/src/commands.ts`, передача вызовов между хостами - `core/src/contract-calls.ts` и `core/src/call-check.ts` поверх канала `core/src/rpc.ts`, право вызывающего через контракт (`guard`) - `core/src/via-contract.ts`. Тесты - `core/test/registry.test.ts`, `core/test/rpc.test.ts`, `core/test/subscriptions.test.ts` (подписка через границу хоста), `core/test/via-contract.test.ts` (в том числе вызов из вида), `core/test/trust.test.ts` (контракт зовёт только связанный графом потребитель, аргументы команды сверяются со схемой), `core/test/loader.test.ts` («команды: запуск из ядра и из другого плагина…»).
+**Сделано в ядре.** Реестр контрактов - `core/src/registry.ts`, реестр команд и проверка `callers` и `guard` команды - `core/src/commands.ts`, передача вызовов между хостами - `core/src/contract-calls.ts` и `core/src/call-check.ts` поверх канала `core/src/rpc.ts`, право вызывающего через контракт (`guard`) - `core/src/via-contract.ts`. Тесты - `core/test/registry.test.ts`, `core/test/rpc.test.ts`, `core/test/subscriptions.test.ts` (подписка через границу хоста), `core/test/via-contract.test.ts` (в том числе вызов из вида), `core/test/trust.test.ts` (контракт зовёт только связанный графом потребитель, аргументы команды сверяются со схемой, вызывающего команды называет канал), `core/test/command-callers.test.ts` (`callers` и `guard` команд), `core/test/loader.test.ts` («команды: запуск из ядра и из другого плагина…»).
 
 ### 3.5. Изоляция сбоев: хосты и сторож
 
@@ -321,6 +321,7 @@ const view = await ctx.terminal.open(ticket);  // data / write / resize, мим�
 - путь проверяется после `realpath`, на открытом дескрипторе; вне области - всегда `PermissionDenied`, никогда `NotFound`;
 - защищённые пути закрыты всегда: данные приложения, файл воркспейса и его соседи `<файл>.*` (замок, копия `.corrupt-<время>`, `.v1.bak`, временный файл записи - они несут его содержимое), запись в `.git/` (кроме явной области `workspace.git`); показать файл воркспейса человеку - команда ядра, а не плагина ([3.10](#310-главный-конфиг-и-состояние));
 - права через чужой контракт не передаются: член контракта объявляет нужное право (`guard` в `provides` поставщика), и шлюз проверяет его у **вызывающего** (`reason: 'via-contract'`);
+- права через чужую команду не передаются: команда открыта плагинам, только если исполнитель объявил `callers: "plugins"` (иначе `PermissionDenied`, `reason: 'command-callers'`), а путь в аргументе проверяет `guard` команды по праву вызывающего ([3.4](#34-связь-между-плагинами), [ADR-CH-0016](../adr/ADR-CH-0016-command-callers.md));
 - каждый отказ пишется в журнал плагинов.
 
 **Честная граница:** `process` и `pty` дают программе все права пользователя ОС. Списки аргументов и запрет опасных флагов - смягчение, а не защита; окно подтверждения показывает такое право как «полный доступ через программу».
@@ -664,6 +665,16 @@ if (sessions) ctx.subscriptions.add(await sessions.onChange(e => { /* ... */ }))
 // виды: string, number (конечное), boolean, array, strings, record, any (не undefined)
 ```
 
+**Кому открыта команда** ([ADR-CH-0016](../adr/ADR-CH-0016-command-callers.md)). Поле `callers` у команды в манифесте исполнителя: `"user"` (по умолчанию) - команду зовут палитра, клавиши, меню, клик уведомления, вид самого плагина и его главная часть; `"plugins"` - ещё и главные части других плагинов. Вызов чужой главной части к команде `user` - `PermissionDenied` и запись `denied` с `reason: 'command-callers'` у вызывающего; вызывающего называет канал хоста, а не плагин. Команда `plugins` может объявить `guard` для аргумента-пути, как член контракта: ядро сверяет его с правом вызывающего, исполнитель работает своими правами. Команду объявляет один плагин: если её объявили два манифеста (`a` и `a.b` оба объявили `a.b.run`), граф отвергает обоих, а при одном встроенном - остальных (причина `command`); вид и клик по уведомлению идут через `Kernel.runOwn` и исполняют только команду своего плагина.
+
+```jsonc
+"commands": {
+  "sessions.new":     { "args": ["string"] },                                    // только пользователь
+  "sessions.actions": { "args": ["string", "number"], "callers": "plugins" },    // и чужие главные части
+  "file.open":        { "args": ["record"], "callers": "plugins", "guard": { "fs.read": "0.path" } }
+}
+```
+
 11. **Кто объявляет контракт.** Контракт вклада объявляет владелец сущности или вида; вкладчик зависит от владельца, а не наоборот. Общий ресурс предметной области, нужный нескольким плагинам, получает плагин-владелец с контрактом, а не место в ядре. Так уже устроены `cyborg.tree-decoration` (его объявляет `files`, владелец дерева, а `git` поставляет отметки) и `cyborg.session-prompt` (его объявляет и опрашивает `sessions`, а фрагменты дают поставщики). Три следствия:
     - **общий ресурс** (git, трекеры) - свой плагин с контрактом: `git` даёт `cyborg.git`, `trackers` - один плагин с видами «Задачи», «MR/PR», «Статус»;
     - **данные одного плагина в виде другого** - владелец вида объявляет вклад (`many`), вкладчики отдают данные, рисует владелец: полосу кнопок под терминалом объявляет `sessions`, кнопки отдаёт `command-buttons`, шаблоны старта (`mr.review`, `task.start`) - `trackers`;
@@ -694,7 +705,7 @@ flowchart LR
 | `sessions` | `cyborg.sessions`: реестр сессий, документ-терминал, события, `create` / `send` / `paste` / `reveal`, приём броска пути; команда `sessions.new` | `cyborg.agent` (many), `cyborg.projects` (optional) | `pty` по списку агентов, `security.roots` (cwd живых сессий) |
 | `agent-claude-code` | `cyborg.agent`: запуск `claude` с хуками, адаптер событий `Stop` / `Notification`, `resume`; вид «Сессии» (история) | - | `process`: `$SHELL -lc 'claude --version'`, `fs.read: ["~/.claude/projects"]`; pty запускает `sessions` по описанию `launch` |
 | `files` | вид «Файлы»; бросок пути как MIME | `cyborg.sessions`, `cyborg.projects` (optional), `cyborg.tree-decoration` (many); команда `file.open` | `fs.read`, `fs.watch`: `workspace` |
-| `viewer` | документ «файл» (Monaco), исполнитель `file.open`, `cyborg.editor` | - | `fs.read: workspace`, `shell.openPath: workspace` |
+| `viewer` | документ «файл» (Monaco), исполнитель `file.open` (`callers: "plugins"`, `guard` `fs.read` на путь), `cyborg.editor` | - | `fs.read: workspace`, `shell.openPath: workspace` |
 | `projects` | `cyborg.projects`, диалог проекта, команды `projects.new` / `projects.edit` | `cyborg.project-settings` (many) | `security.roots` |
 
 **`cyborg.agent` - сделано.** Контракт - `contracts/agent.ts`: `facts` (найдена ли программа, версия, `capabilities`: `resume`, `history`, `events`), `launch` (готовый вход `ctx.os.pty.spawn`), `watch` (события `cwd`, `session` - id сессии самого агента для `resume`, `activity`, `prompt`, `turnEnd`, `waiting`), `ended` (уборка и причина выхода по коду: 127 - `notFound`), `history`. Поставщик процессов не создаёт ([ADR-CH-0004](../adr/ADR-CH-0004-agent-provider-contract.md)), pty запускает потребитель по своему праву. Программа правила `process` и `pty` может быть `$SHELL` - оболочка входа человека: ядро подставляет её путь, а правило обязано закрепить флаг и скрипт; так `agent-claude-code` запускает `$SHELL -lc 'exec claude --settings "$CYBORG_SETTINGS" "$@"'`, как сегодняшний Cyborg, и `claude` находится по PATH из профиля. В playground: `agent-claude-code` (хуки `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`, `Notification` пишут JSON в файл сессии в `plugin-data`, `watch` следит за каталогом сессий через `fs.watch` и дочитывает файл через `fs.readSlice` с конца; `history` - интерактивные сессии каталога и его worktree из `~/.claude/projects`, заголовок с краёв журнала, как в сегодняшнем Cyborg), второй поставщик `agent-shell` (агент без следов: только запуск и вывод) и потребитель `sessions` с видом - кнопка на поставщика и терминал сессии по билету. Общий набор тестов поставщика и паритет аргументов и хуков - `playground/test/agents.test.ts`; дымовой тест открывает сессию `agent-shell` в окне. Восстановление сессий - [5.3](#53-восстановление-сессий). **«Ждёт», фрагменты промпта, confused deputy - сделано.** «Ждёт» после `Stop` объявляет `agent-claude-code` (`waitAfterStop`), как сегодняшний Cyborg: только если ход закончен без фоновой работы и сессия молчит 30 с - чужой Stop-хук может продолжить ход; любое следующее событие и `dispose` снимают таймер. Фрагменты промпта - контракт `cyborg.session-prompt` (кратность many): `sessions` собирает фрагменты всех поставщиков по порядку id и передаёт в `launch({ promptFragments })`; изоляцию даёт плагин `session-isolation`. ADR-CH-0004 (п. 6) называл для этого waterfall-событие `session.prompt`; шины событий в ядре нет, а контракт many даёт тот же сбор без нового механизма. Confused deputy закрыт в ядре: `pty.spawn({ describedBy })` сверяет описание и с `pty` потребителя, и с новым правом `launch` поставщика - права пересекаются, сторонний поставщик не получает права потребителя; `launch` члена в `ctx.os` не даёт. Дымовой тест с `CYBORG_SMOKE_CLAUDE=1` запускает живой `claude` по праву `launch` и доходит до вопроса о доверии к каталогу; стрелки из пустого поля вида уходят в сессию.
@@ -716,7 +727,7 @@ sequenceDiagram
   participant K as Ядро
   participant V as viewer
   F->>K: commands.run('file.open', {path, line})
-  K->>K: право fs.read:path у files (via-contract)
+  K->>K: callers команды и guard: право fs.read:path у files
   K->>V: file.open {path, line}
   V->>K: ctx.os.fs.readText(path)
   K->>K: realpath, область workspace у viewer
