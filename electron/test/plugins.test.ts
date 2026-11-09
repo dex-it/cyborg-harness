@@ -283,7 +283,7 @@ test('служба окна: сочетания с конфликтом, пер�
   assert.equal(service.press({ ...ctrlShiftE, shift: false }), false, 'свободное сочетание ядро не забирает');
   assert.equal(service.press(ctrlShiftE), true);
   // Запись ear.hi идёт после асинхронного вызова контракта; под нагрузкой фиксированной паузы в 20 мс не хватало.
-  for (let i = 0; i < 150 && service.snapshot().feed.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  await waitFor('две записи ленты', () => service.snapshot().feed.length >= 2);
   assert.deepEqual(
     service.snapshot().feed.map((l) => [l.kind, l.subject, l.text]),
     [
@@ -354,7 +354,7 @@ test('служба окна: динамическое сочетание кно�
   service.setInputFocus('nonsense');
   service.setInputFocus('text');
   assert.equal(service.press(f('F3'), true), true, 'repeat и input: any');
-  for (let i = 0; i < 150 && ran.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  await waitFor('две выполненные команды', () => ran.length >= 2);
   assert.deepEqual(ran, [['build'], ['again']]);
   assert.deepEqual(
     service.snapshot().keys.filter((k) => k.pluginId === 'buttons').map((k) => [k.key, k.live]),
