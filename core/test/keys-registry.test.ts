@@ -210,6 +210,58 @@ test('акселератор меню занят заранее: манифес�
   await k.unload();
 });
 
+test('человек старше окна и меню: plugins.keybindings забирает акселератор меню и освобождает его через null, как команду окна', async () => {
+  const pad = manifest('pad', { commands: ['pad.open'] });
+  const { start, keys } = harness(
+    { pad: idle, buttons: idle },
+    { enabled: ['pad', 'buttons'], manifests: [pad, buttons], menuKeys: { 'menu.print': 'CmdOrCtrl+P', 'menu.find': 'CmdOrCtrl+F' }, keybindings: [{ key: 'Ctrl+P', command: 'pad.open' }, { key: 'Ctrl+F', command: null }] },
+  );
+  const k = await start();
+  const taken = k.keybinding('Ctrl+P');
+  assert.deepEqual([taken?.pluginId, taken?.command, taken?.user], ['pad', 'pad.open', true], 'выбор человека перекрыл меню');
+  assert.deepEqual(taken?.shadowed, [{ pluginId: MENU_OWNER, command: 'menu.print' }], 'меню названо в shadowed');
+  assert.equal(k.keybinding('Ctrl+F'), undefined, 'null освободил акселератор меню');
+  assert.equal((await keys('buttons').register({ key: 'Ctrl+F', command: 'buttons.plain' })).active, true, 'освобождённое динамическому доступно');
+  assert.equal((await keys('buttons').register({ key: 'Ctrl+P', command: 'buttons.plain' })).winner, 'pad', 'занятое человеком - уже не меню: динамическое проигрывает ему');
+  await k.unload();
+});
+
+test('сочетание меню на команде окна: пункт отброшен с записью key-ignored, а не молча', async () => {
+  const { start } = harness({ buttons: idle }, { enabled: ['buttons'], manifests: [buttons], menuKeys: { 'menu.next': 'F6' } });
+  const k = await start();
+  assert.equal(k.keybinding('F6')?.pluginId, WINDOW_OWNER);
+  assert.deepEqual(
+    k.journal.flatMap((e) => (e.kind === 'key-ignored' ? [`${e.key}:${e.command}:${e.reason}`] : [])),
+    ['F6:menu.next:сочетание меню занято командой окна cyborg.window.focus-next'],
+  );
+  await k.unload();
+});
+
+test('победитель-динамика снят: проигравшие на том же сочетании снимаются вместе с ним и не наследуют его', async () => {
+  const other = manifest('other', { commands: ['other.go'] });
+  const { start, keys } = harness({ buttons: idle, other: idle }, { enabled: ['buttons', 'other'], manifests: [buttons, other] });
+  const k = await start();
+  const first = await keys('buttons').register({ key: 'F3', command: 'buttons.plain' });
+  const second = await keys('other').register({ key: 'F3', command: 'other.go' });
+  assert.equal(second.active, false);
+  first.dispose();
+  await settle();
+  assert.equal(k.keybinding('F3'), undefined, 'сочетание свободно, проигравший победителем не стал');
+  assert.equal((await keys('other').register({ key: 'F3', command: 'other.go' })).active, true, 'плагин повторяет регистрацию сам и теперь побеждает');
+  await k.unload();
+});
+
+test('плагин дважды регистрирует одно сочетание: вторая регистрация проигрывает первой, победитель в журнале - он же', async () => {
+  const { start, keys } = harness({ buttons: idle }, { enabled: ['buttons'], manifests: [buttons] });
+  const k = await start();
+  assert.equal((await keys('buttons').register({ key: 'F3', command: 'buttons.press', args: ['a'] })).active, true);
+  const again = await keys('buttons').register({ key: 'F3', command: 'buttons.press', args: ['b'] });
+  assert.deepEqual([again.active, again.winner], [false, 'buttons']);
+  assert.deepEqual(conflicts(k.journal), ['buttons:F3->buttons']);
+  assert.deepEqual(k.keybinding('F3')?.args, ['a']);
+  await k.unload();
+});
+
 test('выгрузка плагина снимает его динамические регистрации, остальные остаются', async () => {
   const other = manifest('other', { commands: ['other.go'] });
   const { start, keys } = harness({ buttons: idle, other: idle }, { enabled: ['buttons', 'other'], manifests: [buttons, other] });

@@ -25,8 +25,10 @@ export function bindKeys(
       continue;
     }
     const key = resolveKey(normalized, platform);
-    // Окно и меню делят одну таблицу: пункт меню на сочетание команды окна ничего не меняет.
-    if (!table.has(key)) table.set(key, { key, command: item, pluginId: MENU_OWNER, shadowed: [] });
+    // Окно и меню делят одну таблицу: пункт меню на сочетание команды окна ничего не меняет, но в журнале это видно.
+    const taken = table.get(key);
+    if (taken) record({ kind: 'key-ignored', key: raw, command: item, reason: `сочетание меню занято командой окна ${taken.command}` });
+    else table.set(key, { key, command: item, pluginId: MENU_OWNER, shadowed: [] });
   }
   for (const m of sorted) {
     for (const k of m.keybindings) {
