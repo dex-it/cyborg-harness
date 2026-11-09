@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { appendFile, chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { AgentEvent, PluginContext, PluginModule } from '@cyborg-harness/contracts';
@@ -427,6 +427,20 @@ test('сторонний плагин: текст и инструменты аг
       { kind: 'reserved', what: 'provides', name: 'cyborg.session-prompt', prefix: 'cyborg.' },
     ] }],
   );
+});
+
+test('поставка: текст и инструменты агенту дают только перечисленные плагины - новый поставщик без правки этого списка не пройдёт ревью', () => {
+  // Инструменты поставки идут без вопроса (allow: mcp__cyborg), а промпт читает агент: состав - решение ревью, а не побочный эффект (У-30, SAD 3.7).
+  const providers = (contract: string) =>
+    readdirSync(PLUGINS, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .flatMap((d) => {
+        const m = manifestOf(d.name) as { id: string; provides?: Record<string, string> };
+        return m.provides !== undefined && contract in m.provides ? [m.id] : [];
+      })
+      .toSorted();
+  assert.deepEqual(providers('cyborg.agent-tool'), ['next-actions'], 'новый cyborg.agent-tool: проверь, что инструмент не выводит данные наружу, и поправь список здесь и в SAD 3.7');
+  assert.deepEqual(providers('cyborg.session-prompt'), ['next-actions', 'session-isolation'], 'новый cyborg.session-prompt: фрагмент читает агент, ревью как код с правами агента');
 });
 
 test('sessions: инструменты поставщиков - по id плагина, повтор имени и чужое имя отброшены, упавший не мешает', async () => {
