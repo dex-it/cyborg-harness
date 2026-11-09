@@ -492,7 +492,10 @@ async function main() {
   await setClipboard('');
   await focusEditor();
   await clickIn('editor', '.monaco-editor .view-lines');
-  await chord('a', 'KeyA', 65);
+  await waitFor('Monaco выделил весь текст (Cmd/Ctrl+A)', async () => {
+    await chord('a', 'KeyA', 65);
+    return (await inView('editor', "document.querySelectorAll('.monaco-editor .selected-text').length")) > 0;
+  }, 8000);
   await edit('copy', async () => /"fontSize": 99/.test(await clipboardText()));
   await waitFor('copy: в буфере текст Monaco', async () => /"fontSize": 99/.test(await clipboardText()));
   await setClipboard('// из буфера');
