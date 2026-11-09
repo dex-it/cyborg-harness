@@ -18,7 +18,7 @@ flowchart LR
 ## Команды
 
 :::caution[Команда ещё не выпущена]
-Команда `cyborg-plugin` и пакеты `@cyborg-harness/*` публикуются задачами [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-06](https://github.com/dex-it/cyborg-harness/issues/42), [P-09](https://github.com/dex-it/cyborg-harness/issues/9), [P-02](https://github.com/dex-it/cyborg-harness/issues/34). До выпуска плагин живёт в каталоге `playground/plugins/` репозитория и проверяется гейтами репозитория (`npm run typecheck`, `npm run lint`, `npm test`).
+Команда `cyborg-plugin` и пакеты `@cyborg-harness/*` ещё не в реестре: их выпуск - [P-10](https://github.com/dex-it/cyborg-harness/issues/11); готовят его [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-06](https://github.com/dex-it/cyborg-harness/issues/42) и [P-09](https://github.com/dex-it/cyborg-harness/issues/9) (влиты) и [P-05](https://github.com/dex-it/cyborg-harness/issues/39) (шаблон плагина). До выпуска плагин живёт в каталоге `playground/plugins/` репозитория и проверяется гейтами репозитория (`npm run typecheck`, `npm run lint`, `npm test`).
 :::
 
 | Команда | Что делает |
