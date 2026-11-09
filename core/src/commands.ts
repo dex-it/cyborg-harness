@@ -1,3 +1,4 @@
+import { splitSignal, withSignal } from './cancel.ts';
 import { CoreError } from './errors.ts';
 import type { BridgeEnd, Commands, KernelContext } from './kernel-context.ts';
 import { checkArgs, type CommandSpec } from './manifest.ts';
@@ -30,8 +31,11 @@ export function createCommands(ctx: KernelContext): Commands {
   }
 
   /** `caller` - плагин, чья главная часть зовёт команду, его назвал канал хоста; без него зовёт пользователь: палитра, клавиши, меню. `only` - плагин, от имени которого зовёт его вид. */
-  async function execute(command: string, args: unknown[], caller?: string, only?: string): Promise<unknown> {
+  async function execute(command: string, given: unknown[], caller?: string, only?: string): Promise<unknown> {
     const { activation, pool } = ctx.parts;
+    // Сигнал отмены - последний аргумент: схема манифеста его не видит, владельцу он едет меткой (cancel.ts).
+    const { args: wire, signal } = splitSignal(given);
+    const args = signal ? wire.slice(0, -1) : wire;
     if (only !== undefined && isKernelCommand(command)) throw new CoreError('PermissionDenied', `${command}: команда ядра, а не плагина ${only}`);
     if (command === KERNEL_COMMANDS.revealWorkspace) return ctx.gateway.revealWorkspace();
     const declares = (id: string) => Object.hasOwn(ctx.manifestOf(id).commands, command);
@@ -52,7 +56,7 @@ export function createCommands(ctx: KernelContext): Commands {
     if (caller !== undefined) open(caller, owner, command);
     checkArgs(command, spec, args);
     if (caller !== undefined && caller !== owner) await guard(caller, command, spec, args);
-    return pool.call(pool.live(owner), owner, 'command', { pluginId: owner, name: command, args });
+    return pool.call(pool.live(owner), owner, 'command', { pluginId: owner, name: command, args: wire }, undefined, signal);
   }
 
   const run = (command: string, ...args: unknown[]) => execute(command, args);
@@ -69,10 +73,10 @@ export function createCommands(ctx: KernelContext): Commands {
       mine(p.pluginId);
       if (owners.get(p.name) === p.pluginId) owners.delete(p.name);
     });
-    onRequest('run', { caller: 'string', name: 'string', args: 'array' }, (p) => {
+    onRequest('run', { caller: 'string', name: 'string', args: 'array' }, (p, signal) => {
       const caller = mine(p.caller).id;
       if (isKernelCommand(p.name)) throw new CoreError('PermissionDenied', `${p.name}: команду ядра зовёт приложение, а не плагин`);
-      return execute(p.name, p.args, caller);
+      return execute(p.name, withSignal(p.args, signal), caller);
     });
   }
 

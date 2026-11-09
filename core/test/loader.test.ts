@@ -7,6 +7,7 @@ import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { entryLevel, pluginStatuses } from '../src/status.ts';
+import { startCancel } from './fixtures/cancel.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 
@@ -437,6 +438,71 @@ test('схема раздела из манифеста: значение не �
   assert.deepEqual(kinds(k).slice(-1), ['timer:config']);
   assert.deepEqual(k.journal.at(-1), { pluginId: 'timer', kind: 'config', result: { status: 'invalid', errors: ['/minutes: ожидается >= 1'] } });
   await k.unload();
+});
+
+// Отмена запросов между плагинами (K-09): стенд - core/test/fixtures/cancel.ts.
+const pause = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+
+test('отмена вызова контракта: поставщик получает сигнал, вызывающий - Cancelled, вызовы без сигнала целы', async () => {
+  const { kernel, api, log } = await startCancel();
+  const abort = new AbortController();
+  const call = api.slow('a', abort.signal);
+  await pause();
+  assert.deepEqual(log, ['a:start']);
+  abort.abort();
+  await assert.rejects(call, { code: 'Cancelled' });
+  await pause();
+  assert.deepEqual(log, ['a:start', 'a:abort:Cancelled']);
+  const plain = api.slow('b');
+  plain.catch(() => undefined);
+  await pause();
+  assert.deepEqual(log.slice(2), ['b:start']);
+  await kernel.unload();
+});
+
+test('отмена: уже отменённый сигнал - вызов до поставщика не доходит; отмена после ответа и двойная безвредны', async () => {
+  const { kernel, api, log, held } = await startCancel();
+  await assert.rejects(api.slow('x', AbortSignal.abort()), { code: 'Cancelled' });
+  await pause();
+  assert.deepEqual(log, []);
+
+  held.slowMs = 10;
+  const abort = new AbortController();
+  assert.equal(await api.slow('fast', abort.signal), 'fast');
+  abort.abort();
+  abort.abort();
+  await pause();
+  assert.deepEqual(log, ['fast:start', 'fast:done']);
+  assert.equal(await api.slow('again'), 'again');
+  await kernel.unload();
+});
+
+test('callTimeout отменяет вызов у поставщика, а не только отпускает вызывающего', async () => {
+  const { kernel, api, log } = await startCancel({ callTimeout: 80 });
+  const never = new AbortController();
+  await assert.rejects(api.slow('t', never.signal), { code: 'Timeout' });
+  await pause();
+  assert.deepEqual(log, ['t:start', 't:abort:Timeout']);
+  await kernel.unload();
+});
+
+test('отмена команды: commands.run с сигналом доводит его до обработчика, аргументы проверяются без сигнала', async () => {
+  const { kernel, ctx, log } = await startCancel();
+  const abort = new AbortController();
+  const run = ctx.commands.run('provider.slow', 'one', abort.signal);
+  await pause();
+  assert.deepEqual(log, ['cmd:one:signal']);
+  abort.abort();
+  await assert.rejects(run, { code: 'Cancelled' });
+  await pause();
+  assert.deepEqual(log, ['cmd:one:signal', 'cmd:abort:Cancelled']);
+  const app = new AbortController();
+  const fromApp = kernel.run('provider.slow', 'two', app.signal);
+  await pause();
+  app.abort();
+  await assert.rejects(fromApp, { code: 'Cancelled' });
+  await assert.rejects(ctx.commands.run('provider.slow', 'one', 'extra'), { code: 'Invalid' });
+  await kernel.unload();
 });
 
 // K-03: упорядоченный снимок раскладки по манифестам, до запуска кода плагинов.

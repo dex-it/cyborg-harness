@@ -234,6 +234,15 @@ const clock = ctx.contracts.get('demo.clock', 1);   // Remote<Clock> | undefined
 const n = await clock?.nowSync();                    // number | undefined, только через await
 ```
 
+## Отмена вызова
+
+`AbortSignal` не переживает `structuredClone`, поэтому отмена едет не в данных. Контракт, который можно отменить, объявляет **последним** параметром члена `signal?: AbortSignal`; `Remote<T>` сохраняет параметр. Потребитель передаёт сигнал на этом месте, ядро шлёт поставщику сообщение `cancel`, и обработчик поставщика получает свой `AbortSignal` на том же месте. Тот же приём работает для `ctx.commands.run(name, ...args, signal)` и `ctx.os.process.run(program, args, { signal })`. Отменённый вызов отказывает кодом `Cancelled`; срок вызова (`Timeout`) отменяет запрос у поставщика тоже. Если вызывающий не передал сигнал, на его месте у поставщика `undefined`. Подробности - [SAD, раздел 4, п. 12](../docs/03-architecture/design/sad.md).
+
+```ts
+interface Search { find(query: string, signal?: AbortSignal): Promise<string[]> }
+const hits = await ctx.contracts.get('acme.search', 1)?.find('main', abort.signal);   // abort.abort() -> Cancelled
+```
+
 ## Полный пример
 
 Поставщик `files` отдаёт две мажорные версии, `editor` берёт вторую, `projects` — первую. Вкладки собирает `tabs`. Код — `core/examples/plugins/*`, прогон — `npm run demo -- all`.

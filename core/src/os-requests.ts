@@ -46,7 +46,7 @@ export function createOsRequests(ctx: KernelContext): OsRequests {
       if (p.method === 'save') return documents.save(id, p.args[0], p.args[1]);
       return documents.close(id, p.args[0]);
     });
-    onRequest('os', { pluginId: 'string', method: 'string', args: 'array' }, (p) => {
+    onRequest('os', { pluginId: 'string', method: 'string', args: 'array' }, (p, signal) => {
       const m = live(p.pluginId);
       if (p.method === 'ui.lock' || p.method === 'ui.unlock') {
         lockCall(m, p.method, p.args);
@@ -59,7 +59,7 @@ export function createOsRequests(ctx: KernelContext): OsRequests {
       }
       // Системный диалог встал бы поверх экрана замка.
       if (p.method === 'dialog.open' && !layer.allows(m.id)) throw new CoreError('Unavailable', `${m.id}: окно закрыто замком`);
-      return gateway.call(m, p.method, p.args);
+      return gateway.call(m, p.method, p.args, signal);
     });
   }
 
