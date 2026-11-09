@@ -229,7 +229,7 @@ async function main() {
   const area = (selector) => ev(`[...document.querySelectorAll(${JSON.stringify(selector + ' [data-plugin]')})].map((f) => f.dataset.plugin + '/' + f.dataset.view).sort().join(',')`);
   assert.equal(await area('#main-view'), 'sessions/main', 'основная область не по манифесту');
   assert.equal(await area('#toolbar-view'), 'panels/bar', 'панель инструментов не по манифесту');
-  assert.equal(await area('#views'), 'alice/main,bob/main,echo/main,panels/panel,pin-lock/main', 'боковая колонка не по манифесту');
+  assert.equal(await area('#views'), 'alice/main,bob/main,built-dep/main,echo/main,panels/panel,pin-lock/main', 'боковая колонка не по манифесту');
   const panelsText = () =>
     main(`(async () => {
       const { webContents } = process.mainModule.require('electron');
