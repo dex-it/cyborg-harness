@@ -269,6 +269,24 @@ const str = (method: string, v: unknown, name: string): string => {
   return v;
 };
 
+/** Config плагина для права `net`: `trusted` - слой пользователя, `untrusted` - остальные слои (файл воркспейса). */
+export interface ConfigView {
+  readonly trusted: Readonly<Record<string, unknown>>;
+  readonly untrusted: Readonly<Record<string, unknown>>;
+}
+
+/** Хост записи `net`: имя как есть либо значение поля `config:<поле>` из `config`; нет значения - пусто. */
+function configHost(entry: string, config: Readonly<Record<string, unknown>>): string[] {
+  if (!entry.startsWith('config:')) return [entry.toLowerCase()];
+  const v = config[entry.slice('config:'.length)];
+  if (typeof v !== 'string') return [];
+  try {
+    return [new URL(v).host.toLowerCase()];
+  } catch {
+    return [v.toLowerCase()];
+  }
+}
+
 /** Причина отказа правила `process`, `pty` или `launch`; undefined - запуск подходит. */
 function ruleRefusal(m: PluginManifest, key: 'process' | 'pty' | 'launch', program: string, argv: readonly string[], envNames: readonly string[]): string | undefined {
   const rule = (m.permissions[key] ?? []).find((r) => {
@@ -301,11 +319,11 @@ function ownDir(base: string, pluginId: string): string {
 export class OsGateway {
   readonly #env: OsEnvironment;
   readonly #deny: (denial: Denial) => void;
-  readonly #configOf: (pluginId: string) => Readonly<Record<string, unknown>>;
+  readonly #configOf: (pluginId: string) => ConfigView;
   readonly #manifestOf: (pluginId: string) => PluginManifest | undefined;
   readonly #roots = new Map<string, readonly string[]>();
-  /** Хосты `config:<поле>` на момент активации или правки файла человеком: своя запись плагина в config их не меняет. */
-  readonly #approved = new Map<string, Readonly<Record<string, unknown>>>();
+  /** Config на момент активации или правки файла человеком: своя запись плагина в config его не меняет. */
+  readonly #approved = new Map<string, ConfigView>();
 
   readonly #pty: PtyTable | undefined;
   readonly #push: (pluginId: string, method: PushMethod, params: unknown) => void;
@@ -327,7 +345,7 @@ export class OsGateway {
   constructor(
     env: OsEnvironment,
     deny: (denial: Denial) => void,
-    configOf: (pluginId: string) => Readonly<Record<string, unknown>> = () => ({}),
+    configOf: (pluginId: string) => ConfigView = () => ({ trusted: {}, untrusted: {} }),
     push: (pluginId: string, method: PushMethod, params: unknown) => void = () => undefined,
     manifestOf: (pluginId: string) => PluginManifest | undefined = () => undefined,
     grants?: GrantStore,
@@ -970,21 +988,17 @@ export class OsGateway {
     if (url.protocol !== 'https:' && url.protocol !== 'http:') throw this.#denied(m, method, `схема ${url.protocol}`);
     // Прежний fetch отвергал учётные данные в адресе, а node:http отправил бы их как Basic: заголовок задаёт плагин явно.
     if (url.username !== '' || url.password !== '') throw new CoreError('Invalid', `${method}: учётные данные в адресе не принимаются, используйте заголовок Authorization`);
-    const config = this.#approved.get(m.id) ?? {};
+    const { trusted, untrusted } = this.#approved.get(m.id) ?? { trusted: {}, untrusted: {} };
+    const entries = m.permissions.net ?? [];
     // Хост из `config:<поле>` назвал человек, принимая настройку: внутренний адрес у него - ожидаемый (Jira за VPN).
-    const rights = (m.permissions.net ?? []).flatMap((h) => {
-      if (!h.startsWith('config:')) return [{ host: h.toLowerCase(), named: false }];
-      const v = config[h.slice('config:'.length)];
-      if (typeof v !== 'string') return [];
-      try {
-        return [{ host: new URL(v).host.toLowerCase(), named: true }];
-      } catch {
-        return [{ host: v.toLowerCase(), named: true }];
-      }
-    });
+    const rights = entries.flatMap((h) => configHost(h, trusted).map((host) => ({ host, named: h.startsWith('config:') })));
     // Запись без порта - только порт схемы по умолчанию: URL сводит его к пустой строке.
     const right = rights.find((r) => r.host === url.host.toLowerCase());
-    if (!right) throw this.#denied(m, method, `хост не в net: ${url.host}`);
+    if (!right) {
+      // Значение из файла воркспейса хоста не даёт (ADR-CH-0015): причина называет поле, чтобы человек знал, где его задать.
+      const field = entries.find((h) => h.startsWith('config:') && configHost(h, untrusted).includes(url.host.toLowerCase()));
+      throw this.#denied(m, method, field === undefined ? `хост не в net: ${url.host}` : `хост не в net: ${url.host}; ${field} задан в файле воркспейса, а хосты из настройки берутся только из файла пользователя`);
+    }
     // Локальный адрес открыт там, где его назвали: IP-адрес и localhost в праве, хост из настройки человека.
     const bare = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
     const local = right.named || net.isIP(bare) !== 0 || bare === 'localhost' || bare.endsWith('.localhost');

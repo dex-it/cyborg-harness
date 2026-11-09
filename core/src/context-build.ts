@@ -1,6 +1,7 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { TRUSTED_LAYER } from './config.ts';
 import { CoreError } from './errors.ts';
 import { resolveGraph } from './graph.ts';
 import { DocumentTable } from './documents.ts';
@@ -69,7 +70,12 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
   const gateway = new OsGateway(
     osEnv,
     (d) => record({ pluginId: d.pluginId, kind: 'denied', method: d.method, detail: d.detail, ...(d.reason && { reason: d.reason }) }),
-    (id) => Object.assign({}, ...(options.config?.raw(id) ?? []).map(([, data]) => (isRecord(data) ? data : {}))) as Record<string, unknown>,
+    (id) => {
+      // Права расширяет только слой пользователя (ADR-CH-0015): файл воркспейса приходит из репозитория команды.
+      const layers = options.config?.raw(id) ?? [];
+      const merged = (trusted: boolean) => Object.assign({}, ...layers.filter(([layer]) => (layer === TRUSTED_LAYER) === trusted).map(([, data]) => (isRecord(data) ? data : {}))) as Record<string, unknown>;
+      return { trusted: merged(true), untrusted: merged(false) };
+    },
     (id, method, params) => {
       const host = ctx.parts.pool.hosts.get(ctx.hostOf(id) ?? id);
       if (host && !host.down) host.endpoint.notify(method, params);
