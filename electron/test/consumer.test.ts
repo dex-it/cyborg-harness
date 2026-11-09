@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { tryCommand } from '../../core/test/run-command.ts';
+import { tryCommand } from './run-command.ts';
 
 // P-03: пустой проект вне репозитория ставит три пакета из архивов `npm pack` (реестр не нужен), и `npm ls --all` не находит
 // неудовлетворённых peer-зависимостей на контракты и ядро - в том числе когда контракты вышли предрелизом (`1.0.0-dev`:

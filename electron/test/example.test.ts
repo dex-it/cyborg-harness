@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { build } from 'esbuild';
-import { runCommand } from '../../core/test/run-command.ts';
+import { runCommand } from './run-command.ts';
 
 // P-03, приёмка: пример «окно + ядро» из README адаптера собирается. Блоки ```ts с первой строкой `// file: <имя>` пишутся
 // в каталог вне репозитория, проверяются компилятором (типы пакета читаются из его .d.ts) и собираются esbuild так, как их собирает приложение.

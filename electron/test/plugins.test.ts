@@ -8,7 +8,7 @@ import type { PluginModule } from '@cyborg-harness/core';
 import { WINDOW_OWNER } from '@cyborg-harness/core';
 import type { KeyRow } from '../src/snapshot.ts';
 import { discoverPlugins, PluginsService, readSchemaFile, startPlugins } from '../src/plugins.ts';
-import { waitFor } from '../../core/test/wait-for.ts';
+import { waitFor } from './wait-for.ts';
 
 // Контракт для плагинов-подделок теста: карту контрактов приложения (playground/plugins/contracts.ts) пакет не знает.
 declare module '@cyborg-harness/contracts' {

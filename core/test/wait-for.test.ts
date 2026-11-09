@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { waitFor } from './wait-for.ts';
 
@@ -56,4 +57,12 @@ test('waitFor: проба, бросающая исключение, повтор
     }, { timeout: 50, interval: 5 }),
     /файл: не дождались за 50 мс.*нет файла X/s,
   );
+});
+
+test('помощники тестов electron/test - побайтовые копии core/test: адаптер не импортирует из-за пределов electron/ (electron/test/boundary.test.ts), а расхождение копий сломало бы одинаковые правила ожидания и команд', () => {
+  for (const name of ['wait-for.ts', 'run-command.ts']) {
+    const original = readFileSync(new URL(`./${name}`, import.meta.url), 'utf8');
+    const copy = readFileSync(new URL(`../../electron/test/${name}`, import.meta.url), 'utf8');
+    assert.equal(copy, original, `electron/test/${name} разошёлся с core/test/${name}: скопируйте файл заново`);
+  }
 });

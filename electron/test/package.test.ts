@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { before, describe, it } from 'node:test';
-import { runCommand } from '../../core/test/run-command.ts';
+import { runCommand } from './run-command.ts';
 
 // Состав архива пакета: собранный JS, объявления и оболочка вида; исходников, тестов и скриптов сборки в нём нет.
 const pkg = path.resolve(import.meta.dirname, '..');
