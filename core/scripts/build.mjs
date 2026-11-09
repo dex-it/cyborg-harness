@@ -8,6 +8,9 @@ const core = join(import.meta.dirname, '..');
 const dist = join(core, 'dist');
 const tsc = join(core, '..', 'node_modules', 'typescript7', 'bin', 'tsc');
 
+// Ядро собирается против настоящего пакета контрактов (paths пуст), а не против его исходников: сначала собираем contracts/dist.
+execFileSync(process.execPath, [join(core, '..', 'contracts', 'scripts', 'build.ts')], { stdio: 'inherit' });
+
 rmSync(dist, { recursive: true, force: true });
 for (const project of ['tsconfig.build.json', 'elements/tsconfig.build.json']) {
   execFileSync(process.execPath, [tsc, '-p', join(core, project)], { stdio: 'inherit' });
