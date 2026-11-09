@@ -12,8 +12,10 @@ const DEFAULT_AREA = { view: 'sidebar', document: 'main' } as const satisfies Re
 export const DEFAULT_ORDER = 1000;
 
 /**
- * Почему плагин сейчас не работает. `not-enabled` - его нет в `plugins.enabled`: места вида окно не резервирует, фрейма и заглушки нет;
- * `disabled` - включён в настройках, но выключен человеком или сторожем: окно ставит заглушку с возвратом; `out-of-graph` - граф контрактов его отверг.
+ * Почему плагин не работает по решению настроек, человека, сторожа или графа. `not-enabled` - его не было в `plugins.enabled` при запуске ядра:
+ * места вида окно не резервирует, фрейма и заглушки нет; `disabled` - выключен человеком, сторожем или убран из `plugins.enabled` на ходу:
+ * окно ставит заглушку с возвратом; `out-of-graph` - граф контрактов его отверг. Сбой активации, пропуск без поставщика и безопасный режим
+ * метки не дают: их причина - в журнале (`pluginStatuses`).
  */
 export type LayoutMark = 'not-enabled' | 'disabled' | 'out-of-graph';
 
@@ -25,7 +27,7 @@ export interface LayoutEntry {
   readonly area: Area;
   readonly order: number;
   readonly title?: string;
-  /** Есть, когда плагин не работает; что с этим делать окну, зависит от метки (см. `LayoutMark`). */
+  /** Причина из `LayoutMark`; нет метки - не значит, что плагин работает (сбой активации виден только в журнале). */
   readonly mark?: LayoutMark;
 }
 

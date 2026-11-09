@@ -93,7 +93,7 @@ test('старт: включённый плагин активен, миграц
   await kernel.unload();
 });
 
-test('служба окна: снимок с причиной и журналом, «Включить снова» поднимает не поднявшийся плагин', async () => {
+test('служба окна: снимок с причиной и журналом, «Включить снова» поднимает не поднявшийся плагин', async (t) => {
   const userData = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['disk'], hosts: { io: ['disk'] } } }));
   plugin(path.join(userData, 'plugins'), 'disk', {}, 'export default {}');
@@ -114,6 +114,8 @@ test('служба окна: снимок с причиной и журнало�
     })),
     log: () => {},
   });
+  // Без выгрузки упавшая проверка держит слежение, и процесс файла не выходит.
+  t.after(() => service.unload());
   const before = service.snapshot();
   assert.equal(before.phase, 'ready');
   assert.equal(before.problems.length, 1);
@@ -134,7 +136,6 @@ test('служба окна: снимок с причиной и журнало�
   assert.equal(service.snapshot().canHang, false);
   assert.ok(changes > 3);
   assert.deepEqual(alerts, []);
-  await service.unload();
 });
 
 test('служба окна: сочетания с конфликтом, перехват нажатия, лента, выгрузка с зависимым и загрузка обратно', async (t) => {
