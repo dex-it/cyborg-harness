@@ -17,6 +17,7 @@ import {
   type JournalEntry,
   type Kernel,
   type KeyInput,
+  type KeyPress,
   type OsEnvironment,
   type SpawnHost,
   type SystemEvent,
@@ -25,7 +26,7 @@ import {
   type WatchdogOptions,
 } from '@cyborg-harness/core';
 import { isRecord } from '@cyborg-harness/core';
-import { WINDOW_OWNER, type WindowSnapshot } from '@cyborg-harness/core';
+import { MENU_OWNER, WINDOW_OWNER, type WindowSnapshot } from '@cyborg-harness/core';
 import type { FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from '../shared/plugins.ts';
 import { viewOrigin } from '../shared/views.ts';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
@@ -512,15 +513,32 @@ export class PluginsService {
     };
   }
 
+  /** Где сейчас фокус ввода, по сообщениям страниц: `before-input-event` DOM не видит, а решать надо синхронно. */
+  #focus: NonNullable<KeyPress['focus']> = 'other';
+
+  setInputFocus(kind: unknown): void {
+    if (kind === 'text' || kind === 'terminal' || kind === 'other') this.#focus = kind;
+  }
+
+  /** Окно сообщает, виден ли вид плагина (`when.visible` у динамических сочетаний); плагина нет или ядро не запущено - молча. */
+  setViewVisible(pluginId: string, visible: boolean): void {
+    try {
+      this.kernel?.setViewVisible(pluginId, visible);
+    } catch {
+      // Вид, которого ядро не знает, сочетаниям не нужен.
+    }
+  }
+
   /** Синхронно, иначе `preventDefault` в `before-input-event` опоздает: сочетание активного плагина страница не получает. */
-  press(input: KeyInput): boolean {
+  press(input: KeyInput, repeat = false): boolean {
     const key = keyOfInput(input);
     const kernel = this.kernel;
-    const binding = key === undefined ? undefined : kernel?.keybinding(key);
-    if (!binding) return false;
+    const binding = key === undefined ? undefined : kernel?.keybinding(key, { repeat, focus: this.#focus });
+    // Акселератор меню обрабатывает меню ОС, ядру его не отнять.
+    if (!binding || binding.pluginId === MENU_OWNER) return false;
     this.say({ kind: 'key', subject: binding.key, text: `→ ${binding.command} (${binding.pluginId})` });
     if (binding.pluginId === WINDOW_OWNER) this.events.windowCommand?.(binding.command);
-    else void this.run(binding.command);
+    else void this.run(binding.command, binding.args);
     return true;
   }
 

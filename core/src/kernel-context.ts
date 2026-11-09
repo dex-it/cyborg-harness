@@ -4,7 +4,7 @@ import type { DocumentTable } from './documents.ts';
 import type { CoreError } from './errors.ts';
 import type { ContractGraph } from './graph.ts';
 import type { SectionInput, SystemEvent } from './host-runtime.ts';
-import type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Keybinding, LoadOptions, UninstallReport } from './kernel-types.ts';
+import type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Keybinding, KeyPress, LoadOptions, UninstallReport } from './kernel-types.ts';
 import type { ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { Notices } from './notices.ts';
@@ -143,6 +143,16 @@ export interface Commands {
   runOwn(pluginId: string, command: string, args: unknown[]): Promise<unknown>;
 }
 
+/** Динамические сочетания рядом со статической таблицей `ctx.keys`; нажатие и список читают обе через эту часть. */
+export interface KeyRegistry {
+  attach(end: BridgeEnd): void;
+  dropFor(pluginId: string): void;
+  /** Владелец не работает или условия не прошли - undefined; без `press` условия не проверяются. */
+  lookup(key: string, press?: KeyPress): Keybinding | undefined;
+  rows(): Keybinding[];
+  setVisible(pluginId: string, visible: boolean): void;
+}
+
 /** Слушатели простоя пользователя. */
 export interface IdleWatch {
   attach(end: BridgeEnd): void;
@@ -184,6 +194,7 @@ export interface Parts {
   readonly activation: Activation;
   readonly contracts: ContractCalls;
   readonly commands: Commands;
+  readonly keyRegistry: KeyRegistry;
   readonly idleWatch: IdleWatch;
   readonly sections: Sections;
   readonly osRequests: OsRequests;

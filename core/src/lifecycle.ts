@@ -55,10 +55,11 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
   }
 
   function dropPlugin(pluginId: string, pty: PtyDrop = 'release'): number {
-    const { idleWatch, contracts, commands } = ctx.parts;
+    const { idleWatch, contracts, commands, keyRegistry } = ctx.parts;
     idleWatch.drop(pluginId);
     contracts.dropFor(pluginId);
     commands.dropFor(pluginId);
+    keyRegistry.dropFor(pluginId);
     const kept = forgetOs(pluginId, pty);
     layer.forget(pluginId);
     const i = active.indexOf(pluginId);

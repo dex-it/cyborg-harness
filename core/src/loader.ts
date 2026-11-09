@@ -9,11 +9,12 @@ import { buildKernel } from './kernel-api.ts';
 import type { KernelContext, Parts } from './kernel-context.ts';
 import type { Kernel, LoadOptions } from './kernel-types.ts';
 import { createLifecycle } from './lifecycle.ts';
+import { createKeyRegistry } from './keybindings.ts';
 import { createOsRequests } from './os-requests.ts';
 import { createSections } from './sections.ts';
 import { createViewsState } from './views-state.ts';
 
-export type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Kernel, Keybinding, LoadOptions, UninstallReport, UserKeybinding, WatchdogOptions } from './kernel-types.ts';
+export type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Kernel, Keybinding, KeyPress, LoadOptions, UninstallReport, UserKeybinding, WatchdogOptions } from './kernel-types.ts';
 
 /** Части ядра, у каждой своё состояние; зовут друг друга через `ctx.parts` в момент вызова. Раскладка по файлам - в SAD, раздел 3.2. */
 const createParts = (ctx: KernelContext): Parts => ({
@@ -22,6 +23,7 @@ const createParts = (ctx: KernelContext): Parts => ({
   activation: createActivation(ctx),
   contracts: createContractCalls(ctx),
   commands: createCommands(ctx),
+  keyRegistry: createKeyRegistry(ctx),
   idleWatch: createIdleWatch(ctx),
   sections: createSections(ctx),
   osRequests: createOsRequests(ctx),

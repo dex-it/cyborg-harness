@@ -340,3 +340,38 @@ test('emit и release: чужой хост не стреляет в чужую �
   assert.equal(logs.filter((l) => l.startsWith('хост m: ядро отказало')).length, 3, logs.join('\n'));
   await kernel.unload();
 });
+
+test('keys.register и keys.unregister: хост не занимает сочетания и не снимает регистрации от чужого имени', async () => {
+  const forger = forging({
+    victim: { activate: () => undefined },
+    mallory: { activate: () => undefined },
+  });
+  const logs: string[] = [];
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['victim', 'mallory'],
+    manifests: [manifest('victim', { commands: ['victim.save'] }), manifest('mallory', { commands: ['mallory.go'] })],
+    spawnHost: forger.spawn,
+    hosts: { v: ['victim'], m: ['mallory'] },
+    platform: 'linux',
+    onLog: (id, message) => logs.push(`${id}: ${message}`),
+  });
+  const register = (host: string, fields: Record<string, unknown>) =>
+    forger.request(host, 'keys.register', { pluginId: 'victim', key: 'Ctrl+K', command: 'victim.save', args: [], when: {}, ...fields });
+
+  assert.equal(code(await register('m', {})), 'Unavailable', 'от имени плагина чужого хоста');
+  assert.equal(code(await register('v', { command: 'mallory.go' })), 'NotDeclared');
+  assert.equal(code(await register('v', { key: {} })), 'Invalid');
+  assert.equal(code(await register('v', { when: [] })), 'Invalid');
+  assert.equal(code(await register('v', { args: {} })), 'Invalid');
+  assert.equal(code(await register('v', { when: { repeat: 'sometimes' } })), 'Invalid');
+  assert.equal(kernel.keybinding('Ctrl+K'), undefined);
+  assert.equal(code(await register('v', {})), 'ok');
+  forger.notify('m', 'keys.unregister', { pluginId: 'victim', id: 1 });
+  forger.notify('m', 'keys.unregister', { pluginId: 'mallory', id: 1 });
+  forger.notify('v', 'keys.unregister', { pluginId: 'victim', id: 'one' });
+  await settle();
+  assert.equal(kernel.keybinding('Ctrl+K')?.pluginId, 'victim', 'регистрацию victim чужой хост не снял');
+  assert.equal(logs.filter((l) => l.startsWith('хост m: ядро отказало')).length, 1, logs.join('\n'));
+  await kernel.unload();
+});
