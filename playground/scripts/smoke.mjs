@@ -77,7 +77,8 @@ userConfig.plugins.enabled.push('built-dep');
 writeFileSync(join(userData, 'cyborg.json'), JSON.stringify(userConfig, null, 2));
 
 // --inspect=0 - инспектор главного процесса: нажатие оттуда идёт через before-input-event, как с клавиатуры.
-const app = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${userData}`, '--remote-debugging-port=0', ...electronArgs], {
+// Собранный плагин лежит в каталоге пользователя (P-06), а он читается только с флагом (K-17).
+const app = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${userData}`, '--remote-debugging-port=0', '--user-plugins', ...electronArgs], {
   stdio: ['ignore', 'ignore', 'pipe'],
   env: liveClaude ? process.env : { ...process.env, SHELL: join(fakeBin, 'login-shell') },
 });
