@@ -7,7 +7,7 @@ origin: derived
 quality-checks: входных записей нет
 ---
 
-> Анализ готовности ядра к системе плагинов, 2026-11-06. Основа эпика [микроядра](../05-plans/epic-microkernel.md). Составлен чтением кода и документов без запуска приложения и тестов: ключи K-, T-, P- в тексте - рабочие номера анализа, не задач GitHub (соответствие - в реестре эпика); утверждения о коде проверяются в задачах.
+> Анализ готовности ядра к системе плагинов, 2026-11-06. Основа эпика [микроядра](../06-plans/epic-microkernel.md). Составлен чтением кода и документов без запуска приложения и тестов: ключи K-, T-, P- в тексте - рабочие номера анализа, не задач GitHub (соответствие - в реестре эпика); утверждения о коде проверяются в задачах.
 
 # Cyborg Harness: анализ готовности микроядра к системе плагинов
 
@@ -15,7 +15,7 @@ quality-checks: входных записей нет
 
 ## 0. Метод и оговорки
 
-Прочитано полностью: CLAUDE.md, README.md, docs/README.md, docs/OVERVIEW.md, docs/03-architecture/design/sad.md (разделы 1-10), sad2-disputed-points.md, все 9 ADR-CH (0001, 0002, 0003, 0004, 0005, 0007, 0008, 0012, 0014), docs/05-plans/roadmap.md, docs/01-product/** (brd, обе фичи: brd-feat, decision-log, srs), docs/04-verification/*, docs/02-use-cases/*, docs/00-strategy/one-pager.md. Из docs/research: заголовки sad2-validation.md, начало cyborg-today.md, строки со ссылками.
+Прочитано полностью: CLAUDE.md, README.md, docs/README.md, docs/OVERVIEW.md, docs/04-architecture/design/sad.md (разделы 1-10), sad2-disputed-points.md, все 9 ADR-CH (0001, 0002, 0003, 0004, 0005, 0007, 0008, 0012, 0014), docs/06-plans/roadmap.md, docs/01-product/** (brd, обе фичи: brd-feat, decision-log, srs), docs/05-verification/*, docs/02-use-cases/*, docs/00-strategy/one-pager.md. Из docs/research: заголовки sad2-validation.md, начало cyborg-today.md, строки со ссылками.
 
 Код, прочитан целиком: core/src/{manifest,loader,host-runtime,graph,registry,semver,journal,status,config,workspace,recent,permissions,keys,via-contract,documents,window-layer,ui-shell,pty,errors,wire,rpc,transports,host-entry,disposable,index}.ts; contracts/*.ts и contracts/README.md; playground/src/main/{main,plugins,plugin-hosts,plugin-host,os-env,view-files,views}.ts; playground/scripts/build.mjs; манифесты плагинов playground; .github/workflows/ci.yml; eslint.config.mjs; package.json. Просмотрено частично: core/src/os-gateway.ts (строки 1-260, 380-560, 680-760), json-schema, serve, elements-model, core/elements/elements.ts, core/examples, playground/plugins/{sessions,agent-claude-code,pin-lock}, playground/test/agents.test.ts (начало), playground/scripts/smoke.mjs (заголовки), core/test/plugin-imports.test.ts и hosts.test.ts (начало), renderer. Тесты core/test читались по именам и выборочно.
 
@@ -275,7 +275,7 @@ T-06. Снимок API (ADR-0002 п.3): тест-снимок типов PluginC
 
 T-07. Секрет не попадает в журнал (ADR-0014 п.4): тест, что строка секрета не встречается в journal, describeEntry, onLog после secrets.resolve, net.fetch с секретным заголовком, отказов правил. S.
 
-T-08. Задержка шлюза ctx.os на горячих путях (вопрос 9, NFR-CH-1001): цена RPC измерена (spike-hosts.md), шлюза нет. Замер fs.readText, fs.watch, pty.write, secrets.get, net.fetch (локальный сервер), p50/p95/p99 при 64 Б - 64 КиБ. Приёмка: таблица в docs/04-verification и CI-проверка бюджета (P-10). S-M. Зависимость: числа бюджета.
+T-08. Задержка шлюза ctx.os на горячих путях (вопрос 9, NFR-CH-1001): цена RPC измерена (spike-hosts.md), шлюза нет. Замер fs.readText, fs.watch, pty.write, secrets.get, net.fetch (локальный сервер), p50/p95/p99 при 64 Б - 64 КиБ. Приёмка: таблица в docs/05-verification и CI-проверка бюджета (P-10). S-M. Зависимость: числа бюджета.
 
 T-09. macOS: хосты, фреймы, клавиши, drag. Linux мерился в репозитории, macOS только в ресёрче-2 (M1: 15 МБ на хост, 70-100 мс, другая метрика); issue #2. Повторить npm run spike и spike:hosts, проверить before-input-event на настоящей клавиатуре при фокусе во фрейме, startDrag (блокирующий ли на macOS), role copy/paste. M. Нужен исполнитель с macOS. Закрывает вопрос 11 частично.
 
