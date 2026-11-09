@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { build } from 'esbuild';
+import { runCommand } from '../../core/test/run-command.ts';
 
 // P-03, приёмка: пример «окно + ядро» из README адаптера собирается. Блоки ```ts с первой строкой `// file: <имя>` пишутся
 // в каталог вне репозитория, проверяются компилятором (типы пакета читаются из его .d.ts) и собираются esbuild так, как их собирает приложение.
@@ -44,12 +44,7 @@ describe('пример из README адаптера', { timeout: 120_000 }, () =
   });
 
   it('компилятор принимает пример: имена и типы пакета на месте', () => {
-    try {
-      execFileSync(process.execPath, [tsc, '-p', work], { cwd: work, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 90_000, killSignal: 'SIGKILL' });
-    } catch (error) {
-      const e = error as { stdout?: string; stderr?: string };
-      assert.fail(`tsc отказал:\n${e.stdout ?? ''}${e.stderr ?? ''}`);
-    }
+    runCommand(process.execPath, [tsc, '-p', work], { cwd: work });
   });
 
   it('esbuild собирает главный процесс, preload, файл хоста и окно; окно без node:*', async () => {
