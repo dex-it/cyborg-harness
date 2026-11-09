@@ -7,3 +7,4 @@ site/.astro/
 site/src/generated/
 site/public/favicon.svg
 core/dist/
+contracts/dist/

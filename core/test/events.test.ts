@@ -207,6 +207,31 @@ test('activation lazy: ждёт; будит команда, сочетание, 
   await k.unload();
 });
 
+test('activation lazy: enable ждущего поднимает его один раз, wake после enable не активирует повторно', async () => {
+  let activated = 0;
+  const k = await start(
+    {
+      late: {
+        activate(ctx) {
+          activated++;
+          ctx.commands.register('late.go', () => 'ok');
+          return undefined;
+        },
+      },
+    },
+    { manifests: [manifest('late', { activation: 'lazy', commands: ['late.go'] })] },
+  );
+  assert.equal(activated, 0);
+  await k.enable('late');
+  assert.equal(activated, 1);
+  await k.wake('late');
+  assert.equal(await k.run('late.go'), 'ok');
+  await k.idle();
+  assert.equal(activated, 1, 'enable оставил плагин ждущим: wake поднял его второй раз');
+  assert.equal(k.active.filter((id) => id === 'late').length, 1);
+  await k.unload();
+});
+
 test('предел слушателей onIdle: сверх предела ядро отказывает с причиной в журнале, снятый слушатель освобождает место', async () => {
   let idle = 0;
   let ctx: PluginContext | undefined;

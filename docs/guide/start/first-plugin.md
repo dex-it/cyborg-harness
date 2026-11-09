@@ -23,7 +23,7 @@ cd greeter
 ```
 
 :::caution[Пакеты ещё не опубликованы]
-Пакеты `@cyborg-harness/*` и команда `cyborg-plugin` публикуются задачами [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9). Пакеты scope `@cyborg` на npmjs.com к проекту не относятся. До выпуска работайте из репозитория (`npm ci`, `npm start`).
+Пакеты `@cyborg-harness/*` и команда `cyborg-plugin` ещё не в реестре. `@cyborg-harness/contracts` готов к выпуску ([P-01](https://github.com/dex-it/cyborg-harness/issues/29): собирается, упаковывается и ставится в пустой проект из tarball), его выпуск - [P-10](https://github.com/dex-it/cyborg-harness/issues/11); остальное публикуется задачами [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9). Пакеты scope `@cyborg` на npmjs.com к проекту не относятся. До выпуска работайте из репозитория (`npm ci`, `npm start`).
 :::
 
 Команда создаёт манифест, главную часть, вид, схему раздела `config`, тест и настройки сборки. Дальше правим их по порядку.

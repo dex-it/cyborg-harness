@@ -1,6 +1,6 @@
 // Слой окна (SAD §3.8): диалоги видов поверх всех фреймов и экраны замков. Что показывать, решает ядро; окно только рисует снимок.
 
-import type { ShownDialog, WindowSnapshot } from '@cyborg-harness/core';
+import type { ShownDialog, WindowSnapshot } from '@cyborg-harness/core/window';
 import type { PluginRow, Reply } from '../shared/plugins.ts';
 import { el } from './dom.ts';
 

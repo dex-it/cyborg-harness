@@ -29,7 +29,7 @@ description: "Какие проверки гоняет репозиторий, �
 |---|---|
 | Загрузка: разбор манифеста, граф контрактов, версии, ленивая активация, журнал, безопасный режим, выгрузка с зависимыми | `loader`, `graph`, `registry`, `lifecycle`, `status`, `semver-manifest` |
 | Хосты и сторож: падение, зависание, перезапуск, три страйка | `hosts`, `stress-hosts`, `stress-restart` |
-| Границы доверия: подделка сообщений хоста, недоверенный ввод, шлюз `ctx.os`, права через контракт, значение секрета вне журнала, `config` и `state` | `trust`, `untrusted-input`, `security-gateway`, `via-contract`, `os`, `secrets-journal` |
+| Границы доверия: подделка сообщений хоста, недоверенный ввод, шлюз `ctx.os`, права через контракт и команду, значение секрета вне журнала, `config` и `state` | `trust`, `untrusted-input`, `security-gateway`, `via-contract`, `command-callers`, `os`, `secrets-journal` |
 | Данные: разделы `config` и `state`, миграции, схема, воркспейс | `config`, `json-schema`, `workspace`, `stress-sections`, `stress-workspace` |
 | Терминалы | `pty`, `stress-pty` на поддельном pty |
 | Окно и вид: оболочка вида, слой диалогов и замок, элементы `cy-*`, документы, события | `ui-shell`, `window`, `elements`, `documents`, `events`, `subscriptions` |
@@ -37,6 +37,7 @@ description: "Какие проверки гоняет репозиторий, �
 | Сторож импортов плагинов: плагин импортирует только `@cyborg-harness/contracts` и свои модули (на плагинах репозитория) | `plugin-imports` |
 | Проверка плагина вне репозитория `checkPlugin` и `cyborg-plugin check`: манифест, версия API, файлы из манифеста, импорты; разбор импортов сверен с компилятором на коде репозитория | `plugin-check`, `plugin-scan`, `plugin-cli` |
 | Чистота ядра: нет предметных слов, Electron, импортов вне `core/src` и зависимостей npm | `purity` |
+| Пакет ядра и публичный API: состав пакета, установка в пустой проект, хосты на собранном пакете, перечень имён по точкам входа, окно без `node:*`, граница playground | `package`, `consumer`, `hosts-dist`, `public-api` |
 | Стенд: поиск плагинов, схема `cyborg-plugin://`, мост видов, перетаскивание, билеты терминала, замеры памяти, общий набор тестов `cyborg.agent` | `playground/src/main/*.test.ts`, `playground/test/` |
 
 :::note[Проверки чистоты]

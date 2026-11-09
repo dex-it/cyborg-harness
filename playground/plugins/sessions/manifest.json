@@ -50,12 +50,14 @@
   },
   "documents": {
     "session": {
-      "restorable": true
+      "restorable": true,
+      "area": "main",
+      "order": 100
     }
   },
   "ui": {
     "views": {
-      "main": "./ui/ui.js"
+      "main": { "module": "./ui/ui.js", "area": "main", "order": 100 }
     }
   }
 }
