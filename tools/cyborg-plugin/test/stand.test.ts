@@ -35,7 +35,9 @@ describe('стенд на инструменте: состав результа�
       const views = sources.filter((f) => /^ui\/[^/]+\.ts$/.test(f));
       const want = [...sources.filter((f) => !views.includes(f)), ...views.flatMap((f) => [f.replace(/\.ts$/, '.js'), f.replace(/\.ts$/, '.js.map')])];
       assert.ok(walk(out).includes('.cyborg-plugin-build'), 'нет метки сборки');
-      assert.deepEqual(withoutMarker(walk(out)), [...new Set(want)].sort());
+      // Таблицу стилей и шрифт, которые модуль вида подтянул импортом (Monaco в editor), сборщик кладёт рядом с ним: это не исходники плагина.
+      const generated = (f: string) => /^ui\/(ui\.css(\.map)?|[\w.-]+-[\w]+\.ttf)$/.test(f);
+      assert.deepEqual(withoutMarker(walk(out)).filter((f) => !generated(f) || want.includes(f)), [...new Set(want)].sort());
       for (const f of sources.filter((s) => !views.includes(s))) {
         assert.deepEqual(fs.readFileSync(path.join(out, f)), fs.readFileSync(path.join(src, f)), `${f} изменён`);
       }

@@ -168,7 +168,8 @@ async function compile(home: string, entry: string, outfile: string, kind: 'main
       logLevel: 'silent',
       ...(kind === 'main'
         ? { platform: 'node', format: 'esm', target: NODE_TARGET, external: ['electron', 'electron/*'] }
-        : { platform: 'browser', format: 'esm', target: VIEW_TARGET }),
+        // Шрифт из импорта (значки Monaco, PL-05) кладётся рядом с модулем вида: фрейм грузит ресурсы только со своего origin.
+        : { platform: 'browser', format: 'esm', target: VIEW_TARGET, loader: { '.ttf': 'file' } }),
     } as const);
     into.files.push(...result.outputFiles);
     into.warnings.push(...result.warnings.map((w) => `${fromMessage(w, home).file}:${String(w.location?.line ?? 0)}: ${w.text}`));

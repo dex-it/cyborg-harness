@@ -48,7 +48,7 @@ quality-checks: входных записей нет
 | pty-хост - отдельный `utilityProcess` ядра, вывод к виду по `MessagePort` ([ADR-CH-0012](../03-architecture/adr/ADR-CH-0012-pty-host.md)) | не начато; `node-pty` и таблица pty в главном процессе |
 | Льготное время осиротевшего pty ([3.6](../03-architecture/design/sad.md#36-ресурсы-дольше-плагина-pty)) | сделано в ядре: 60 с по умолчанию, `ptyOrphanGrace` |
 | Группы рендера: `ui.group`, `plugins.uiGroups`, origin кадра по группе ([3.8](../03-architecture/design/sad.md#38-изоляция-рендера)) | не начато; origin кадра - по id плагина |
-| Закрытая CSP вида `default-src 'none'` с явными источниками ([3.8](../03-architecture/design/sad.md#38-изоляция-рендера)) | не начато; `VIEW_CSP` - `default-src 'self'` |
+| Закрытая CSP вида `default-src 'none'` с явными источниками ([3.8](../03-architecture/design/sad.md#38-изоляция-рендера)) | не начато; `VIEW_CSP` - `default-src 'self'`; набор, которого хватает Monaco и xterm, снят пилотом PL-05 ([итоги](../04-verification/spike-monaco-xterm.md)) |
 | Форма API: вклады в меню, отмена запросов ([вопрос 15](../03-architecture/design/sad.md#8-открытые-вопросы)) | `ctx.keys.register` с условием сделан (K-07, [3.9](../03-architecture/design/sad.md#39-системные-клавиши-и-события)); меню и отмена - не начато |
 | Сборка и упаковка плагина: `cyborg-plugin build` и `pack` ([поставка плагина](../03-architecture/design/sad.md#1-общая-архитектура)) | сделано (P-06): бандл главной части, виды, проверка состава, предварительный `tar.gz`; осталось: публикация пакета (P-10), загрузка поставки приложением (P-07, T-10), подпись и хеш (этап 2, вопрос 8) |
 
