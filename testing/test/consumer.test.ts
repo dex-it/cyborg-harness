@@ -52,6 +52,13 @@ describe('потребитель вне репозитория', { timeout: 180_
     assert.equal(lock.packages['node_modules/@cyborg-harness/testing']?.version, own.version);
   });
 
+  it('npm ls --all --offline: неудовлетворённых peer нет', () => {
+    // npm ls завершается ошибкой (ELSPROBLEMS) на неудовлетворённом peer; run() покажет вывод.
+    const out = run('npm', ['ls', '--all', '--offline'], project);
+    assert.match(out, /@cyborg-harness\/testing@/);
+    assert.doesNotMatch(out, /invalid|UNMET|missing/i);
+  });
+
   it('типы читаются из .d.ts: startKernel, наборы и подделки собираются tsc', () => {
     fs.writeFileSync(
       path.join(project, 'check.ts'),

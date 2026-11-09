@@ -51,6 +51,11 @@ describe('package.json тест-кита', () => {
     assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).toSorted(), ['@cyborg-harness/contracts', '@cyborg-harness/core']);
   });
 
+  it('peer на контракты допускает предрелиз 1.0.0-dev: ^1.0.0 его не покрывает и даёт ERESOLVE', () => {
+    // Диапазон основы стопки (#103): нижняя граница 1.0.0-0 пускает предрелизы серии 1.
+    assert.equal(manifest.peerDependencies?.['@cyborg-harness/contracts'], '>=1.0.0-0 <2.0.0');
+  });
+
   it('одна точка входа, цели - собранные файлы', () => {
     assert.deepEqual(Object.keys(manifest.exports ?? {}), ['.', './package.json']);
     for (const target of exportTargets()) assert.match(target, /^\.\/dist\/.+\.(js|d\.ts)$/, target);
