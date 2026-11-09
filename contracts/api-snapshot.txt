@@ -408,6 +408,7 @@ export interface PluginContext {
         register(name: string, handler: CommandHandler): Disposable;
         run(name: string, ...args: unknown[]): Promise<unknown>;
     };
+    readonly keys: PluginKeys;
     readonly config?: PluginSection;
     readonly state?: PluginSection;
     readonly os: PluginOs;
@@ -416,6 +417,25 @@ export interface PluginContext {
     readonly system: PluginSystem;
     readonly documents: PluginDocuments;
     log(message: string): void;
+}
+export interface KeyWhen {
+    readonly repeat?: boolean;
+    readonly dialog?: boolean;
+    readonly input?: 'any' | 'not-text';
+    readonly visible?: boolean;
+}
+export interface KeyBinding {
+    readonly key: string;
+    readonly command: string;
+    readonly args?: readonly unknown[];
+    readonly when?: KeyWhen;
+}
+export interface KeyRegistration extends Disposable {
+    readonly active: boolean;
+    readonly winner?: string;
+}
+export interface PluginKeys {
+    register(binding: KeyBinding): Promise<KeyRegistration>;
 }
 export interface DocumentInfo {
     readonly id: string;
