@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { workspaceKey } from '@cyborg-harness/core';
+import { claimInstance, workspaceKey, type Claim } from '@cyborg-harness/core';
 import type { RestartFlags } from './restarts.ts';
 
 /** Каталог сессии окна без воркспейса (и префикс его ключа экземпляра): такое окно в `userData` одно. */
@@ -37,4 +37,24 @@ const PER_PROCESS = [/^--inspect(?:-brk|-port)?(?:=|$)/, /^--remote-debugging-(?
 export function newWindowArgs(argv: readonly string[], file: string, flags: RestartFlags): string[] {
   const keep = argv.filter((a) => a !== flags.noWorkspace && !a.startsWith(flags.workspace) && !PER_PROCESS.some((re) => re.test(a)));
   return [...keep, `${flags.workspace}${file}`];
+}
+
+/**
+ * Занимает экземпляр воркспейса (`claimInstance` ядра): адреса в личном каталоге (`XDG_RUNTIME_DIR` или `<userData>/run`). Отказ контроля
+ * экземпляров (каталог адресов чужой или не создаётся, ошибка сокета) не оставляет процесс без окна: причина уходит в `onUnavailable`, процесс
+ * становится владельцем без адреса. Данные при этом целы: их по-прежнему держит замок воркспейса; теряется только поднятие окна повторным запуском.
+ */
+export async function claimWorkspace(
+  userData: string,
+  workspaceFile: string | undefined,
+  data: Record<string, unknown>,
+  onSecond: (data: unknown) => void,
+  onUnavailable?: (error: Error) => void,
+): Promise<Claim> {
+  try {
+    return await claimInstance(instanceKey(workspaceFile, userData), data, onSecond, { home: userData });
+  } catch (error) {
+    onUnavailable?.(error instanceof Error ? error : new Error(String(error)));
+    return { kind: 'owner', close: () => undefined };
+  }
 }

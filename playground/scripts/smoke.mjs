@@ -736,10 +736,12 @@ async function main() {
 
   const lock = JSON.parse(readFileSync(join(userData, 'workspace.cyborg.json.lock'), 'utf8'));
   assert.equal(typeof lock.pid, 'number', 'замок воркспейса без pid');
+  const askedBefore = await main('globalThis.playgroundSecondLaunches');
   const second = spawn(join(repo, 'node_modules', '.bin', 'electron'), [repo, `--user-data-dir=${userData}`, ...electronArgs], { stdio: 'ignore' });
   const code = await Promise.race([new Promise((r) => second.once('exit', r)), sleep(15000).then(() => 'висит')]);
   if (code === 'висит') second.kill('SIGKILL');
-  assert.equal(code, 0, 'второй экземпляр на том же воркспейсе не ушёл сам');
+  assert.equal(code, 0, 'второй экземпляр на том же воркспейсе не ушёл сам (код 3 - владелец не ответил)');
+  assert.equal(await main('globalThis.playgroundSecondLaunches'), askedBefore + 1, 'владелец не получил запрос на подъём окна: код 0 второго процесса этого не доказывает');
   assert.equal(app.exitCode, null, 'первый экземпляр закрылся вместе со вторым');
   assert.equal(await state('echo'), 'active');
   assert.match(await text('#workspace-current'), /workspace\.cyborg\.json$/);
@@ -789,14 +791,15 @@ async function sharedUserData({ ev, main, state }) {
   writeFileSync(fileB, '{}');
   writeFileSync(fileC, '{}');
   const env = liveClaude ? process.env : { ...process.env, SHELL: join(fakeBin, 'login-shell') };
-  const launch = (file, extra = []) => {
-    const child = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${userData}`, '--remote-debugging-port=0', `--workspace=${file}`, ...extra, ...electronArgs], { stdio: ['ignore', 'ignore', 'pipe'], env });
+  const launch = (file, extra = [], extraEnv = {}) => {
+    const child = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${userData}`, '--remote-debugging-port=0', `--workspace=${file}`, ...extra, ...electronArgs], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, ...extraEnv } });
     child.out = '';
     child.stderr.on('data', (d) => (child.out += d));
     return child;
   };
   const second = launch(fileB);
   let third;
+  let fourth;
   try {
     const port = await waitFor('порт DevTools второго процесса', () => /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//.exec(second.out)?.[1]);
     const page = await waitFor('окно второго процесса', async () => (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page'));
@@ -836,15 +839,31 @@ async function sharedUserData({ ev, main, state }) {
     assert.ok(recent.includes(realpathSync(fileA)), `«Недавние» потеряли воркспейс первого: ${recent.join(', ')}`);
     log('два процесса, два воркспейса, один userData: свои замки, свои сессии Chromium и localStorage, «Недавние» с обоими');
 
-    // Повторный запуск воркспейса B: поднимает окно владельца и сам завершается.
+    // Повторный запуск воркспейса B: поднимает окно владельца и сам завершается. Код 0 это не доказывает (молчащий владелец дал бы код 3,
+    // но и «ничего не сделали» не отличить): главный процесс владельца считает запросы на подъём окна.
+    const askedBefore = await mainB('globalThis.playgroundSecondLaunches');
     const again = launch(fileB);
     const code = await Promise.race([new Promise((r) => again.once('exit', r)), sleep(15000).then(() => 'висит')]);
     if (code === 'висит') again.kill('SIGKILL');
-    assert.equal(code, 0, 'повторный запуск воркспейса не ушёл сам');
+    assert.equal(code, 0, `повторный запуск воркспейса не ушёл сам или не передал запрос (код ${String(code)}): ${again.out}`);
+    assert.equal(await mainB('globalThis.playgroundSecondLaunches'), askedBefore + 1, 'владелец не получил запрос поднять окно: onSecond не вызван');
     assert.equal(second.exitCode, null, 'владелец воркспейса закрылся от повторного запуска');
     assert.equal(lockPid(fileB), pidB, 'замок владельца сменился');
     assert.equal(await stateB('echo'), 'active');
-    log('повторный запуск того же воркспейса: окно владельца поднято, новый процесс завершился, замок за владельцем');
+    log('повторный запуск того же воркспейса: владелец получил запрос и поднял окно, новый процесс завершился (код 0), замок за владельцем');
+
+    // Контроль экземпляров недоступен (каталог адресов не создаётся): процесс всё равно открывает окно и называет причину, а не висит без окна.
+    const blocker = join(dir, 'not-a-dir');
+    writeFileSync(blocker, 'файл на месте каталога');
+    const fileD = join(dir, 'd.cyborg.json');
+    writeFileSync(fileD, '{}');
+    fourth = launch(fileD, [], { XDG_RUNTIME_DIR: join(blocker, 'run') });
+    const portD = await waitFor('порт DevTools процесса без контроля экземпляров', () => /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//.exec(fourth.out)?.[1]);
+    const pageD = await waitFor('окно процесса без контроля экземпляров', async () => (await (await fetch(`http://127.0.0.1:${portD}/json`)).json()).find((t) => t.type === 'page'));
+    const evD = await connect(pageD.webSocketDebuggerUrl);
+    await waitFor('плагины воркспейса запущены', async () => (await evD("document.querySelector('#plugins-list [data-plugin=\"echo\"]')?.dataset.state ?? ''")) === 'active');
+    assert.match(fourth.out, /Контроль экземпляров недоступен/, 'причина не названа в stderr');
+    log('контроль экземпляров недоступен: окно открыто, плагины работают, причина названа');
 
     // «Открыть в новом окне» из первого окна: третий процесс, первые два живы.
     writeFileSync(join(userData, 'recent.json'), JSON.stringify({ recent: [...recent, realpathSync(fileC)] }));
@@ -858,6 +877,7 @@ async function sharedUserData({ ev, main, state }) {
     log('«Открыть в новом окне»: воркспейс в отдельном процессе, прежние окна остались');
   } finally {
     if (third !== undefined && alive(third)) process.kill(third, 'SIGTERM');
+    fourth?.kill('SIGTERM');
     second.kill('SIGTERM');
     await Promise.race([new Promise((r) => second.once('exit', r)), sleep(8000)]);
     if (second.exitCode === null) second.kill('SIGKILL');

@@ -1,7 +1,6 @@
 // Окно и приложение: события ядра -> окно, окно и ОС -> ядро, экземпляры приложения. Раскладку окна и меню делает приложение.
 import { app, nativeTheme, Notification, powerMonitor, type BrowserWindow } from 'electron';
-import { claimInstance } from '@cyborg-harness/core';
-import { instanceKey, sessionDataDir } from './instances.ts';
+import { claimWorkspace, sessionDataDir } from './instances.ts';
 import type { PluginsEvents, PluginsService } from './plugins.ts';
 import { themeTokens } from './theme.ts';
 import { viewOrigin } from './view-protocol.ts';
@@ -86,16 +85,26 @@ export function watchTheme(getWindow: () => BrowserWindow | undefined): void {
 }
 
 /**
- * Один экземпляр на воркспейс, процессов может быть несколько (K-20, SAD 3.1): `false` - воркспейс уже открыт другим процессом,
- * ему передан `data`, текущему пора выйти. `true` - процесс владелец: он слушает адрес воркспейса и зовёт `onSecond(data)`, когда
- * второй запуск того же воркспейса просит поднять окно. Другой воркспейс с тем же `userData` не мешает. Окно без воркспейса
- * (`workspaceFile` не задан) в `userData` одно. Вызывать до готовности приложения; адрес отдаётся при выходе.
+ * Один экземпляр на воркспейс, процессов может быть несколько (K-20, SAD 3.1). Исход:
+ * - `owner` - процесс владелец: он слушает адрес воркспейса и зовёт `onSecond(data)`, когда второй запуск того же воркспейса просит поднять окно.
+ *   Если контроль экземпляров недоступен (каталог адресов чужой или не создаётся, ошибка сокета), причина уходит в `onUnavailable`, а процесс
+ *   всё равно `owner`, только без адреса: окно открывается, данные держит замок воркспейса, повторный запуск получит отказ замка в своём окне;
+ * - `handed` - воркспейс уже открыт другим процессом, ему передан `data`, текущему пора выйти;
+ * - `unresponsive` - владелец жив, но не ответил в срок: запрос не доставлен, текущему тоже пора выйти, но человеку об этом надо сказать.
+ * Другой воркспейс с тем же `userData` не мешает. Окно без воркспейса (`workspaceFile` не задан) в `userData` одно. Вызывать до готовности
+ * приложения; адрес отдаётся при выходе. Промис не отклоняется.
  */
-export async function workspaceInstance(userData: string, workspaceFile: string | undefined, data: Record<string, unknown>, onSecond: (data: unknown) => void): Promise<boolean> {
-  const claim = await claimInstance(instanceKey(workspaceFile, userData), data, onSecond);
-  if (claim.kind !== 'owner') return false;
+export async function workspaceInstance(
+  userData: string,
+  workspaceFile: string | undefined,
+  data: Record<string, unknown>,
+  onSecond: (data: unknown) => void,
+  onUnavailable?: (error: Error) => void,
+): Promise<'owner' | 'handed' | 'unresponsive'> {
+  const claim = await claimWorkspace(userData, workspaceFile, data, onSecond, onUnavailable);
+  if (claim.kind !== 'owner') return claim.kind;
   app.once('will-quit', () => claim.close());
-  return true;
+  return 'owner';
 }
 
 /**

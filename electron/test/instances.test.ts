@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { workspaceKey } from '@cyborg-harness/core';
-import { instanceKey, newWindowArgs, NO_WORKSPACE_KEY, sessionDataDir } from '../src/instances.ts';
+import { claimWorkspace, instanceKey, newWindowArgs, NO_WORKSPACE_KEY, sessionDataDir } from '../src/instances.ts';
 
 // K-20: несколько процессов с общим userData. Ключ экземпляра и каталог сессии Chromium - по воркспейсу; новое окно - процесс с теми же флагами.
 
@@ -46,4 +47,52 @@ test('новое окно: аргументы текущего процесса,
   assert.deepEqual(newWindowArgs(argv, '/new.json', FLAGS), ['/app', '--user-data-dir=/u', '--safe-mode', '--user-plugins', '--workspace=/new.json']);
   assert.deepEqual(newWindowArgs(['/app', '--no-workspace'], '/new.json', FLAGS), ['/app', '--workspace=/new.json']);
   assert.deepEqual(newWindowArgs(['/app', '--inspect-brk=9229', '--remote-debugging-pipe'], '/new.json', FLAGS), ['/app', '--workspace=/new.json']);
+});
+
+// Адрес сокета ограничен ~104 байтами: каталог короткий, а `tmpdir()` macOS для `userData` + `/run/<ключ>.sock` длинноват.
+async function shortSandbox() {
+  const root = await realpath(await mkdtemp(path.join(process.platform === 'win32' ? tmpdir() : '/tmp', 'ci-')));
+  return { root, [Symbol.asyncDispose]: () => rm(root, { recursive: true, force: true }) };
+}
+
+async function withoutRuntimeDir<T>(run: () => Promise<T>): Promise<T> {
+  const saved = process.env.XDG_RUNTIME_DIR;
+  delete process.env.XDG_RUNTIME_DIR;
+  try {
+    return await run();
+  } finally {
+    if (saved !== undefined) process.env.XDG_RUNTIME_DIR = saved;
+  }
+}
+
+const posix = process.platform !== 'win32';
+
+test('claimWorkspace: адреса лежат в личном каталоге userData, второй запуск передаёт данные и уходит', { skip: !posix }, async () => {
+  await using box = await shortSandbox();
+  await withoutRuntimeDir(async () => {
+    const file = path.join(box.root, 'w.cyborg.json');
+    await writeFile(file, '{}');
+    const asked: unknown[] = [];
+    const first = await claimWorkspace(box.root, file, { safeMode: false }, (data) => asked.push(data));
+    assert.equal(first.kind, 'owner');
+    assert.ok(existsSync(path.join(box.root, 'run', `${workspaceKey(file)}.sock`)), 'адрес не в userData/run');
+    const second = await claimWorkspace(box.root, file, { safeMode: true }, () => assert.fail('второй стал владельцем'));
+    assert.equal(second.kind, 'handed');
+    assert.deepEqual(asked, [{ safeMode: true }]);
+    if (first.kind === 'owner') first.close();
+  });
+});
+
+test('claimWorkspace: контроль экземпляров недоступен - процесс остаётся владельцем без адреса и называет причину, а не остаётся без окна', { skip: !posix }, async () => {
+  await using box = await shortSandbox();
+  await withoutRuntimeDir(async () => {
+    // Каталог адресов занят обычным файлом: так выглядит чужой или недоступный каталог (EEXIST/ENOTDIR при создании).
+    await writeFile(path.join(box.root, 'run'), 'не каталог');
+    const reasons: Error[] = [];
+    const claim = await claimWorkspace(box.root, path.join(box.root, 'w.cyborg.json'), {}, () => undefined, (error) => reasons.push(error));
+    assert.equal(claim.kind, 'owner', 'отказ контроля экземпляров оставил процесс без окна');
+    assert.equal(reasons.length, 1);
+    assert.match(reasons[0]?.message ?? '', /run/);
+    if (claim.kind === 'owner') assert.doesNotThrow(() => claim.close());
+  });
 });
