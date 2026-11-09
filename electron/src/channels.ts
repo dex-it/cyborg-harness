@@ -3,10 +3,11 @@ import { BrowserWindow, ipcMain, MessageChannelMain, nativeImage, nativeTheme, s
 import { isRecord } from './guards.ts';
 import type { PluginsService } from './plugins.ts';
 import { themeTokens } from './theme.ts';
-import { viewOfUrl, viewOrigin } from './view-protocol.ts';
+import { viewOfUrl } from './view-protocol.ts';
 import { resolveDragFile, ViewDrags } from './view-drag.ts';
 import { ViewTerminals, type TerminalFrame } from './view-terminals.ts';
-import { framesOf, fromWindow, senderPlugin } from './views.ts';
+import { framesOfPlugin, senderPlugin, type ViewGroups } from './view-frames.ts';
+import { fromWindow } from './views.ts';
 
 /** Канал, который принимает только документ окна: вид плагина не выключит соседа, даже если обойдёт свой preload. */
 export function windowChannel(channel: string, handler: (arg: unknown) => unknown): void {
@@ -17,12 +18,13 @@ export function windowChannel(channel: string, handler: (arg: unknown) => unknow
 }
 
 /**
- * Канал, который принимает вид плагина: плагин берётся из origin фрейма-отправителя, а не из аргументов, поэтому чужой вид
- * чужого плагина не вызовет. Не вид (окно, чужая страница) получает `notView`. Точка расширения для каналов приложения (K-13).
+ * Канал, который принимает вид плагина: плагин берётся из адреса фрейма-отправителя (группа из origin, плагин из пути, плагин обязан состоять в группе),
+ * а не из аргументов, поэтому вид не вызовет команду плагина вне своей группы. Внутри группы плагины друг друга не различают (SAD 3.8).
+ * Не вид (окно, чужая страница) получает `notView`. Точка расширения для каналов приложения (K-13); `groups` - служба плагинов.
  */
-export function viewChannel(channel: string, handler: (pluginId: string, ...args: unknown[]) => unknown, notView: unknown = { error: 'не вид плагина' }): void {
+export function viewChannel(groups: ViewGroups, channel: string, handler: (pluginId: string, ...args: unknown[]) => unknown, notView: unknown = { error: 'не вид плагина' }): void {
   ipcMain.handle(channel, (event: IpcMainInvokeEvent, ...args: unknown[]) => {
-    const pluginId = senderPlugin(event);
+    const pluginId = senderPlugin(event, groups);
     return pluginId === undefined ? notView : handler(pluginId, ...args);
   });
 }
@@ -48,8 +50,8 @@ export function registerWindowChannels({ plugins, window }: WindowChannelsOption
   windowChannel('views:visibility', (arg) => {
     const win = window();
     if (!isRecord(arg) || typeof arg.id !== 'string' || typeof arg.view !== 'string' || typeof arg.visible !== 'boolean' || !win) return;
-    // Видов у плагина может быть несколько, каждый во фрейме со своим ?view=: свёрнутый вид не прячет остальные.
-    for (const frame of framesOf(win.webContents, viewOrigin(arg.id))) if (viewOfUrl(frame.url) === arg.view) frame.send('view:visibility', arg.visible);
+    // Видов у плагина может быть несколько, каждый во фрейме со своим ?view=: свёрнутый вид не прячет остальные, а сосед по группе рендера - тем более.
+    for (const frame of framesOfPlugin(win.webContents, plugins.groupOf(arg.id), arg.id)) if (viewOfUrl(frame.url) === arg.view) frame.send('view:visibility', arg.visible);
     plugins.setViewVisible(arg.id, arg.visible);
   });
 }
@@ -74,33 +76,33 @@ export interface ViewChannelsOptions {
   readonly dragRoot: () => string;
 }
 
-/** Каналы видов: плагин всегда берётся из origin фрейма-отправителя, а не из аргументов. */
+/** Каналы видов: плагин всегда берётся из адреса фрейма-отправителя внутри его группы, а не из аргументов. */
 export function registerViewChannels({ plugins, dragRoot }: ViewChannelsOptions): void {
-  viewChannel('view:dialog', (pluginId, view, spec) => plugins.dialogFor(pluginId, view, spec));
-  viewChannel('view:keys', (pluginId) => plugins.keysFor(pluginId), {});
-  viewChannel('view:logs', (pluginId) => plugins.logsOf(pluginId), []);
-  viewChannel('view:run', (pluginId, command, args) => plugins.runFor(pluginId, command, args));
-  viewChannel('view:contract', (pluginId, contract, major) => plugins.contractFor(pluginId, contract, major));
-  viewChannel('view:call', (pluginId, contract, major, method, args) => plugins.callFor(pluginId, contract, major, method, args));
-  viewChannel('view:state', (pluginId, view) => plugins.viewStateFor(pluginId, view));
-  viewChannel('view:state:set', (pluginId, view, value) => plugins.setViewStateFor(pluginId, view, value));
+  viewChannel(plugins, 'view:dialog', (pluginId, view, spec) => plugins.dialogFor(pluginId, view, spec));
+  viewChannel(plugins, 'view:keys', (pluginId) => plugins.keysFor(pluginId), {});
+  viewChannel(plugins, 'view:logs', (pluginId) => plugins.logsOf(pluginId), []);
+  viewChannel(plugins, 'view:run', (pluginId, command, args) => plugins.runFor(pluginId, command, args));
+  viewChannel(plugins, 'view:contract', (pluginId, contract, major) => plugins.contractFor(pluginId, contract, major));
+  viewChannel(plugins, 'view:call', (pluginId, contract, major, method, args) => plugins.callFor(pluginId, contract, major, method, args));
+  viewChannel(plugins, 'view:state', (pluginId, view) => plugins.viewStateFor(pluginId, view));
+  viewChannel(plugins, 'view:state:set', (pluginId, view, value) => plugins.setViewStateFor(pluginId, view, value));
   const terminals = new ViewTerminals((pluginId, ticket, channel) => plugins.openTerminal(pluginId, ticket, channel), () => new MessageChannelMain());
   const terminalChannel = (channel: string, handler: (frame: TerminalFrame, pluginId: string, ...args: unknown[]) => unknown): void => {
     ipcMain.handle(channel, (event: IpcMainInvokeEvent, ...args: unknown[]) => {
-      const pluginId = senderPlugin(event);
+      const pluginId = senderPlugin(event, plugins);
       return pluginId === undefined || !event.senderFrame ? { error: 'не вид плагина' } : handler(event.senderFrame, pluginId, ...args);
     });
   };
   terminalChannel('view:terminal:open', (frame, pluginId, ticket) => terminals.open(frame, pluginId, ticket));
   ipcMain.on('view:terminal:close', (event, tid: unknown) => {
-    if (senderPlugin(event) !== undefined && event.senderFrame) terminals.close(event.senderFrame, tid);
+    if (senderPlugin(event, plugins) !== undefined && event.senderFrame) terminals.close(event.senderFrame, tid);
   });
   ipcMain.handle('view:theme', () => themeTokens(nativeTheme.shouldUseDarkColors));
   // Фокус ввода сообщают документ окна и виды плагинов: ядро решает по нему, пускать ли сочетание с `when.input` в поле ввода.
   // Фреймы живут в разных процессах, и уход фокуса из старого приходит то раньше, то позже прихода в новый: уход засчитывается, только если фокус ещё у его фрейма.
   let focusFrame = '';
   ipcMain.on('input:focus', (event, kind: unknown) => {
-    if (event.senderFrame !== event.sender.mainFrame && senderPlugin(event) === undefined) return;
+    if (event.senderFrame !== event.sender.mainFrame && senderPlugin(event, plugins) === undefined) return;
     const frame = `${String(event.processId)}:${String(event.frameId)}`;
     if (kind === 'blur') {
       if (frame === focusFrame) plugins.setInputFocus('other');
@@ -111,7 +113,7 @@ export function registerViewChannels({ plugins, dragRoot }: ViewChannelsOptions)
   });
   const drags = new ViewDrags();
   ipcMain.on('view:drag', (event, relative: unknown) => {
-    const pluginId = senderPlugin(event);
+    const pluginId = senderPlugin(event, plugins);
     const file = resolveDragFile(dragRoot(), relative);
     if (pluginId === undefined || file === undefined || typeof relative !== 'string') return;
     const drag = drags.start(pluginId, relative);
@@ -121,7 +123,7 @@ export function registerViewChannels({ plugins, dragRoot }: ViewChannelsOptions)
     setTimeout(() => drags.end(drag), 1000);
   });
   ipcMain.handle('view:drop', async (event) => {
-    const pluginId = senderPlugin(event);
+    const pluginId = senderPlugin(event, plugins);
     return pluginId === undefined ? null : ((await drags.take(pluginId)) ?? null);
   });
 }

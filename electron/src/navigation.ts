@@ -1,5 +1,6 @@
 import type { WebContents, WebFrameMain } from 'electron';
-import { pluginOfOrigin, VIEW_SCHEME } from './view-protocol.ts';
+import { groupOfOrigin, VIEW_SCHEME } from './view-protocol.ts';
+import { pluginOfFrame, type ViewGroups } from './view-frames.ts';
 
 
 interface Navigation {
@@ -24,26 +25,27 @@ function withoutHash(url: string): string {
   return i < 0 ? url : url.slice(0, i);
 }
 
-/** Окно - только на свою страницу; документ окна ставит во фрейм любой вид, а вид уводит только свой фрейм и только на свой origin. */
+/** Окно - только на свою страницу; документ окна ставит во фрейм любой вид, а вид уводит только свой фрейм и только в свою группу рендера (origin): переход к соседу по группе - не выход за границу доверия, плагин вне группы адрес не обслужит. */
 export function navigationAllowed(nav: Navigation, windowUrl: string, mainFrame: WebFrameMain): boolean {
   if (nav.isMainFrame) return withoutHash(nav.url) === withoutHash(windowUrl);
-  const target = pluginOfOrigin(originOf(nav.url));
+  const target = groupOfOrigin(originOf(nav.url));
   if (target === undefined || !nav.url.startsWith(`${VIEW_SCHEME}://`)) return false;
   if (nav.initiator === mainFrame) return true;
   // Инициатора нет у перехода браузера (перезагрузка) и у удалённого фрейма: пускаем только на тот вид, что уже во фрейме.
-  if (!nav.initiator) return pluginOfOrigin(nav.frame?.origin ?? '') === target;
-  const by = pluginOfOrigin(nav.initiator.origin);
-  return by === target && pluginOfOrigin(nav.frame?.origin ?? '') === by;
+  if (!nav.initiator) return groupOfOrigin(nav.frame?.origin ?? '') === target;
+  const by = groupOfOrigin(nav.initiator.origin);
+  return by === target && groupOfOrigin(nav.frame?.origin ?? '') === by;
 }
 
 /** Окно не открывает новых окон и не уходит со своих адресов (У-23): ссылки наружу - только `shell.openExternal` по праву. */
-export function guardNavigation(contents: WebContents, windowUrl: string, denied: (pluginId: string, url: string) => void): void {
+export function guardNavigation(contents: WebContents, windowUrl: string, denied: (pluginId: string, url: string) => void, groups: ViewGroups): void {
   // Открывший фрейм Electron не называет, а referrer со схемы cyborg-plugin пуст: окно отклоняется без записи в журнал.
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
   contents.on('will-frame-navigate', (event) => {
     if (navigationAllowed(event, windowUrl, contents.mainFrame)) return;
     event.preventDefault();
-    const pluginId = pluginOfOrigin(event.initiator?.origin ?? '') ?? pluginOfOrigin(event.frame?.origin ?? '');
+    const by = event.initiator ?? event.frame;
+    const pluginId = by ? pluginOfFrame(by, groups) : undefined;
     if (pluginId !== undefined) denied(pluginId, event.url);
   });
 }
