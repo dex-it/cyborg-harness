@@ -96,7 +96,8 @@ export function restarts(options: RestartOptions): Restarts {
       if (file === undefined || isCurrent(file)) return;
       // Не перезапуск: текущий процесс, его плагины и pty остаются, вопроса про живые процессы нет.
       const child = spawn(process.execPath, newWindowArgs(process.argv.slice(1), file, flags), { detached: true, stdio: 'ignore' });
-      // Процесс не запустился - человек увидит причину в ответе окна, а не молчаливо мёртвую кнопку.
+      // Процесс не запустился (`spawn` отказал) - отказ уходит ответом, окно показывает его рядом с кнопкой. Что новый процесс упал уже после запуска,
+      // этот процесс не видит: такой отказ показывает сам новый процесс (диалог в своём окне или сообщение о занятом воркспейсе).
       await new Promise<void>((resolve, reject) => {
         child.once('error', reject);
         child.once('spawn', () => resolve());

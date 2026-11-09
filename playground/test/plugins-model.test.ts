@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import type { LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot } from '@cyborg-harness/electron/window';
-import { actionsFor, conflictText, journalFor, keyStatus, mergeFeed, originNote, sortedPlugins, summary, userPluginsNotice, viewMode, viewSlots } from '../src/renderer/plugins-model.ts';
+import { actionsFor, conflictText, journalFor, keyStatus, mergeFeed, originNote, sortedPlugins, summary, userPluginsNotice, viewMode, viewSlots, workspaceActionError } from '../src/renderer/plugins-model.ts';
 
 const row = (id: string, state: PluginRow['state'], over: Partial<PluginRow> = {}): PluginRow => ({ id, state, revivable: state === 'stopped', unloaded: false, commands: [], permissions: [], ...over });
 const snapshot = (plugins: PluginRow[], over: Partial<PluginsSnapshot> = {}): PluginsSnapshot => ({ phase: 'ready', safeMode: false, userPlugins: false, problems: [], plugins, layout: [], keys: [], feed: [], journal: [], canHang: true, window: { title: '', queued: 0, locks: [] }, documents: [], workspace: { current: '/w.cyborg.json', recent: [] }, ...over });
@@ -120,5 +120,14 @@ describe('окно «Плагины Cyborg»: модель', () => {
       for (const id of ids) if (new RegExp(`(['"\`])${id.replaceAll('-', '\\-')}\\1`).test(text)) found.push(`${file}: '${id}'`);
     }
     assert.deepEqual(found, []);
+  });
+});
+
+describe('окно «Плагины Cyborg»: действия над воркспейсом', () => {
+  it('отказ главного процесса и сбой вызова становятся текстом для окна, успех и отмена диалога - нет', async () => {
+    assert.equal(await workspaceActionError('Открыть в новом окне', () => Promise.resolve({})), undefined);
+    assert.equal(await workspaceActionError('Открыть в новом окне', () => Promise.resolve({ error: 'spawn ENOENT' })), 'Открыть в новом окне: spawn ENOENT');
+    assert.equal(await workspaceActionError('Открыть воркспейс', () => Promise.reject(new Error('воркспейса нет в «Недавних»'))), 'Открыть воркспейс: воркспейса нет в «Недавних»');
+    assert.equal(await workspaceActionError('Открыть воркспейс', () => Promise.reject('строка')), 'Открыть воркспейс: строка');
   });
 });

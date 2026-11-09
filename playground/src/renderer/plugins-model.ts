@@ -1,4 +1,4 @@
-import type { FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot, PluginState } from '@cyborg-harness/electron/window';
+import type { FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot, PluginState, Reply } from '@cyborg-harness/electron/window';
 
 export const STATE_LABEL: Record<PluginState, string> = {
   active: 'Работает',
@@ -117,4 +117,17 @@ export function summary(snapshot: PluginsSnapshot): string {
 
 export function clock(at: number): string {
   return new Date(at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+/**
+ * Действие над воркспейсом («Открыть…», «в новом окне»): отказ главного процесса приходит ответом с `error`, сбой самого вызова - исключением.
+ * Оба становятся текстом для окна, иначе кнопка молча не работает; успех и отмену диалога возвращает `undefined`.
+ */
+export async function workspaceActionError(label: string, call: () => Promise<Reply>): Promise<string | undefined> {
+  try {
+    const reply = await call();
+    return reply.error === undefined ? undefined : `${label}: ${reply.error}`;
+  } catch (error) {
+    return `${label}: ${error instanceof Error ? error.message : String(error)}`;
+  }
 }
