@@ -1,4 +1,5 @@
 import { fork } from 'node:child_process';
+import { extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CoreError } from './errors.ts';
 import { runHost, type Importer } from './host-runtime.ts';
@@ -41,10 +42,14 @@ export function inlineHosts(importer: Importer): SpawnHost {
   };
 }
 
-/** Хост - дочерний процесс Node; advanced-сериализация повторяет structuredClone, как у utilityProcess. */
-export function forkHosts(options: { silent?: boolean } = {}): SpawnHost {
-  // Не на верхнем уровне: в cjs-бандле главного процесса Electron import.meta.url пуст.
-  const hostEntry = fileURLToPath(new URL('./host-entry.ts', import.meta.url));
+/**
+ * Хост - дочерний процесс Node; advanced-сериализация повторяет structuredClone, как у utilityProcess.
+ * `entry` - путь к `host-entry` ядра (`@cyborg-harness/core/host-entry`). Без него путь выводится из `import.meta.url`
+ * с тем же расширением, что у этого модуля: `.ts` из исходников, `.js` из собранного пакета.
+ */
+export function forkHosts(options: { silent?: boolean; entry?: string } = {}): SpawnHost {
+  // Не на верхнем уровне: в cjs-бандле главного процесса Electron import.meta.url пуст - там путь задаёт приложение.
+  const hostEntry = options.entry ?? fileURLToPath(new URL(`./host-entry${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
   return (hostId) => {
     const stdio = options.silent ? 'ignore' : 'inherit';
     const child = fork(hostEntry, [hostId], { serialization: 'advanced', stdio: [stdio, stdio, stdio, 'ipc'] });

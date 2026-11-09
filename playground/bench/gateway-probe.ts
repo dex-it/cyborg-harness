@@ -17,7 +17,7 @@ export interface ProbePty {
   kill(): Promise<unknown>;
 }
 
-export type ProbePath = 'fs.readText' | 'fs.readText.cold' | 'fs.watch' | 'pty.write' | 'secrets.get' | 'net.fetch';
+export type ProbePath = 'fs.readText' | 'fs.readText.cold' | 'fs.watch' | 'pty.write' | 'secrets.get' | 'net.fetch' | 'net.fetch.checked';
 
 export interface Sampled {
   /** Первый вызов, до разогрева. */
@@ -108,6 +108,7 @@ export async function measure(os: ProbeOs, probe: ProbePath, target: string, siz
       await os.setSecret(target, 's'.repeat(size));
       return loop(async () => expectSize(await os.secret(target), size, probe));
     case 'net.fetch':
+    case 'net.fetch.checked':
       return loop(async () => expectSize(await os.fetch(target), size, probe));
   }
 }

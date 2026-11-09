@@ -1,5 +1,5 @@
 import { utilityProcess } from 'electron';
-import type { SpawnHost } from '../../../core/src/transports.ts';
+import type { SpawnHost } from '@cyborg-harness/core';
 
 export interface UtilityHosts {
   readonly spawn: SpawnHost;

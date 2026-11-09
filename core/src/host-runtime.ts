@@ -749,7 +749,7 @@ function context(
           }),
         );
       },
-      run: (name, ...args) => endpoint.request('run', { name, args }),
+      run: (name, ...args) => endpoint.request('run', { caller: pluginId, name, args }),
     },
     keys: {
       async register(binding) {

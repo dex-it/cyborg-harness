@@ -117,11 +117,11 @@ test('run: ядро сверяет аргументы со схемой мани
   const kernel = await load({
     apiVersion: PLUGIN_API_VERSION,
     enabled: ['victim', 'mallory'],
-    manifests: [manifest('victim', { commands: { 'victim.open': { args: ['string', 'number?'] } } }), manifest('mallory')],
+    manifests: [manifest('victim', { commands: { 'victim.open': { args: ['string', 'number?'], callers: 'plugins' } } }), manifest('mallory')],
     spawnHost: forger.spawn,
     hosts: { v: ['victim'], m: ['mallory'] },
   });
-  const run = (args: unknown) => forger.request('m', 'run', { name: 'victim.open', args });
+  const run = (args: unknown) => forger.request('m', 'run', { caller: 'mallory', name: 'victim.open', args });
 
   assert.equal((await run(['/a'])).v, 'открыл');
   assert.equal((await run(['/a', 3])).v, 'открыл');
@@ -132,6 +132,33 @@ test('run: ядро сверяет аргументы со схемой мани
   assert.equal(code(await run('/a')), 'Invalid');
   await assert.rejects(kernel.run('victim.open', 42), { code: 'Invalid', message: 'victim.open: аргумент 1 не string' });
   assert.deepEqual(seen, [['/a'], ['/a', 3]]);
+  await kernel.unload();
+});
+
+test('run: вызывающего называет канал - чужой плагин в caller и запрос без него отклоняются, команда без callers недоступна главной части', async () => {
+  const seen: unknown[][] = [];
+  const forger = forging({
+    victim: { activate: (ctx) => void ctx.commands.register('victim.pin', (...args) => void seen.push(args)) },
+    mallory: { activate: () => undefined },
+  });
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['victim', 'mallory'],
+    manifests: [manifest('victim', { commands: ['victim.pin', 'victim.open'] }), manifest('mallory')],
+    spawnHost: forger.spawn,
+    hosts: { v: ['victim'], m: ['mallory'] },
+  });
+  const run = (body: Record<string, unknown>) => forger.request('m', 'run', { name: 'victim.pin', args: [], ...body });
+
+  assert.equal(code(await run({ caller: 'mallory' })), 'PermissionDenied', 'victim.pin закрыта плагинам');
+  assert.equal(code(await run({ caller: 'victim' })), 'Unavailable', 'хост m не держит victim: от его имени не зовут');
+  assert.equal(code(await run({ caller: 'ghost' })), 'Unavailable');
+  assert.equal(code(await run({})), 'Invalid', 'без caller запрос не принят: «пользователем» из хоста не назваться');
+  assert.deepEqual(seen, []);
+  assert.deepEqual(
+    kernel.journal.flatMap((e) => (e.kind === 'denied' ? [`${e.pluginId}:${e.method}:${e.reason ?? '-'}`] : [])),
+    ['mallory:victim.pin:command-callers'],
+  );
   await kernel.unload();
 });
 

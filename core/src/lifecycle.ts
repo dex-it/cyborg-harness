@@ -2,7 +2,8 @@ import { CoreError, errorMessage, ignore } from './errors.ts';
 import { providesMatching } from './graph.ts';
 import { bump } from './host-pool.ts';
 import type { Counter, KernelContext, Lifecycle, PtyDrop } from './kernel-context.ts';
-import type { DisableOptions } from './kernel-types.ts';
+import type { DisableOptions, UninstallReport } from './kernel-types.ts';
+import { isValidId } from './manifest-fields.ts';
 import type { PluginManifest } from './manifest.ts';
 
 /** Очередь операций над плагинами, выключение и включение, страйки сторожа, снятие плагина и выгрузка ядра. */
@@ -16,9 +17,9 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
   let chain: Promise<void> = Promise.resolve();
 
   // Отказ одного шага не отравляет очередь: иначе idle, enable, disable и unload отвечали бы им вечно.
-  const enqueue = (step: () => Promise<void>): Promise<void> => {
+  const enqueue = <T>(step: () => Promise<T>): Promise<T> => {
     const run = chain.then(step);
-    chain = run.catch(ignore);
+    chain = run.then(ignore, ignore);
     return run;
   };
 
@@ -156,6 +157,59 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     await idle();
   }
 
+  /** Что осталось после `uninstall` и почему: человек читает это до того, как поставит плагин с тем же id. */
+  function leftAfterUninstall(pluginId: string): string[] {
+    const hasConfig = (options.config?.raw(pluginId) ?? []).some(([, data]) => data !== undefined);
+    return [
+      ...(hasConfig ? ['настройки (config) в файлах пользователя и воркспейса: их правит человек'] : []),
+      'state, память видов, документы и выбранные пути в других воркспейсах: ядро знает только текущий',
+      'код плагина на диске: его убирает приложение',
+      'веб-хранилище видов плагина (localStorage, IndexedDB его origin): его стирает приложение',
+    ];
+  }
+
+  async function uninstall(pluginId: string): Promise<UninstallReport> {
+    if (ctx.unloading) throw new CoreError('Unavailable', 'ядро выгружается');
+    // Путь и ключи строятся из id: недопустимый не доходит ни до одного шага.
+    if (!isValidId(pluginId)) throw new CoreError('Invalid', `недопустимый id плагина: ${JSON.stringify(pluginId)}`);
+    // В очереди вместе с enable и disable: пока идёт стирание, плагин не поднимется.
+    return enqueue(async (): Promise<UninstallReport> => {
+      if (ctx.unloading) throw new CoreError('Unavailable', 'ядро выгружается');
+      const { activation, views } = ctx.parts;
+      const running = active.includes(pluginId) || activation.waiting.has(pluginId) || activation.waking.has(pluginId) || activation.activating.has(pluginId);
+      // Плагин в графе, но не выключен ни человеком, ни сторожем: хост может вернуть его, и он пересоздал бы стёртое.
+      // Снятый плагин общего хоста, который жив ради соседей, пересоздать не может: шлюз (`live` в host-bridge) отказывает в os, documents и section.write всем, кто не active.
+      // В безопасном режиме хостов нет и enable/disable недоступны: ждать нечего, а удалить сломанный плагин нужно именно здесь (BR-CH-005).
+      if (running || (!options.safeMode && graph.order.includes(pluginId) && !userOff.has(pluginId) && !switchedOff.has(pluginId))) {
+        throw new CoreError('Invalid', `${pluginId} работает или ждёт запуска: сначала disablePreview и disable`);
+      }
+      const erased: string[] = [];
+      const failed: string[] = [];
+      const step = async (what: string, run: () => Promise<string | string[] | undefined> | string | undefined): Promise<void> => {
+        try {
+          const done = await run();
+          if (done !== undefined) erased.push(...[done].flat());
+        } catch (error) {
+          failed.push(`${what}: ${errorMessage(error)}`);
+        }
+      };
+      const counted = (n: number, what: string) => (n > 0 ? `${what}: ${String(n)}` : undefined);
+      dropPlugin(pluginId);
+      await step('терминалы', () => counted(gateway.endAllPty(pluginId), 'терминалов завершено'));
+      await step('файлы', () => gateway.eraseFiles(pluginId));
+      await step('секреты', async () => counted(await gateway.eraseSecrets(pluginId), 'секреты'));
+      await step('выбранные пути', async () => counted(await gateway.eraseGrants(pluginId), 'выбранные человеком пути (granted)'));
+      await step('память видов', async () => counted(await views.forget(pluginId), 'память видов'));
+      await step('документы', async () => counted(await ctx.documents.removeOf(pluginId), 'документы'));
+      await step('state', async () => ((await options.state?.remove('workspace', pluginId)) === true ? 'состояние (state) воркспейса' : undefined));
+      const left = leftAfterUninstall(pluginId);
+      const error = failed.join('; ');
+      ctx.record({ pluginId, kind: 'uninstalled', erased, left, ...(error !== '' && { error }) });
+      if (error !== '') throw new CoreError('Unavailable', `${pluginId}: стёрто не всё, повтор доделает: ${error}; стёрто: ${erased.join(', ') || 'ничего'}`);
+      return { pluginId, erased, left };
+    });
+  }
+
   /** Снимает плагины в обратном порядке активации и гасит хосты. */
   async function shutdown(): Promise<void> {
     const { pool, idleWatch } = ctx.parts;
@@ -174,7 +228,7 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     gateway.releaseAllPty();
     layer.clear();
     pool.stopAll();
-    ctx.denials.flush();
+    ctx.flushRepeats();
   }
 
   return {
@@ -189,6 +243,7 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     unloadPlugin,
     enable,
     disable,
+    uninstall,
     shutdown,
     async setEnabled(next) {
       const want = new Set(next);

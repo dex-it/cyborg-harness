@@ -1,5 +1,5 @@
-import { runHost } from '../../../core/src/host-runtime.ts';
-import type { PluginModule } from '../../../core/src/plugin.ts';
+import { runHost } from '@cyborg-harness/core/host';
+import type { PluginModule } from '@cyborg-harness/core';
 
 const port = process.parentPort;
 runHost(
