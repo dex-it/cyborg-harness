@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SectionStore, type LayerStore } from '../src/config.ts';
+import { memoryStore as memory } from '../../testing/src/memory.ts';
+import { SectionStore } from '../src/config.ts';
 import { toDisposable } from '../src/disposable.ts';
 import { load, type LoadOptions } from '../src/loader.ts';
 import type { PluginModule } from '../src/plugin.ts';
@@ -21,12 +22,6 @@ function kernel(table: Record<string, PluginModule>, options: Omit<LoadOptions, 
     }),
     ...options,
   });
-}
-
-function memory(initial: Record<string, Record<string, unknown>> = {}) {
-  const docs = new Map(Object.entries(initial));
-  const store: LayerStore = { load: async (l) => docs.get(l), save: async (l, d) => void docs.set(l, d) };
-  return { docs, store };
 }
 
 const kinds = (k: { journal: readonly { pluginId?: string | undefined; kind: string }[] }) => k.journal.map((e) => `${e.pluginId ?? '-'}:${e.kind}`);
