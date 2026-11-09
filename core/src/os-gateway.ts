@@ -148,8 +148,9 @@ async function readAtMost(method: string, handle: fs.FileHandle, size: number, m
   }
 }
 
-/** Запись через соседний временный файл и `rename`: читатель и оборванная запись видят прежний файл или новый целиком, а не пустой или недописанный. Режим существующего файла сохраняется. Без `fsync`: он не вошёл бы в бюджет шлюза (1 мс на p99), так что защита от падения процесса, а не питания. */
-async function writeAtomic(method: string, file: string, text: string): Promise<void> {
+/** Запись через соседний временный файл и `rename`: читатель и оборванная запись видят прежний файл или новый целиком, а не пустой или недописанный. Режим существующего файла сохраняется. Без `fsync`: он не вошёл бы в бюджет шлюза (1 мс на p99), так что защита от падения процесса, а не питания.
+ * Временный файл лежит рядом с целью, поэтому ему нужно право записи на его имя (`tempAllowed`): область из одного файла или маска `*.json` его не покрывают. Нет права на имя или каталог цели закрыт для создания файлов (`EACCES`) - запись идёт на месте, как до атомарной: цель целиком, но без защиты от обрыва. Ни временного файла вне права, ни отказа записи, которая раньше проходила. */
+async function writeAtomic(method: string, file: string, text: string, tempAllowed: (temp: string) => boolean): Promise<void> {
   const old = await fs.lstat(file).catch((error: unknown) => {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
@@ -158,7 +159,21 @@ async function writeAtomic(method: string, file: string, text: string): Promise<
   const mode = old === undefined ? 0o644 : old.mode & 0o777;
   // Имя `<файл>.<n>.tmp`: соседи защищённого файла закрыты для плагинов (`sibling`), в том числе временный файл его записи.
   const temp = `${file}.${randomBytes(6).toString('hex')}.tmp`;
-  const handle = await fs.open(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
+  const handle = tempAllowed(temp)
+    ? await fs.open(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode).catch((error: unknown) => {
+        if (['EACCES', 'EPERM', 'EROFS'].includes((error as NodeJS.ErrnoException).code ?? '')) return undefined;
+        throw error;
+      })
+    : undefined;
+  if (handle === undefined) {
+    const direct = await fs.open(file, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, mode);
+    try {
+      await direct.writeFile(text, 'utf8');
+    } finally {
+      await direct.close();
+    }
+    return;
+  }
   try {
     try {
       await handle.writeFile(text, 'utf8');
@@ -682,7 +697,9 @@ export class OsGateway {
       case 'fs.writeText': {
         await this.#ownDirs(m.id);
         const file = await this.#checkPath(m, method, args[0], true);
-        await writeAtomic(method, file, str(method, args[1], 'текст'));
+        const text = str(method, args[1], 'текст');
+        const areas = await this.#areas(m, 'fs.write');
+        await writeAtomic(method, file, text, (temp) => areas.some((a) => areaDir(a, temp) !== undefined));
         return undefined;
       }
       case 'fs.mkdir': {

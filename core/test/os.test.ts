@@ -458,6 +458,46 @@ test('fs.writeText атомарна: читатель видит прежний 
   await k.unload();
 });
 
+test('fs.writeText: временный файл не ложится вне fs.write - область-файл и маска пишутся на месте, режим каталога без записи не ломает запись', { skip: process.platform === 'win32' && 'режимы POSIX' }, async () => {
+  await using box = await sandbox();
+  const one = path.join(box.outside, 'one.json');
+  const masked = path.join(box.outside, 'masked.json');
+  const free = path.join(box.work, 'free.json');
+  const ro = path.join(box.work, 'ro');
+  await mkdir(ro);
+  for (const f of [one, masked, free, path.join(ro, 'kept.json')]) await writeFile(f, 'old');
+  const { k, os, denied } = await kernel({ w: { 'fs.read': [box.outside, box.work], 'fs.write': [one, path.join(box.outside, '*.json'), box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  // Область «только один файл»: временный файл рядом был бы вне права, поэтому запись на месте (inode тот же).
+  const fs = os('w').fs;
+  const ino = async (f: string) => (await stat(f)).ino;
+  const before = [await ino(one), await ino(masked), await ino(free)];
+  const seen: string[] = [];
+  const watcher = (await import('node:fs')).watch(box.outside, (_e, name) => {
+    if (name) seen.push(name);
+  });
+  await fs.writeText(one, 'new-one');
+  await fs.writeText(masked, 'new-masked');
+  await fs.writeText(free, 'new-free');
+  await new Promise((r) => setTimeout(r, 100));
+  watcher.close();
+  assert.deepEqual([await readFile(one, 'utf8'), await readFile(masked, 'utf8'), await readFile(free, 'utf8')], ['new-one', 'new-masked', 'new-free']);
+  assert.equal(await ino(one), before[0], 'one.json записан на месте: временный файл вне права не создавался');
+  assert.equal(await ino(masked), before[1], 'masked.json под маску *.json - сосед masked.json.<hex>.tmp под маску не подходит');
+  assert.notEqual(await ino(free), before[2], 'где временный файл разрешён, запись по-прежнему атомарна');
+  assert.deepEqual(seen.filter((n) => n.endsWith('.tmp')), [], 'во внешнем каталоге временных файлов не было');
+  if (process.getuid?.() !== 0) {
+    await chmod(ro, 0o555);
+    try {
+      await fs.writeText(path.join(ro, 'kept.json'), 'rw-file-in-ro-dir');
+      assert.equal(await readFile(path.join(ro, 'kept.json'), 'utf8'), 'rw-file-in-ro-dir', 'файл в каталоге без записи записывался и раньше');
+    } finally {
+      await chmod(ro, 0o755);
+    }
+  }
+  assert.deepEqual(denied(), []);
+  await k.unload();
+});
+
 test('fs.readSlice: кусок по байтам, символ UTF-8 не рвётся, пределы и права', async () => {
   await using box = await sandbox();
   const file = path.join(box.work, 'log.jsonl');
