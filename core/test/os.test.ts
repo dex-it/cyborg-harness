@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFile, chmod, lstat, mkdtemp, mkdir, readdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, lstat, mkdtemp, mkdir, open, readdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { EventEmitter } from 'node:events';
+import type { FSWatcher } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, PluginOs } from '@cyborg-harness/contracts';
@@ -532,6 +534,31 @@ test('fs.writeText: файл только для чтения (0444) в ката
   await k.unload();
 });
 
+test('fs: ссылка внутри области - ответ зависит от цели (вне существует - PermissionDenied, висячая - NotFound или ошибка операции, под закрытым каталогом снаружи - EACCES операции); обещание контракта только про путь, названный плагином', { skip: (process.platform === 'win32' || process.getuid?.() === 0) && 'ссылки и режимы POSIX, не root' }, async () => {
+  await using box = await sandbox();
+  const closed = path.join(box.outside, 'closed');
+  await mkdir(closed);
+  await writeFile(path.join(closed, 'x'), 'секрет');
+  await writeFile(path.join(box.outside, 'there'), 'секрет');
+  await chmod(closed, 0o000);
+  try {
+    await symlink(path.join(box.outside, 'there'), path.join(box.work, 'to-existing'));
+    await symlink(path.join(box.outside, 'нет'), path.join(box.work, 'to-missing'));
+    await symlink(path.join(closed, 'x'), path.join(box.work, 'to-closed'));
+    const { k, os } = await kernel({ app: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+    const fs = os('app').fs;
+    await assert.rejects(fs.readText(path.join(box.work, 'to-existing')), { code: 'PermissionDenied' });
+    await assert.rejects(fs.stat(path.join(box.work, 'to-missing')), { code: 'NotFound' });
+    await assert.rejects(fs.readText(path.join(box.work, 'to-missing')), (error: Error & { code?: string }) => error.code !== 'PermissionDenied', 'чтение висячей ссылки: ошибка самой операции, не отказ области');
+    await assert.rejects(fs.stat(path.join(box.work, 'to-closed')), (error: Error & { code?: string }) => error.code === 'Remote' && /EACCES/.test(error.message));
+    // Названный плагином путь вне области остаётся PermissionDenied при любом состоянии цели.
+    for (const named of [path.join(box.outside, 'there'), path.join(box.outside, 'нет'), path.join(closed, 'x')]) await assert.rejects(fs.readText(named), { code: 'PermissionDenied' }, named);
+    await k.unload();
+  } finally {
+    await chmod(closed, 0o755);
+  }
+});
+
 test('fs.readSlice: кусок по байтам, символ UTF-8 не рвётся, пределы и права', async () => {
   await using box = await sandbox();
   const file = path.join(box.work, 'log.jsonl');
@@ -614,6 +641,30 @@ test('fs.watch файла: каждая из записей writeText (подм�
   sub.dispose();
 });
 
+test('fs.watch файла: старый inode держит открытым другой процесс (tail -f) - каждая из записей writeText всё равно даёт событие', { skip: process.platform !== 'linux' && 'rename-события без IN_DELETE_SELF - особенность inotify' }, async (t) => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ app: { 'fs.read': [box.work], 'fs.write': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  t.after(() => k.unload());
+  const fs = os('app').fs;
+  const file = path.join(box.work, 'state.json');
+  await fs.writeText(file, '0');
+  const events: (readonly string[])[] = [];
+  const closed: string[] = [];
+  const sub = await fs.watch(file, (names) => events.push(names), (reason) => closed.push(reason));
+  const holder = await open(file, 'r');
+  try {
+    for (let i = 1; i <= 3; i++) {
+      await fs.writeText(file, String(i));
+      await waitFor(() => events.length >= i, `событий ${String(events.length)} из ${String(i)}; onClose: ${closed.join()}`);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  } finally {
+    await holder.close();
+  }
+  assert.deepEqual(closed, []);
+  sub.dispose();
+});
+
 test('fs.watch файла: файл удалён - onClose с причиной, а не тишина', async (t) => {
   await using box = await sandbox();
   const { k, os } = await kernel({ app: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
@@ -626,6 +677,87 @@ test('fs.watch файла: файл удалён - onClose с причиной, 
   await rm(file);
   for (let i = 0; i < 100 && closed.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
   assert.equal(closed.length, 1, 'удаление файла закрывает наблюдение с причиной');
+});
+
+/** Наблюдатели, подставленные шлюзу: Linux не присылает `rename`, пока старый inode держит открытым другой процесс (`tail -f`) - приходит только `change`. */
+function fakeWatchers() {
+  const list: { w: FSWatcher; closed: boolean; fire: (event: string, name?: string) => void }[] = [];
+  const watch = ((_path: string, listener: (event: string, name: string) => void) => {
+    const w = Object.assign(new EventEmitter(), {
+      close: () => {
+        item.closed = true;
+      },
+    });
+    const item = { w: w as unknown as FSWatcher, closed: false, fire: (event: string, name = 'state.json') => listener(event, name) };
+    list.push(item);
+    return w as unknown as FSWatcher;
+  }) as unknown as NonNullable<OsEnvironment['watch']>;
+  return { list, watch };
+}
+
+async function waitFor(cond: () => boolean, what: string) {
+  for (let i = 0; i < 100 && !cond(); i++) await new Promise((r) => setTimeout(r, 20));
+  assert.ok(cond(), what);
+}
+
+test('fs.watch файла: на change inode пути сверяется со старым - подмена без rename (старый inode держит другой процесс) переоткрывает наблюдение', async (t) => {
+  await using box = await sandbox();
+  const { list, watch } = fakeWatchers();
+  const { k, os } = await kernel({ app: { 'fs.read': [box.work], 'fs.write': [box.work] } }, { dataDir: box.data, tempDir: box.temp, watch });
+  t.after(() => k.unload());
+  const fs = os('app').fs;
+  const file = path.join(box.work, 'state.json');
+  await fs.writeText(file, '0');
+  const events: (readonly string[])[] = [];
+  const closed: string[] = [];
+  const sub = await fs.watch(file, (names) => events.push(names), (reason) => closed.push(reason));
+  assert.equal(list.length, 1);
+  // Тот же inode (дописали на месте): change не переоткрывает.
+  await writeFile(file, 'на месте');
+  list[0]!.fire('change');
+  await waitFor(() => events.length === 1, 'событие дописанного файла');
+  assert.equal(list.length, 1, 'inode тот же - наблюдатель прежний');
+  // Файл подменён через rename, а rename-события нет: пришёл только change.
+  for (let i = 1; i <= 3; i++) {
+    await fs.writeText(file, String(i));
+    list[i - 1]!.fire('change');
+    await waitFor(() => list.length === i + 1, `переоткрытие после подмены ${String(i)}`);
+    assert.equal(list[i - 1]!.closed, true, 'прежний наблюдатель закрыт');
+    await waitFor(() => events.length === i + 1, `событие подмены ${String(i)}`);
+  }
+  list[0]!.fire('change');
+  await new Promise((r) => setTimeout(r, 120));
+  assert.equal(events.length, 4, 'поздние события закрытого наблюдателя отброшены');
+  assert.deepEqual(closed, []);
+  sub.dispose();
+});
+
+test('fs.watch файла: заменён каталогом с тем же именем - наблюдение закрыто с причиной, а не переходит на детей каталога; ссылка вместо файла - так же', async (t) => {
+  await using box = await sandbox();
+  const { list, watch } = fakeWatchers();
+  const { k, os } = await kernel({ app: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp, watch });
+  t.after(() => k.unload());
+  const fs = os('app').fs;
+  for (const [name, replace] of [
+    ['dir.json', async (f: string) => mkdir(f)],
+    ['link.json', async (f: string) => symlink(path.join(box.work, 'other'), f)],
+  ] as const) {
+    const file = path.join(box.work, name);
+    await writeFile(file, '0');
+    await writeFile(path.join(box.work, 'other'), 'x');
+    const events: (readonly string[])[] = [];
+    const closed: string[] = [];
+    const before = list.length;
+    await fs.watch(file, (names) => events.push(names), (reason) => closed.push(reason));
+    await rm(file);
+    await replace(file);
+    list[before]!.fire('rename', name);
+    await waitFor(() => closed.length === 1, `${name}: onClose`);
+    assert.match(closed[0]!, /не обычный файл/);
+    assert.equal(list.length, before + 1, `${name}: новый наблюдатель на подмену не ставился`);
+    assert.equal(list[before]!.closed, true);
+    assert.deepEqual(events.flat().filter((n) => n !== name), [], `${name}: имена детей плагину не уходят`);
+  }
 });
 
 test('fs.watch: лимит не обходится параллельными вызовами; сузились корни - наблюдение закрыто', async () => {

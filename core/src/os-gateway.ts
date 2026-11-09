@@ -702,11 +702,11 @@ export class OsGateway {
         const reserved = () => void this.#watches.delete(key);
         this.#watches.set(key, reserved);
         let target: string;
-        let isFile: boolean;
+        let first: Stats;
         try {
           await this.#ownDirs(m.id);
           target = await this.#checkPath(m, method, args[0], false);
-          isFile = (await fs.stat(target)).isFile();
+          first = await fs.stat(target);
         } catch (error) {
           if (this.#watches.get(key) === reserved) this.#watches.delete(key);
           throw error;
@@ -729,14 +729,38 @@ export class OsGateway {
           if ((await this.#checkPath(m, method, args[0], false).catch(() => undefined)) !== target) close('путь больше не в правах плагина');
           else if (this.#watches.get(key) === close) this.#push(m.id, 'fs.change', { pluginId: m.id, id, names: list });
         };
-        // rename подменяет inode (writeText, редакторы с атомарной записью), а наблюдатель файла привязан к прежнему и молчал бы дальше: у файла по событию `rename` наблюдение переоткрывается на том же пути. Само событие передаётся плагину: запись между переоткрытием и чтением не теряется, плагин читает файл после склейки.
-        const open = this.#env.watch ?? watchFs;
-        const attach = (): FSWatcher => {
-          const w = open(target, (event, name) => {
-            if (w !== watcher) return;
-            if (name) names.add(name);
-            timer ??= setTimeout(() => void send(), WATCH_COALESCE_MS);
-            if (isFile && event === 'rename') {
+        // Файл под наблюдением подменяют новым (writeText, редакторы с атомарной записью): наблюдатель привязан к прежнему inode и молчал бы дальше. Поэтому у файла по событию `rename` путь сверяется заново, а по `change` - если inode пути не тот, что у наблюдателя: пока другой процесс (`tail -f`, второй плагин) держит старый файл открытым, Linux не шлёт `rename`, а только `change` старого inode. Само событие передаётся плагину: запись между переоткрытием и чтением не теряется, плагин читает файл после склейки.
+        // Не обычный файл по пути (каталог, ссылка) или нет пути - наблюдение закрыто с причиной: следить за детьми каталога плагин не просил.
+        const isFile = first.isFile();
+        let known = { ino: first.ino, dev: first.dev };
+        let busy = false;
+        let more = false;
+        let forced = false;
+        const recheck = async (force: boolean): Promise<void> => {
+          forced ||= force;
+          if (busy) {
+            more = true;
+            return;
+          }
+          busy = true;
+          try {
+            do {
+              more = false;
+              const must = forced;
+              forced = false;
+              let now: Stats;
+              try {
+                now = await fs.lstat(target);
+              } catch (error) {
+                close(`файл исчез или заменён: ${(error as Error).message}`);
+                return;
+              }
+              if (this.#watches.get(key) !== close) return;
+              if (!now.isFile()) {
+                close('по пути больше не обычный файл');
+                return;
+              }
+              if (!must && now.ino === known.ino && now.dev === known.dev) continue;
               const stale = watcher;
               try {
                 watcher = attach();
@@ -744,8 +768,20 @@ export class OsGateway {
                 close(`файл исчез или заменён: ${(error as Error).message}`);
                 return;
               }
+              known = { ino: now.ino, dev: now.dev };
               stale.close();
-            }
+            } while (more);
+          } finally {
+            busy = false;
+          }
+        };
+        const open = this.#env.watch ?? watchFs;
+        const attach = (): FSWatcher => {
+          const w = open(target, (event, name) => {
+            if (w !== watcher) return;
+            if (name) names.add(name);
+            timer ??= setTimeout(() => void send(), WATCH_COALESCE_MS);
+            if (isFile) void recheck(event === 'rename');
           });
           // Без слушателя ошибка наблюдателя (удалён каталог, кончились inotify) уронила бы главный процесс.
           w.on('error', (error) => {
