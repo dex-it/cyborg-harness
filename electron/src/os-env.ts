@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { BrowserWindow, clipboard, dialog, Notification, safeStorage, shell } from 'electron';
 import * as nodePty from 'node-pty';
-import { groupKilled, type NoticeEvents, type NoticeHandle, type OsEnvironment, type SecretStore } from '@cyborg-harness/core';
+import { groupKilled, type NoticeEvents, type NoticeHandle, type OsEnvironment, type SecretStore, type SpawnPtyHost } from '@cyborg-harness/core';
 
 /** Секреты в файле, каждое значение зашифровано safeStorage; без шифрования ОС хранилище недоступно, а не открыто. */
 export function fileSecrets(file: string): SecretStore {
@@ -65,7 +65,9 @@ export interface ElectronOsOptions {
   readonly protectedPaths: readonly string[];
   readonly workspaceFile?: string;
   readonly raiseWindow: () => void;
-  /** Откуда берутся pty: по умолчанию `node-pty` в главном процессе; отдельный pty-хост ядра (K-01) подставляется здесь. */
+  /** Отдельный процесс pty-хоста (`utilityPtyHost`, K-01): `node-pty` живёт в нём, ядро следит за ним сторожем. Сильнее `pty`. */
+  readonly ptyHost?: SpawnPtyHost;
+  /** Без `ptyHost` pty берутся из этого бэкенда в главном процессе (по умолчанию `node-pty`): зависший нативный модуль заморозит окно. */
   readonly pty?: OsEnvironment['pty'];
 }
 
@@ -97,6 +99,7 @@ export function electronOs(options: ElectronOsOptions): OsEnvironment {
         return result.canceled ? [] : result.filePaths;
       },
     },
+    ...(options.ptyHost !== undefined && { ptyHost: options.ptyHost }),
     pty: options.pty ?? { spawn: (file, args, o) => groupKilled(nodePty.spawn(file, args, o)) },
   };
 }
