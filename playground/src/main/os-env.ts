@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { BrowserWindow, clipboard, dialog, Notification, safeStorage, shell } from 'electron';
 import * as nodePty from 'node-pty';
-import { groupKilled, type NoticeEvents, type NoticeHandle, type OsEnvironment, type SecretStore } from '../../../core/src/index.ts';
+import { groupKilled, type NoticeEvents, type NoticeHandle, type OsEnvironment, type SecretStore } from '@cyborg-harness/core';
 
 /** Секреты в файле, каждое значение зашифровано safeStorage; без шифрования ОС хранилище недоступно, а не открыто. */
 export function fileSecrets(file: string): SecretStore {

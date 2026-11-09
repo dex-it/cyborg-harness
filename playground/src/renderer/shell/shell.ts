@@ -1,7 +1,7 @@
 // Оболочка вида: страницу и этот скрипт отдаёт приложение под origin плагина, модуль плагина получает готовый UiContext.
 
-import { defineElements } from '../../../../core/elements/elements.ts';
-import { connectView, keepFocus, mountModule } from '../../../../core/src/ui-shell.ts';
+import { defineElements } from '@cyborg-harness/core/elements';
+import { connectView, keepFocus, mountModule } from '@cyborg-harness/core/ui-shell';
 import type { ViewBridge } from '../../shared/views.ts';
 
 const script = document.currentScript as HTMLScriptElement;

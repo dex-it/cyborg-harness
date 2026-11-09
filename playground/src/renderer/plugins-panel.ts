@@ -1,8 +1,8 @@
 // Окно playground: плагины с кнопками над ядром, сочетания клавиш, лента сообщений плагинов и журнал ядра (SAD §3.2, §3.5).
 
-import { keyOfInput } from '../../../core/src/keys.ts';
+import { keyOfInput } from '@cyborg-harness/core/keys';
 import type { FeedLine, KeptPtyRow, KeyRow, PluginRow, PluginsSnapshot, Reply } from '../shared/plugins.ts';
-import type { DisablePreview } from '../../../core/src/loader.ts';
+import type { DisablePreview } from '@cyborg-harness/core';
 import { byId, el } from './dom.ts';
 import { ViewsPanel } from './views-panel.ts';
 import { moveFocus } from './focus.ts';
