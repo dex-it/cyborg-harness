@@ -120,7 +120,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
   },
   './host': { source: 'src/index-host.ts', values: ['runHost'], types: ['HostOptions', 'Importer', 'Port'] },
   './host-entry': { source: 'src/host-entry.ts', values: [], types: [] },
-  './pty-host': { source: 'src/index-pty-host.ts', values: ['nodeViewPort', 'runPtyHost'], types: ['Port', 'PtyBackend', 'PtyHost', 'PtyHostOptions', 'PtyProcess', 'ViewPort'] },
+  './pty-host': { source: 'src/index-pty-host.ts', values: ['groupKilled', 'nodeViewPort', 'runPtyHost'], types: ['Port', 'PtyBackend', 'PtyHost', 'PtyHostOptions', 'PtyProcess', 'ViewPort'] },
   './keys': { source: 'src/index-keys.ts', values: ['keyOfInput'], types: ['KeyInput'] },
   './ui-shell': {
     source: 'src/index-ui-shell.ts',
