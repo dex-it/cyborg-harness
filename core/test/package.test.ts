@@ -67,13 +67,15 @@ describe('package.json ядра', () => {
 describe('потребители в репозитории', () => {
   it('playground берёт ядро через пакет: ни импортов, ни строковых путей (new URL, fork, readFile) в core/src и core/elements', () => {
     const playground = path.join(root, 'playground');
-    const files = walk(playground).filter((f) => /\.(ts|mjs)$/.test(f) && !f.includes(`${path.sep}dist${path.sep}`) && !f.includes(`${path.sep}node_modules${path.sep}`));
+    // Спайк SP-01 вне CI берёт из core/src то, чего нет в точках входа пакета (Tail, BACKLOG_LIMIT).
+    const allowed = new Set([path.join(playground, 'scripts', 'spike-pty-restore.mjs')]);
+    const files = walk(playground).filter((f) => /\.(ts|mjs)$/.test(f) && !allowed.has(f) && !f.includes(`${path.sep}dist${path.sep}`) && !f.includes(`${path.sep}node_modules${path.sep}`));
     assert.ok(files.length > 50, `файлов playground: ${files.length}`);
     const bad = files.flatMap((f) =>
       fs
         .readFileSync(f, 'utf8')
         .split('\n')
-        .flatMap((line, i) => (/['"`][^'"`\n]*core\/(?:src|elements)\//.test(line) ? [`${path.relative(root, f)}:${i + 1}: ${line.trim()}`] : [])),
+        .flatMap((line, i) => (/['"`][^'"`\n]*core\/(?:src|elements)\/|['"`]core['"`]\s*,\s*['"`](?:src|elements)['"`]/.test(line) ? [`${path.relative(root, f)}:${i + 1}: ${line.trim()}`] : [])),
     );
     assert.deepEqual(bad, []);
   });
