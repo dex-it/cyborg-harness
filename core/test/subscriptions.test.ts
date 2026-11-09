@@ -256,3 +256,65 @@ test('ответ, обогнавший отмену: ядро уже ответ�
   sub.dispose();
   await kernel.unload();
 });
+
+test('ответ поставщика пришёл в ядро после отмены: ядро шлёт release по drop - подписка у поставщика снята, место свободно', async () => {
+  const listeners = new Set<(n: number) => void>();
+  let ctx!: PluginContext;
+  const table: Record<string, PluginModule> = {
+    provider: {
+      activate(c) {
+        c.contracts.provide('test.cancel', '1.0', {
+          async watch(listener: (n: number) => void) {
+            listeners.add(listener);
+            return { dispose: () => void listeners.delete(listener) };
+          },
+          slow: async () => 'x',
+          listeners: () => listeners.size,
+        });
+        return undefined;
+      },
+    },
+    user: { activate: (c) => void (ctx = c) },
+  };
+  const inline = inlineHosts(async (entry) => {
+    const mod = table[entry];
+    if (!mod) throw new Error(`нет модуля ${entry}`);
+    return mod;
+  });
+  // Сообщения поставщика ядру задерживаются: ответ на watch доходит до ядра, когда ядро уже отменило вызов.
+  let late = false;
+  const spawnHost = (hostId: string): HostHandle => {
+    const handle = inline(hostId);
+    if (hostId !== 'p') return handle;
+    const onMessage = (listener: (message: unknown) => void) => {
+      handle.port.onMessage((message) => {
+        if (late) setTimeout(() => listener(message), 100);
+        else listener(message);
+      });
+    };
+    return { ...handle, port: { post: (message) => handle.port.post(message), onMessage } };
+  };
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['provider', 'user'],
+    manifests: [manifest('provider', { provides: { 'test.cancel': '1.0' } }), manifest('user', { requires: { 'test.cancel': '^1' } })],
+    hosts: { p: ['provider'], u: ['user'] },
+    limits: { subscriptions: 1 },
+    spawnHost,
+  });
+  const api = ctx.contracts.get('test.cancel', 1)!;
+  const abort = new AbortController();
+  late = true;
+  const call = api.watch(() => undefined, abort.signal);
+  await sleep(30);
+  abort.abort();
+  await assert.rejects(call, { code: 'Cancelled' });
+  assert.equal(listeners.size, 1, 'поставщик открыл подписку до отмены');
+  await sleep(200);
+  late = false;
+  assert.equal(listeners.size, 0, 'подписку из опоздавшего ответа сняло ядро');
+  const sub = await api.watch(() => undefined);
+  assert.equal(listeners.size, 1, 'при пределе 1 место освободилось');
+  sub.dispose();
+  await kernel.unload();
+});
