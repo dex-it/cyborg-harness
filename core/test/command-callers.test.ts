@@ -187,3 +187,47 @@ test('guard команды: путь вне права вызывающего о
   assert.equal(await s.k.run('sessions.open', { path: '/etc/passwd' }), 'ok:sessions.open', 'пользователь сам назвал путь: guard о чужих плагинах');
   assert.equal(await s.run('sessions', 'sessions.open', { path: '/etc/passwd' }), 'ok:sessions.open', 'свой плагин себя guard не проверяет');
 });
+
+// Ревью K-22: `a` и `a.b` оба проходят проверку пространства имён для `a.b.run`.
+test('команда в двух манифестах: сторонний отвергнут, встроенный остаётся владельцем; runOwn не пускает к чужой команде', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'cyborg-callers-'));
+  const contexts = new Map<string, PluginContext>();
+  const ran: string[] = [];
+  const k = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    spawnHost: inlineHosts(async (entry) => ({
+      activate: (ctx: PluginContext) => {
+        contexts.set(entry, ctx);
+        const names = entry === 'a' ? ['a.b.run', 'a.own'] : entry === 'a.b' ? ['a.b.run'] : ['other.go'];
+        for (const name of names) ctx.commands.register(name, (...args) => void ran.push(`${entry}:${name}:${JSON.stringify(args)}`));
+      },
+    })),
+    enabled: ['a', 'a.b', 'other'],
+    bundled: ['a', 'other'],
+    reservedPrefixes: ['cyborg.'],
+    manifests: [
+      { ...base, id: 'a', commands: ['a.b.run', 'a.own'] },
+      { ...base, id: 'a.b', commands: ['a.b.run'], keybindings: [{ key: 'F9', command: 'a.b.run' }] },
+      { ...base, id: 'other', commands: ['other.go'] },
+    ],
+    os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp') },
+  });
+  try {
+    const rejected = k.journal.find((e) => e.kind === 'rejected' && e.pluginId === 'a.b');
+    assert.ok(rejected, 'a.b отвергнут');
+    assert.match(describeEntry(rejected), /команду a\.b\.run объявил и a/);
+    assert.equal(contexts.has('a.b'), false, 'отвергнутый не запущен и не покажет уведомление');
+    assert.equal(k.keybindings.some((b) => b.pluginId === 'a.b'), false, 'сочетание отвергнутого не действует');
+    assert.equal(k.keybinding('F9'), undefined);
+
+    assert.equal(await k.runOwn('a', 'a.b.run'), undefined);
+    assert.deepEqual(ran, ['a:a.b.run:[]']);
+    await assert.rejects(k.runOwn('a.b', 'a.b.run'), { code: 'PermissionDenied' }, 'вид отвергнутого не запускает команду владельца');
+    await assert.rejects(k.runOwn('other', 'a.b.run'), { code: 'PermissionDenied' }, 'чужая команда');
+    await assert.rejects(k.runOwn('a', 'a.nothing'), { code: 'CommandNotFound' });
+    assert.deepEqual(ran, ['a:a.b.run:[]'], 'чужие вызовы обработчик не достали');
+  } finally {
+    await k.unload();
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -179,6 +179,8 @@ export interface Kernel {
   /** `plugins.enabled` поменяли в файле: убранные выключаются, вернувшиеся включаются; ответ - кого нет в графе запуска и кто ждёт перезапуска. */
   setEnabled(next: readonly string[]): Promise<EnabledChange>;
   run(command: string, ...args: unknown[]): Promise<unknown>;
+  /** Команда по просьбе вида плагина `pluginId`: исполняет её только он, чужую (в том числе объявленную и им) ядро не запускает - `PermissionDenied`. `callers` не проверяется: вид зовёт как пользователь. */
+  runOwn(pluginId: string, command: string, ...args: unknown[]): Promise<unknown>;
   /** Раздел поменялся извне (файл воркспейса правили руками): активные владельцы получают `onChange`, не прошедший проверку - запись в журнал. */
   reloadSections(kind: 'config' | 'state', ids: readonly string[]): Promise<void>;
   /** Дожидается перезапусков хостов, начатых сторожем, и ленивых активаций. */

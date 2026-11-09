@@ -23,8 +23,14 @@ export function createCommands(ctx: KernelContext): Commands {
     for (const g of spec.guard ?? []) await ctx.gateway.checkFor(ctx.manifestOf(caller), command, g.right, guardedValue(args, g, command));
   }
 
-  /** `caller` - плагин, чья главная часть зовёт команду, его назвал канал хоста; без него зовёт пользователь: палитра, клавиши, меню, вид своего плагина. */
-  async function execute(command: string, args: unknown[], caller?: string): Promise<unknown> {
+  /** Команду зовут от имени плагина `only` (его вид, клик по его уведомлению): исполняет её только он. Имя в манифесте ничего не решает: `a` и `a.b` могут оба его объявить. */
+  function onlyOwner(only: string | undefined, executor: string, command: string): void {
+    if (only === undefined || only === executor) return;
+    throw new CoreError('PermissionDenied', `${command}: команда плагина ${executor}, а не ${only}`);
+  }
+
+  /** `caller` - плагин, чья главная часть зовёт команду, его назвал канал хоста; без него зовёт пользователь: палитра, клавиши, меню. `only` - плагин, от имени которого зовёт его вид. */
+  async function execute(command: string, args: unknown[], caller?: string, only?: string): Promise<unknown> {
     const { activation, pool } = ctx.parts;
     if (command === KERNEL_COMMANDS.revealWorkspace) return ctx.gateway.revealWorkspace();
     const declares = (id: string) => Object.hasOwn(ctx.manifestOf(id).commands, command);
@@ -33,6 +39,7 @@ export function createCommands(ctx: KernelContext): Commands {
       // Отказанный не будит спящего исполнителя: отказ не должен запускать чужой код.
       const known = sleeper ?? [...activation.activating.keys()].find(declares);
       if (caller !== undefined && known !== undefined) open(caller, known, command);
+      if (known !== undefined) onlyOwner(only, known, command);
       if (sleeper !== undefined) await activation.wake(sleeper);
       else await [...activation.activating].find(([id]) => declares(id))?.[1];
     }
@@ -40,6 +47,7 @@ export function createCommands(ctx: KernelContext): Commands {
     if (!owner) throw new CoreError('CommandNotFound', `команды ${command} нет`);
     const spec = ctx.manifestOf(owner).commands[command];
     if (!spec) throw new CoreError('CommandNotFound', `команда ${command} не объявлена у ${owner}`);
+    onlyOwner(only, owner, command);
     if (caller !== undefined) open(caller, owner, command);
     checkArgs(command, spec, args);
     if (caller !== undefined && caller !== owner) await guard(caller, command, spec, args);
@@ -47,6 +55,7 @@ export function createCommands(ctx: KernelContext): Commands {
   }
 
   const run = (command: string, ...args: unknown[]) => execute(command, args);
+  const runOwn = (pluginId: string, command: string, args: unknown[]) => execute(command, args, undefined, pluginId);
 
   function attach({ mine, onRequest, onNote }: BridgeEnd): void {
     onNote('register', { pluginId: 'string', name: 'string' }, (p) => {
@@ -70,6 +79,7 @@ export function createCommands(ctx: KernelContext): Commands {
     owners,
     attach,
     run,
+    runOwn,
     dropFor(pluginId) {
       for (const [name, owner] of [...owners]) if (owner === pluginId) owners.delete(name);
     },

@@ -135,6 +135,7 @@ export interface Commands {
   attach(end: BridgeEnd): void;
   dropFor(pluginId: string): void;
   run(command: string, ...args: unknown[]): Promise<unknown>;
+  runOwn(pluginId: string, command: string, args: unknown[]): Promise<unknown>;
 }
 
 /** Слушатели простоя пользователя. */

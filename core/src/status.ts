@@ -78,6 +78,8 @@ function rejection(r: Rejection): string {
       return `несколько поставщиков ${r.contract}: ${r.providers.join(', ')}`;
     case 'cycle':
       return `цикл зависимостей: ${r.members.join(' → ')}`;
+    case 'command':
+      return `команду ${r.command} объявил и ${list(r.with)}: владельца нет, пока команда в двух манифестах`;
     case 'reserved':
       return r.what === 'id'
         ? `id ${r.name} из пространства ${r.prefix}* - только у встроенных плагинов`
