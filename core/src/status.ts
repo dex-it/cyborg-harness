@@ -54,6 +54,7 @@ export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[]
         case 'pty-expired':
         case 'host-isolated':
         case 'group-isolated':
+        case 'group-shared':
         case 'host-own-grouped':
         case 'third-party':
           // Ни конфликт сочетаний, ни отказ шлюза, ни вызов устаревшего члена, ни удержанное хостом отклонение, ни завершённый по сроку pty, ни выбор хоста о работе плагина ничего не говорят: плагин работает как обычно.
@@ -163,6 +164,8 @@ export function describeEntry(e: JournalEntry): string {
       return e.reason === 'taken'
         ? `группа ${e.group} занята сторонним плагином: плагин работает в своей ${e.renderGroup}`
         : `сторонний плагин не делит группу рендера: группа ${e.group} не действует, работает в своей ${e.renderGroup}`;
+    case 'group-shared':
+      return `сторонний плагин по воле владельца в общей группе рендера ${e.group}: он видит DOM и хранилище origin плагинов ${list(e.neighbours)}, а они - его`;
     case 'third-party':
       return 'сторонний плагин: код не из поставки, не проверен; на этапе 1 хост - обычный процесс Node, и плагин может обойти шлюз ctx.os';
     case 'unhandled-rejection':
@@ -215,6 +218,7 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
     case 'host-down':
     case 'host-isolated':
     case 'group-isolated':
+    case 'group-shared':
     case 'host-own-grouped':
     case 'third-party':
       return 'warn';

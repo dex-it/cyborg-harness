@@ -360,13 +360,13 @@ test('группы рендера: ui.group - рекомендация, plugins.
   await plain.unload();
 });
 
-test('группы рендера: сторонний всегда один в своей группе, запись group-isolated только если ему было с кем делить', async () => {
+test('группы рендера: сторонний один в своей группе, если его не посадил владелец (слой пользователя); запись group-isolated только если ему было с кем делить', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
   const ids = ['files', 'tree', 'x', 'y', 'z', 'w'];
   const k = await kernel(Object.fromEntries(ids.map((id) => [id, noop])), {
     enabled: ids,
-    // x просит группу tools из конфига пользователя, y - из своего манифеста, z называет id плагина поставки, а не группу, w просит группу, где он один: делить обоим нечего.
+    // x просит группу panels из config воркспейса, y - из своего манифеста, z называет id плагина поставки, а не группу, w просит группу, где он один: делить им нечего или не дают.
     manifests: [manifest('files', view('panels')), manifest('tree', view('panels')), manifest('x', view()), manifest('y', view('panels')), manifest('z', view('files')), manifest('w', view('mine'))],
     bundled: ['files', 'tree'],
     uiGroups: { panels: ['x'] },
@@ -400,6 +400,43 @@ test('группы рендера: сторонний всегда один в �
   assert.deepEqual([open.groupOf('x'), open.groupOf('y')], ['x', 'y'], 'без bundled все сторонние');
   assert.equal(open.journal.filter((e) => e.kind === 'group-isolated').length, 2);
   await open.unload();
+});
+
+test('группы рендера: сторонний садится в общую группу только волей владельца (слой пользователя, ADR-CH-0015) - с записью group-shared и предупреждением', async () => {
+  const noop: PluginModule = { activate: () => undefined };
+  const view = { ui: { views: { main: './ui.js' } } };
+  const ids = ['files', 'tree', 'mine', 'theirs'];
+  const table = Object.fromEntries(ids.map((id) => [id, noop]));
+  const manifests = ids.map((id) => manifest(id, view));
+  // mine назван в слое пользователя, theirs - только в слое воркспейса (он приходит из репозитория команды).
+  const k = await kernel(table, { enabled: ids, manifests, bundled: ['files', 'tree'], uiGroups: { panels: ['files', 'tree', 'mine', 'theirs'] }, userUiGroups: { panels: ['files', 'tree', 'mine'] } });
+  assert.deepEqual(
+    ids.map((id) => [id, k.groupOf(id)]),
+    [
+      ['files', 'panels'],
+      ['tree', 'panels'],
+      ['mine', 'panels'],
+      ['theirs', 'theirs'],
+    ],
+  );
+  assert.deepEqual(
+    k.journal.filter((e) => e.kind === 'group-shared' || e.kind === 'group-isolated'),
+    [
+      { pluginId: 'mine', kind: 'group-shared', group: 'panels', neighbours: ['files', 'tree'] },
+      { pluginId: 'theirs', kind: 'group-isolated', group: 'panels', renderGroup: 'theirs', reason: 'third-party' },
+    ],
+  );
+  const shared = k.journal.find((e) => e.kind === 'group-shared');
+  assert.ok(shared);
+  assert.match(describeEntry(shared), /сторонний плагин по воле владельца в общей группе рендера panels: он видит DOM и хранилище origin плагинов files, tree, а они - его/);
+  assert.equal(entryLevel(shared), 'warn');
+  assert.equal(pluginStatuses([shared]).length, 0);
+  await k.unload();
+
+  // Просьба стороннего в манифесте (ui.group) без слова владельца не действует, как и группа воркспейса.
+  const byAuthor = await kernel(table, { enabled: ids, manifests: [manifest('files', { ui: { ...view.ui, group: 'p' } }), manifest('tree', { ui: { ...view.ui, group: 'p' } }), manifest('mine', { ui: { ...view.ui, group: 'p' } }), manifest('theirs', view)], bundled: ['files', 'tree'] });
+  assert.deepEqual([byAuthor.groupOf('files'), byAuthor.groupOf('tree'), byAuthor.groupOf('mine')], ['p', 'p', 'mine']);
+  await byAuthor.unload();
 });
 
 test('группы рендера: плагин поставки не садится в группу, чьё имя - id стороннего плагина', async () => {

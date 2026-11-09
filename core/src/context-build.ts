@@ -147,7 +147,7 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
     return m;
   };
   const hostIds = assignHosts(manifests, options.hosts ?? {}, new Set(options.bundled ?? []), record);
-  const groupIds = assignUiGroups(manifests, options.uiGroups ?? {}, new Set(options.bundled ?? []), record);
+  const groupIds = assignUiGroups(manifests, options.uiGroups ?? {}, options.userUiGroups ?? {}, new Set(options.bundled ?? []), record);
   const accepted = graph.order.map(manifestOf);
   // Без `bundled` поставку не от чего отличить: записи нет, как нет и проверки зарезервированных пространств.
   if (options.bundled) for (const pluginId of graph.order) if (!options.bundled.includes(pluginId)) record({ pluginId, kind: 'third-party' });
