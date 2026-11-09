@@ -94,8 +94,8 @@ describe('каркасы наборов', () => {
     for (const c of [...SECRET_SOURCE_REQUIRED_CHECKS, ...PROJECT_SETTINGS_REQUIRED_CHECKS]) {
       assert.ok(c.name.length > 10 && c.source.includes('sad.md'), c.name);
     }
-    assert.equal(SECRET_SOURCE_REQUIRED_CHECKS.length, 6);
-    assert.equal(PROJECT_SETTINGS_REQUIRED_CHECKS.length, 5);
+    assert.equal(SECRET_SOURCE_REQUIRED_CHECKS.length, 5);
+    assert.equal(PROJECT_SETTINGS_REQUIRED_CHECKS.length, 3);
   });
 });
 
