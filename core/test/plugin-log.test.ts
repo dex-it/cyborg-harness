@@ -248,6 +248,24 @@ test('поток: после «Включить снова» плагин пиш
   }
 });
 
+test('поток: интервал закрывается строкой, пришедшей раньше таймера, - выключенный им плагин эту строку уже не пишет', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+  const { k, ctx, lines, journal } = await rig(['a'], { limits: { logRate: 1, logWindowMs: 1000, logFloodMs: 1000 } });
+  try {
+    ctx.a?.log('первая');
+    ctx.a?.log('сверх предела');
+    await sleep(30);
+    t.mock.timers.setTime(1_005_000);
+    ctx.a?.log('после интервала');
+    await until('выключение', () => switchedOff(journal, 'a').length === 1);
+    await sleep(30);
+    assert.deepEqual(lines.map(([, m]) => m), ['первая']);
+    assert.deepEqual(summaries(journal, 'a').map((e) => e.skipped), [1]);
+  } finally {
+    await k.unload();
+  }
+});
+
 // FR-CH-4018, вопрос 7 SRS фичи 04: ядро вычёркивает из строк значения, лежащие в хранилище секретов.
 /** Среда ядра с хранилищем секретов в памяти из тест-кита; `map` - то, что в хранилище лежит. */
 function withSecrets(): { store: Map<string, string>; os: NonNullable<LoadOptions['os']> } {
