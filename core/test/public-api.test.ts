@@ -44,6 +44,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'forkHosts',
       'groupKilled',
       'inlineHosts',
+      'inlinePtyHost',
       'keyOfInput',
       'load',
       'openWorkspace',
@@ -116,8 +117,9 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'ShowNotice',
       'ShownDialog',
       'SpawnHost',
+      'SpawnPtyHost',
       'SystemEvent',
-      'TerminalSink',
+      'TerminalChannel',
       'TerminalView',
       'UninstallReport',
       'UserKeybinding',
@@ -132,6 +134,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
   },
   './host': { source: 'src/index-host.ts', values: ['runHost'], types: ['HostOptions', 'Importer', 'Port'] },
   './host-entry': { source: 'src/host-entry.ts', values: [], types: [] },
+  './pty-host': { source: 'src/index-pty-host.ts', values: ['groupKilled', 'nodeViewPort', 'runPtyHost'], types: ['Port', 'PtyBackend', 'PtyHost', 'PtyHostOptions', 'PtyProcess', 'ViewPort'] },
   './keys': { source: 'src/index-keys.ts', values: ['keyOfInput'], types: ['KeyInput'] },
   './ui-shell': {
     source: 'src/index-ui-shell.ts',
@@ -153,8 +156,9 @@ const NOT_NAMED: Readonly<Record<string, string>> = {
   Denial: 'позиционный параметр конструктора OsGateway (там же)',
   PtyExpiry: 'позиционный параметр конструктора OsGateway (там же)',
   PushMethod: 'позиционный параметр конструктора OsGateway (там же)',
-  PtyLimits: 'позиционный параметр конструктора PtyTable: класс отдан для замеров и тестов, не для встраивания',
-  PtyOrphan: 'позиционный параметр конструктора PtyTable (там же)',
+  PtyTableOptions: 'позиционный параметр конструктора PtyTable: класс отдан для замеров и тестов, не для встраивания',
+  PtyHostEvents: 'часть параметров конструктора PtyTable и OsGateway (там же)',
+  PtyWatchdog: 'часть параметров конструктора PtyTable (там же)',
 };
 
 const manifest = JSON.parse(fs.readFileSync(path.join(core, 'package.json'), 'utf8')) as { exports: Record<string, string | { default: string }> };

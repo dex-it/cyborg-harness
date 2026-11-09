@@ -51,7 +51,7 @@ export function buildKernel(ctx: KernelContext): Kernel {
     },
     keysOf: (pluginId) => Object.fromEntries([...keys.values()].filter((k) => k.pluginId === pluginId).map((k) => [k.command, k.key])),
     wake: (pluginId) => activation.wake(pluginId),
-    openTerminal: (pluginId, ticket, sink) => gateway.openTerminal(pluginId, ticket, sink),
+    openTerminal: (pluginId, ticket, channel) => gateway.openTerminal(pluginId, ticket, channel),
     keptPty: () => gateway.keptPty(),
     endKeptPty: (id) => gateway.endKeptPty(id),
     viewState: (pluginId, view) => views.viewState(pluginId, view),

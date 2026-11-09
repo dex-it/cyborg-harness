@@ -5,7 +5,7 @@ import { CoreError } from './errors.ts';
 import { resolveGraph } from './graph.ts';
 import { DocumentTable } from './documents.ts';
 import { assignHosts } from './host-pool.ts';
-import { appendBounded, DeniedCollapse, DeprecatedCollapse } from './journal.ts';
+import { appendBounded, DeniedCollapse, DeprecatedCollapse, PTY_HOST_ID } from './journal.ts';
 import type { KernelContext, Parts } from './kernel-context.ts';
 import type { JournalEntry, LoadOptions } from './kernel-types.ts';
 import { applyUserKeys, bindKeys } from './keybindings.ts';
@@ -87,7 +87,15 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
       if (!host || host.down) throw new CoreError('Unavailable', `${id}: хост не работает`);
       return host.endpoint.request('serve.request', params);
     },
-    { expired: (e) => record({ kind: 'pty-expired', ...e }), kept: () => options.onKeptPty?.() },
+    {
+      expired: (e) => record({ kind: 'pty-expired', ...e }),
+      kept: () => options.onKeptPty?.(),
+      watchdog: options.watchdog,
+      // pty-хост - хост ядра, а не плагинов: в журнале он называется как хост, но снятых плагинов у него нет (`plugins` пуст), владельцы потерянных pty - в `lostPtys`.
+      hostDown: ({ reason, plugins }) => record({ kind: 'host-down', hostId: PTY_HOST_ID, reason, culprits: [], plugins: [], affects: [], lostPtys: plugins }),
+      hostRestarted: () => record({ kind: 'host-restart', hostId: PTY_HOST_ID, plugins: [] }),
+      hostAbandoned: (failures) => record({ kind: 'host-abandoned', hostId: PTY_HOST_ID, failures, plugins: [] }),
+    },
   );
 
   for (const raw of options.manifests) {

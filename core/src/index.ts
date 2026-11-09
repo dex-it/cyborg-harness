@@ -10,6 +10,7 @@ export { parseManifest } from './manifest.ts';
 export { OsGateway } from './os-gateway.ts';
 export { describeOpenCommands, describePermissions } from './permissions.ts';
 export { groupKilled, PtyTable } from './pty.ts';
+export { inlinePtyHost } from './pty-link.ts';
 export { RecentWorkspaces } from './recent.ts';
 export { describeEntry, entryLevel, entryPlugins, pluginStatuses } from './status.ts';
 export { forkHosts, inlineHosts } from './transports.ts';
@@ -35,7 +36,8 @@ export type { NoticeEvents, NoticeHandle, NotifyLimits, ShowNotice } from './not
 export type { GrantStore, OsEnvironment, SecretStore } from './os-gateway.ts';
 export type { PluginPermissions } from './permissions.ts';
 export type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';
-export type { KeptPty, PtyBackend, PtyProcess, PtyWire, TerminalSink, TerminalView } from './pty.ts';
+export type { KeptPty, PtyBackend, PtyProcess, PtyWire, TerminalChannel, TerminalView } from './pty.ts';
+export type { SpawnPtyHost } from './pty-link.ts';
 export type { ContractImpl, ContractRegistry, Provider } from './registry.ts';
 export type { PluginState, PluginStatus } from './status.ts';
 export type { HostHandle, SpawnHost } from './transports.ts';

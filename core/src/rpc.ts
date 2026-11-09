@@ -3,8 +3,9 @@ import { isRecord } from './wire.ts';
 
 /** Канал сообщений между ядром и хостом; post бросает, если сообщение не переживает structuredClone. */
 export interface Port {
-  post(message: unknown): void;
-  onMessage(listener: (message: unknown) => void): void;
+  /** `transfer` - объекты, которые уходят в другой процесс с передачей владения (порты сообщений); у хоста плагинов их нет. */
+  post(message: unknown, transfer?: readonly unknown[]): void;
+  onMessage(listener: (message: unknown, transfer?: readonly unknown[]) => void): void;
 }
 
 type Message =

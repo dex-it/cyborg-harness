@@ -36,6 +36,7 @@ async function main() {
   const { SerializeAddon } = req('@xterm/addon-serialize');
   const nodePty = createRequire(join(repo, 'package.json'))('node-pty');
   const { PtyTable, Tail, BACKLOG_LIMIT, groupKilled } = await import(join(repo, 'core', 'src', 'pty.ts'));
+  const { inlinePtyHost } = await import(join(repo, 'core', 'src', 'pty-link.ts'));
 
   setFlagsFromString('--expose-gc');
   const gc = runInNewContext('gc');
@@ -131,12 +132,13 @@ async function main() {
         return p;
       },
     };
-    const table = new PtyTable(backend, (_plugin, method, params) => {
+    // Хост pty в том же процессе: тот же протокол, что у отдельного процесса, хвост и шаг размера ведёт он (K-01).
+    const table = new PtyTable(inlinePtyHost(backend), (_plugin, method, params) => {
       if (method === 'pty.data') for (const v of views) v.write(params.data);
-    }, backlogLimit);
+    }, { backlog: backlogLimit });
     const settings = JSON.stringify({ tui: mode === 'inline' ? 'default' : 'fullscreen' });
     const script = `${preOutput}exec claude --model ${model} --settings '${settings}'`;
-    const wire = table.spawn('spike', { program: shell, args: ['-lc', script], cwd: repo, env, cols: COLS, rows: ROWS, persist: true });
+    const wire = await table.spawn('spike', { program: shell, args: ['-lc', script], cwd: repo, env, cols: COLS, rows: ROWS, persist: true });
     const s = {
       raw: () => raw,
       text: () => screen(ref.t),
@@ -173,7 +175,7 @@ async function main() {
         const t0 = performance.now();
         const snapshot = serialize.serialize();
         const serializeMs = performance.now() - t0;
-        const back = table.attach('spike', wire.id);
+        const back = await table.attach('spike', wire.id);
         const tail = term(size?.cols ?? COLS, size?.rows ?? ROWS);
         const snap = term(COLS, ROWS);
         tail.write(back.backlog);

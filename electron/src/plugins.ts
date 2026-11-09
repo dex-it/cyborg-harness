@@ -21,7 +21,7 @@ import {
   type OsEnvironment,
   type SpawnHost,
   type SystemEvent,
-  type TerminalSink,
+  type TerminalChannel,
   type TerminalView,
   type WatchdogOptions,
   type WindowSnapshot,
@@ -399,9 +399,9 @@ export class PluginsService {
   }
 
   /** Терминал вида по билету `share()` его главной части; плагин - из origin фрейма. */
-  openTerminal(pluginId: string, ticket: string, sink: TerminalSink): TerminalView {
-    if (!this.kernel) throw new Error('ядро плагинов не запущено');
-    return this.kernel.openTerminal(pluginId, ticket, sink);
+  openTerminal(pluginId: string, ticket: string, channel: TerminalChannel): Promise<TerminalView> {
+    if (!this.kernel) return Promise.reject(new Error('ядро плагинов не запущено'));
+    return this.kernel.openTerminal(pluginId, ticket, channel);
   }
 
   /** Память вида: плагин - из origin фрейма, имя вида - из слов вида, но чужого плагина вид так не достанет. */

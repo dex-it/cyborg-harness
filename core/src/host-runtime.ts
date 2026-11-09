@@ -9,7 +9,8 @@ import type { PluginManifest } from './manifest.ts';
 import type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';
 import { ContractRegistry, type ContractImpl } from './registry.ts';
 import { Endpoint, type Owner, type Port } from './rpc.ts';
-import { BACKLOG_LIMIT, Tail, type PtyWire } from './pty.ts';
+import { BACKLOG_LIMIT, Tail } from './pty-tail.ts';
+import type { PtyWire } from './pty-types.ts';
 import { isRecord, own } from './wire.ts';
 
 /** Описание отданного контракта на проводе: данные как есть, методы - только именами. */

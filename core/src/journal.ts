@@ -3,6 +3,8 @@ import type { JournalEntry } from './kernel-types.ts';
 export const MAX_DENIED = 1000;
 export const MAX_DEPRECATED = 1000;
 export const DENIED_WINDOW_MS = 5000;
+/** Имя pty-хоста в журнале: записи `host-down`, `host-restart` и `host-abandoned` с этим `hostId` - о нём, а не о хосте плагинов. */
+export const PTY_HOST_ID = 'pty-host';
 export const DEPRECATED_WINDOW_MS = 5000;
 
 type Denied = Extract<JournalEntry, { kind: 'denied' }>;
