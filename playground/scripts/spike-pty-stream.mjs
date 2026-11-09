@@ -12,9 +12,27 @@ const electronArgs = process.argv.slice(2).filter((a) => !a.startsWith('--runs='
 const SIZE = 4 * 1024 * 1024;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const userData = mkdtempSync(join(tmpdir(), 'cyborg-pty-stream-'));
-const app = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${userData}`, '--remote-debugging-port=0', ...electronArgs], { stdio: ['ignore', 'ignore', 'pipe'] });
+const app = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${userData}`, '--remote-debugging-port=0', ...electronArgs], { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
 let stderr = '';
 app.stderr.on('data', (d) => (stderr += d));
+// Приложение не должно пережить скрипт: выход по сигналу, исключению или обрыву stdout тоже убивает его (иначе остаётся Electron с --inspect).
+const stop = () => {
+  // Группа процессов целиком: убитый SIGKILL главный процесс оставляет хосты плагинов и pty-хост сиротами.
+  try {
+    process.kill(-app.pid, 'SIGKILL');
+  } catch {
+    // Группы уже нет.
+  }
+};
+process.on('exit', stop);
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(1));
+process.on('uncaughtException', (error) => {
+  // EPIPE при потерянном stdout не повод оставлять приложение: сообщение теряется, выход чистый.
+  if (error.code !== 'EPIPE') process.stderr.write(`${String(error.stack ?? error)}\n`);
+  process.exit(1);
+});
+process.stdout.on('error', () => undefined);
+process.stderr.on('error', () => undefined);
 const sockets = [];
 
 async function waitFor(what, probe, timeout = 30_000) {
@@ -110,9 +128,12 @@ async function main() {
 
 try {
   await main();
+} catch (error) {
+  process.stderr.write(`spike-pty-stream: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 1;
 } finally {
   for (const s of sockets) s.close();
-  app.kill('SIGKILL');
+  stop();
   await sleep(300);
   rmSync(userData, { recursive: true, force: true });
   // Трубы потомка держат цикл событий: без явного выхода скрипт висит после замера.
