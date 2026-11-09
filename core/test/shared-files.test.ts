@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { statSync, writeFileSync } from 'node:fs';
+import { statSync, utimesSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -100,7 +100,31 @@ test('withFileLock: замок снят после ошибки, замок ум
     'охрана снята',
   );
   await writeFile(`${file}.write.lock`, JSON.stringify({ pid: process.ppid }));
-  assert.throws(() => withFileLock(file, () => 'не должно', { timeoutMs: 100 }), new RegExp(`pid ${String(process.ppid)}`));
+  assert.throws(() => withFileLock(file, () => 'не должно', { timeoutMs: 100, staleMs: 60_000 }), new RegExp(`pid ${String(process.ppid)}`));
+});
+
+test('withFileLock: замок записи старше срока забирается и при чужом живом pid (после перезагрузки pid занят чужим процессом)', async () => {
+  await using box = await sandbox();
+  const file = path.join(box.root, 'shared.json');
+  await writeFile(`${file}.write.lock`, JSON.stringify({ pid: process.ppid }));
+  // Свежий замок живого соседа не крадётся.
+  assert.throws(() => withFileLock(file, () => 'не должно', { timeoutMs: 300, staleMs: 60_000 }), new RegExp(`pid ${String(process.ppid)}`));
+  // Тот же замок, но оставленный давно: тело `run` по контракту короткое, значит держатель не мог его держать столько.
+  const old = new Date(Date.now() - 60_000);
+  utimesSync(`${file}.write.lock`, old, old);
+  assert.equal(withFileLock(file, () => 'забран', { timeoutMs: 300, staleMs: 30_000 }), 'забран');
+  assert.equal(statSync(`${file}.write.lock`, { throwIfNoEntry: false }), undefined, 'замок после забора снят');
+});
+
+test('withFileLock: забор по сроку не снимает замок, который успел взять сосед (замок сменился, пока мы решали)', async () => {
+  await using box = await sandbox();
+  const file = path.join(box.root, 'shared.json');
+  // Устаревший замок живого pid и охрана снятия, занятая живым соседом: забирать нельзя, пока он в охране.
+  await writeFile(`${file}.write.lock`, JSON.stringify({ pid: process.ppid }));
+  const old = new Date(Date.now() - 60_000);
+  utimesSync(`${file}.write.lock`, old, old);
+  await writeFile(`${file}.write.lock.reclaim`, JSON.stringify({ pid: process.ppid }));
+  assert.throws(() => withFileLock(file, () => 'не должно', { timeoutMs: 200, staleMs: 30_000 }), /не дождались/);
 });
 
 test('writeJsonAtomic: права файла задаются при создании, а не после', async () => {

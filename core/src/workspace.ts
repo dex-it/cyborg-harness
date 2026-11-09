@@ -21,19 +21,23 @@ export function writeJsonAtomic(file: string, data: unknown, mode?: number): voi
 export interface FileLockOptions {
   /** Сколько ждать чужой замок, мс; по умолчанию 10 с. */
   readonly timeoutMs?: number;
+  /** Через сколько мс замок записи считается брошенным и забирается даже при живом pid; по умолчанию как `timeoutMs`. */
+  readonly staleMs?: number;
 }
 
 /**
  * Замок записи общего файла (`<файл>.write.lock` с pid): чтение, правка и запись внутри `run` не перемежаются с такими же у другого процесса.
  * Для файлов `userData`, которые пишут несколько экземпляров приложения: «Недавние», слой пользователя, секреты. `run` синхронный и короткий,
- * замок умершего процесса забирается; живого не дождались за `timeoutMs` - ошибка, а не запись поверх.
+ * замок умершего процесса забирается; живого не дождались за `timeoutMs` - ошибка, а не запись поверх. Замок старше `timeoutMs` по mtime тоже
+ * забирается, даже если его pid жив: тело `run` короткое, а после сбоя посреди записи или перезагрузки этот pid занят чужим процессом.
  */
 export function withFileLock<T>(file: string, run: () => T, options: FileLockOptions = {}): T {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const deadline = Date.now() + (options.timeoutMs ?? 10_000);
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const deadline = Date.now() + timeoutMs;
   const pause = new Int32Array(new SharedArrayBuffer(4));
   for (;;) {
-    const lock = lockWorkspace(`${file}.write`);
+    const lock = lockWorkspace(`${file}.write`, process.pid, options.staleMs ?? timeoutMs);
     if (lock.ok) {
       try {
         return run();
@@ -41,7 +45,7 @@ export function withFileLock<T>(file: string, run: () => T, options: FileLockOpt
         lock.release();
       }
     }
-    if (Date.now() >= deadline) throw new Error(`${file}: замок записи держит pid ${String(lock.owner)}, не дождались`);
+    if (Date.now() >= deadline) throw new Error(`${file}: замок записи ${lock.owner > 0 ? `держит pid ${String(lock.owner)}` : 'то снимают, то берут другие процессы'}, не дождались`);
     Atomics.wait(pause, 0, 0, 5);
   }
 }
@@ -121,20 +125,23 @@ const alive = (pid: number) => {
   }
 };
 
-/** Замок `<файл>.lock` с pid владельца; замок умершего процесса забирается. */
-export function lockWorkspace(file: string, pid = process.pid): LockResult {
+/**
+ * Замок `<файл>.lock` с pid владельца; замок умершего процесса забирается. `maxAgeMs` - для коротких замков записи: замок старше срока
+ * забирается и при живом pid (долгий замок воркспейса его не задаёт). При `ok: false` `owner` 0 значит, что назвать владельца не удалось.
+ */
+export function lockWorkspace(file: string, pid = process.pid, maxAgeMs?: number): LockResult {
   const lock = `${file}.lock`;
   // Замок появляется сразу с pid: файл, созданный пустым и дописанный потом, сосед успел бы счесть протухшим и снять.
   const draft = `${lock}.${randomBytes(8).toString('hex')}`;
   fs.writeFileSync(draft, JSON.stringify({ pid }));
   try {
-    return takeLock(lock, draft, pid);
+    return takeLock(lock, draft, pid, maxAgeMs);
   } finally {
     fs.rmSync(draft, { force: true });
   }
 }
 
-function takeLock(lock: string, draft: string, pid: number): LockResult {
+function takeLock(lock: string, draft: string, pid: number, maxAgeMs: number | undefined): LockResult {
   // Попыток больше двух: при гонке нескольких процессов замок успевают снять и взять между чтением и повтором.
   for (let attempt = 0; attempt < 50; attempt++) {
     try {
@@ -164,12 +171,22 @@ function takeLock(lock: string, draft: string, pid: number): LockResult {
       throw error;
     }
     const owner = ownerOf(text);
-    if (owner !== undefined && owner !== pid && alive(owner)) return { ok: false, owner };
-    reclaim(lock, draft, owner);
+    if (owner !== undefined && owner !== pid && alive(owner) && !expired(lock, maxAgeMs)) return { ok: false, owner };
+    reclaim(lock, draft, owner, pid, maxAgeMs);
   }
   // Замок всё время то снимают, то берут другие: он занят, хотя назвать владельца за эти попытки не удалось (pid 0).
   return { ok: false, owner: 0 };
 }
+
+/** Замок старше срока: его mtime - время создания (ссылка на черновик). Нет файла - не просрочен, решает следующая попытка. */
+const expired = (lock: string, maxAgeMs: number | undefined): boolean => {
+  if (maxAgeMs === undefined) return false;
+  try {
+    return Date.now() - fs.statSync(lock).mtimeMs >= maxAgeMs;
+  } catch {
+    return false;
+  }
+};
 
 const ownerOf = (text: string): number | undefined => {
   try {
@@ -186,7 +203,7 @@ const ownerOf = (text: string): number | undefined => {
  * процесса, увидевшие один и тот же мёртвый замок, снимали бы замок друг друга: первый уже взял свой, второй удалил его как «мёртвый».
  * Охрана живого соседа - ждём (вернёмся в цикл), охрана мёртвого - её удаляем.
  */
-function reclaim(lock: string, draft: string, expected: number | undefined): void {
+function reclaim(lock: string, draft: string, expected: number | undefined, mine: number, maxAgeMs: number | undefined): void {
   const guard = `${lock}.reclaim`;
   try {
     fs.linkSync(draft, guard);
@@ -209,8 +226,8 @@ function reclaim(lock: string, draft: string, expected: number | undefined): voi
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
-    // Замок за это время мог смениться: снимаем только тот, который видели мёртвым.
-    if (text !== undefined && ownerOf(text) === expected) fs.rmSync(lock, { force: true });
+    // Замок за это время мог смениться: снимаем только тот, который видели мёртвым (или просроченным, если владелец жив).
+    if (text !== undefined && ownerOf(text) === expected && (expected === undefined || !alive(expected) || expected === mine || expired(lock, maxAgeMs))) fs.rmSync(lock, { force: true });
   } finally {
     fs.rmSync(guard, { force: true });
   }
