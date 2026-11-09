@@ -23,6 +23,8 @@ test('манифест: callers у команды - user по умолчанию
       'sessions.actions': { args: ['string', 'number'], callers: 'plugins' },
       'sessions.open': { args: ['string'], callers: 'plugins', guard: { 'fs.read': 0 } },
       'sessions.cwd': { args: ['record'], callers: 'plugins', guard: { 'fs.read': '0.cwd', 'secrets.ref': '0.ref' } },
+      'sessions.any': { args: ['any'], callers: 'plugins', guard: { 'fs.read': 0, 'secrets.ref': '0.ref' } },
+      'sessions.many': { args: ['string'], rest: 'string', callers: 'plugins', guard: { 'fs.read': 0, shell: 2 } },
     },
   });
   assert.ok(ok.ok, ok.ok ? '' : ok.errors.join('\n'));
@@ -53,6 +55,12 @@ test('манифест: неизвестное значение callers и guard
       'bad.f': { callers: 'plugins', guard: { 'fs.read': -1 } },
       'bad.g': { callers: 'plugins', guard: {} },
       'bad.h': { callers: 'plugins', guard: [] },
+      'bad.i': { args: ['record'], callers: 'plugins', guard: { 'fs.read': 3 } },
+      'bad.j': { args: ['number'], callers: 'plugins', guard: { 'fs.read': 0 } },
+      'bad.k': { args: ['string'], callers: 'plugins', guard: { 'fs.read': '0.path' } },
+      'bad.l': { args: ['record'], callers: 'plugins', guard: { 'fs.read': 0 } },
+      'bad.m': { callers: 'plugins', guard: { 'fs.read': 0 } },
+      'bad.n': { args: ['string'], rest: 'number', callers: 'plugins', guard: { 'fs.read': 1 } },
     },
   });
   assert.ok(!bad.ok);
@@ -65,11 +73,17 @@ test('манифест: неизвестное значение callers и guard
     'commands.bad.f.guard.fs.read: ожидается номер аргумента или "номер.поле"',
     'commands.bad.g.guard: ожидается { право: номер аргумента или "номер.поле" }',
     'commands.bad.h.guard: ожидается { право: номер аргумента или "номер.поле" }',
+    'commands.bad.i.guard.fs.read: аргумента 3 нет в args и rest',
+    'commands.bad.j.guard.fs.read: аргумент 0 - number, а право без поля проверяет строку: нужен string или any',
+    'commands.bad.k.guard.fs.read: аргумент 0 - string, а поле path есть только у record: нужен record или any',
+    'commands.bad.l.guard.fs.read: аргумент 0 - record, а право без поля проверяет строку: нужен string или any',
+    'commands.bad.m.guard.fs.read: аргумента 0 нет в args и rest',
+    'commands.bad.n.guard.fs.read: аргумент 1 - number, а право без поля проверяет строку: нужен string или any',
   ]);
 });
 
 test('права словами: команды, открытые другим плагинам, названы; закрытых и пустого списка нет', () => {
-  const parsed = parseManifest({ ...base, id: 'sessions', commands: { 'sessions.new': {}, 'sessions.actions': { callers: 'plugins' }, 'sessions.open': { callers: 'plugins', guard: { 'fs.read': 0 } } } });
+  const parsed = parseManifest({ ...base, id: 'sessions', commands: { 'sessions.new': {}, 'sessions.actions': { callers: 'plugins' }, 'sessions.open': { args: ['string'], callers: 'plugins', guard: { 'fs.read': 0 } } } });
   assert.ok(parsed.ok);
   assert.deepEqual(describeOpenCommands(parsed.manifest.commands), ['другие плагины могут звать команды: sessions.actions, sessions.open']);
   assert.deepEqual(describeOpenCommands({ 'sessions.new': {} }), []);

@@ -212,6 +212,7 @@ function readCommandSpec(name: string, raw: unknown, errors: string[]): CommandS
   const callers = readCallers(where, raw.callers, errors);
   const guard = readCommandGuard(where, raw.guard, callers, errors);
   const shape = readCommandShape(where, raw, errors);
+  if (shape && guard) checkGuardKinds(where, shape, guard, errors);
   return shape && { ...shape, ...(callers !== undefined && { callers }), ...(guard !== undefined && { guard }) };
 }
 
@@ -230,6 +231,17 @@ function readCommandGuard(where: string, raw: unknown, callers: CommandCallers |
     return undefined;
   }
   return readRights(`${where}.guard`, raw, errors);
+}
+
+/** Ядро берёт под проверку строку: без поля - сам аргумент, с полем - поле объекта. Схема команды должна допускать такой аргумент, иначе каждый чужой вызов получит `Invalid`. */
+function checkGuardKinds(where: string, spec: CommandSpec, guard: readonly Guard[], errors: string[]): void {
+  for (const g of guard) {
+    const at = `${where}.guard.${g.right}`;
+    const kind = spec.args[g.arg]?.kind ?? (g.arg >= spec.args.length ? spec.rest : undefined);
+    if (kind === undefined) errors.push(`${at}: аргумента ${g.arg} нет в args и rest`);
+    else if (g.field === undefined && kind !== 'string' && kind !== 'any') errors.push(`${at}: аргумент ${g.arg} - ${kind}, а право без поля проверяет строку: нужен string или any`);
+    else if (g.field !== undefined && kind !== 'record' && kind !== 'any') errors.push(`${at}: аргумент ${g.arg} - ${kind}, а поле ${g.field} есть только у record: нужен record или any`);
+  }
 }
 
 function readCommandShape(where: string, raw: Record<string, unknown>, errors: string[]): CommandSpec | undefined {
