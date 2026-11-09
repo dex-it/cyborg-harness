@@ -35,7 +35,8 @@ description: "Какие проверки гоняет репозиторий, �
 | Окно и вид: оболочка вида, слой диалогов и замок, элементы `cy-*`, документы, события | `ui-shell`, `window`, `elements`, `documents`, `events`, `subscriptions` |
 | Канал и данные вызова: клонируемость, подписки | `rpc` |
 | Сторож импортов плагинов: плагин импортирует только `@cyborg-harness/contracts` и свои модули (на плагинах репозитория) | `plugin-imports` |
-| Проверка плагина вне репозитория `checkPlugin` и `cyborg-plugin check`: манифест, версия API, файлы из манифеста, импорты; разбор импортов сверен с компилятором на коде репозитория | `plugin-check`, `plugin-scan`, `plugin-cli` |
+| Проверка плагина вне репозитория `checkPlugin` и `cyborg-plugin check`: манифест, версия API, файлы из манифеста, импорты; разбор импортов сверен с компилятором на коде репозитория | `plugin-check`, `plugin-scan` |
+| Пакет `cyborg-plugin` (`tools/cyborg-plugin`): `check`, `build`, `pack`; плагин с npm-зависимостью собирается и грузится ядром в `forkHosts`, отказы по `node:*` и `electron` в исходнике и в зависимости, по файлам манифеста и `engines.cyborg`, воспроизводимый архив, состав сборки стенда | `tools/cyborg-plugin/test/` |
 | Чистота ядра: нет предметных слов, Electron, импортов вне `core/src` и зависимостей npm | `purity` |
 | Стенд: поиск плагинов, схема `cyborg-plugin://`, мост видов, перетаскивание, билеты терминала, замеры памяти, общий набор тестов `cyborg.agent` | `playground/src/main/*.test.ts`, `playground/test/` |
 
