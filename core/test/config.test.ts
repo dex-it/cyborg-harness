@@ -1,19 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { deepMerge, resolveSection, SectionStore, type LayerStore } from '../src/config.ts';
-
-function memory(initial: Record<string, Record<string, unknown>> = {}) {
-  const docs = new Map(Object.entries(structuredClone(initial)));
-  const saves: string[] = [];
-  const store: LayerStore = {
-    load: async (layer) => structuredClone(docs.get(layer)),
-    save: async (layer, doc) => {
-      saves.push(layer);
-      docs.set(layer, structuredClone(doc));
-    },
-  };
-  return { store, docs, saves };
-}
+import { memoryStore as memory } from '../../testing/src/memory.ts';
+import { deepMerge, resolveSection, SectionStore } from '../src/config.ts';
 
 test('слияние: объекты по ключам, массивы целиком', () => {
   assert.deepEqual(deepMerge({ a: { x: 1, y: 2 }, list: [1, 2] }, { a: { y: 3 }, list: [9] }), { a: { x: 1, y: 3 }, list: [9] });
@@ -83,4 +71,24 @@ test('хранилище: set пишет слой, уведомляет и во�
   assert.deepEqual(seen, [value]);
   assert.deepEqual(docs.get('workspace'), { 'pin-lock': { $version: 1, minutes: 1 } });
   await assert.rejects(h.set('machine', {}), /слоя machine нет/);
+});
+
+test('хранилище: remove стирает раздел слоя, чужие разделы целы, нет раздела - нет и записи', async () => {
+  const { store, docs, saves } = memory({ workspace: { gone: { $version: 1, n: 1 }, keep: { $version: 1, n: 2 } }, user: { gone: { $version: 1, n: 3 } } });
+  const s = await SectionStore.open(store, ['user', 'workspace']);
+  assert.equal(await s.remove('workspace', 'gone'), true);
+  assert.deepEqual(docs.get('workspace'), { keep: { $version: 1, n: 2 } });
+  assert.deepEqual(docs.get('user'), { gone: { $version: 1, n: 3 } }, 'другой слой не тронут');
+  assert.deepEqual(s.raw('gone'), [['user', { $version: 1, n: 3 }], ['workspace', undefined]], 'память отстала от файла');
+  assert.equal(await s.remove('workspace', 'gone'), false);
+  assert.deepEqual(saves, ['workspace'], 'второй remove ничего не писал');
+  await assert.rejects(s.remove('machine', 'gone'), /слоя machine нет/);
+});
+
+test('хранилище: remove берёт основу из файла, а не из памяти: правка извне не стирается', async () => {
+  const { store, docs } = memory({ workspace: { gone: { $version: 1 } } });
+  const s = await SectionStore.open(store, ['workspace']);
+  docs.set('workspace', { gone: { $version: 1 }, outside: { $version: 1, by: 'человек' } });
+  assert.equal(await s.remove('workspace', 'gone'), true);
+  assert.deepEqual(docs.get('workspace'), { outside: { $version: 1, by: 'человек' } });
 });

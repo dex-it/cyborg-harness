@@ -96,9 +96,12 @@ test('consumes не создаёт ребра: циклические consumes �
   assert.deepEqual(g.order, ['a', 'b']);
 });
 
-test('повтор id - отказ второму', () => {
-  const g = resolveGraph([m('a'), m('a')], '1.0.0');
+// Ядро отвергает id целиком: оба плагина не загружаются. Чтобы встроенный пережил одноимённый пользовательский, приложение
+// не передаёт ядру второй манифест (electron/test/plugins.test.ts, «поиск: …» и «старт с флагом: …»).
+test('повтор id в манифестах - отказ id, ни один из двух не загружается', () => {
+  const g = resolveGraph([m('a'), m('a'), m('b')], '1.0.0');
   assert.deepEqual(g.rejected.get('a'), [{ kind: 'duplicate' }]);
+  assert.deepEqual(g.order, ['b']);
 });
 
 // ADR-CH-0002 п. 6: без закрепления один сторонний манифест с provides cyborg.agent делал встроенного потребителя ambiguous.
@@ -142,4 +145,20 @@ test('пространство поставки: префикс закрывае
     ],
   );
   assert.deepEqual(g.order, ['apple']);
+});
+
+// Ревью K-22: плагины `a` и `a.b` оба проходят проверку пространства имён для `a.b.run`; кто первым зарегистрирует, тот владелец.
+test('команда в двух манифестах - отказ обоим; встроенному уступает только сторонний', () => {
+  const clash = [m('a', { commands: ['a.b.run', 'a.own'] }), m('a.b', { commands: ['a.b.run'] }), m('c', { commands: ['c.go'] })];
+  const g = resolveGraph(clash, '1.0.0');
+  assert.deepEqual(g.rejected.get('a'), [{ kind: 'command', command: 'a.b.run', with: ['a.b'] }]);
+  assert.deepEqual(g.rejected.get('a.b'), [{ kind: 'command', command: 'a.b.run', with: ['a'] }]);
+  assert.deepEqual(g.order, ['c']);
+
+  const withBundled = resolveGraph(clash, '1.0.0', { prefixes: ['cyborg.'], bundled: new Set(['a', 'c']) });
+  assert.deepEqual([...withBundled.rejected.keys()], ['a.b'], 'встроенный остаётся, сторонний отвергнут');
+  assert.deepEqual(withBundled.order, ['a', 'c']);
+
+  const both = resolveGraph(clash, '1.0.0', { prefixes: ['cyborg.'], bundled: new Set(['a', 'a.b']) });
+  assert.deepEqual([...both.rejected.keys()].sort(), ['a', 'a.b'], 'оба встроенные - неоднозначность, отказ обоим');
 });

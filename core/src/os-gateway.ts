@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
+import dns from 'node:dns';
 import fs from 'node:fs/promises';
 import { constants, watch as watchFs, type Dirent, type FSWatcher, type Stats } from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -8,10 +10,13 @@ import { StringDecoder } from 'node:string_decoder';
 import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, ProcessResult, PtyInfo, SecretValue } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
 import { limitsOf, type ResourceLimits } from './limits.ts';
+import { isValidId } from './manifest-fields.ts';
 import type { PluginManifest } from './manifest.ts';
+import { closePools, guardedLookup, isLocalAddress, transport } from './net-transport.ts';
 import type { NotifyLimits, ShowNotice } from './notices.ts';
 import { ANY_PATH, envNameAllowed, LOGIN_SHELL } from './permissions.ts';
-import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type KeptPty, type PtyExpiry, type TerminalSink, type TerminalView } from './pty.ts';
+import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type KeptPty, type PtyExpiry, type PtyHostEvents, type TerminalChannel, type TerminalView } from './pty.ts';
+import { inlinePtyHost, type PtyWatchdog, type SpawnPtyHost } from './pty-link.ts';
 import { HttpServes, type AskHost } from './serve.ts';
 import type { GuardRight } from './via-contract.ts';
 import { isRecord } from './wire.ts';
@@ -22,6 +27,8 @@ export interface SecretStore {
   get(key: string): Promise<string | undefined>;
   set(key: string, value: string): Promise<void>;
   delete(key: string): Promise<void>;
+  /** Стирает все ключи, начинающиеся с `prefix` (ядро зовёт с `<pluginId>/` при удалении плагина); число стёртых. Шифрование ОС не нужно. */
+  deletePrefix(prefix: string): Promise<number>;
 }
 
 /** Среда шлюза: каталоги и то, что даёт только приложение (Electron). Нет адаптера - вызов получает `Unavailable`. */
@@ -46,10 +53,18 @@ export interface OsEnvironment {
   readonly raiseWindow?: () => void;
   readonly clipboard?: { readText(): string | Promise<string>; writeText(text: string): void | Promise<void> };
   readonly env?: Readonly<Record<string, string | undefined>>;
+  /**
+   * Подмена всей передачи `net.fetch` для тестов. Она заменяет и соединение, поэтому проверка адреса (`lookup`) к ней не относится;
+   * адаптер приложения её не задаёт, и его запросы идут через `node:http(s)` с проверкой.
+   */
   readonly fetch?: typeof fetch;
+  /** Резолв имён для `net.fetch`; по умолчанию `dns.lookup`. Адрес из его ответа проверяет шлюз: локальные и частные отвергаются. */
+  readonly lookup?: typeof dns.lookup;
   readonly watch?: typeof watchFs;
-  /** Псевдотерминал; нет - `ctx.os.pty` отвечает `Unavailable`. */
+  /** Псевдотерминал в этом же процессе: ядро запускает над ним pty-хост без изоляции (тесты, замеры). Нет ни `pty`, ни `ptyHost` - `ctx.os.pty` отвечает `Unavailable`. */
   readonly pty?: PtyBackend;
+  /** Отдельный процесс pty-хоста (`utilityProcess` ядра, K-01): держит `node-pty`, хвосты вывода и зрителей; ядро следит за ним сторожем и перезапускает. Сильнее `pty`. */
+  readonly ptyHost?: SpawnPtyHost;
   /** Хвост вывода pty, символов; по умолчанию 256 К. */
   readonly ptyBacklog?: number;
   /** Сколько мс pty с `persist` ждёт `attach` плагина после падения его хоста; по умолчанию 60 000. */
@@ -319,6 +334,20 @@ function ruleRefusal(m: PluginManifest, key: 'process' | 'pty' | 'launch', progr
   return foreign.length > 0 ? `переменные не в правиле ${key}: ${foreign.join(', ')}` : undefined;
 }
 
+function assertOwnId(pluginId: string): void {
+  if (!isValidId(pluginId)) throw new CoreError('Invalid', `недопустимый id плагина: ${JSON.stringify(pluginId)}`);
+}
+
+/** `<base>/<id>` для допустимого id и только внутри `base`: вторая проверка держит и тогда, когда правило id ослабят. */
+function ownDir(base: string, pluginId: string): string {
+  assertOwnId(pluginId);
+  const root = path.resolve(base);
+  const dir = path.join(root, pluginId);
+  const rel = path.relative(root, dir);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) throw new CoreError('Invalid', `каталог плагина ${pluginId} вне ${base}`);
+  return dir;
+}
+
 /** Шлюз ОС в главном процессе: вызывающего знает ядро по каналу хоста, права - из его манифеста. */
 export class OsGateway {
   readonly #env: OsEnvironment;
@@ -354,7 +383,7 @@ export class OsGateway {
     manifestOf: (pluginId: string) => PluginManifest | undefined = () => undefined,
     grants?: GrantStore,
     ask: AskHost = () => Promise.reject(new CoreError('Unavailable', 'хоста нет')),
-    ptyEvents: { readonly expired?: (expiry: PtyExpiry) => void; readonly kept?: () => void } = {},
+    ptyEvents: { readonly expired?: (expiry: PtyExpiry) => void; readonly kept?: () => void; readonly watchdog?: Partial<PtyWatchdog> | undefined } & PtyHostEvents = {},
   ) {
     this.#env = env;
     this.#limits = limitsOf(env.limits);
@@ -373,7 +402,8 @@ export class OsGateway {
     this.#push = push;
     this.#deny = deny;
     this.#configOf = configOf;
-    this.#pty = env.pty && new PtyTable(env.pty, push, env.ptyBacklog, undefined, { ...this.#limits, ...(env.ptyOrphanGrace !== undefined && { graceMs: env.ptyOrphanGrace }), ...ptyEvents });
+    const ptyHost = env.ptyHost ?? (env.pty && inlinePtyHost(env.pty));
+    this.#pty = ptyHost && new PtyTable(ptyHost, push, { ...this.#limits, ...(env.ptyBacklog !== undefined && { backlog: env.ptyBacklog }), ...(env.ptyOrphanGrace !== undefined && { graceMs: env.ptyOrphanGrace }), ...ptyEvents });
   }
 
   pathsOf(pluginId: string): { data: string; temp: string; home: string } {
@@ -392,12 +422,68 @@ export class OsGateway {
     for (const [key, close] of this.#watches) if (key.startsWith(`${pluginId}\0`)) close();
     for (const cancel of this.#pending.get(pluginId) ?? []) cancel();
     this.#pending.delete(pluginId);
+    closePools(pluginId);
     this.#runs.delete(pluginId);
     this.#serves.forget(pluginId);
     if (pty === 'park') return this.#pty?.park(pluginId) ?? 0;
     if (pty === 'detach') this.#pty?.detach(pluginId);
     else this.#pty?.release(pluginId);
     return 0;
+  }
+
+  /*
+   * Удаление плагина (`Kernel.uninstall`): каждый метод стирает один вид данных по id плагина и называет, что стёр.
+   * Id проверяется здесь, а не у вызывающего: путь и ключ строятся из него, и `..` или `/` вывели бы за каталог данных.
+   */
+
+  /** `<dataDir>/<id>` и `<tempDir>/<id>`; ссылка на месте каталога стирается сама, а не то, на что она указывает. Что стёрто - словами. */
+  async eraseFiles(pluginId: string): Promise<string[]> {
+    const dirs = [
+      [ownDir(this.#env.dataDir, pluginId), 'данные плагина (plugin-data)'],
+      [ownDir(this.#env.tempDir, pluginId), 'временные файлы (plugin-temp)'],
+    ] as const;
+    const erased: string[] = [];
+    for (const [dir, what] of dirs) {
+      const present = await fs.lstat(dir).then(
+        () => true,
+        (error: unknown) => {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+          throw error;
+        },
+      );
+      if (!present) continue;
+      await fs.rm(dir, { recursive: true, force: true });
+      erased.push(what);
+    }
+    this.#ownMade.delete(pluginId);
+    return erased;
+  }
+
+  /** Ключи `<id>/` в хранилище секретов; шифрование ОС для стирания не нужно, поэтому `available()` не спрашивается. Число стёртых. */
+  async eraseSecrets(pluginId: string): Promise<number> {
+    assertOwnId(pluginId);
+    return (await this.#env.secrets?.deletePrefix(`${pluginId}/`)) ?? 0;
+  }
+
+  /** Выбор человека в `dialog`: из памяти и из state воркспейса. Число стёртых путей. */
+  async eraseGrants(pluginId: string): Promise<number> {
+    assertOwnId(pluginId);
+    const had = this.#granted.get(pluginId);
+    if (had === undefined) return 0;
+    this.#granted.delete(pluginId);
+    try {
+      await this.#saveGrants();
+    } catch (error) {
+      // Файл ещё хранит выбор: повтор должен записать его заново, а не счесть стёртым.
+      this.#granted.set(pluginId, had);
+      throw error;
+    }
+    return had.size;
+  }
+
+  /** Все pty плагина, оставленные человеком тоже; число живых, которые это завершило. */
+  endAllPty(pluginId: string): number {
+    return this.#pty?.endAll(pluginId) ?? 0;
   }
 
   /** Живые pty плагина - что завершит выключение без оставления. */
@@ -413,8 +499,9 @@ export class OsGateway {
     await shell.showItemInFolder(file);
   }
 
-  releaseAllPty(): void {
-    this.#pty?.releaseAll();
+  /** Выгрузка ядра: процессы pty завершены, pty-хост остановлен. */
+  async releaseAllPty(): Promise<void> {
+    await this.#pty?.releaseAll();
   }
 
   /** Плагин активирован: с этого момента идёт льготный срок на `attach` его pty без владельца. */
@@ -432,8 +519,8 @@ export class OsGateway {
   }
 
   /** Вид плагина предъявил билет своей главной части; `pluginId` приложение берёт из origin фрейма, а не из слов вида. */
-  openTerminal(pluginId: string, ticket: string, sink: TerminalSink): TerminalView {
-    return this.#ptyTable().openTerminal(pluginId, ticket, sink);
+  openTerminal(pluginId: string, ticket: string, channel: TerminalChannel): Promise<TerminalView> {
+    return this.#ptyTable().openTerminal(pluginId, ticket, channel);
   }
 
   /** Запомнить config плагина как принятый: зовётся при активации и после правки файла извне, но не после записи самого плагина. */
@@ -564,15 +651,16 @@ export class OsGateway {
     return made;
   }
 
-  async call(m: PluginManifest, method: string, args: readonly unknown[]): Promise<unknown> {
+  /** `signal` - отмена запроса плагина: пока её слышит только `process.run` (программа и её группа завершаются). */
+  async call(m: PluginManifest, method: string, args: readonly unknown[], signal?: AbortSignal): Promise<unknown> {
     try {
-      return await this.#call(m, method, args);
+      return await this.#call(m, method, args, signal);
     } catch (error) {
       throw missing(method, error);
     }
   }
 
-  async #call(m: PluginManifest, method: string, args: readonly unknown[]): Promise<unknown> {
+  async #call(m: PluginManifest, method: string, args: readonly unknown[], signal?: AbortSignal): Promise<unknown> {
     const p = m.permissions;
     switch (method) {
       case 'fs.readText': {
@@ -722,7 +810,7 @@ export class OsGateway {
         return undefined;
       }
       case 'process.run':
-        return this.#run(m, args);
+        return this.#run(m, args, signal);
       case 'pty.spawn': {
         const table = this.#ptyTable();
         const o = isRecord(args[0]) ? args[0] : {};
@@ -738,14 +826,14 @@ export class OsGateway {
           if (refused) throw this.#denied(m, method, `${id}: ${refused}`);
         }
         const size = (v: unknown, fallback: number) => (Number.isInteger(v) && (v as number) > 0 && (v as number) <= 1000 ? (v as number) : fallback);
-        return table.spawn(m.id, { program: checked.file, args: checked.argv, ...(checked.cwd !== undefined && { cwd: checked.cwd }), env: checked.env, cols: size(o.cols, 80), rows: size(o.rows, 24), persist: o.persist === true });
+        return await table.spawn(m.id, { program: checked.file, args: checked.argv, ...(checked.cwd !== undefined && { cwd: checked.cwd }), env: checked.env, cols: size(o.cols, 80), rows: size(o.rows, 24), persist: o.persist === true });
       }
       case 'pty.share':
         return this.#ptyTable().share(m.id, str(method, args[0], 'id'));
       case 'pty.list':
         return this.#ptyTable().list(m.id);
       case 'pty.attach':
-        return this.#ptyTable().attach(m.id, str(method, args[0], 'id'));
+        return await this.#ptyTable().attach(m.id, str(method, args[0], 'id'));
       case 'pty.write':
         this.#ptyTable().write(m.id, str(method, args[0], 'id'), str(method, args[1], 'ввод'));
         return undefined;
@@ -820,6 +908,8 @@ export class OsGateway {
         const options = readDialogOptions(method, args[0]);
         if (!this.#env.dialog) throw new CoreError('Unavailable', 'диалога выбора нет в этой среде');
         const chosen = (await this.#env.dialog.open(options)).filter((c) => path.isAbsolute(c));
+        // Человек выбирал, пока плагин сняли (disable, uninstall): выбор снятому не записывается, иначе его унаследует новый плагин с тем же id.
+        if (!this.#approved.has(m.id)) throw new CoreError('Unavailable', `${m.id} снят, пока шёл выбор`);
         const grants = this.#granted.get(m.id) ?? new Set<string>();
         const before = grants.size;
         for (const c of chosen) grants.add(await real(c));
@@ -888,7 +978,7 @@ export class OsGateway {
     return { file, argv, cwd, env: { ...base, ...extra } };
   }
 
-  async #run(m: PluginManifest, args: readonly unknown[]): Promise<ProcessResult> {
+  async #run(m: PluginManifest, args: readonly unknown[], signal?: AbortSignal): Promise<ProcessResult> {
     const method = 'process.run';
     const program = str(method, args[0], 'программа');
     const options = isRecord(args[2]) ? args[2] : {};
@@ -900,14 +990,18 @@ export class OsGateway {
     this.#runs.set(m.id, runs);
     runs.n++;
     try {
-      return await this.#spawnRun(m.id, program, file, argv, cwd, env, timeout, maxOutput, options.input);
+      return await this.#spawnRun(m.id, program, file, argv, cwd, env, timeout, maxOutput, options.input, signal);
     } finally {
       runs.n--;
     }
   }
 
-  #spawnRun(pluginId: string, program: string, file: string, argv: string[], cwd: string | undefined, env: Record<string, string>, timeout: number, maxOutput: number, input: unknown): Promise<ProcessResult> {
+  #spawnRun(pluginId: string, program: string, file: string, argv: string[], cwd: string | undefined, env: Record<string, string>, timeout: number, maxOutput: number, input: unknown, signal?: AbortSignal): Promise<ProcessResult> {
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new CoreError('Cancelled', 'process.run: отменён до запуска'));
+        return;
+      }
       // Своя группа процессов: тайм-аут и выгрузка плагина гасят и то, что программа запустила сама.
       const child = spawn(file, argv, { cwd, env, shell: false, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
       let exited = false;
@@ -935,10 +1029,18 @@ export class OsGateway {
       };
       const timer = timeout > 0 ? setTimeout(terminate, timeout) : undefined;
       const untrack = this.#track(pluginId, () => stop('SIGKILL'));
+      // Отмена вызывающего: SIGTERM всей группе, как по тайм-ауту; вызывающий уже получил Cancelled от канала, здесь ждём close и освобождаем место в пределе runs.
+      let cancelled = false;
+      const onAbort = () => {
+        cancelled = true;
+        stop('SIGTERM');
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
       const done = () => {
         clearTimeout(timer);
         clearTimeout(kill);
         untrack();
+        signal?.removeEventListener('abort', onAbort);
       };
       let truncated = false;
       // Предел в байтах и на каждый поток: символ UTF-8 бывает на границе кусков трубы, декодер держит недочитанные байты.
@@ -971,9 +1073,10 @@ export class OsGateway {
         done();
         reject(new CoreError((error as NodeJS.ErrnoException).code === 'ENOENT' ? 'NotFound' : 'Remote', `${program}: ${error.message}`));
       });
-      child.once('close', (code, signal) => {
+      child.once('close', (code, sig) => {
         done();
-        resolve({ code, signal, stdout: out.end(), stderr: err.end(), truncated });
+        if (cancelled) reject(new CoreError('Cancelled', 'process.run: отменён'));
+        else resolve({ code, signal: sig, stdout: out.end(), stderr: err.end(), truncated });
       });
       child.stdin.end(typeof input === 'string' ? input : undefined);
     });
@@ -995,19 +1098,26 @@ export class OsGateway {
       throw new CoreError('Invalid', `${method}: адрес не URL`);
     }
     if (url.protocol !== 'https:' && url.protocol !== 'http:') throw this.#denied(m, method, `схема ${url.protocol}`);
+    // Прежний fetch отвергал учётные данные в адресе, а node:http отправил бы их как Basic: заголовок задаёт плагин явно.
+    if (url.username !== '' || url.password !== '') throw new CoreError('Invalid', `${method}: учётные данные в адресе не принимаются, используйте заголовок Authorization`);
     const config = this.#approved.get(m.id) ?? {};
-    const hosts = (m.permissions.net ?? []).flatMap((h) => {
-      if (!h.startsWith('config:')) return [h.toLowerCase()];
+    // Хост из `config:<поле>` назвал человек, принимая настройку: внутренний адрес у него - ожидаемый (Jira за VPN).
+    const rights = (m.permissions.net ?? []).flatMap((h) => {
+      if (!h.startsWith('config:')) return [{ host: h.toLowerCase(), named: false }];
       const v = config[h.slice('config:'.length)];
       if (typeof v !== 'string') return [];
       try {
-        return [new URL(v).host.toLowerCase()];
+        return [{ host: new URL(v).host.toLowerCase(), named: true }];
       } catch {
-        return [v.toLowerCase()];
+        return [{ host: v.toLowerCase(), named: true }];
       }
     });
     // Запись без порта - только порт схемы по умолчанию: URL сводит его к пустой строке.
-    if (!hosts.includes(url.host.toLowerCase())) throw this.#denied(m, method, `хост не в net: ${url.host}`);
+    const right = rights.find((r) => r.host === url.host.toLowerCase());
+    if (!right) throw this.#denied(m, method, `хост не в net: ${url.host}`);
+    // Локальный адрес открыт там, где его назвали: IP-адрес и localhost в праве, хост из настройки человека.
+    const bare = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    const local = right.named || net.isIP(bare) !== 0 || bare === 'localhost' || bare.endsWith('.localhost');
     const request = isRecord(args[1]) ? args[1] : {};
     const headers = isRecord(request.headers) ? Object.fromEntries(Object.entries(request.headers).filter((e): e is [string, string] => typeof e[1] === 'string')) : {};
     const timeout = typeof request.timeoutMs === 'number' && request.timeoutMs > 0 ? request.timeoutMs : FETCH_TIMEOUT_MS;
@@ -1016,13 +1126,21 @@ export class OsGateway {
     const untrack = this.#track(m.id, () => abort.abort(new CoreError('Unavailable', `${method}: плагин выгружен`)));
     try {
       // Переадресация не идёт сама: иначе ответ пришёл бы с хоста, которого нет в праве.
-      const response = await (this.#env.fetch ?? fetch)(url, {
-        method: typeof request.method === 'string' ? request.method : 'GET',
-        headers,
-        redirect: 'manual',
-        signal: abort.signal,
-        ...(typeof request.body === 'string' && { body: request.body }),
-      });
+      const verb = typeof request.method === 'string' ? request.method : 'GET';
+      const body = typeof request.body === 'string' ? { body: request.body } : {};
+      const real = this.#env.lookup ?? dns.lookup;
+      const response = this.#env.fetch
+        ? await this.#env.fetch(url, { method: verb, headers, redirect: 'manual', signal: abort.signal, ...body })
+        : await transport(url, {
+            method: verb,
+            headers,
+            signal: abort.signal,
+            local,
+            owner: m.id,
+            // Проверка на том же резолве, по которому идёт соединение: отдельный `dns.lookup` до запроса мог бы получить другой ответ.
+            lookup: local ? real : guardedLookup(real, (address) => (isLocalAddress(address) ? this.#denied(m, method, `адрес ${address} локальный: ${url.host}`) : undefined)),
+            ...body,
+          });
       return { status: response.status, headers: Object.fromEntries(response.headers), body: await readBody(response, MAX_BODY) };
     } catch (error) {
       throw abort.signal.aborted && abort.signal.reason instanceof CoreError ? abort.signal.reason : error;

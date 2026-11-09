@@ -59,6 +59,14 @@ export interface ProcessResult {
   readonly truncated: boolean;
 }
 
+// Пакет собирается без lib DOM и @types/node (потребитель может не ставить ни то, ни другое): объявляем минимум `AbortSignal`.
+// Слияние с настоящим `AbortSignal` из DOM или Node безвредно: поле то же.
+declare global {
+  interface AbortSignal {
+    readonly aborted: boolean;
+  }
+}
+
 export interface ProcessOptions {
   readonly cwd?: string;
   /** Только имена из `env` правила `process`; база - PATH, HOME, локаль. Значения - данные, а не ссылки `$secret`. */
@@ -68,6 +76,8 @@ export interface ProcessOptions {
   readonly timeoutMs?: number;
   /** Предел вывода, байт на `stdout` и на `stderr` отдельно: целое от 1 до 64 МиБ, по умолчанию 16 МиБ. Превышение не ошибка вызова, а `truncated` в ответе. */
   readonly maxOutputBytes?: number;
+  /** Отмена: сигнал сработал - программе и её группе `SIGTERM`, вызов отклоняется `Cancelled`. Сработал до вызова - программа не запускается. */
+  readonly signal?: AbortSignal;
 }
 
 export interface HttpRequest {

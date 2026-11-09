@@ -140,6 +140,28 @@ test('fs.readText: предел по умолчанию - 8 МиБ (JSON Cyborg 
   }
 });
 
+test('process.run: signal в options - отмена завершает программу и её потомков, вызывающий получает Cancelled, место в пределе освобождается', { skip: !posix && 'группы процессов - POSIX' }, async () => {
+  await using box = await sandbox();
+  const { k, ctx } = await kernel({ a: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp }, { runs: 1 });
+  const pids: number[] = [];
+  try {
+    const file = path.join(box.work, 'a');
+    const abort = new AbortController();
+    const run = ctx('a').os.process!.run(process.execPath, ['-e', family(file)], { signal: abort.signal });
+    run.catch(() => undefined);
+    pids.push(...(await pidsOf(file)));
+    abort.abort();
+    await assert.rejects(run, { code: 'Cancelled' });
+    await until(() => !alive(pids[0]!) && !alive(pids[1]!), 3000, 'программа и внук после отмены');
+    const ok = await ctx('a').os.process!.run(process.execPath, ['-e', '0'], { signal: new AbortController().signal });
+    assert.equal(ok.code, 0, 'место в пределе runs освободилось, неотменённый сигнал не мешает');
+    await assert.rejects(ctx('a').os.process!.run(process.execPath, ['-e', '0'], { signal: AbortSignal.abort() }), { code: 'Cancelled' });
+  } finally {
+    for (const pid of pids) if (alive(pid)) process.kill(pid, 'SIGKILL');
+    await k.unload();
+  }
+});
+
 test('pty: kill бьёт по группе процесса - потомки оболочки агента не остаются сиротами', { skip: !posix && 'группы процессов - POSIX' }, async () => {
   // node-pty делает процесс лидером своей сессии и группы; detached даёт то же без псевдотерминала.
   const leader = spawn('/bin/sh', ['-c', 'sleep 30 & echo $!; wait'], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });

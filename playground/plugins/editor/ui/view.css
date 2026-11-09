@@ -1,0 +1,38 @@
+#cyborg-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cy-gap);
+  padding: 8px 10px;
+  box-sizing: border-box;
+  height: 100vh;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: var(--cy-gap);
+}
+
+.files {
+  display: flex;
+  gap: var(--cy-gap);
+}
+
+.state {
+  flex: 1;
+  color: var(--cy-muted);
+}
+
+.monaco-host {
+  flex: 1;
+  min-height: 8em;
+  border: 1px solid var(--cy-border);
+  border-radius: var(--cy-radius);
+  overflow: hidden;
+}
+
+.problems {
+  margin: 0;
+  padding-left: 1.2em;
+  color: var(--cy-muted);
+}

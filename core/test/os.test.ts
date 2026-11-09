@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFile, chmod, mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, lstat, mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, PluginOs } from '@cyborg-harness/contracts';
@@ -9,7 +9,8 @@ import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
 import { describePermissions, envNameAllowed } from '../src/permissions.ts';
 import type { NoticeEvents } from '../src/notices.ts';
-import type { OsEnvironment, SecretStore } from '../src/os-gateway.ts';
+import { memorySecrets } from '../../testing/src/memory.ts';
+import { OsGateway, type OsEnvironment } from '../src/os-gateway.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
@@ -21,11 +22,6 @@ async function sandbox() {
   const dirs = { data: path.join(root, 'data'), temp: path.join(root, 'temp'), work: path.join(root, 'work'), outside: path.join(root, 'outside') };
   for (const d of [dirs.work, dirs.outside]) await mkdir(d, { recursive: true });
   return { root, ...dirs, [Symbol.asyncDispose]: () => rm(root, { recursive: true, force: true }) };
-}
-
-function memorySecrets(available = true): SecretStore & { map: Map<string, string> } {
-  const map = new Map<string, string>();
-  return { map, available: () => available, get: async (k) => map.get(k), set: async (k, v) => void map.set(k, v), delete: async (k) => void map.delete(k) };
 }
 
 /** Плагины отдают свой ctx наружу: тест зовёт ctx.os так же, как плагин. */
@@ -923,6 +919,7 @@ test('команда ядра cyborg.workspace.reveal: среда показыв
   assert.deepEqual(shown, [file]);
   await assert.rejects(os('reader').fs.readText(file), { code: 'PermissionDenied' }, 'файл воркспейса - защищённый путь');
   await assert.rejects(ctx('reader').commands.run('cyborg.workspace.reveal'), { code: 'PermissionDenied' }, 'команду ядра зовёт приложение');
+  await assert.rejects(k.runOwn('reader', 'cyborg.workspace.reveal'), { code: 'PermissionDenied' }, 'вид и уведомление плагина команду ядра не зовут');
   assert.deepEqual(shown, [file]);
   await k.unload();
 
@@ -1011,6 +1008,63 @@ test('env правила: программа получает GIT_CONFIG_COUNT, 
   const got = await os('vcs').process!.run(process.execPath, ['-e', 'process.stdout.write(JSON.stringify(Object.entries(process.env).filter(([k]) => k.startsWith("GIT_CONFIG_")).sort()))'], { env });
   assert.deepEqual(JSON.parse(got.stdout), Object.entries(env).sort());
   await k.unload();
+});
+
+const gatewayFor = (env: OsEnvironment, grants?: ConstructorParameters<typeof OsGateway>[5]) => new OsGateway(env, () => undefined, undefined, undefined, undefined, grants);
+
+test('uninstall, шлюз: eraseFiles стирает data и temp только этого id, ссылка не ведёт наружу, чужие каталоги целы', async () => {
+  await using box = await sandbox();
+  const gateway = gatewayFor({ dataDir: box.data, tempDir: box.temp });
+  for (const [dir, id] of [[box.data, 'jira'], [box.temp, 'jira'], [box.data, 'jira2'], [box.data, 'jira.sub'], [box.temp, 'other']] as const) {
+    await mkdir(path.join(dir, id, 'deep'), { recursive: true });
+    await writeFile(path.join(dir, id, 'deep', 'f.txt'), id);
+  }
+  assert.deepEqual(await gateway.eraseFiles('jira'), ['данные плагина (plugin-data)', 'временные файлы (plugin-temp)']);
+  for (const gone of [path.join(box.data, 'jira'), path.join(box.temp, 'jira')]) await assert.rejects(stat(gone), { code: 'ENOENT' });
+  for (const kept of [path.join(box.data, 'jira2'), path.join(box.data, 'jira.sub'), path.join(box.temp, 'other')]) assert.equal((await stat(kept)).isDirectory(), true, kept);
+  assert.deepEqual(await gateway.eraseFiles('jira'), [], 'повтор ничего не находит');
+
+  // Каталог плагина подменён ссылкой наружу: стирается ссылка, а не то, на что она указывает.
+  await writeFile(path.join(box.outside, 'keep.txt'), 'нельзя');
+  await symlink(box.outside, path.join(box.data, 'linked'));
+  assert.deepEqual(await gateway.eraseFiles('linked'), ['данные плагина (plugin-data)']);
+  await assert.rejects(lstat(path.join(box.data, 'linked')), { code: 'ENOENT' });
+  assert.equal(await readFile(path.join(box.outside, 'keep.txt'), 'utf8'), 'нельзя');
+});
+
+test('uninstall, шлюз: недопустимый id не выводит за каталог данных и ничего не стирает', async () => {
+  await using box = await sandbox();
+  const gateway = gatewayFor({ dataDir: box.data, tempDir: box.temp });
+  await mkdir(box.data, { recursive: true });
+  await writeFile(path.join(box.root, 'precious.txt'), 'важное');
+  for (const id of ['..', '../outside', 'a/../..', '/etc', '', '.', 'a/b', 'UP', 'a\0b', 'a b']) {
+    await assert.rejects(gateway.eraseFiles(id), { code: 'Invalid' }, JSON.stringify(id));
+    await assert.rejects(gateway.eraseSecrets(id), { code: 'Invalid' }, JSON.stringify(id));
+  }
+  assert.equal(await readFile(path.join(box.root, 'precious.txt'), 'utf8'), 'важное');
+  assert.equal((await stat(box.outside)).isDirectory(), true);
+  assert.equal((await stat(box.data)).isDirectory(), true);
+});
+
+test('uninstall, шлюз: eraseSecrets стирает ключи <id>/ даже без шифрования ОС, соседи с общим началом целы', async () => {
+  await using box = await sandbox();
+  const store = memorySecrets(false);
+  for (const k of ['jira/token', 'jira/a/b', 'jira2/token', 'jira.sub/token', 'other/jira/token']) store.map.set(k, 'v');
+  const gateway = gatewayFor({ dataDir: box.data, tempDir: box.temp, secrets: store });
+  assert.equal(await gateway.eraseSecrets('jira'), 2);
+  assert.deepEqual([...store.map.keys()].sort(), ['jira.sub/token', 'jira2/token', 'other/jira/token']);
+  assert.equal(await gatewayFor({ dataDir: box.data, tempDir: box.temp }).eraseSecrets('jira'), 0, 'хранилища нет - стирать нечего');
+});
+
+test('uninstall, шлюз: eraseGrants убирает выбор плагина из памяти и из state, чужой выбор цел', async () => {
+  await using box = await sandbox();
+  const written: Record<string, readonly string[]>[] = [];
+  const grants = { read: () => ({ jira: [box.work], other: [box.outside] }), write: async (by: Record<string, readonly string[]>) => void written.push(by) };
+  const gateway = gatewayFor({ dataDir: box.data, tempDir: box.temp }, grants);
+  assert.equal(await gateway.eraseGrants('jira'), 1);
+  assert.deepEqual(written, [{ other: [box.outside] }]);
+  assert.equal(await gateway.eraseGrants('jira'), 0);
+  assert.equal(written.length, 1, 'нечего стирать - нечего писать');
 });
 
 test('права в манифесте: маска под названным каталогом, workspace.git только у записи, shell без file:', () => {
