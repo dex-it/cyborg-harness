@@ -360,7 +360,7 @@ test('cancel: чужой хост не отменяет запрос друго�
   const kernel = await load({
     apiVersion: PLUGIN_API_VERSION,
     enabled: ['provider', 'victim', 'mallory'],
-    manifests: [manifest('provider', { commands: ['provider.slow'] }), manifest('victim'), manifest('mallory')],
+    manifests: [manifest('provider', { commands: { 'provider.slow': { callers: 'plugins' } } }), manifest('victim'), manifest('mallory')],
     spawnHost: forger.spawn,
     hosts: { p: ['provider'], v: ['victim'], m: ['mallory'] },
   });

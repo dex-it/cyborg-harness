@@ -67,7 +67,7 @@ export async function startCancel(extra: Partial<LoadOptions> = {}) {
     apiVersion: PLUGIN_API_VERSION,
     enabled: ['provider', 'user'],
     manifests: [
-      manifest('provider', { provides: { 'test.cancel': '1.0' }, commands: { 'provider.slow': { args: ['string'] } } }),
+      manifest('provider', { provides: { 'test.cancel': '1.0' }, commands: { 'provider.slow': { args: ['string'], callers: 'plugins' } } }),
       manifest('user', { requires: { 'test.cancel': '^1' } }),
     ],
     hosts: { p: ['provider'], u: ['user'] },
