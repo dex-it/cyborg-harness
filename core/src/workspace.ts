@@ -165,8 +165,7 @@ function takeLock(lock: string, draft: string, pid: number): LockResult {
     }
     const owner = ownerOf(text);
     if (owner !== undefined && owner !== pid && alive(owner)) return { ok: false, owner };
-    const live = reclaim(lock, owner);
-    if (live !== undefined) return { ok: false, owner: live };
+    reclaim(lock, draft, owner);
   }
   // Замок всё время то снимают, то берут другие: он занят, хотя назвать владельца за эти попытки не удалось (pid 0).
   return { ok: false, owner: 0 };
@@ -182,30 +181,38 @@ const ownerOf = (text: string): number | undefined => {
 };
 
 /**
- * Снимает замок мёртвого владельца. Два процесса, увидевшие один и тот же мёртвый замок, не должны снять замок друг друга:
- * `rename` отдаёт файл ровно одному, он проверяет, что забрал именно тот замок, и если успел забрать свежий чужой - кладёт его обратно.
- * Возвращает pid живого владельца, если забрал не то.
+ * Снимает замок мёртвого владельца. Снимать может только тот, кто держит охранный файл `<замок>.reclaim` (создаётся так же, как сам замок,
+ * ссылкой на черновик): пока он у нас, замок не сменит никто, кроме нас, и повторная проверка перед удалением надёжна. Без охраны два
+ * процесса, увидевшие один и тот же мёртвый замок, снимали бы замок друг друга: первый уже взял свой, второй удалил его как «мёртвый».
+ * Охрана живого соседа - ждём (вернёмся в цикл), охрана мёртвого - её удаляем.
  */
-function reclaim(lock: string, expected: number | undefined): number | undefined {
-  const aside = `${lock}.stale.${randomBytes(6).toString('hex')}`;
+function reclaim(lock: string, draft: string, expected: number | undefined): void {
+  const guard = `${lock}.reclaim`;
   try {
-    fs.renameSync(lock, aside);
+    fs.linkSync(draft, guard);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw error;
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    let holder: number | undefined;
+    try {
+      holder = ownerOf(fs.readFileSync(guard, 'utf8'));
+    } catch {
+      return;
+    }
+    if (holder !== undefined && alive(holder)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+    else fs.rmSync(guard, { force: true });
+    return;
   }
   try {
-    const taken = ownerOf(fs.readFileSync(aside, 'utf8'));
-    if (taken === expected || taken === undefined) return undefined;
-    // Это уже чужой свежий замок: возвращаем на место, если место ещё свободно.
+    let text: string | undefined;
     try {
-      fs.linkSync(aside, lock);
-    } catch {
-      // Место заняли: у замка два претендента, держащий его заметит это на записи.
+      text = fs.readFileSync(lock, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
-    return taken;
+    // Замок за это время мог смениться: снимаем только тот, который видели мёртвым.
+    if (text !== undefined && ownerOf(text) === expected) fs.rmSync(lock, { force: true });
   } finally {
-    fs.rmSync(aside, { force: true });
+    fs.rmSync(guard, { force: true });
   }
 }
 

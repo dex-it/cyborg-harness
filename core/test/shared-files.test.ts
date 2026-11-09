@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { statSync } from 'node:fs';
+import { statSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -51,12 +51,24 @@ test('withFileLock: чтение-изменение-запись из проце
   assert.equal(await readFile(path.join(box.root, 'counter.txt'), 'utf8'), '60');
 });
 
-test('withFileLock: оставшийся от умершего процесса замок снимает один из шести, остальные его замок не крадут', async () => {
+test('withFileLock: замки умерших процессов то и дело появляются - каждый снимает один процесс, замок живого соседа не крадётся', async () => {
   await using box = await sandbox();
   const dead = spawnSync(process.execPath, ['-e', '']).pid;
-  await writeFile(path.join(box.root, 'counter.txt.write.lock'), JSON.stringify({ pid: dead }));
-  await race('counter', box.root, 6, 10);
-  assert.equal(await readFile(path.join(box.root, 'counter.txt'), 'utf8'), '60');
+  const lock = path.join(box.root, 'counter.txt.write.lock');
+  // Подбрасывает замок «упавшего» процесса, как только место свободно: у участников постоянно идёт гонка за снятие.
+  const saboteur = setInterval(() => {
+    try {
+      writeFileSync(lock, JSON.stringify({ pid: dead }), { flag: 'wx' });
+    } catch {
+      // Замок есть: чей-то живой или ещё не снятый мёртвый.
+    }
+  }, 1);
+  try {
+    await race('counter', box.root, 8, 60);
+  } finally {
+    clearInterval(saboteur);
+  }
+  assert.equal(await readFile(path.join(box.root, 'counter.txt'), 'utf8'), '480');
 });
 
 test('withFileLock: замок снят после ошибки, замок умершего процесса забирается, живой не отдаётся', async () => {
