@@ -450,7 +450,7 @@ test('spawn в пути и detach: pty-хост узнаёт, что владе�
     return {
       ...handle,
       port: {
-        post: handle.port.post,
+        post: (m, t) => handle.port.post(m, t),
         onMessage: (l) =>
           handle.port.onMessage((m, tr) => {
             if (isRecord(m) && m.t === 'note' && m.m === 'data') notes++;

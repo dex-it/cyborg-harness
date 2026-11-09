@@ -95,7 +95,11 @@ test('порт терминала: не пришёл за срок - отказ,
   assert.equal(await ports.connect(8), false);
   const late = pair();
   let closed = 0;
-  const port = { ...late.port, set onmessage(_h: unknown) {}, close: () => (closed++, late.port.close()) } as unknown as PortLike;
+  const port = { ...late.port, set onmessage(_h: unknown) {}, close: () => {
+      closed++;
+      late.port.close();
+    },
+  } as unknown as PortLike;
   ports.arrived(8, port);
   assert.equal(closed, 1, 'опоздавший порт отказанного терминала остался открытым');
   late.host.postMessage({ data: 'вывод в никуда' });

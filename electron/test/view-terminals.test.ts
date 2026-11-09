@@ -170,10 +170,10 @@ test('терминалы вида на таблице ядра: тысяча к�
 test('терминалы вида: канал закрыт, пока шёл openTerminal (выход pty, выгрузка плагина), - запись не остаётся в учёте, фрейм получает порт и узнаёт о выходе из него; потеря pty-хоста - отказ (ревью K-01)', async () => {
   const done: string[] = [];
   const pairs: ReturnType<typeof fakePair>[] = [];
-  let lost: PtyExit | undefined;
+  const state: { lost: PtyExit | undefined } = { lost: undefined };
   const terminals = new ViewTerminals(
     (_p, _t, ch) => {
-      ch.closed(lost);
+      ch.closed(state.lost);
       return Promise.resolve({ id: 'pty-1', pid: 7, program: 'sh', args: [], persist: false, backlog: '', close: () => void done.push('close') });
     },
     () => {
@@ -189,7 +189,7 @@ test('терминалы вида: канал закрыт, пока шёл open
   assert.deepEqual(early.posted.map((p) => p.channel), ['view:terminal:port'], 'порт с выходом фрейм не получил');
   assert.deepEqual(pairs[0]?.closed, [], 'порт фрейма закрыт раньше, чем он прочитал выход');
 
-  lost = { code: -1 };
+  state.lost = { code: -1 };
   const gone = frame(2);
   assert.match((await terminals.open(gone, 'echo', 't')).error ?? '', /pty-хост потерян/);
   assert.equal(terminals.size, 0);

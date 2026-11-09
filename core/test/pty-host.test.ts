@@ -275,7 +275,9 @@ test('pty-хост: завершаемый процесс, переживший 
   const host = inlinePtyHost(backend, { endGraceMs: 60 })();
   const ep = new Endpoint(host.port);
   await ep.request('init', { ptyInput: 1024, ptyFlushMs: 4, ptyFlushChars: 1024, backlog: 100 });
-  const start = async (key: string) => void (await ep.request('spawn', { key, file: 'sh', args: [], options: { name: 'xterm-256color', env: {}, cols: 80, rows: 24 } }));
+  const start = async (key: string) => {
+    await ep.request('spawn', { key, file: 'sh', args: [], options: { name: 'xterm-256color', env: {}, cols: 80, rows: 24 } });
+  };
   await start('deaf');
   await start('polite');
   const [deaf, polite] = backend.procs as [FakeProc, FakeProc];
