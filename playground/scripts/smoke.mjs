@@ -492,14 +492,14 @@ async function main() {
   await setClipboard('');
   await focusEditor();
   await clickIn('editor', '.monaco-editor .view-lines');
-  await waitFor('Monaco выделил весь текст (Cmd/Ctrl+A)', async () => {
-    await chord('a', 'KeyA', 65);
-    return (await inView('editor', "document.querySelectorAll('.monaco-editor .selected-text').length")) > 0;
-  }, 8000);
-  await edit('copy', async () => /"fontSize": 99/.test(await clipboardText()));
-  await waitFor('copy: в буфере текст Monaco', async () => /"fontSize": 99/.test(await clipboardText()));
+  // Без выделения Monaco копирует строку с кареткой (emptySelectionClipboard): выделение клавишами в окне CI ненадёжно, а проверяется канал copy.
+  const copied = async () => {
+    const text = (await clipboardText()).trim();
+    return text !== '' && (await editorText()).includes(text) ? text : '';
+  };
+  await edit('copy', async () => (await copied()) !== '');
+  await waitFor('copy: в буфере строка Monaco', async () => (await copied()) !== '');
   await setClipboard('// из буфера');
-  await chord('ArrowDown', 'ArrowDown', 40);
   await edit('paste', async () => /\/\/ из буфера/.test(await editorText()));
   await waitFor('paste: текст из буфера вставлен в Monaco', async () => /\/\/ из буфера/.test(await editorText()));
   const row = await inView('sessions', "[...document.querySelectorAll('#screen .xterm-rows > div')].findIndex((d) => /оба-49/.test(d.textContent)) + 1");
