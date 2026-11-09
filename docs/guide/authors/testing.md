@@ -10,7 +10,7 @@ npm install --save-dev @cyborg-harness/testing
 ```
 
 :::caution[Пакеты ещё не опубликованы]
-Пакеты `@cyborg-harness/*` и команда `cyborg-plugin` публикуются задачами [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9). Пакеты scope `@cyborg` на npmjs.com к проекту не относятся. До выпуска работайте из репозитория (`npm ci`, `npm start`).
+Пакеты `@cyborg-harness/*` и команда `cyborg-plugin` готовятся задачами [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-08](https://github.com/dex-it/cyborg-harness/issues/8), [P-09](https://github.com/dex-it/cyborg-harness/issues/9), а публикует их [P-10](https://github.com/dex-it/cyborg-harness/issues/11). Пакеты scope `@cyborg` на npmjs.com к проекту не относятся. До выпуска работайте из репозитория (`npm ci`, `npm start`).
 :::
 
 Тесты запускаются встроенным `node --test`: Node 24 снимает типы с `.ts` сам, сборка для теста не нужна.
@@ -73,9 +73,9 @@ agentContractSuite(new URL('../my-agent', import.meta.url).pathname, {
 - `history` отвечает пустым списком там, где `capabilities.history` ложно;
 - в журнале нет записей `denied` и `failed`.
 
-Параметр `os` нужен, если поставщик ищет программу агента: без него `facts().found` ложно, и набор скажет об этом. Плагины, без которых поставщик не активируется, передайте в `plugins`. Те же проверки одной функцией, которая бросает на первой неудачной, - `checkAgentContract(provider, options)`.
+Параметр `os` нужен, если поставщик ищет программу агента: без него `facts().found` ложно, и набор скажет об этом. Поля `pty` в нём нет: запуск набор наблюдает в своём `fakePty()`, и свой бэкенд оставил бы проверку слепой. Плагины, без которых поставщик не активируется, передайте в `plugins`. Те же проверки одной функцией, которая бросает на первой неудачной, - `checkAgentContract(provider, options)`.
 
-Для контрактов `cyborg.secret-source` и `cyborg.project-settings` в пакете лежат каркасы наборов (`secretSourceContractSuite`, `projectSettingsContractSuite`): они перечисляют обязательные проверки и в отчёте теста стоят как `todo`. Проверять они начнут, когда контракты появятся в `@cyborg-harness/contracts`.
+Для контрактов `cyborg.secret-source` и `cyborg.project-settings` в пакете лежат каркасы наборов (`secretSourceContractSuite`, `projectSettingsContractSuite`): они перечисляют обязательные проверки, каждая со ссылкой на место в SAD, и в отчёте теста стоят как `todo`. Проверка попадает в перечень только после того, как требование записано в SAD или SRS. Проверять они начнут, когда контракты появятся в `@cyborg-harness/contracts`.
 
 ## Собственный набор для своего контракта
 
