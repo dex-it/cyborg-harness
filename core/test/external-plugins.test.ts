@@ -51,6 +51,7 @@ const variants: readonly Variant[] = [
   { name: 'ts-parameter-property', files: { 'package.json': MODULE, 'index.ts': PARAMETER_PROPERTY }, entry: 'index.ts', fails: 'параметры-свойства' },
   { name: 'ts-in-node-modules', files: { 'node_modules/plugin/index.ts': TS }, home: 'node_modules/plugin', entry: 'index.ts', fails: 'node_modules' },
   { name: 'js-in-node-modules', files: { 'node_modules/plugin/package.json': MODULE, 'node_modules/plugin/index.js': ESM }, home: 'node_modules/plugin', entry: 'index.js' },
+  { name: 'js-typeless-in-node-modules', files: { 'node_modules/plugin/index.js': ESM }, home: 'node_modules/plugin', entry: 'index.js' },
   { name: 'mjs-in-node-modules', files: { 'node_modules/plugin/index.mjs': ESM }, home: 'node_modules/plugin', entry: 'index.mjs' },
   { name: 'entry-missing', files: { 'readme.txt': 'нет точки входа' }, entry: 'index.mjs', fails: 'Cannot find module' },
   { name: 'ts-sibling-import', files: { 'package.json': MODULE, 'index.ts': "import { name } from './helper.ts';\nexport default { activate(): string { return name; } };\n", 'helper.ts': 'export const name: string = "helper";\n' }, entry: 'index.ts' },
