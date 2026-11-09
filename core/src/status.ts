@@ -16,23 +16,44 @@ export interface PluginStatus {
 }
 
 /**
- * Записи, которые о работе плагина ничего не говорят: ни конфликт сочетаний, ни отказ шлюза, ни вызов устаревшего члена, ни удержанное хостом отклонение, ни завершённый по сроку pty, ни выбор хоста.
- * Плагин работает как обычно (или стоит, как стоял), и они не должны перекрывать запись жизненного цикла: по последней из них `pluginStatuses` и `enable` решают, что с плагином.
+ * Какие виды записей журнала - события жизненного цикла плагина (загружен, пропущен, снят, упал), а какие о его работе ничего не говорят: конфликт сочетаний, отказ шлюза,
+ * вызов устаревшего члена, удержанное хостом отклонение, завершённый по сроку pty, выбор хоста. Вторые приходят в любой момент, в том числе после снятия плагина, и не должны
+ * перекрывать запись жизненного цикла: по последней из них `pluginStatuses` показывает состояние, а `enable` поставщика решает, поднимать ли зависимого.
+ * Таблица полная по типу: новый вид записи без пометки компилятор не пропустит.
  */
-const NOT_LIFECYCLE = new Set<JournalEntry['kind']>([
-  'key-conflict',
-  'key-ignored',
-  'denied',
-  'deprecated-call',
-  'unhandled-rejection',
-  'pty-expired',
-  'host-isolated',
-  'host-own-grouped',
-  'third-party',
-]);
+const LIFECYCLE: Record<JournalEntry['kind'], boolean> = {
+  invalid: true,
+  disabled: true,
+  'not-found': true,
+  rejected: true,
+  'safe-mode': true,
+  skipped: true,
+  config: true,
+  state: true,
+  failed: true,
+  activated: true,
+  deactivated: true,
+  revived: true,
+  waiting: true,
+  unloaded: true,
+  uninstalled: true,
+  'switched-off': true,
+  'host-down': true,
+  'host-restart': true,
+  'host-abandoned': true,
+  'key-conflict': false,
+  'key-ignored': false,
+  denied: false,
+  'deprecated-call': false,
+  'unhandled-rejection': false,
+  'pty-expired': false,
+  'host-isolated': false,
+  'host-own-grouped': false,
+  'third-party': false,
+};
 
-/** Запись о жизненном цикле плагина: загружен, пропущен, снят, упал. Остальные виды (`NOT_LIFECYCLE`) приходят в любой момент, в том числе после снятия. */
-export const isLifecycleEntry = (entry: JournalEntry): boolean => !NOT_LIFECYCLE.has(entry.kind);
+/** Запись о жизненном цикле плагина (таблица `LIFECYCLE`). */
+export const isLifecycleEntry = (entry: JournalEntry): boolean => LIFECYCLE[entry.kind];
 
 const REVIVABLE = new Set<JournalEntry['kind']>(['switched-off', 'failed', 'skipped', 'host-abandoned']);
 
