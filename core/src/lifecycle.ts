@@ -173,7 +173,7 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     gateway.releaseAllPty();
     layer.clear();
     pool.stopAll();
-    ctx.denials.flush();
+    ctx.flushRepeats();
   }
 
   return {

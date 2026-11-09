@@ -183,3 +183,25 @@ test('документ: area и order типа; короткая запись п
   assert.deepEqual(docErrors({ note: true }), ['documents.note: ожидается объект { "restorable": true, "area"?, "order"? }, получено true']);
 });
 
+test('манифест: deprecated у provides - члены с пометкой @deprecated, ошибки называют поле', () => {
+  const ok = parseManifest({ ...base, provides: { 'test.old': { version: ['1.4', '2.0'], deprecated: ['list', 'get_one'], guard: { list: { 'fs.read': 0 } } }, 'test.new': '1.0' } });
+  assert.ok(ok.ok);
+  assert.deepEqual(ok.manifest.deprecated, { 'test.old': ['list', 'get_one'] });
+  assert.deepEqual(ok.manifest.provides, { 'test.old': ['1.4', '2.0'], 'test.new': ['1.0'] });
+  const none = parseManifest({ ...base, provides: { 'test.old': { version: '1.0', deprecated: [] }, 'test.new': '1.0' } });
+  assert.ok(none.ok);
+  assert.equal(none.manifest.deprecated, undefined, 'пустой список - пометок нет');
+
+  const notList = parseManifest({ ...base, provides: { 'test.old': { version: '1.0', deprecated: 'list' } } });
+  assert.deepEqual(notList, { ok: false, id: 'pin-lock', errors: ['provides.test.old.deprecated: ожидается список имён членов, получено "list"'] });
+
+  const bad = parseManifest({ ...base, provides: { 'test.old': { version: '1.0', deprecated: ['list', 7, 'a b', '', 'list', 'x.y'] } } });
+  assert.ok(!bad.ok);
+  assert.deepEqual(bad.errors, [
+    'provides.test.old.deprecated[1]: ожидается имя члена контракта строкой, получено 7',
+    'provides.test.old.deprecated[2]: ожидается имя члена контракта строкой, получено "a b"',
+    'provides.test.old.deprecated[3]: ожидается имя члена контракта строкой, получено ""',
+    'provides.test.old.deprecated[4]: "list" уже в списке',
+    'provides.test.old.deprecated[5]: ожидается имя члена контракта строкой, получено "x.y"',
+  ]);
+});

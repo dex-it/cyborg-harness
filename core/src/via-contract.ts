@@ -31,26 +31,32 @@ export function readGuard(field: string, raw: unknown, errors: string[]): Member
   }
   const out: Record<string, Guard[]> = {};
   for (const [member, rights] of Object.entries(raw)) {
-    if (!isRecord(rights) || Object.keys(rights).length === 0) {
-      errors.push(`${field}.${member}: ожидается { право: номер аргумента или "номер.поле" }`);
-      continue;
-    }
-    const list: Guard[] = [];
-    for (const [right, at] of Object.entries(rights)) {
-      if (!(GUARD_RIGHTS as readonly string[]).includes(right)) {
-        errors.push(`${field}.${member}.${right}: право не для аргумента - допустимы ${GUARD_RIGHTS.join(', ')}`);
-        continue;
-      }
-      const match = typeof at === 'number' ? (Number.isInteger(at) && at >= 0 && at < 100 ? [String(at), String(at)] : null) : typeof at === 'string' ? ARG.exec(at) : null;
-      if (!match?.[1]) {
-        errors.push(`${field}.${member}.${right}: ожидается номер аргумента или "номер.поле"`);
-        continue;
-      }
-      list.push({ right: right as GuardRight, arg: Number(match[1]), ...(match[2] !== undefined && { field: match[2] }) });
-    }
-    out[member] = list;
+    const list = readRights(`${field}.${member}`, rights, errors);
+    if (list) out[member] = list;
   }
   return out;
+}
+
+/** Права на аргументы одного члена или одной команды: `{ "fs.read": "0.path" }`. */
+export function readRights(field: string, rights: unknown, errors: string[]): Guard[] | undefined {
+  if (!isRecord(rights) || Object.keys(rights).length === 0) {
+    errors.push(`${field}: ожидается { право: номер аргумента или "номер.поле" }`);
+    return undefined;
+  }
+  const list: Guard[] = [];
+  for (const [right, at] of Object.entries(rights)) {
+    if (!(GUARD_RIGHTS as readonly string[]).includes(right)) {
+      errors.push(`${field}.${right}: право не для аргумента - допустимы ${GUARD_RIGHTS.join(', ')}`);
+      continue;
+    }
+    const match = typeof at === 'number' ? (Number.isInteger(at) && at >= 0 && at < 100 ? [String(at), String(at)] : null) : typeof at === 'string' ? ARG.exec(at) : null;
+    if (!match?.[1]) {
+      errors.push(`${field}.${right}: ожидается номер аргумента или "номер.поле"`);
+      continue;
+    }
+    list.push({ right: right as GuardRight, arg: Number(match[1]), ...(match[2] !== undefined && { field: match[2] }) });
+  }
+  return list;
 }
 
 /** Значение аргумента под проверкой; не строка - отказ, а не пропуск: иначе проверку обошёл бы объект вместо пути. */

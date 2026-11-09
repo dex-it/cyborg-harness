@@ -67,6 +67,8 @@ function rejection(r: Rejection): string {
       return `${r.contract}: поставщиков несколько (${r.providers.join(', ')}), а кратность one`;
     case 'cycle':
       return `цикл зависимостей: ${r.members.join(' -> ')}`;
+    case 'command':
+      return `команда ${r.command} объявлена и в манифесте ${r.with.join(', ')}`;
     case 'reserved':
       return `${r.what === 'id' ? 'id' : 'контракт'} ${r.name} из пространства поставки ${r.prefix}*, а плагин сторонний`;
   }
@@ -126,6 +128,8 @@ function journalLine(e: JournalEntry): string {
       return `${yellow('↻')} ${id} включён снова`;
     case 'denied':
       return `${yellow('⛔')} ${id} отказ ctx.os: ${e.detail}`;
+    case 'deprecated-call':
+      return `${yellow('⚠')} ${id} вызывает устаревший ${e.contract}.${e.member} поставщика ${e.provider}`;
     case 'unloaded':
       return `${dim('⏏')} ${id} выгружен${e.by === e.pluginId ? '' : ` вместе с ${e.by}`}${e.error ? `, ошибка: ${e.error}` : ''}`;
     case 'pty-expired':

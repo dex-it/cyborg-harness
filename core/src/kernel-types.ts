@@ -27,14 +27,26 @@ export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'revived' }
   /** `activation: "lazy"`: ждёт первой команды, сочетания, показа вида или потребителя своего контракта. */
   | { readonly pluginId: string; readonly kind: 'waiting' }
-  /** Шлюз `ctx.os` отказал: вызов вне прав манифеста; `reason: 'window'` - окно не пустило вид на чужой адрес. */
+  /** Шлюз `ctx.os` отказал: вызов вне прав манифеста; `reason: 'window'` - окно не пустило вид на чужой адрес; `reason: 'command-callers'` - команда не открыта главным частям других плагинов. */
   | {
       readonly pluginId: string;
       readonly kind: 'denied';
       readonly method: string;
       readonly detail: string;
-      readonly reason?: 'via-contract' | 'window';
+      readonly reason?: 'via-contract' | 'window' | 'command-callers';
       /** Столько таких же отказов склеено за окно после первого. */
+      readonly repeats?: number;
+    }
+  /**
+   * Плагин `pluginId` вызвал член контракта `contract` поставщика `provider`, помеченный `@deprecated` в его манифесте (`provides.<контракт>.deprecated`).
+   * Пишется после проверок вызова; повторы склеиваются за окно, `repeats` - сколько их было после первой записи.
+   */
+  | {
+      readonly pluginId: string;
+      readonly kind: 'deprecated-call';
+      readonly provider: string;
+      readonly contract: string;
+      readonly member: string;
       readonly repeats?: number;
     }
   /** Снят по disable: сам (`by` - он же) или вместе с поставщиком, которого требовал. */
@@ -182,6 +194,8 @@ export interface Kernel {
   /** `plugins.enabled` поменяли в файле: убранные выключаются, вернувшиеся включаются; ответ - кого нет в графе запуска и кто ждёт перезапуска. */
   setEnabled(next: readonly string[]): Promise<EnabledChange>;
   run(command: string, ...args: unknown[]): Promise<unknown>;
+  /** Команда по просьбе вида плагина `pluginId`: исполняет её только он, чужую (в том числе объявленную и им) ядро не запускает - `PermissionDenied`. `callers` не проверяется: вид зовёт как пользователь. */
+  runOwn(pluginId: string, command: string, ...args: unknown[]): Promise<unknown>;
   /** Раздел поменялся извне (файл воркспейса правили руками): активные владельцы получают `onChange`, не прошедший проверку - запись в журнал. */
   reloadSections(kind: 'config' | 'state', ids: readonly string[]): Promise<void>;
   /** Дожидается перезапусков хостов, начатых сторожем, и ленивых активаций. */

@@ -53,7 +53,8 @@ description: "Все поля манифеста плагина manifest.json: �
 "commands": {
   "tabs.open":  { "args": ["string"] },
   "acme.log":   { "args": ["string", "number?"] },
-  "acme.trace": { "args": ["string"], "rest": "any" }
+  "acme.trace": { "args": ["string"], "rest": "any" },
+  "acme.sync":  { "args": ["record"], "callers": "plugins", "guard": { "fs.read": "0.path" } }
 }
 ```
 
@@ -66,6 +67,8 @@ description: "Все поля манифеста плагина manifest.json: �
 | `any` | Любое значение, кроме `undefined` |
 
 `?` в конце вида делает аргумент необязательным, но только в хвосте списка. `rest` - вид всех остальных аргументов; вместе с необязательными не допускается. Имя команды обязано начинаться с `<id>.`.
+
+`callers` - кому открыта команда: `"user"` (по умолчанию) или `"plugins"`. Команду `user` не вызовет главная часть чужого плагина: `PermissionDenied` и запись `denied` с причиной `command-callers`. `guard` - объект `{ право: аргумент }`, права `fs.read`, `fs.write`, `shell`, `secrets.ref`, аргумент - номер или `"номер.поле"`; ядро сверяет значение с правом вызывающего. Разрешён только при `callers: "plugins"`. Подробно - [Контракты и команды](/features/contracts/#кому-открыта-команда).
 
 ## keybindings
 

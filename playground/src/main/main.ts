@@ -9,6 +9,7 @@ import { electronOs } from './os-env.ts';
 import { utilityHosts } from './plugin-hosts.ts';
 import { guardNavigation } from './navigation.ts';
 import { PluginsService } from './plugins.ts';
+import { quietPipes } from './quiet-pipes.ts';
 import { runSpike } from './spike.ts';
 import { runHostsSpike } from './spike-hosts.ts';
 import { runGatewaySpike } from './spike-gateway.ts';
@@ -17,8 +18,8 @@ import { framesOf, fromWindow, registerViewScheme, senderPlugin, serveViews, vie
 import { themeTokens } from './theme.ts';
 import { resolveViewRequest } from './view-files.ts';
 import { ViewTerminals, type TerminalFrame } from './view-terminals.ts';
-import { isRecord } from '../../../core/src/manifest.ts';
-import { RecentWorkspaces } from '../../../core/src/recent.ts';
+import { isRecord } from '@cyborg-harness/core';
+import { RecentWorkspaces } from '@cyborg-harness/core';
 
 // Своя папка данных: cyborg.json и пользовательские плагины playground не смешиваются с настройками Cyborg.
 app.setName('Cyborg Playground');
@@ -289,6 +290,8 @@ app.on('before-quit', (event) => {
 app.on('window-all-closed', () => {
   if (!spiking) app.quit();
 });
+
+quietPipes();
 
 void app.whenReady().then(() => {
   if (gatewaySpikeOut !== undefined) {

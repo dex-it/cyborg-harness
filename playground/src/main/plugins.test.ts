@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { inlineHosts } from '../../../core/src/transports.ts';
-import type { PluginModule } from '../../../core/src/plugin.ts';
-import { WINDOW_OWNER } from '../../../core/src/window-layer.ts';
+import { inlineHosts } from '@cyborg-harness/core';
+import type { PluginModule } from '@cyborg-harness/core';
+import { WINDOW_OWNER } from '@cyborg-harness/core';
 import type { KeyRow } from '../shared/plugins.ts';
 import { discoverPlugins, PluginsService, readSchemaFile, startPlugins } from './plugins.ts';
 
@@ -217,7 +217,7 @@ test('виды: адрес у плагина с ui в манифесте и у �
   const dir = path.join(userData, 'plugins');
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['face', 'voice'] } }));
   plugin(dir, 'face', { commands: { 'face.hi': {}, 'face.sum': { args: ['number', 'number'] } }, optional: { 'demo.echo': '^1' }, ui: { views: { main: './ui/ui.js' } } }, 'export default {}');
-  plugin(dir, 'voice', { commands: ['voice.ping'], provides: { 'demo.echo': '1.0' } }, 'export default {}');
+  plugin(dir, 'voice', { commands: { 'voice.ping': { callers: 'plugins' } }, provides: { 'demo.echo': '1.0' } }, 'export default {}');
   const modules: Record<string, PluginModule> = {
     face: {
       activate(ctx) {
@@ -244,6 +244,8 @@ test('виды: адрес у плагина с ui в манифесте и у �
   assert.deepEqual(service.snapshot().layout, [{ pluginId: 'face', kind: 'view', name: 'main', area: 'sidebar', order: 1000, url: 'cyborg-plugin://face/?view=main' }]);
   assert.deepEqual(service.uiOf('face'), { dir: path.join(dir, 'face'), views: { main: './ui/ui.js' } });
   assert.equal(service.uiOf('voice'), undefined);
+  assert.deepEqual(service.snapshot().plugins.find((p) => p.id === 'voice')?.permissions, ['другие плагины могут звать команды: voice.ping'], 'открытые чужим команды - в правах словами');
+  assert.deepEqual(service.snapshot().plugins.find((p) => p.id === 'face')?.permissions, []);
   assert.deepEqual(await service.runFor('face', 'face.hi'), {});
   assert.deepEqual(await service.runFor('face', 'face.sum', [2, 3]), { value: 5 });
   assert.deepEqual(await service.runFor('face', 'face.sum', 'x'), { error: 'face.sum: аргументы - не массив' });

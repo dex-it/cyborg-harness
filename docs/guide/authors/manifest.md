@@ -46,7 +46,8 @@ description: "Поля manifest.json, их ограничения и то, ка�
 "commands": {
   "acme.ping": {},
   "acme.log": { "args": ["string", "number?"] },
-  "acme.trace": { "args": ["string"], "rest": "any" }
+  "acme.trace": { "args": ["string"], "rest": "any" },
+  "acme.sync": { "args": ["record"], "callers": "plugins", "guard": { "fs.read": "0.path" } }
 }
 ```
 
@@ -56,6 +57,8 @@ description: "Поля manifest.json, их ограничения и то, ка�
 | Виды аргументов | `string`, `number` (конечное), `boolean`, `array`, `strings`, `record`, `any` (всё, кроме `undefined`) |
 | Необязательные | Суффикс `?`, только в конце списка |
 | `rest` | Вид всех остальных аргументов; вместе с необязательными не разрешён |
+| `callers` | `"user"` (по умолчанию) или `"plugins"`: открыта ли команда главным частям других плагинов. Другое значение - ошибка манифеста |
+| `guard` | Право вызывающего на аргумент-путь или ссылку: `{ "fs.read": "0.path" }`; только при `callers: "plugins"`; без поля аргумент в `args` должен быть `string` или `any`, с полем - `record` или `any`, иначе ошибка манифеста |
 
 Ядро сверяет аргументы со схемой до вызова обработчика, откуда бы ни пришла команда; несовпадение - `Invalid` с номером аргумента.
 
