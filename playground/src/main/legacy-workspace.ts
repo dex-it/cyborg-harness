@@ -1,5 +1,5 @@
-import type { Migrated } from '../../../core/src/index.ts';
-import { isRecord } from '../../../core/src/manifest.ts';
+import type { Migrated } from '@cyborg-harness/core';
+import { isRecord } from '@cyborg-harness/core';
 
 /** Конфиг Cyborg до плагинов `{projects, lastProjectId}`: проекты и трекеры - в разделы плагинов, активный проект - в state. */
 export function migrateLegacyWorkspace(doc: Record<string, unknown>): Migrated | undefined {
