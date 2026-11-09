@@ -27,6 +27,18 @@ export function createViewsState(ctx: KernelContext): ViewsState {
 
   return {
     viewKey,
+    forget(pluginId) {
+      const prefix = `${pluginId}/`;
+      const write = writes.then(async () => {
+        const all = memory();
+        const kept = Object.entries(all).filter(([key]) => !key.startsWith(prefix));
+        const removed = Object.keys(all).length - kept.length;
+        if (removed > 0) await options.state?.write('workspace', VIEW_STATE, 1, Object.fromEntries(kept));
+        return removed;
+      });
+      writes = write.catch(() => undefined);
+      return write;
+    },
     viewState: (pluginId, view) => {
       const value = memory()[viewKey(pluginId, view)];
       return value === undefined ? undefined : structuredClone(value);

@@ -51,6 +51,8 @@ export type JournalEntry =
     }
   /** Снят по disable: сам (`by` - он же) или вместе с поставщиком, которого требовал. */
   | { readonly pluginId: string; readonly kind: 'unloaded'; readonly by: string; readonly error?: string; readonly keptPty?: number }
+  /** `Kernel.uninstall`: что стёрто и что ядро оставило, словами; `error` - шаги, которые не удались (повтор доделает). */
+  | { readonly pluginId: string; readonly kind: 'uninstalled'; readonly erased: readonly string[]; readonly left: readonly string[]; readonly error?: string }
   /** pty без владельца не взят через `attach` за льготное время после падения хоста или активации плагина и завершён. */
   | { readonly pluginId: string; readonly kind: 'pty-expired'; readonly id: string; readonly program: string; readonly graceMs: number }
   /** Сочетание объявлено и другим плагином; нажатие получает `winner`. */
@@ -168,6 +170,15 @@ export interface DisablePreview {
   readonly ptys: readonly (PtyInfo & { readonly pluginId: string })[];
 }
 
+/** Итог `Kernel.uninstall`: те же строки идут в запись журнала `uninstalled`. */
+export interface UninstallReport {
+  readonly pluginId: string;
+  /** Что стёрто, словами. */
+  readonly erased: readonly string[];
+  /** Что осталось и почему: человек читает это до того, как поставит плагин с тем же id. */
+  readonly left: readonly string[];
+}
+
 export interface Kernel {
   readonly journal: readonly JournalEntry[];
   /** Активные сейчас, в порядке активации. */
@@ -189,6 +200,15 @@ export interface Kernel {
   disable(pluginId: string, options?: DisableOptions): Promise<void>;
   /** Что выключение заберёт с собой: плагины по requires и их живые pty - о них приложение спрашивает человека до `disable`. */
   disablePreview(pluginId: string): DisablePreview;
+  /**
+   * Удаление плагина после `disable`: стирает его данные и temp (`ctx.os.paths`), секреты `<id>/*`, выбранные человеком пути (`granted`),
+   * память видов, документы и раздел `state` текущего воркспейса, завершает оставленные pty. Раздел `config` остаётся в файлах человека.
+   * Активный (или ждущий первого вызова, или ещё не снятый после сбоя) плагин - `Invalid`: сначала `disablePreview` и вопрос о pty, затем `disable`.
+   * Плагин, которого нет в графе (не включён в настройках, убран с диска), чистится без `disable`. Недопустимый id - `Invalid`, ничего не стёрто.
+   * Какой-то шаг не удался - остальные всё равно выполнены, в журнале запись с `error`, вызов бросает `Unavailable`; повтор доделывает.
+   * Код плагина на диске ядро не трогает.
+   */
+  uninstall(pluginId: string): Promise<UninstallReport>;
   /** «Включить снова»: сбрасывает счёт сбоев, активирует плагин, его пропущенных потребителей и снятых вместе с ним. */
   enable(pluginId: string): Promise<void>;
   /** `plugins.enabled` поменяли в файле: убранные выключаются, вернувшиеся включаются; ответ - кого нет в графе запуска и кто ждёт перезапуска. */

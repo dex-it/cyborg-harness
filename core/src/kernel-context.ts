@@ -4,7 +4,7 @@ import type { DocumentTable } from './documents.ts';
 import type { CoreError } from './errors.ts';
 import type { ContractGraph } from './graph.ts';
 import type { SectionInput, SystemEvent } from './host-runtime.ts';
-import type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Keybinding, LoadOptions } from './kernel-types.ts';
+import type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Keybinding, LoadOptions, UninstallReport } from './kernel-types.ts';
 import type { ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { Notices } from './notices.ts';
@@ -66,6 +66,8 @@ export interface Subscription {
 export interface BridgeEnd {
   readonly host: Host;
   readonly mine: (pluginId: string) => PluginManifest;
+  /** `mine` плюс плагин active или активируется: снятый плагин общего хоста (хост жив ради соседей) ничего не пишет в ядро. */
+  readonly live: (pluginId: string) => PluginManifest;
   /** Запрос с ответом: недоверенный вход сверяется со схемой до обработчика. */
   readonly onRequest: <const S extends WireSpec>(method: string, spec: S, handler: (p: Parsed<S>) => unknown) => void;
   /** Уведомление: отказ идёт в лог, потому что вернуть его отправителю некому. */
@@ -105,6 +107,7 @@ export interface Lifecycle {
   disable(pluginId: string, options?: DisableOptions): Promise<void>;
   setEnabled(next: readonly string[]): Promise<EnabledChange>;
   disablePreview(pluginId: string): DisablePreview;
+  uninstall(pluginId: string): Promise<UninstallReport>;
   shutdown(): Promise<void>;
 }
 
@@ -166,6 +169,8 @@ export interface ViewsState {
   viewKey(pluginId: string, view: string): string;
   viewState(pluginId: string, view: string): unknown;
   setViewState(pluginId: string, view: string, value: unknown): Promise<void>;
+  /** Плагин удалён: стирает все ключи `<плагин>/*`, манифест не нужен; число стёртых. */
+  forget(pluginId: string): Promise<number>;
 }
 
 /** Обработчики сообщений хоста. */

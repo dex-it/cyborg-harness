@@ -41,14 +41,14 @@ export function createSections(ctx: KernelContext): Sections {
     return compiled.ok ? { ...sectionInput, schema } : { status: 'invalid', errors: compiled.errors.map((e) => `${file}: ${e}`) };
   }
 
-  function attach({ mine, onRequest }: BridgeEnd): void {
+  function attach({ live, onRequest }: BridgeEnd): void {
     onRequest('section.write', { pluginId: 'string', kind: ['config', 'state'], layer: 'string', version: 'number', data: 'record' }, async (p) => {
-      const declared = mine(p.pluginId)[p.kind];
+      const declared = live(p.pluginId)[p.kind];
       if (!declared) throw new CoreError('NotDeclared', `${p.pluginId}: раздел ${p.kind} не объявлен в манифесте`);
       if (p.version !== declared.version) {
         throw new CoreError('Invalid', `${p.pluginId}: раздел ${p.kind} версии ${p.version}, а в манифесте ${declared.version}`);
       }
-      if (p.kind === 'config') guardNetFields(mine(p.pluginId), p.data);
+      if (p.kind === 'config') guardNetFields(live(p.pluginId), p.data);
       await options[p.kind]?.write(p.layer, p.pluginId, p.version, p.data);
     });
   }

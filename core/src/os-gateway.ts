@@ -8,6 +8,7 @@ import path from 'node:path';
 import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, ProcessResult, PtyInfo, SecretValue } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
 import { limitsOf, type ResourceLimits } from './limits.ts';
+import { isValidId } from './manifest-fields.ts';
 import type { PluginManifest } from './manifest.ts';
 import { closePools, guardedLookup, isLocalAddress, transport, type Lookup } from './net-transport.ts';
 import type { NotifyLimits, ShowNotice } from './notices.ts';
@@ -23,6 +24,8 @@ export interface SecretStore {
   get(key: string): Promise<string | undefined>;
   set(key: string, value: string): Promise<void>;
   delete(key: string): Promise<void>;
+  /** Стирает все ключи, начинающиеся с `prefix` (ядро зовёт с `<pluginId>/` при удалении плагина); число стёртых. Шифрование ОС не нужно. */
+  deletePrefix(prefix: string): Promise<number>;
 }
 
 /** Среда шлюза: каталоги и то, что даёт только приложение (Electron). Нет адаптера - вызов получает `Unavailable`. */
@@ -277,6 +280,20 @@ function ruleRefusal(m: PluginManifest, key: 'process' | 'pty' | 'launch', progr
   return foreign.length > 0 ? `переменные не в правиле ${key}: ${foreign.join(', ')}` : undefined;
 }
 
+function assertOwnId(pluginId: string): void {
+  if (!isValidId(pluginId)) throw new CoreError('Invalid', `недопустимый id плагина: ${JSON.stringify(pluginId)}`);
+}
+
+/** `<base>/<id>` для допустимого id и только внутри `base`: вторая проверка держит и тогда, когда правило id ослабят. */
+function ownDir(base: string, pluginId: string): string {
+  assertOwnId(pluginId);
+  const root = path.resolve(base);
+  const dir = path.join(root, pluginId);
+  const rel = path.relative(root, dir);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) throw new CoreError('Invalid', `каталог плагина ${pluginId} вне ${base}`);
+  return dir;
+}
+
 /** Шлюз ОС в главном процессе: вызывающего знает ядро по каналу хоста, права - из его манифеста. */
 export class OsGateway {
   readonly #env: OsEnvironment;
@@ -357,6 +374,61 @@ export class OsGateway {
     if (pty === 'detach') this.#pty?.detach(pluginId);
     else this.#pty?.release(pluginId);
     return 0;
+  }
+
+  /*
+   * Удаление плагина (`Kernel.uninstall`): каждый метод стирает один вид данных по id плагина и называет, что стёр.
+   * Id проверяется здесь, а не у вызывающего: путь и ключ строятся из него, и `..` или `/` вывели бы за каталог данных.
+   */
+
+  /** `<dataDir>/<id>` и `<tempDir>/<id>`; ссылка на месте каталога стирается сама, а не то, на что она указывает. Что стёрто - словами. */
+  async eraseFiles(pluginId: string): Promise<string[]> {
+    const dirs = [
+      [ownDir(this.#env.dataDir, pluginId), 'данные плагина (plugin-data)'],
+      [ownDir(this.#env.tempDir, pluginId), 'временные файлы (plugin-temp)'],
+    ] as const;
+    const erased: string[] = [];
+    for (const [dir, what] of dirs) {
+      const present = await fs.lstat(dir).then(
+        () => true,
+        (error: unknown) => {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+          throw error;
+        },
+      );
+      if (!present) continue;
+      await fs.rm(dir, { recursive: true, force: true });
+      erased.push(what);
+    }
+    this.#ownMade.delete(pluginId);
+    return erased;
+  }
+
+  /** Ключи `<id>/` в хранилище секретов; шифрование ОС для стирания не нужно, поэтому `available()` не спрашивается. Число стёртых. */
+  async eraseSecrets(pluginId: string): Promise<number> {
+    assertOwnId(pluginId);
+    return (await this.#env.secrets?.deletePrefix(`${pluginId}/`)) ?? 0;
+  }
+
+  /** Выбор человека в `dialog`: из памяти и из state воркспейса. Число стёртых путей. */
+  async eraseGrants(pluginId: string): Promise<number> {
+    assertOwnId(pluginId);
+    const had = this.#granted.get(pluginId);
+    if (had === undefined) return 0;
+    this.#granted.delete(pluginId);
+    try {
+      await this.#saveGrants();
+    } catch (error) {
+      // Файл ещё хранит выбор: повтор должен записать его заново, а не счесть стёртым.
+      this.#granted.set(pluginId, had);
+      throw error;
+    }
+    return had.size;
+  }
+
+  /** Все pty плагина, оставленные человеком тоже; число живых, которые это завершило. */
+  endAllPty(pluginId: string): number {
+    return this.#pty?.endAll(pluginId) ?? 0;
   }
 
   /** Живые pty плагина - что завершит выключение без оставления. */
@@ -743,6 +815,8 @@ export class OsGateway {
         const options = readDialogOptions(method, args[0]);
         if (!this.#env.dialog) throw new CoreError('Unavailable', 'диалога выбора нет в этой среде');
         const chosen = (await this.#env.dialog.open(options)).filter((c) => path.isAbsolute(c));
+        // Человек выбирал, пока плагин сняли (disable, uninstall): выбор снятому не записывается, иначе его унаследует новый плагин с тем же id.
+        if (!this.#approved.has(m.id)) throw new CoreError('Unavailable', `${m.id} снят, пока шёл выбор`);
         const grants = this.#granted.get(m.id) ?? new Set<string>();
         const before = grants.size;
         for (const c of chosen) grants.add(await real(c));

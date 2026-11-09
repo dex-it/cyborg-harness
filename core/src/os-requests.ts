@@ -38,16 +38,16 @@ export function createOsRequests(ctx: KernelContext): OsRequests {
     return undefined;
   }
 
-  function attach({ mine, onRequest }: BridgeEnd): void {
+  function attach({ live, onRequest }: BridgeEnd): void {
     onRequest('documents', { pluginId: 'string', method: ['list', 'open', 'save', 'close'], args: 'array' }, (p) => {
-      const id = mine(p.pluginId).id;
+      const id = live(p.pluginId).id;
       if (p.method === 'list') return documents.list(id);
       if (p.method === 'open') return documents.open(id, p.args[0], p.args[1]);
       if (p.method === 'save') return documents.save(id, p.args[0], p.args[1]);
       return documents.close(id, p.args[0]);
     });
     onRequest('os', { pluginId: 'string', method: 'string', args: 'array' }, (p) => {
-      const m = mine(p.pluginId);
+      const m = live(p.pluginId);
       if (p.method === 'ui.lock' || p.method === 'ui.unlock') {
         lockCall(m, p.method, p.args);
         return undefined;

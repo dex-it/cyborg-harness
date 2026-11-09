@@ -149,6 +149,8 @@ export function describeEntry(e: JournalEntry): string {
       const what = e.keptPty ? `${base}; процессов в терминале оставлено: ${String(e.keptPty)}` : base;
       return e.error ? `${what}; deactivate с ошибкой: ${e.error}` : what;
     }
+    case 'uninstalled':
+      return `удалён; стёрто: ${list(e.erased) || 'ничего'}; осталось: ${list(e.left)}` + (e.error ? `; не удалось: ${e.error}` : '');
     case 'key-conflict':
       return `сочетание ${e.key} (${e.command}) уже у ${e.winner}: нажатие получает ${e.winner}`;
     case 'key-ignored':
@@ -184,6 +186,8 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
       return 'info';
     case 'unloaded':
       return e.error ? 'warn' : 'info';
+    case 'uninstalled':
+      return e.error ? 'error' : 'info';
     case 'key-conflict':
     case 'key-ignored':
     case 'denied':
