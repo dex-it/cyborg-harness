@@ -100,6 +100,8 @@ export interface Denial {
 }
 
 const MAX_BODY = 16 * 1024 * 1024;
+/** Сколько программа, остановленная `SIGTERM` (тайм-аутом или пределом вывода), может его глушить до `SIGKILL`. */
+const KILL_GRACE_MS = 2000;
 const FETCH_TIMEOUT_MS = 30_000;
 const MAX_SLICE = 1024 * 1024;
 const MAX_WATCHES = 64;
@@ -894,10 +896,17 @@ export class OsGateway {
         // До close, а не до выхода лидера: потомки, держащие его вывод, ещё живы в группе.
         if (child.pid !== undefined) killGroup(child.pid, signal);
       };
-      const timer = timeout > 0 ? setTimeout(() => stop('SIGTERM'), timeout) : undefined;
+      // Программа, глушащая SIGTERM, иначе жила бы без срока, не возвращала бы `run` и держала место в пределе `runs`; таймер снимает `done`.
+      let kill: NodeJS.Timeout | undefined;
+      const terminate = () => {
+        stop('SIGTERM');
+        kill ??= setTimeout(() => stop('SIGKILL'), KILL_GRACE_MS);
+      };
+      const timer = timeout > 0 ? setTimeout(terminate, timeout) : undefined;
       const untrack = this.#track(pluginId, () => stop('SIGKILL'));
       const done = () => {
         clearTimeout(timer);
+        clearTimeout(kill);
         untrack();
       };
       let truncated = false;
@@ -916,7 +925,7 @@ export class OsGateway {
             text += decoder.write(part);
             if (part !== chunk) {
               full = truncated = true;
-              stop('SIGTERM');
+              terminate();
             }
           },
           // Оборванный символ на границе предела не дописывается: `end()` дал бы U+FFFD.

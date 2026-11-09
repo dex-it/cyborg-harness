@@ -163,11 +163,23 @@ test('process.run: вывод больше предела - truncated, прог�
   assert.deepEqual([err.truncated, err.stderr.length, err.stdout], [true, 1000, '']);
   const endless = await run(`for(;;)process.stdout.write('x'.repeat(65536))`);
   assert.deepEqual([endless.truncated, endless.signal, endless.stdout.length], [true, 'SIGTERM', 1000], 'бесконечный вывод останавливает программу');
+  const deaf = await run(`process.on('SIGTERM',()=>{});process.stdout.write('x'.repeat(2000));setInterval(()=>{},1000)`);
+  assert.deepEqual([deaf.truncated, deaf.signal], [true, 'SIGKILL'], 'программа, глушащая SIGTERM, добита');
   const raised = await run(`process.stdout.write('x'.repeat(3000))`, { maxOutputBytes: 3000 });
   assert.deepEqual([raised.truncated, raised.stdout.length], [false, 3000], 'опция поднимает предел');
   const lowered = await run(`process.stdout.write('x'.repeat(100))`, { maxOutputBytes: 10 });
   assert.deepEqual([lowered.truncated, lowered.stdout], [true, 'x'.repeat(10)], 'опция опускает предел');
   for (const bad of [0, -1, 1.5, 4001, '10', Number.NaN]) await assert.rejects(run('0', { maxOutputBytes: bad }), { code: 'Invalid', message: /maxOutputBytes/ }, String(bad));
+  await k.unload();
+});
+
+test('process.run: тайм-аут программы, глушащей SIGTERM, кончается SIGKILL, а не висит в пределе runs', async () => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ runner: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp, limits: {} });
+  const t = Date.now();
+  const got = await os('runner').process!.run(process.execPath, ['-e', `process.on('SIGTERM',()=>{});setInterval(()=>{},1000)`], { timeoutMs: 200 });
+  assert.deepEqual([got.signal, got.truncated], ['SIGKILL', false]);
+  assert.ok(Date.now() - t < 8000, 'не ждали вечно');
   await k.unload();
 });
 
