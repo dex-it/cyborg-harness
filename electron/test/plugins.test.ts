@@ -6,6 +6,7 @@ import path from 'node:path';
 import { inlineHosts } from '@cyborg-harness/core';
 import type { PluginModule } from '@cyborg-harness/core';
 import { WINDOW_OWNER } from '@cyborg-harness/core';
+import { DELIVERY_FILE, writeDelivery } from '@cyborg-harness/core/delivery';
 import type { KeyRow } from '../src/snapshot.ts';
 import { discoverPlugins, PluginsService, readSchemaFile, startPlugins } from '../src/plugins.ts';
 
@@ -48,8 +49,10 @@ test('поиск: повтор id внутри одного каталога н�
   const user = tmp();
   fs.mkdirSync(path.join(user, 'b'));
   fs.writeFileSync(path.join(user, 'b', 'manifest.json'), JSON.stringify({ id: 'z' }));
+  fs.writeFileSync(path.join(user, 'b', 'index.mjs'), 'export default {}');
   fs.mkdirSync(path.join(user, 'a'));
   fs.writeFileSync(path.join(user, 'a', 'manifest.json'), JSON.stringify({ id: 'z' }));
+  fs.writeFileSync(path.join(user, 'a', 'index.mjs'), 'export default {}');
   const found = discoverPlugins([user]);
   assert.deepEqual(found.problems, [`повтор id z в ${path.join(user, 'b')}: действует ${path.join(user, 'a')}`]);
 });
@@ -535,4 +538,152 @@ test('заголовок окна: имя приложения задаёт пр
     await kernel.unload();
   }
   assert.deepEqual(titles, ['workspace.cyborg.json - Cyborg', 'workspace.cyborg.json - Мой редактор']);
+});
+
+// P-07: поставка. Точка входа встроенного плагина - index.mjs и только он; угадывание остаётся плагинам каталога пользователя и режиму стенда.
+// Контрольные суммы (delivery.json) на этапе 1 только сообщают о расхождении.
+
+/** Поставка из плагинов с главной частью index.mjs и списком хешей. */
+async function delivery(ids: readonly string[]): Promise<string> {
+  const dir = tmp();
+  for (const id of ids) plugin(dir, id, {}, 'export default {}');
+  await writeDelivery(dir);
+  return dir;
+}
+
+const inline = () => inlineHosts(async () => ({ activate() {} }));
+
+test('точка входа поставки: index.mjs; index.ts и index.js встроенного не угадываются, причина называет найденное; у каталога пользователя угадывание прежнее', () => {
+  const builtin = tmp();
+  const user = tmp();
+  plugin(builtin, 'built', {}, 'export default {}');
+  plugin(builtin, 'source', {}, 'export default {}', 'index.ts');
+  plugin(builtin, 'bare', {});
+  plugin(user, 'dev', {}, 'export default {}', 'index.ts');
+  const found = discoverPlugins([builtin, user], { strictEntry: [builtin] });
+  assert.deepEqual([...found.entries.keys()].sort(), ['built', 'dev']);
+  assert.deepEqual([...found.missing.keys()].sort(), ['bare', 'source']);
+  assert.match(found.missing.get('source') ?? '', /нет точки входа index\.mjs.*найден index\.ts.*cyborg-plugin build/);
+  assert.match(found.missing.get('bare') ?? '', /нет точки входа index\.mjs/);
+  assert.ok(found.problems.some((p) => p.includes(path.join(builtin, 'source')) && p.includes('index.mjs')), 'причина и в problems');
+  // Без списка строгих каталогов поведение прежнее: угадывание по трём именам.
+  const loose = discoverPlugins([builtin]);
+  assert.deepEqual([...loose.entries.keys()].sort(), ['built', 'source']);
+  assert.deepEqual([...loose.missing.keys()], ['bare']);
+});
+
+test('старт: встроенный плагин без index.mjs не активируется, в журнале ядра запись failed с понятной причиной, остальные активны', async (t) => {
+  const userData = tmp();
+  const builtinDir = await delivery(['good']);
+  plugin(builtinDir, 'source', {}, 'export default {}', 'index.ts');
+  await writeDelivery(builtinDir);
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['good', 'source'] } }));
+  const problems: string[] = [];
+  const kernel = await startPlugins({ userData, builtinDir, spawnHost: inline(), log: () => {}, onProblem: (p) => problems.push(p) });
+  t.after(() => kernel.unload());
+  assert.deepEqual(kernel.active, ['good']);
+  const failed = kernel.journal.find((e) => e.kind === 'failed' && e.pluginId === 'source');
+  assert.ok(failed && 'error' in failed);
+  assert.match(failed.error, /нет точки входа index\.mjs.*найден index\.ts/);
+  assert.ok(problems.some((p) => p.includes('source') && p.includes('index.mjs')));
+});
+
+test('режим стенда: точка входа встроенного угадывается (index.ts), контрольные суммы не проверяются и об их отсутствии молчим', async (t) => {
+  const userData = tmp();
+  const builtinDir = tmp();
+  plugin(builtinDir, 'source', {}, 'export default {}', 'index.ts');
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['source'] } }));
+  const problems: string[] = [];
+  const kernel = await startPlugins({ userData, builtinDir, builtinMode: 'stand', spawnHost: inline(), log: () => {}, onProblem: (p) => problems.push(p) });
+  t.after(() => kernel.unload());
+  assert.deepEqual(kernel.active, ['source']);
+  assert.deepEqual(problems, []);
+});
+
+test('поставка = N плагинов: список каталога равен списку включённых, все активны в хосте builtin, ни одного пропущенного и лишнего; расхождений сумм нет', async (t) => {
+  const ids = ['agent', 'files', 'notes', 'sessions', 'tasks', 'terminal'];
+  const builtinDir = await delivery(ids);
+  const userData = tmp();
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ids } }));
+  const problems: string[] = [];
+  const found: string[][] = [];
+  const kernel = await startPlugins({ userData, builtinDir, spawnHost: inline(), log: () => {}, onProblem: (p) => problems.push(p), onDiscovered: (d) => found.push([...d.origins.keys()].sort()) });
+  t.after(() => kernel.unload());
+  assert.deepEqual(found, [ids], 'каталог поставки перечислен списком: ни лишнего, ни пропущенного');
+  assert.deepEqual([...kernel.active].sort(), ids);
+  assert.deepEqual(ids.map((id) => kernel.hostOf(id)), ids.map(() => 'builtin'));
+  assert.ok(!kernel.journal.some((e) => e.kind === 'third-party' || e.kind === 'failed' || e.kind === 'not-found'));
+  assert.deepEqual(problems, []);
+});
+
+test('подмена: плагин каталога пользователя с id встроенного отвергнут, встроенный активен и его код тот же, код подмены не выполнен', async (t) => {
+  const ids = ['files', 'notes'];
+  const builtinDir = await delivery(ids);
+  const userData = tmp();
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ids } }));
+  plugin(path.join(userData, 'plugins'), 'files', {}, 'export default { подмена: true }');
+  plugin(path.join(userData, 'plugins'), 'notes', {}, 'export default { подмена: true }', 'index.ts');
+  const entries: string[] = [];
+  const problems: string[] = [];
+  const service = new PluginsService({ changed: () => {}, alert: () => {} });
+  await service.start({
+    userData,
+    builtinDir,
+    userPlugins: true,
+    spawnHost: inlineHosts(async (entry) => {
+      entries.push(entry);
+      return { activate() {} };
+    }),
+    log: (line) => problems.push(line),
+  });
+  t.after(() => service.unload());
+  assert.deepEqual(entries.map((e) => path.relative(builtinDir, new URL(e).pathname)).sort(), ['files/index.mjs', 'notes/index.mjs'], 'хост получил только файлы поставки');
+  assert.deepEqual(service.snapshot().plugins.map((r) => [r.id, r.origin, r.state]), [['files', 'bundled', 'active'], ['notes', 'bundled', 'active']]);
+  assert.equal(problems.filter((l) => l.includes('повтор id')).length, 2, 'оба отказа в логе');
+  assert.ok(service.snapshot().problems.some((p) => p.includes('повтор id files')));
+});
+
+test('контрольные суммы: изменённый, пропавший и лишний файл поставки попадают в лог и problems, старт не отказан, плагин активен', async (t) => {
+  const builtinDir = await delivery(['files', 'notes']);
+  fs.writeFileSync(path.join(builtinDir, 'files', 'index.mjs'), 'export default { изменён: true }');
+  fs.rmSync(path.join(builtinDir, 'notes', 'manifest.json'));
+  fs.writeFileSync(path.join(builtinDir, 'notes', 'extra.js'), '1');
+  const userData = tmp();
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['files'] } }));
+  const lines: string[] = [];
+  const problems: string[] = [];
+  const kernel = await startPlugins({ userData, builtinDir, spawnHost: inline(), log: (l) => lines.push(l), onProblem: (p) => problems.push(p) });
+  t.after(() => kernel.unload());
+  assert.deepEqual(kernel.active, ['files'], 'расхождение не отказывает в старте');
+  const sums = problems.filter((p) => p.startsWith('контрольная сумма поставки: '));
+  assert.ok(sums.some((p) => p.includes('files/index.mjs') && p.includes('контрольная сумма не совпала')));
+  assert.ok(sums.some((p) => p.includes('notes/manifest.json') && p.includes('файла нет в поставке')));
+  assert.ok(sums.some((p) => p.includes('notes/extra.js') && p.includes(DELIVERY_FILE)));
+  assert.ok(lines.some((l) => l.startsWith('[plugins] контрольная сумма поставки: files/index.mjs')), 'и в лог главного процесса');
+});
+
+test('контрольные суммы: нет delivery.json у непустой поставки или он битый - жалоба, старт идёт; пустой и отсутствующий каталог поставки молчат', async (t) => {
+  const builtinDir = tmp();
+  plugin(builtinDir, 'files', {}, 'export default {}');
+  const userData = tmp();
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['files'] } }));
+  const problems: string[] = [];
+  const kernel = await startPlugins({ userData, builtinDir, spawnHost: inline(), log: () => {}, onProblem: (p) => problems.push(p) });
+  assert.deepEqual(kernel.active, ['files']);
+  assert.ok(problems.some((p) => p.includes('нет delivery.json') && p.includes(builtinDir)));
+  await kernel.unload();
+
+  fs.writeFileSync(path.join(builtinDir, DELIVERY_FILE), '{ нет');
+  const broken: string[] = [];
+  const again = await startPlugins({ userData, builtinDir, spawnHost: inline(), log: () => {}, onProblem: (p) => broken.push(p) });
+  assert.deepEqual(again.active, ['files']);
+  assert.ok(broken.some((p) => p.includes(DELIVERY_FILE) && p.includes('не разобран')));
+  await again.unload();
+
+  for (const empty of [tmp(), path.join(tmp(), 'нет')]) {
+    const quiet: string[] = [];
+    const k = await startPlugins({ userData, builtinDir: empty, spawnHost: inline(), log: () => {}, onProblem: (p) => quiet.push(p) });
+    assert.ok(!quiet.some((p) => p.includes(DELIVERY_FILE)), `в ${empty} суммы не нужны`);
+    await k.unload();
+  }
 });

@@ -50,6 +50,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
     ],
     types: [
       'Discovered',
+      'DiscoverOptions',
       'ElectronOsOptions',
       'PluginUi',
       'PluginsEvents',

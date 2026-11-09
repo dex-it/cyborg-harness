@@ -61,6 +61,8 @@ const spiking = spikeOut !== undefined || hostsSpikeOut !== undefined || gateway
 const safeMode = process.argv.includes('--safe-mode');
 /** `--user-plugins` (SAD 6.1): читать каталог плагинов пользователя; без флага грузятся только плагины из поставки. Флаг только в командной строке: файл воркспейса может лежать в репозитории. Смена воркспейса и безопасного режима его сохраняет (перезапуск берёт argv). */
 const userPlugins = process.argv.includes(USER_PLUGINS_FLAG);
+/** `--delivery` (P-07): каталог `plugins` рядом с приложением - поставка, собранная `cyborg-plugin delivery` (index.mjs и delivery.json); без флага это стенд с исходниками (index.ts). */
+const deliveryMode = process.argv.includes('--delivery');
 
 let win: BrowserWindow | undefined;
 
@@ -169,6 +171,8 @@ void app.whenReady().then(() => {
     safeMode,
     userPlugins,
     builtinDir: path.join(__dirname, 'plugins'),
+    // Стенд собирает плагины как исходники (index.ts), без delivery.json: поставку с index.mjs и суммами собирает `cyborg-plugin delivery` (P-07).
+    builtinMode: deliveryMode ? 'delivery' : 'stand',
     spawnHost: hosts.spawn,
     pidOf: hosts.pidOf,
     idleSeconds: () => powerMonitor.getSystemIdleTime(),
