@@ -733,21 +733,21 @@ export class OsGateway {
         // Не обычный файл по пути (каталог, ссылка) или нет пути - наблюдение закрыто с причиной: следить за детьми каталога плагин не просил.
         const isFile = first.isFile();
         let known = { ino: first.ino, dev: first.dev };
-        let busy = false;
-        let more = false;
-        let forced = false;
+        // Поля объекта, а не переменные: события приходят во время `await`, и анализ потока иначе считает `more` всегда ложным (отсюда и `again`).
+        const recheckState = { busy: false, more: false, forced: false };
+        const again = (): boolean => recheckState.more;
         const recheck = async (force: boolean): Promise<void> => {
-          forced ||= force;
-          if (busy) {
-            more = true;
+          recheckState.forced ||= force;
+          if (recheckState.busy) {
+            recheckState.more = true;
             return;
           }
-          busy = true;
+          recheckState.busy = true;
           try {
             do {
-              more = false;
-              const must = forced;
-              forced = false;
+              recheckState.more = false;
+              const must = recheckState.forced;
+              recheckState.forced = false;
               let now: Stats;
               try {
                 now = await fs.lstat(target);
@@ -770,9 +770,9 @@ export class OsGateway {
               }
               known = { ino: now.ino, dev: now.dev };
               stale.close();
-            } while (more);
+            } while (again());
           } finally {
-            busy = false;
+            recheckState.busy = false;
           }
         };
         const open = this.#env.watch ?? watchFs;

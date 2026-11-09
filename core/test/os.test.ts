@@ -550,7 +550,7 @@ test('fs: ссылка внутри области - ответ зависит �
     await assert.rejects(fs.readText(path.join(box.work, 'to-existing')), { code: 'PermissionDenied' });
     await assert.rejects(fs.stat(path.join(box.work, 'to-missing')), { code: 'NotFound' });
     await assert.rejects(fs.readText(path.join(box.work, 'to-missing')), (error: Error & { code?: string }) => error.code !== 'PermissionDenied', 'чтение висячей ссылки: ошибка самой операции, не отказ области');
-    await assert.rejects(fs.stat(path.join(box.work, 'to-closed')), (error: Error & { code?: string }) => error.code === 'Remote' && /EACCES/.test(error.message));
+    await assert.rejects(fs.stat(path.join(box.work, 'to-closed')), (error: Error & { code?: string }) => error.code === 'Remote' && error.message.includes('EACCES'));
     // Названный плагином путь вне области остаётся PermissionDenied при любом состоянии цели.
     for (const named of [path.join(box.outside, 'there'), path.join(box.outside, 'нет'), path.join(closed, 'x')]) await assert.rejects(fs.readText(named), { code: 'PermissionDenied' }, named);
     await k.unload();
