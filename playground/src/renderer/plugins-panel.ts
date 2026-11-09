@@ -2,7 +2,7 @@
 
 import { keyOfInput } from '@cyborg-harness/core/keys';
 import type { FeedLine, KeptPtyRow, KeyRow, PluginRow, PluginsSnapshot, Reply } from '../shared/plugins.ts';
-import type { DisablePreview } from '@cyborg-harness/core';
+import type { DisablePreview } from '@cyborg-harness/core/window';
 import { byId, el } from './dom.ts';
 import { ViewsPanel } from './views-panel.ts';
 import { moveFocus } from './focus.ts';

@@ -6,7 +6,6 @@ import {
   describeOpenCommands,
   describePermissions,
   entryLevel,
-  errorMessage,
   entryPlugins,
   appendBounded,
   keyOfInput,
@@ -24,9 +23,11 @@ import {
   type TerminalSink,
   type TerminalView,
   type WatchdogOptions,
+  type WindowSnapshot,
+  MENU_OWNER,
+  WINDOW_OWNER,
 } from '@cyborg-harness/core';
-import { isRecord } from '@cyborg-harness/core';
-import { MENU_OWNER, WINDOW_OWNER, type WindowSnapshot } from '@cyborg-harness/core';
+import { errorMessage, isRecord } from './guards.ts';
 import type { FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from '../shared/plugins.ts';
 import { viewOrigin } from '../shared/views.ts';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
