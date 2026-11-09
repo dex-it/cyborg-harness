@@ -7,13 +7,18 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import type { PluginContext, PtyExit } from '@cyborg-harness/contracts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { describeEntry } from '../src/status.ts';
-import { load, type JournalEntry, type LoadOptions } from '../src/loader.ts';
+import { load as loadKernel, type JournalEntry, type Kernel, type LoadOptions } from '../src/loader.ts';
+import { trackKernels } from './kernels.ts';
 import { inlinePtyHost } from '../src/pty-link.ts';
 import { PTY_HOST_LOST, type PtyBackend } from '../src/pty.ts';
 import { Endpoint } from '../src/rpc.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { fakePty, type FakeProc } from '../../testing/src/fake-pty.ts';
 import { fakeView } from './view-channel.ts';
+
+// Ядро выгружается после каждого теста файла, и упавшим тоже: иначе слежение и программы держат процесс файла (core/test/kernels.ts).
+const track = trackKernels();
+const load = async (options: LoadOptions): Promise<Kernel> => track(await loadKernel(options));
 
 const tick = () => sleep(30);
 const shell = { pty: [{ program: '/bin/bash', args: [] }] };

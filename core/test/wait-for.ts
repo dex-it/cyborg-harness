@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-export const DEFAULT_TIMEOUT = 15_000;
-export const DEFAULT_INTERVAL = 10;
+const DEFAULT_TIMEOUT = 15_000;
+const DEFAULT_INTERVAL = 10;
 
 export interface WaitForOptions {
   /** Общий предел ожидания, мс. Большой запас нужен медленному раннеру CI, а не готовому условию: оно возвращается сразу. */
@@ -19,7 +19,7 @@ export interface WaitForOptions {
 export async function waitFor<T>(what: string, probe: () => T | Promise<T>, { timeout = DEFAULT_TIMEOUT, interval = DEFAULT_INTERVAL }: WaitForOptions = {}): Promise<Exclude<T, false | undefined>> {
   const end = Date.now() + timeout;
   let probes = 0;
-  let last: unknown;
+  let last: Error | undefined;
   for (;;) {
     probes++;
     try {
@@ -27,11 +27,11 @@ export async function waitFor<T>(what: string, probe: () => T | Promise<T>, { ti
       if (value !== undefined && value !== false) return value as Exclude<T, false | undefined>;
       last = undefined;
     } catch (error) {
-      last = error;
+      last = error instanceof Error ? error : new Error(String(error));
     }
     if (Date.now() >= end) break;
     await sleep(interval);
   }
-  const reason = last instanceof Error ? `; последняя ошибка пробы: ${last.message}` : last === undefined ? '' : `; последняя ошибка пробы: ${String(last)}`;
+  const reason = last ? `; последняя ошибка пробы: ${last.message}` : '';
   assert.fail(`${what}: не дождались за ${String(timeout)} мс (проб: ${String(probes)})${reason}`);
 }

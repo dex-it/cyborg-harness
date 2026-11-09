@@ -14,7 +14,7 @@ test('waitFor: условие, ставшее истинным позже, во�
 
 test('waitFor: истинное с первой пробы не ждёт ни интервала', async () => {
   const started = Date.now();
-  assert.equal(await waitFor('сразу', () => 0 === 0, { interval: 1000 }), true);
+  assert.equal(await waitFor('сразу', () => 'есть', { interval: 1000 }), 'есть');
   assert.ok(Date.now() - started < 500);
 });
 
@@ -37,7 +37,7 @@ test('waitFor: по пределу падает с названием услов
   const started = Date.now();
   await assert.rejects(
     waitFor('событие журнала', () => (calls++, false), { timeout: 100, interval: 10 }),
-    (e: Error) => e.name === 'AssertionError' && /событие журнала: не дождались за 100 мс/.test(e.message) && /проб: \d+/.test(e.message),
+    (e: Error) => e.name === 'AssertionError' && e.message.includes('событие журнала: не дождались за 100 мс') && /проб: \d+/.test(e.message),
   );
   assert.ok(Date.now() - started < 1500, 'предел не соблюдён');
   assert.ok(calls >= 2);
@@ -56,10 +56,4 @@ test('waitFor: проба, бросающая исключение, повтор
     }, { timeout: 50, interval: 5 }),
     /файл: не дождались за 50 мс.*нет файла X/s,
   );
-});
-
-test('waitFor: предел по умолчанию велик для медленного раннера, шаг мал', async () => {
-  const { DEFAULT_TIMEOUT, DEFAULT_INTERVAL } = await import('./wait-for.ts');
-  assert.ok(DEFAULT_TIMEOUT >= 10_000);
-  assert.ok(DEFAULT_INTERVAL <= 25);
 });

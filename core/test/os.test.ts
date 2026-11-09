@@ -7,7 +7,8 @@ import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, PluginOs } from '@cyborg-harness/contracts';
 import { SectionStore, type LayerStore } from '../src/config.ts';
-import { load } from '../src/loader.ts';
+import { load as loadKernel, type Kernel, type LoadOptions } from '../src/loader.ts';
+import { trackKernels } from './kernels.ts';
 import { parseManifest } from '../src/manifest.ts';
 import { describePermissions, envNameAllowed } from '../src/permissions.ts';
 import type { NoticeEvents } from '../src/notices.ts';
@@ -15,6 +16,11 @@ import { memorySecrets } from '../../testing/src/memory.ts';
 import { OsGateway, type OsEnvironment } from '../src/os-gateway.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
+import { waitFor } from './wait-for.ts';
+
+// Ядро выгружается после каждого теста файла, и упавшим тоже: иначе слежение и программы держат процесс файла (core/test/kernels.ts).
+const track = trackKernels();
+const load = async (options: LoadOptions): Promise<Kernel> => track(await loadKernel(options));
 
 const manifest = (id: string, permissions?: unknown) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...(permissions !== undefined && { permissions }) });
 
@@ -293,7 +299,7 @@ test('notify: клик поднимает окно, закрывает увед�
   const first = await bell.show('Сессия ждёт', 'ответа', { onClick: { command: 'bell.open', args: ['s1'] } });
   assert.equal(typeof first, 'string');
   shown[0]!.events.click();
-  for (let i = 0; i < 100 && ran.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+  await waitFor('команда уведомления выполнена', () => ran.length > 0);
   assert.deepEqual(ran, ['s1']);
   assert.equal(raised, 1);
   assert.equal(shown[0]!.closed, true, 'клик закрывает уведомление');
@@ -592,9 +598,12 @@ test('fs.watch: имена изменённых в каталоге склеен
   await writeFile(path.join(box.work, 'a.jsonl'), '1\n');
   await appendFile(path.join(box.work, 'a.jsonl'), '2\n');
   await writeFile(path.join(box.work, 'b.jsonl'), '1\n');
-  for (let i = 0; i < 100 && !batches.flat().includes('b.jsonl'); i++) await new Promise((r) => setTimeout(r, 20));
-  assert.deepEqual([...new Set(batches.flat())].toSorted(), ['a.jsonl', 'b.jsonl']);
-  assert.ok(batches.length < 4, `события не склеены: ${JSON.stringify(batches)}`);
+  // macOS (FSEvents) в только что созданном каталоге присылает ещё и событие о самом каталоге (его имя - `work`), если создан он за миг до слежения: плагину оно не принадлежит.
+  const own = path.basename(box.work);
+  const written = () => batches.flat().filter((name) => name !== own);
+  await waitFor('событие о b.jsonl', () => written().includes('b.jsonl'));
+  assert.deepEqual([...new Set(written())].toSorted(), ['a.jsonl', 'b.jsonl']);
+  assert.ok(batches.filter((names) => names.some((name) => name !== own)).length < 4, `события не склеены: ${JSON.stringify(batches)}`);
   sub.dispose();
   await new Promise((r) => setTimeout(r, 100));
   const seen = batches.length;
@@ -605,8 +614,7 @@ test('fs.watch: имена изменённых в каталоге склеен
   const fileEvents: (readonly string[])[] = [];
   await fs.watch(path.join(box.work, 'a.jsonl'), (names) => fileEvents.push(names));
   await appendFile(path.join(box.work, 'a.jsonl'), '3\n');
-  for (let i = 0; i < 100 && fileEvents.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
-  assert.ok(fileEvents.length > 0, 'дописанный файл не замечен');
+  await waitFor('событие дописанного файла', () => fileEvents.length > 0);
 
   await assert.rejects(fs.watch(box.outside, () => undefined), { code: 'PermissionDenied' });
   await assert.rejects(fs.watch(path.join(box.work, 'нет'), () => undefined));
@@ -627,8 +635,7 @@ test('fs.watch файла: каждая из записей writeText (подм�
   const closed: string[] = [];
   const sub = await fs.watch(file, (names) => events.push(names), (reason) => closed.push(reason));
   const next = async (n: number) => {
-    for (let i = 0; i < 100 && events.length < n; i++) await new Promise((r) => setTimeout(r, 20));
-    assert.ok(events.length >= n, `событий ${String(events.length)} из ${String(n)}; onClose: ${closed.join()}`);
+    await waitFor(`событий ${String(n)}; onClose: ${closed.join()}`, () => events.length >= n);
   };
   for (let i = 1; i <= 4; i++) {
     await fs.writeText(file, String(i));
@@ -655,7 +662,7 @@ test('fs.watch файла: старый inode держит открытым др
   try {
     for (let i = 1; i <= 3; i++) {
       await fs.writeText(file, String(i));
-      await waitFor(() => events.length >= i, `событий ${String(events.length)} из ${String(i)}; onClose: ${closed.join()}`);
+      await waitFor(`событий ${String(i)}; onClose: ${closed.join()}`, () => events.length >= i);
       await new Promise((r) => setTimeout(r, 100));
     }
   } finally {
@@ -675,7 +682,7 @@ test('fs.watch файла: файл удалён - onClose с причиной, 
   const closed: string[] = [];
   await os('app').fs.watch(file, () => undefined, (reason) => closed.push(reason));
   await rm(file);
-  for (let i = 0; i < 100 && closed.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+  await waitFor('onClose после удаления файла', () => closed.length > 0);
   assert.equal(closed.length, 1, 'удаление файла закрывает наблюдение с причиной');
 });
 
@@ -695,11 +702,6 @@ function fakeWatchers() {
   return { list, watch };
 }
 
-async function waitFor(cond: () => boolean, what: string) {
-  for (let i = 0; i < 100 && !cond(); i++) await new Promise((r) => setTimeout(r, 20));
-  assert.ok(cond(), what);
-}
-
 test('fs.watch файла: на change inode пути сверяется со старым - подмена без rename (старый inode держит другой процесс) переоткрывает наблюдение', async (t) => {
   await using box = await sandbox();
   const { list, watch } = fakeWatchers();
@@ -715,15 +717,15 @@ test('fs.watch файла: на change inode пути сверяется со с
   // Тот же inode (дописали на месте): change не переоткрывает.
   await writeFile(file, 'на месте');
   list[0]!.fire('change');
-  await waitFor(() => events.length === 1, 'событие дописанного файла');
+  await waitFor('событие дописанного файла', () => events.length === 1);
   assert.equal(list.length, 1, 'inode тот же - наблюдатель прежний');
   // Файл подменён через rename, а rename-события нет: пришёл только change.
   for (let i = 1; i <= 3; i++) {
     await fs.writeText(file, String(i));
     list[i - 1]!.fire('change');
-    await waitFor(() => list.length === i + 1, `переоткрытие после подмены ${String(i)}`);
+    await waitFor(`переоткрытие после подмены ${String(i)}`, () => list.length === i + 1);
     assert.equal(list[i - 1]!.closed, true, 'прежний наблюдатель закрыт');
-    await waitFor(() => events.length === i + 1, `событие подмены ${String(i)}`);
+    await waitFor(`событие подмены ${String(i)}`, () => events.length === i + 1);
   }
   list[0]!.fire('change');
   await new Promise((r) => setTimeout(r, 120));
@@ -752,7 +754,7 @@ test('fs.watch файла: заменён каталогом с тем же им
     await rm(file);
     await replace(file);
     list[before]!.fire('rename', name);
-    await waitFor(() => closed.length === 1, `${name}: onClose`);
+    await waitFor(`${name}: onClose`, () => closed.length === 1);
     assert.match(closed[0]!, /не обычный файл/);
     assert.equal(list.length, before + 1, `${name}: новый наблюдатель на подмену не ставился`);
     assert.equal(list[before]!.closed, true);
@@ -776,7 +778,7 @@ test('fs.watch: лимит не обходится параллельными в
   const seen: (readonly string[])[] = [];
   await fs.watch(box.outside, (names) => seen.push(names));
   await writeFile(path.join(box.outside, 'a'), '1');
-  for (let i = 0; i < 100 && seen.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+  await waitFor('событие о файле a', () => seen.length > 0);
   assert.deepEqual(seen.flat(), ['a']);
   await os('projects').security!.setRoots([]);
   await writeFile(path.join(box.outside, 'b'), '1');

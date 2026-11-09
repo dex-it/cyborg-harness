@@ -8,6 +8,7 @@ import type { PluginModule } from '@cyborg-harness/core';
 import { WINDOW_OWNER } from '@cyborg-harness/core';
 import type { KeyRow } from '../src/snapshot.ts';
 import { discoverPlugins, PluginsService, readSchemaFile, startPlugins } from '../src/plugins.ts';
+import { waitFor } from '../../core/test/wait-for.ts';
 
 // Контракт для плагинов-подделок теста: карту контрактов приложения (playground/plugins/contracts.ts) пакет не знает.
 declare module '@cyborg-harness/contracts' {
@@ -479,16 +480,12 @@ test('plugins.enabled из файла воркспейса без перезап
   });
   // Без выгрузки упавший тест держит слежение, и процесс файла не выходит.
   t.after(() => kernel.unload());
-  const until = async (what: string, ok: () => boolean) => {
-    for (let i = 0; i < 100 && !ok(); i++) await new Promise((r) => setTimeout(r, 20));
-    assert.ok(ok(), what);
-  };
   assert.deepEqual(kernel.active, ['a', 'b']);
   write(['a']);
-  await until('b выключен', () => applied === 1);
+  await waitFor('b выключен', () => applied === 1);
   assert.deepEqual(kernel.active, ['a']);
   write(['a', 'b', 'c']);
-  await until('b включён', () => applied === 2);
+  await waitFor('b включён', () => applied === 2);
   assert.deepEqual(kernel.active, ['a', 'b']);
   assert.deepEqual(problems, ['plugins.enabled: c - включатся после перезапуска']);
 });
