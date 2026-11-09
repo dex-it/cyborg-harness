@@ -214,7 +214,10 @@ export interface OsNotify {
 }
 
 export interface PluginOs {
-  /** Свои каталоги: данные и временный; читать и писать в них можно без права. */
+  /**
+   * Свои каталоги: данные и временный; читать и писать в них можно без права. Каталоги общие для всех процессов приложения с этим `userData`
+   * (несколько воркспейсов - несколько процессов, K-20): плагин, пишущий в них, сам отвечает за атомарность записи (временный файл и `rename`) и за гонки двух процессов.
+   */
   readonly paths: { readonly data: string; readonly temp: string; readonly home: string };
   readonly fs: OsFs;
   readonly pty?: OsPty;
