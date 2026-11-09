@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFile, chmod, lstat, mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, lstat, mkdtemp, mkdir, readdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, PluginOs } from '@cyborg-harness/contracts';
@@ -508,6 +508,27 @@ test('fs.writeText: временный файл не ложится вне fs.wr
     }
   }
   assert.deepEqual(denied(), []);
+  await k.unload();
+});
+
+test('fs.writeText: файл только для чтения (0444) в каталоге с записью не заменяется - EACCES, как на O_TRUNC; хоть область каталог, хоть сам файл', { skip: (process.platform === 'win32' || process.getuid?.() === 0) && 'режимы POSIX, не root' }, async () => {
+  await using box = await sandbox();
+  const ro = path.join(box.work, 'ro.json');
+  await writeFile(ro, 'old');
+  await chmod(ro, 0o444);
+  const { k, os } = await kernel({ dir: { 'fs.read': [box.work], 'fs.write': [box.work] }, one: { 'fs.read': [box.work], 'fs.write': [ro] } }, { dataDir: box.data, tempDir: box.temp });
+  const before = await stat(ro);
+  for (const id of ['dir', 'one']) {
+    await assert.rejects(os(id).fs.writeText(ro, 'new'), /EACCES/, id);
+    assert.equal(await readFile(ro, 'utf8'), 'old', `${id}: содержимое цело`);
+    const after = await stat(ro);
+    assert.equal(after.mode & 0o777, 0o444, `${id}: режим прежний`);
+    assert.equal(after.ino, before.ino, `${id}: inode прежний`);
+  }
+  assert.deepEqual((await readdir(box.work)).filter((n) => n.endsWith('.tmp')), [], 'временных файлов не осталось');
+  await chmod(ro, 0o644);
+  await os('dir').fs.writeText(ro, 'new');
+  assert.equal(await readFile(ro, 'utf8'), 'new', 'разрешённый chmod снова открывает запись');
   await k.unload();
 });
 
