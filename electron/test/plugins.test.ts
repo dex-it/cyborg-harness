@@ -174,9 +174,11 @@ test('старт: включённый плагин активен, миграц
     config: { migrate: (_, d) => ({ who: d.name }) },
     activate(ctx) {
       ctx.log(`привет, ${String(ctx.config?.get().who)}`);
+      ctx.log('осторожно', 'warn');
     },
   };
   const lines: string[] = [];
+  const levels: string[] = [];
   const kernel = await startPlugins({
     userData,
     builtinDir: path.join(userData, 'нет'),
@@ -186,9 +188,12 @@ test('старт: включённый плагин активен, миграц
       return greeter;
     }),
     log: (line) => lines.push(line),
+    onLog: (id, message, level) => levels.push(`${id} [${level}] ${message}`),
   });
   assert.deepEqual(kernel.active, ['greeter']);
-  assert.ok(lines.includes('[plugins] greeter: привет, мир'));
+  assert.ok(lines.includes('[plugins] greeter: привет, мир'), 'info - без пометки уровня');
+  assert.ok(lines.includes('[plugins] greeter [warn]: осторожно'), 'уровень не info - пометка в строке журнала приложения');
+  assert.deepEqual(levels, ['greeter [info] привет, мир', 'greeter [warn] осторожно']);
   assert.ok(lines.some((l) => l.includes('"pluginId":"idle","kind":"disabled"')));
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { plugins, settings: { greeter: { $version: 2, who: 'мир' } } });
   await kernel.unload();
