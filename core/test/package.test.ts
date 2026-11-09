@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { describe, it } from 'node:test';
 
 // P-02: ядро как пакет @cyborg-harness/core. Тесты про состав и форму пакета; сборка - `npm run build:core` (её гоняют pretest/pretypecheck/prelint/prebuild).
@@ -36,11 +37,18 @@ describe('package.json ядра', () => {
     assert.equal(manifest.type, 'module');
   });
 
-  it('engines.node - мажор Node, на котором идёт CI и который несёт Electron playground (Node 24)', () => {
+  it('engines.node - мажор Node, который несёт Electron playground: берётся у самого Electron (ELECTRON_RUN_AS_NODE, process.versions.node)', () => {
+    const electron = createRequire(path.join(root, 'package.json'))('electron') as string;
+    const version = execFileSync(electron, ['-p', 'process.versions.node'], { encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 30_000, killSignal: 'SIGKILL' }).trim();
+    const major = /^(\d+)\./.exec(version)?.[1];
+    assert.ok(major, `версия Node в Electron: ${version}`);
+    assert.equal(manifest.engines?.node, `>=${major}`, `Node в Electron playground ${version}`);
+  });
+
+  it('engines.node совпадает с Node в CI (node-version в ci.yml): пакет проверяется на той версии, которую заявляет', () => {
     const ci = fs.readFileSync(path.join(root, '.github', 'workflows', 'ci.yml'), 'utf8');
     const major = /node-version:\s*(\d+)/.exec(ci)?.[1];
     assert.equal(manifest.engines?.node, `>=${major}`);
-    assert.equal(major, '24');
   });
 
   it('рантайм-зависимостей нет; единственная связь - peer на контракты', () => {

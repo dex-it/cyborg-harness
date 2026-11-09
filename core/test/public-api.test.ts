@@ -358,9 +358,13 @@ export function boundaryViolations(file: string, text: string, rel: string): str
   }
   // Путь, собранный из частей (`join(repo, 'core', 'src', …)`), статика импортов не видит.
   text.split('\n').forEach((l, i) => {
-    if (/'core',\s*'(src|dist|elements)'/.test(l)) found.push(`${rel}:${i + 1} путь в core/${/'core',\s*'(\w+)'/.exec(l)?.[1] ?? ''} собран из частей`);
+    if (/(['"`])core\1\s*,\s*(['"`])(src|dist|elements)\2/.test(l)) found.push(`${rel}:${i + 1} путь в core/${/['"`]core['"`]\s*,\s*['"`](\w+)['"`]/.exec(l)?.[1] ?? ''} собран из частей`);
     // `new URL('…/core/src/…', import.meta.url)` - тоже путь мимо пакета, но не импорт.
     if (/new URL\(\s*['"`][^'"`]*core\/(src|dist|elements)\//.test(l)) found.push(`${rel}:${i + 1} путь в core/ через new URL`);
+  });
+  // Любая другая строка с путём в core/src, dist или elements (fork, readFile, spawn): тоже мимо пакета. Строки, уже названные выше, не дублируем.
+  text.split('\n').forEach((l, i) => {
+    if (/['"`][^'"`\n]*core\/(src|dist|elements)\//.test(l) && !found.some((f) => f.startsWith(`${rel}:${i + 1} `))) found.push(`${rel}:${i + 1} путь в core/ строкой`);
   });
   for (const { spec, name, line } of coreImports(file, text)) {
     if (spec !== PACKAGE && !spec.startsWith(`${PACKAGE}/`)) continue;
@@ -414,8 +418,10 @@ describe('публичный API ядра: потребители в репоз�
       "const { Tail } = await import(join(repo, 'core', 'src', 'pty.ts'));",
       "const entry = fileURLToPath(new URL('../../core/src/host-entry.ts', import.meta.url));",
       "const fixture = new URL(`../../core/test/fixtures/x.ts`, import.meta.url);",
+      "const host = fork('../../core/src/host-entry.ts');",
+      "await readFile('core/dist/src/index.js');",
     ].join('\n');
     const found = boundaryViolations('/x.ts', text, 'x.ts').map((v) => Number(/:(\d+) /.exec(v)?.[1]));
-    assert.deepEqual(found.sort((a, b) => a - b), [2, 3, 4, 5, 6, 10, 11, 12]);
+    assert.deepEqual(found.sort((a, b) => a - b), [2, 3, 4, 5, 6, 10, 11, 12, 14, 15]);
   });
 });
