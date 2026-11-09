@@ -7,6 +7,9 @@ export type { Layer, SectionResult, SectionSpec };
 
 export const VERSION_KEY = '$version';
 
+/** Слой, значения которого вправе расширять права плагина (ADR-CH-0015); файл воркспейса приходит из репозитория команды, и его значения права не расширяют. */
+export const TRUSTED_LAYER: Layer = 'user';
+
 interface Resolved { readonly result: SectionResult; readonly layers: ReadonlyMap<Layer, Record<string, unknown>> }
 
 /** Слой новее манифеста - откат плагина: раздел не читается, чтобы старый код не затёр новые данные. */

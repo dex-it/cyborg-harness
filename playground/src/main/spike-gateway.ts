@@ -9,8 +9,7 @@ import { safeStorage } from 'electron';
 import { load, OsGateway, parseManifest, PLUGIN_API_VERSION, type JournalEntry, type OsEnvironment, type PluginManifest } from '@cyborg-harness/core';
 import { closePools, guardedLookup, isLocalAddress, transport, type Lookup } from '../../../core/src/net-transport.ts';
 import { measure, PTY_SCRIPT, SAMPLES, WARMUP, type ProbeOs, type ProbePath, type Sampled } from '../../bench/gateway-probe.ts';
-import { electronOs } from './os-env.ts';
-import { utilityHosts } from './plugin-hosts.ts';
+import { electronOs, utilityHosts } from '@cyborg-harness/electron';
 
 export interface GatewaySpikeOptions {
   readonly out: string;
@@ -73,9 +72,9 @@ function bareOs(env: OsEnvironment): ProbeOs {
       const watcher = fs.watch(dir, () => listener());
       return Promise.resolve(async () => watcher.close());
     },
-    pty: () => {
-      const proc = pty.spawn('/bin/sh', ['-c', PTY_SCRIPT], { name: 'xterm-256color', env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: os.homedir() }, cols: 80, rows: 24 });
-      return Promise.resolve({ write: async (data) => proc.write(data), onData: (listener) => void proc.onData(listener), kill: async () => proc.kill('SIGKILL') });
+    pty: async () => {
+      const proc = await pty.spawn('/bin/sh', ['-c', PTY_SCRIPT], { name: 'xterm-256color', env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: os.homedir() }, cols: 80, rows: 24 });
+      return { write: async (data) => proc.write(data), onData: (listener) => void proc.onData(listener), kill: async () => proc.kill('SIGKILL') };
     },
     setSecret: (key, value) => secrets.set(`${ID}/${key}`, value),
     secret: (key) => secrets.get(`${ID}/${key}`),
@@ -92,7 +91,7 @@ function gatewayOs(env: OsEnvironment, m: PluginManifest, denied: string[]): Pro
   const gateway = new OsGateway(
     env,
     (d) => denied.push(`${d.method}: ${d.detail}`),
-    () => ({}),
+    () => ({ trusted: {}, untrusted: {} }),
     (_pluginId, method, params) => {
       const p = params as { id: string; data?: string };
       if (method === 'pty.data' || method === 'fs.change') listeners.get(p.id)?.(p);

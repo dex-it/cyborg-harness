@@ -3,7 +3,7 @@ import type { SystemEvent } from './host-runtime.ts';
 import type { Counter, Host, HostPool, KernelContext } from './kernel-context.ts';
 import type { JournalEntry } from './kernel-types.ts';
 import type { PluginManifest } from './manifest.ts';
-import { Endpoint } from './rpc.ts';
+import { cancelError, Endpoint } from './rpc.ts';
 
 // Граница доверия ядра - процесс хоста: внутри хоста плагины неразличимы, поэтому сторонний не делит процесс ни с кем.
 export function assignHosts(
@@ -51,24 +51,33 @@ export function bump(counts: Map<string, Counter>, key: string, window: number):
   return n;
 }
 
+/** Отмена вызывающего переносится на контроллер вызова; уже отменённый сигнал отменяет сразу. */
+function linkAbort(signal: AbortSignal, controller: AbortController | undefined): () => void {
+  const onAbort = () => controller?.abort(cancelError(signal));
+  if (signal.aborted) onAbort();
+  else signal.addEventListener('abort', onAbort, { once: true });
+  return () => signal.removeEventListener('abort', onAbort);
+}
+
 export function createHostPool(ctx: KernelContext): HostPool {
   const { options, watchdog, active } = ctx;
   const hosts = new Map<string, Host>();
   const hostFailures = new Map<string, Counter>();
 
-  async function call<T>(host: Host, pluginId: string, method: string, params: unknown, timeout?: number): Promise<T> {
+  async function call<T>(host: Host, pluginId: string, method: string, params: unknown, timeout?: number, signal?: AbortSignal, discard?: (value: unknown) => void): Promise<T> {
     const token = ++host.seq;
     host.inflight.set(token, pluginId);
+    // Срок и отмена вызывающего - одно и то же для хоста поставщика: ему уходит `cancel`, а не только отпускается вызывающий.
+    const controller = timeout !== undefined || signal !== undefined ? new AbortController() : undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let unlink: (() => void) | undefined;
     try {
-      const pending = host.endpoint.request<T>(method, params);
-      if (timeout === undefined) return await pending;
-      const expired = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new CoreError('Timeout', `${method} ${pluginId} дольше ${timeout} мс`)), timeout);
-      });
-      return await Promise.race([pending, expired]);
+      if (signal) unlink = linkAbort(signal, controller);
+      if (timeout !== undefined) timer = setTimeout(() => controller?.abort(new CoreError('Timeout', `${method} ${pluginId} дольше ${timeout} мс`)), timeout);
+      return await host.endpoint.request<T>(method, params, controller?.signal, discard);
     } finally {
       clearTimeout(timer);
+      unlink?.();
       host.inflight.delete(token);
     }
   }

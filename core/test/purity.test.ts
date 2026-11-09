@@ -18,7 +18,7 @@ const ALLOWED: readonly { readonly file: string; readonly token: string; readonl
   { file: 'net-transport.ts', token: 'agent', reason: 'параметр `agent` (пул соединений) в опциях node:http - это не агент Cyborg' },
   { file: 'net-transport.ts', token: 'Agent', reason: 'класс `Agent` в node:http(s) - пул соединений, а не агент Cyborg' },
   { file: 'net-transport.ts', token: 'user-agent', reason: 'заголовок HTTP `user-agent` - это не агент Cyborg' },
-  { file: 'pty.ts', token: 'viewers', reason: 'зрители терминала - окна, подписанные на вывод pty, а не плагин viewer' },
+  { file: 'pty-host.ts', token: 'viewers', reason: 'зрители терминала - окна, подписанные на вывод pty, а не плагин viewer' },
 ];
 
 /** Файл, которому вычисляемый импорт разрешён. */
@@ -127,7 +127,7 @@ describe('чистота ядра', () => {
       domainViolations(file, named).map((v) => Number(/:(\d+) /.exec(v)?.[1])),
       [1, 2, 3, 4, 6],
     );
-    assert.deepEqual(domainViolations(path.join(src, 'pty.ts'), 'const viewers = new Set();'), [], 'исключение не действует в своём файле');
+    assert.deepEqual(domainViolations(path.join(src, 'pty-host.ts'), 'const viewers = new Set();'), [], 'исключение не действует в своём файле');
     assert.deepEqual(importViolations(path.join(src, 'host-entry.ts'), 'const m = await import(entry);'), [], 'исключение не действует в своём файле');
   });
 });

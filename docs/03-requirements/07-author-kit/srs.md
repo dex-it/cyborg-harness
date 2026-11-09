@@ -16,10 +16,10 @@ quality-checks: входных записей нет
 
 ### FR-CH-1013 Набор автора плагина
 
-- **Требование:** автор пишет плагин на пакете объявлений `@cyborg-harness/contracts`: `PluginModule`, `PluginContext`, `UiContext` и карта `Contracts`, которую сторонний пакет дополняет через `declare module`; правила - `contracts/README.md`. Проверка импортов пропускает главной части только `@cyborg-harness/contracts`, свой пакет объявлений и свои модули; виду - ещё npm-пакеты; ни той, ни другому - `node:*` и `electron`. Примеры плагинов - `core/examples/plugins` (`npm run demo`) и `playground/plugins`. Общий набор тестов контракта, которым сторонний поставщик проверяет себя тем же, что и встроенный, есть для `cyborg.agent`.
+- **Требование:** автор пишет плагин на пакете объявлений `@cyborg-harness/contracts`: `PluginModule`, `PluginContext`, `UiContext` и карта `Contracts`, которую сторонний пакет дополняет через `declare module`; правила - `contracts/README.md`. Проверка импортов пропускает главной части только `@cyborg-harness/contracts`, свой пакет объявлений и свои модули, а также npm-пакеты, если главную часть собирает `cyborg-plugin build` (`check --source` их не пропускает); виду - ещё npm-пакеты; ни той, ни другому, ни их зависимостям - `node:*` и `electron`. Примеры плагинов - `core/examples/plugins` (`npm run demo`) и `playground/plugins`. Общий набор тестов контракта, которым сторонний поставщик проверяет себя тем же, что и встроенный, есть для `cyborg.agent` (`agentContractSuite` пакета `@cyborg-harness/testing`); поднять ядро с поддельными pty и секретами в тесте плагина позволяет `startKernel` того же пакета.
 - **traced from:** BR-CH-004.
 - **источник:** [SAD, 6.1](../../04-architecture/design/sad.md#61-этап-1-ядро-без-изоляции-доступа), [открытый вопрос 10 SAD](../../04-architecture/design/sad.md#8-открытые-вопросы); bb 5.8 (`public-sdk-only`).
-- **verification:** испытание - `core/test/plugin-imports.test.ts` («проверка ловит то, что запрещает»), `core/test/contracts-types.ts` (`npm run typecheck`), `playground/test/agents.test.ts` («cyborg.agent, общий набор…»), `contracts/test/package.test.ts` (пустой проект вне репозитория ставит tarball пакета и собирает плагин на `PluginModule` и `declare module`). Ещё нет: общий набор тестов для остальных контрактов.
+- **verification:** испытание - `core/test/plugin-imports.test.ts` («проверка ловит то, что запрещает»), `core/test/plugin-check.test.ts` (`checkPlugin` на плагине вне репозитория), `tools/cyborg-plugin/test/cli.test.ts` (`cyborg-plugin check`), `tools/cyborg-plugin/test/build.test.ts`, `pack.test.ts`, `stand.test.ts` и `package.test.ts` (сборка, упаковка, состав стенда, форма пакета; тесты инструмента лежат в его пакете, а не в `core/test`, чтобы у ядра не появилась обратная зависимость на инструмент), `core/test/contracts-types.ts` (`npm run typecheck`), `testing/test/*.test.ts` (тест-кит и набор на хорошем и плохих поставщиках), `playground/test/agents.test.ts` («cyborg.agent, общий набор…» на `agent-claude-code` и `agent-shell`), `contracts/test/package.test.ts` (пустой проект вне репозитория ставит tarball пакета и собирает плагин на `PluginModule` и `declare module`). Ещё нет: рабочие наборы для `cyborg.secret-source` и `cyborg.project-settings` (каркасы есть, ждут типов контрактов).
 - **класс:** Functions.
 
 ### FR-CH-7001 Шаблон плагина
@@ -27,7 +27,7 @@ quality-checks: входных записей нет
 - **Требование:** шаблон создаёт каталог плагина с `manifest.json`, главной частью и минимальным примером: вид, команда, контракт и раздел `config` со схемой; созданный каталог проходит `checkPlugin` без нарушений и собирается без правок.
 - **traced from:** BR-CH-010; `author-writes-plugin`, шаг 1.
 - **источник:** P-05; [дорожная карта, раздел 10](../../06-plans/roadmap.md#10-опыт-автора-плагина).
-- **verification:** испытание - создать плагин из шаблона, прогнать `checkPlugin`, сборку и тесты в CI. Ещё нет: шаблона (P-05, ждёт P-06 и P-08).
+- **verification:** испытание - создать плагин из шаблона, прогнать `checkPlugin`, сборку и тесты в CI. Ещё нет: шаблона (P-05; P-06 и P-08 влиты).
 - **класс:** Usability.
 
 ### FR-CH-7002 Сборка плагина с проверкой состава бандла
@@ -35,7 +35,7 @@ quality-checks: входных записей нет
 - **Требование:** сборка кладёт npm-зависимости главной части внутрь бандла и перед сборкой прогоняет `checkPlugin`; если в составе есть `node:*`, `electron` или чужой плагин, сборка падает с перечнем нарушений, бандл не создаётся. Вид собирается в ESM-модуль рядом с файлами своего origin, а карты исходников кладутся рядом.
 - **traced from:** BR-CH-004, BR-CH-010; `author-writes-plugin`, шаг 6, расширения 4б, 6а.
 - **источник:** P-06; У-42 ([модель угроз](../../04-architecture/design/threat-model.md), частично); [SAD, 6.1](../../04-architecture/design/sad.md#61-этап-1-ядро-без-изоляции-доступа).
-- **verification:** испытание. Ещё нет: сборки (P-06); плагин с npm-зависимостью без бандла не загрузится.
+- **verification:** испытание - `tools/cyborg-plugin/test/build.test.ts` (бандл главной части, проверка состава, виды, замена результата целиком), `stand.test.ts` (состав стенда), `pack.test.ts`, `cli.test.ts` (P-06, PR #124); плагин с npm-зависимостью без бандла не загрузится. Остаток У-42 - происхождение пакетов, вопрос 11 фичи 03.
 - **класс:** Functions.
 
 ### FR-CH-7003 Общий набор тестов контракта
@@ -43,7 +43,7 @@ quality-checks: входных записей нет
 - **Требование:** для каждого контракта `cyborg.*` есть общий набор тестов, который принимает поставщика и вызывает его через потребителя на поднятом ядре; сторонний поставщик проверяет себя тем же набором, что встроенный. Автор собственного контракта `acme.*` выпускает такую функцию-набор со своим пакетом объявлений.
 - **traced from:** BR-CH-010; `author-writes-plugin`, шаг 5, расширения 5а, 5б; `second-agent`, расширение 3а.
 - **источник:** P-08; [открытый вопрос 10 SAD](../../04-architecture/design/sad.md#8-открытые-вопросы).
-- **verification:** испытание - `playground/test/agents.test.ts` («cyborg.agent, общий набор…»). Ещё нет: наборы для остальных контрактов, в том числе `cyborg.secret-source` и `cyborg.project-settings` (P-08).
+- **verification:** испытание - `testing/test/agent-suite.test.ts` (набор на хорошем и плохих поставщиках), `playground/test/agents.test.ts` («cyborg.agent, общий набор…» на `agent-claude-code` и `agent-shell`; `agentContractSuite` пакета `@cyborg-harness/testing`, P-08, PR #112). Ещё нет: рабочих наборов для `cyborg.secret-source` и `cyborg.project-settings`: каркасы лежат в `testing/src/skeleton-suites.ts` и ждут типов контрактов.
 - **класс:** Usability.
 
 ### FR-CH-7004 Тест-кит
@@ -51,7 +51,7 @@ quality-checks: входных записей нет
 - **Требование:** тест-кит поднимает ядро и хосты в процессе теста без Electron и отдаёт автору: загрузку своих плагинов, ожидание записей журнала, выгрузку по `Symbol.asyncDispose`, поддельные pty, секреты и память разделов, каталог-песочницу; плагин проверяется без открытия окна.
 - **traced from:** BR-CH-010; `author-writes-plugin`, шаг 5.
 - **источник:** P-08.
-- **verification:** испытание - тест плагина-примера на тест-ките в CI. Ещё нет: пакета `@cyborg-harness/testing` (P-08, PR #112 открыт; P-02 влит, PR #103).
+- **verification:** испытание - `testing/test/kit.test.ts`, `consumer.test.ts`, `package.test.ts` и тест плагина-примера на тест-ките в CI (пакет `@cyborg-harness/testing`, P-08, PR #112).
 - **класс:** Usability.
 
 ### FR-CH-7005 `checkPlugin`
@@ -59,7 +59,7 @@ quality-checks: входных записей нет
 - **Требование:** `checkPlugin(dir, options)` проверяет каталог плагина вне репозитория ядра: манифест (все ошибки сразу строками «файл:строка: причина»), `engines.cyborg`, существование точки входа, модулей видов и файлов схем внутри каталога, правило импортов (`node:*`, `electron`, чужой плагин и `import()` с вычисляемым путём - нарушение) и выводит права словами. Результат - структура и код возврата 0 без нарушений, 1 с нарушениями; те же проверки выполняет `cyborg-plugin check`.
 - **traced from:** BR-CH-004, BR-CH-010; `author-writes-plugin`, шаг 7, расширения 2а, 4б, 7а.
 - **источник:** P-09; У-42; `core/src` (проверка импортов, `core/test/plugin-imports.test.ts`).
-- **verification:** испытание - `core/test/plugin-imports.test.ts` («проверка ловит то, что запрещает») для правила импортов. Ещё нет: `checkPlugin` как функция и команда для плагина вне репозитория (P-09).
+- **verification:** испытание - `core/test/plugin-check.test.ts` (`checkPlugin` на плагине вне репозитория, манифест, символические ссылки, `bundled`), `core/test/plugin-imports.test.ts` («проверка ловит то, что запрещает»), `tools/cyborg-plugin/test/cli.test.ts` (`cyborg-plugin check`); P-09, PR #114.
 - **класс:** Functions.
 
 ### FR-CH-7006 Руководство под API 1.0
@@ -67,7 +67,7 @@ quality-checks: входных записей нет
 - **Требование:** руководство `docs/guide/authors/` описывает API 1.0 так, что каждый шаг пути автора выполняется без чтения кода ядра; всё, что описано как существующее, существует в выпуске. Ответ на вопрос автора, найденный только в коде ядра, дописывается в руководство.
 - **traced from:** BR-CH-010; `author-writes-plugin`, шаги 1-9, расширение 1а.
 - **источник:** P-04 (после K-21, K-17); BR-CH-010 (MOE).
-- **verification:** осмотр - сверка руководства с выпуском. Ещё нет: P-04 ждёт K-21; сегодня `packaging.md` и `testing.md` описывают `cyborg-plugin new/check/build/pack` и `@cyborg-harness/testing` как готовые (расхождения - в [ответе составителя](#4-покрытие)).
+- **verification:** осмотр - сверка руководства с выпуском. Ещё нет: P-04 ждёт K-21; сегодня `check`, `build`, `pack` и `@cyborg-harness/testing` собраны в репозитории (P-06, P-08, P-09), но не опубликованы (P-10), а `cyborg-plugin new` ждёт P-05 (расхождения - в [ответе составителя](#4-покрытие)).
 - **класс:** Supportability.
 
 ### FR-CH-7007 Граница доступности видов в руководстве
@@ -91,7 +91,7 @@ quality-checks: входных записей нет
 - **Требование:** `checkPlugin` предупреждает о члене контракта или команде, принимающих путь, но не объявляющих `guard` (для команды - право вызывающего, [FR-CH-3009](../03-security-trust/srs.md#fr-ch-3009-кому-открыта-команда)).
 - **traced from:** BR-CH-004, BR-CH-010; `author-writes-plugin`, шаг 7.
 - **источник:** K-22 (PR #111: поле `callers` и `guard` команды, предупреждение передано в P-09); У-14, У-15.
-- **verification:** испытание. Поле команды и его `guard` есть - `core/test/command-callers.test.ts` (FR-CH-3009). Ещё нет: `checkPlugin` с предупреждением (P-09, PR #114 открыт).
+- **verification:** испытание. Поле команды и его `guard` есть - `core/test/command-callers.test.ts` (FR-CH-3009). Ещё нет: предупреждения `checkPlugin` о члене или команде с путём без `guard`: P-09 влита (PR #114) без него.
 - **класс:** Security.
 
 ### FR-CH-7010 Нижний порог `engines.cyborg` у автора
@@ -163,5 +163,5 @@ quality-checks: входных записей нет
 
 ### Находки
 
-- **Руководство описывает несделанное как готовое.** `docs/guide/authors/packaging.md:22-27`: «`cyborg-plugin new <имя>` | Создаёт каталог плагина…», «`cyborg-plugin check`», «`build`», «`pack`»; `packaging.md` оговорки о невыпуске не несёт. `docs/guide/authors/testing.md:6`: «Пакет называется `@cyborg-harness/testing`», оговорка есть в строках 12-14, но `testing.md:64` описывает `checkPlugin(dir, options)` как существующий. Корневой `README.md:101`: «npx cyborg-plugin new my-plugin», `README.md:142`: «`cyborg-plugin check` проверит манифест… `build` соберёт… `pack` упакует» при оговорке в строке 83. Пакеты и команда ещё не выпущены (P-02, P-05, P-08, P-09). Сайт описывает ядро по завершении эпика (`docs/guide/index.mdx`, «Статус»), и до P-04 это не дефект, если невыпущенное оговорено на странице: добавлена оговорка в `packaging.md`, в корневом `README.md` - отсылка к эпику над таблицей возможностей; `testing.md` оговорку уже несёт. Норма FR-CH-7006 остаётся «Ещё нет» до выпуска.
-- **Нижний порог.** `packaging.md:70` говорил «Плагин, собранный под API 1.x, объявляет `^1`» против `plugin-survives-core-upgrade` (вопрос 3) и BR-CH-008: диапазон `^1` пускает плагин, собранный под 1.5, на ядро 1.3. Исправлено 2026-11-08: порог - минор сборки (`^1.5`), то же в `features/versions.md`. Примеры с `^1` в руководстве и манифесты `playground/plugins` верны: API сегодня 1.0.0 (`PLUGIN_API_VERSION`, `playground/src/main/plugins.ts`).
+- **Руководство описывает несделанное как готовое.** `docs/guide/authors/packaging.md:22-27`: «`cyborg-plugin new <имя>` | Создаёт каталог плагина…», «`cyborg-plugin check`», «`build`», «`pack`»; `packaging.md` оговорки о невыпуске не несёт. `docs/guide/authors/testing.md:6`: «Пакет называется `@cyborg-harness/testing`», оговорка есть в строках 12-14, но `testing.md:64` описывает `checkPlugin(dir, options)` как существующий. Корневой `README.md:101`: «npx cyborg-plugin new my-plugin», `README.md:142`: «`cyborg-plugin check` проверит манифест… `build` соберёт… `pack` упакует» при оговорке в строке 83. Пакеты и команда ещё не выпущены (P-02, P-05, P-08, P-09). Состояние после слияния `master` 2026-11-09: `check`, `build`, `pack` и тест-кит собраны в репозитории (P-06, P-08, P-09), не опубликованы (P-10); `new` ждёт P-05. Сайт описывает ядро по завершении эпика (`docs/guide/index.mdx`, «Статус»), и до P-04 это не дефект, если невыпущенное оговорено на странице: добавлена оговорка в `packaging.md`, в корневом `README.md` - отсылка к эпику над таблицей возможностей; `testing.md` оговорку уже несёт. Норма FR-CH-7006 остаётся «Ещё нет» до выпуска.
+- **Нижний порог.** `packaging.md:70` говорил «Плагин, собранный под API 1.x, объявляет `^1`» против `plugin-survives-core-upgrade` (вопрос 3) и BR-CH-008: диапазон `^1` пускает плагин, собранный под 1.5, на ядро 1.3. Исправлено 2026-11-08: порог - минор сборки (`^1.5`), то же в `features/versions.md`. Примеры с `^1` в руководстве и манифесты `playground/plugins` верны: API сегодня 1.0.0 (`PLUGIN_API_VERSION`, `electron/src/plugins.ts`).

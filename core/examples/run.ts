@@ -1,7 +1,11 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
-import { CoreError, errorMessage, forkHosts, isRecord, load, parseManifest, PLUGIN_API_VERSION, SectionStore, type ContractGraph, type JournalEntry, type LayerStore, type Rejection } from '../src/index.ts';
+import { CoreError, forkHosts, load, parseManifest, PLUGIN_API_VERSION, SectionStore, type ContractGraph, type JournalEntry, type LayerStore, type Rejection } from '../src/index.ts';
 import { scenarios, type Documents, type Scenario } from './scenarios.ts';
+
+// Сценарии идут через публичный вход ядра (их же гоняет consumer.test.ts на пакете), поэтому мелкие помощники свои.
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 const pluginsDir = new URL('./plugins/', import.meta.url);
 
@@ -142,6 +146,8 @@ function journalLine(e: JournalEntry): string {
       return `${yellow('⌨')} plugins.keybindings: ${e.key} -> ${String(e.command)} не применено: ${e.reason}`;
     case 'host-isolated':
       return `${yellow('◌')} ${id} сторонний: группа ${e.group} не действует, свой хост ${e.hostId}`;
+    case 'third-party':
+      return `${yellow('◌')} ${id} сторонний: код не из поставки, не проверен`;
     case 'host-own-grouped':
       return `${yellow('◌')} ${id} просит свой хост, но группа ${e.group} сажает его к ${e.neighbours.join(', ')}`;
   }

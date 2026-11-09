@@ -1,11 +1,12 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { TRUSTED_LAYER } from './config.ts';
 import { CoreError } from './errors.ts';
 import { resolveGraph } from './graph.ts';
 import { DocumentTable } from './documents.ts';
 import { assignHosts } from './host-pool.ts';
-import { appendBounded, DeniedCollapse, DeprecatedCollapse } from './journal.ts';
+import { appendBounded, DeniedCollapse, DeprecatedCollapse, PTY_HOST_ID } from './journal.ts';
 import type { KernelContext, Parts } from './kernel-context.ts';
 import type { JournalEntry, LoadOptions } from './kernel-types.ts';
 import { applyUserKeys, bindKeys } from './keybindings.ts';
@@ -69,7 +70,12 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
   const gateway = new OsGateway(
     osEnv,
     (d) => record({ pluginId: d.pluginId, kind: 'denied', method: d.method, detail: d.detail, ...(d.reason && { reason: d.reason }) }),
-    (id) => Object.assign({}, ...(options.config?.raw(id) ?? []).map(([, data]) => (isRecord(data) ? data : {}))) as Record<string, unknown>,
+    (id) => {
+      // Права расширяет только слой пользователя (ADR-CH-0015): файл воркспейса приходит из репозитория команды.
+      const layers = options.config?.raw(id) ?? [];
+      const merged = (trusted: boolean) => Object.assign({}, ...layers.filter(([layer]) => (layer === TRUSTED_LAYER) === trusted).map(([, data]) => (isRecord(data) ? data : {}))) as Record<string, unknown>;
+      return { trusted: merged(true), untrusted: merged(false) };
+    },
     (id, method, params) => {
       const host = ctx.parts.pool.hosts.get(ctx.hostOf(id) ?? id);
       if (host && !host.down) host.endpoint.notify(method, params);
@@ -87,7 +93,15 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
       if (!host || host.down) throw new CoreError('Unavailable', `${id}: хост не работает`);
       return host.endpoint.request('serve.request', params);
     },
-    { expired: (e) => record({ kind: 'pty-expired', ...e }), kept: () => options.onKeptPty?.() },
+    {
+      expired: (e) => record({ kind: 'pty-expired', ...e }),
+      kept: () => options.onKeptPty?.(),
+      watchdog: options.watchdog,
+      // pty-хост - хост ядра, а не плагинов: в журнале он называется как хост, но снятых плагинов у него нет (`plugins` пуст), владельцы потерянных pty - в `lostPtys`.
+      hostDown: ({ reason, plugins }) => record({ kind: 'host-down', hostId: PTY_HOST_ID, reason, culprits: [], plugins: [], affects: [], lostPtys: plugins }),
+      hostRestarted: () => record({ kind: 'host-restart', hostId: PTY_HOST_ID, plugins: [] }),
+      hostAbandoned: (failures) => record({ kind: 'host-abandoned', hostId: PTY_HOST_ID, failures, plugins: [] }),
+    },
   );
 
   for (const raw of options.manifests) {
@@ -133,6 +147,8 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
   };
   const hostIds = assignHosts(manifests, options.hosts ?? {}, new Set(options.bundled ?? []), record);
   const accepted = graph.order.map(manifestOf);
+  // Без `bundled` поставку не от чего отличить: записи нет, как нет и проверки зарезервированных пространств.
+  if (options.bundled) for (const pluginId of graph.order) if (!options.bundled.includes(pluginId)) record({ pluginId, kind: 'third-party' });
   const platform = options.platform ?? process.platform;
   const keys = bindKeys(accepted, new Set(options.bundled ?? []), platform, record, options.menuKeys);
   applyUserKeys(keys, options.keybindings ?? [], accepted, platform, record);

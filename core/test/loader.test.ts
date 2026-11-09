@@ -1,12 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SectionStore, type LayerStore } from '../src/config.ts';
+import { memoryStore as memory } from '../../testing/src/memory.ts';
+import { SectionStore } from '../src/config.ts';
 import { toDisposable } from '../src/disposable.ts';
 import { load, type LoadOptions } from '../src/loader.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
-import { entryLevel, pluginStatuses } from '../src/status.ts';
+import { describeEntry, entryLevel, pluginStatuses } from '../src/status.ts';
+import { startCancel } from './fixtures/cancel.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 
@@ -20,12 +22,6 @@ function kernel(table: Record<string, PluginModule>, options: Omit<LoadOptions, 
     }),
     ...options,
   });
-}
-
-function memory(initial: Record<string, Record<string, unknown>> = {}) {
-  const docs = new Map(Object.entries(initial));
-  const store: LayerStore = { load: async (l) => docs.get(l), save: async (l, d) => void docs.set(l, d) };
-  return { docs, store };
 }
 
 const kinds = (k: { journal: readonly { pluginId?: string | undefined; kind: string }[] }) => k.journal.map((e) => `${e.pluginId ?? '-'}:${e.kind}`);
@@ -363,6 +359,26 @@ test('хосты: из поставки - по группам, сторонни�
   await unknown.unload();
 });
 
+test('журнал: загруженный сторонний плагин получает запись third-party, плагин поставки, выключенный и загрузка без bundled - нет', async () => {
+  const noop: PluginModule = { activate: () => undefined };
+  const ids = ['a', 'x', 'y'];
+  const k = await kernel(Object.fromEntries(ids.map((id) => [id, noop])), {
+    enabled: ['a', 'x'],
+    manifests: ids.map((id) => manifest(id)),
+    bundled: ['a'],
+  });
+  const entries = k.journal.filter((e) => e.kind === 'third-party');
+  assert.deepEqual(entries, [{ pluginId: 'x', kind: 'third-party' }], 'y не включён и не загружается, a из поставки');
+  assert.equal(entryLevel(entries[0]!), 'warn');
+  assert.match(describeEntry(entries[0]!), /сторонний плагин: код не из поставки/);
+  assert.equal(pluginStatuses(k.journal).find((s) => s.id === 'x')?.state, 'active', 'запись состояния плагину не меняет');
+  await k.unload();
+
+  const unknown = await kernel({ p: noop }, { enabled: ['p'], manifests: [manifest('p')] });
+  assert.equal(unknown.journal.filter((e) => e.kind === 'third-party').length, 0, 'без bundled поставку не от чего отличить: записей нет');
+  await unknown.unload();
+});
+
 test('хосты: host own у плагина поставки - свой хост без группы; в группе с соседом - хост группы и предупреждение host-own-grouped', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const ids = ['solo', 'grouped', 'mate', 'alone', 'guest', 'rogue'];
@@ -437,6 +453,71 @@ test('схема раздела из манифеста: значение не �
   assert.deepEqual(kinds(k).slice(-1), ['timer:config']);
   assert.deepEqual(k.journal.at(-1), { pluginId: 'timer', kind: 'config', result: { status: 'invalid', errors: ['/minutes: ожидается >= 1'] } });
   await k.unload();
+});
+
+// Отмена запросов между плагинами (K-09): стенд - core/test/fixtures/cancel.ts.
+const pause = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+
+test('отмена вызова контракта: поставщик получает сигнал, вызывающий - Cancelled, вызовы без сигнала целы', async () => {
+  const { kernel, api, log } = await startCancel();
+  const abort = new AbortController();
+  const call = api.slow('a', abort.signal);
+  await pause();
+  assert.deepEqual(log, ['a:start']);
+  abort.abort();
+  await assert.rejects(call, { code: 'Cancelled' });
+  await pause();
+  assert.deepEqual(log, ['a:start', 'a:abort:Cancelled']);
+  const plain = api.slow('b');
+  plain.catch(() => undefined);
+  await pause();
+  assert.deepEqual(log.slice(2), ['b:start']);
+  await kernel.unload();
+});
+
+test('отмена: уже отменённый сигнал - вызов до поставщика не доходит; отмена после ответа и двойная безвредны', async () => {
+  const { kernel, api, log, held } = await startCancel();
+  await assert.rejects(api.slow('x', AbortSignal.abort()), { code: 'Cancelled' });
+  await pause();
+  assert.deepEqual(log, []);
+
+  held.slowMs = 10;
+  const abort = new AbortController();
+  assert.equal(await api.slow('fast', abort.signal), 'fast');
+  abort.abort();
+  abort.abort();
+  await pause();
+  assert.deepEqual(log, ['fast:start', 'fast:done']);
+  assert.equal(await api.slow('again'), 'again');
+  await kernel.unload();
+});
+
+test('callTimeout отменяет вызов у поставщика, а не только отпускает вызывающего', async () => {
+  const { kernel, api, log } = await startCancel({ callTimeout: 80 });
+  const never = new AbortController();
+  await assert.rejects(api.slow('t', never.signal), { code: 'Timeout' });
+  await pause();
+  assert.deepEqual(log, ['t:start', 't:abort:Timeout']);
+  await kernel.unload();
+});
+
+test('отмена команды: commands.run с сигналом доводит его до обработчика, аргументы проверяются без сигнала', async () => {
+  const { kernel, ctx, log } = await startCancel();
+  const abort = new AbortController();
+  const run = ctx.commands.run('provider.slow', 'one', abort.signal);
+  await pause();
+  assert.deepEqual(log, ['cmd:one:signal']);
+  abort.abort();
+  await assert.rejects(run, { code: 'Cancelled' });
+  await pause();
+  assert.deepEqual(log, ['cmd:one:signal', 'cmd:abort:Cancelled']);
+  const app = new AbortController();
+  const fromApp = kernel.run('provider.slow', 'two', app.signal);
+  await pause();
+  app.abort();
+  await assert.rejects(fromApp, { code: 'Cancelled' });
+  await assert.rejects(ctx.commands.run('provider.slow', 'one', 'extra'), { code: 'Invalid' });
+  await kernel.unload();
 });
 
 // K-03: упорядоченный снимок раскладки по манифестам, до запуска кода плагинов.

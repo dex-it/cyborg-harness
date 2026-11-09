@@ -20,8 +20,8 @@ export function createBridge(ctx: KernelContext): Bridge {
       if (!ctx.active.includes(m.id) && !ctx.parts.activation.activating.has(m.id)) throw new CoreError('Unavailable', `${pluginId} не активен`);
       return m;
     };
-    const onRequest = <const S extends WireSpec>(method: string, spec: S, handler: (p: Parsed<S>) => unknown) => {
-      endpoint.handle(method, (raw: unknown) => handler(parseWire(method, raw, spec)));
+    const onRequest = <const S extends WireSpec>(method: string, spec: S, handler: (p: Parsed<S>, signal: AbortSignal) => unknown) => {
+      endpoint.handle(method, (raw: unknown, signal: AbortSignal) => handler(parseWire(method, raw, spec), signal));
     };
     // У уведомления нет отправителя, которому вернуть отказ: без записи в лог подделка прошла бы молча.
     const onNote = <const S extends WireSpec>(method: string, spec: S, handler: (p: Parsed<S>) => void) => {

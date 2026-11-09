@@ -7,7 +7,7 @@ import type { LayoutEntry } from './layout.ts';
 import type { ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { OsEnvironment } from './os-gateway.ts';
-import type { KeptPty, TerminalSink, TerminalView } from './pty.ts';
+import type { KeptPty, TerminalChannel, TerminalView } from './pty.ts';
 import type { ContractRegistry } from './registry.ts';
 import type { SpawnHost } from './transports.ts';
 import type { WindowSnapshot, WindowTitle } from './window-layer.ts';
@@ -61,6 +61,8 @@ export type JournalEntry =
   | { readonly pluginId?: undefined; readonly kind: 'key-ignored'; readonly key: string; readonly command: string | null; readonly reason: string }
   /** Сторонний плагин назван в группе plugins.hosts с другими - ядро всё равно дало ему свой хост. */
   | { readonly pluginId: string; readonly kind: 'host-isolated'; readonly group: string; readonly hostId: string }
+  /** Загружен плагин не из поставки (по `bundled`): его код не проверен, а на этапе 1 хост - обычный процесс Node. Состояния плагину запись не меняет. */
+  | { readonly pluginId: string; readonly kind: 'third-party' }
   /** Промис плагина отклонён без обработчика; хост держится, плагину страйк. */
   | { readonly pluginId: string; readonly kind: 'unhandled-rejection'; readonly error: string }
   /** Плагин поставки просит свой хост (`"host": "own"`), а группа plugins.hosts сажает его к соседям: действует группа. */
@@ -81,6 +83,8 @@ export type JournalEntry =
       readonly plugins: readonly string[];
       /** Активные плагины других хостов, которые брали контракты снятых. */
       readonly affects: readonly string[];
+      /** Только у pty-хоста (`hostId: 'pty-host'`): плагины, чьи живые pty пропали вместе с ним; они получили `onExit`. */
+      readonly lostPtys?: readonly string[];
     }
   | { readonly pluginId?: undefined; readonly kind: 'host-restart'; readonly hostId: string; readonly plugins: readonly string[] }
   | {
@@ -231,8 +235,8 @@ export interface Kernel {
   idle(): Promise<void>;
   /** Плагин с `activation: "lazy"` нужен сейчас - например, показан его вид; активному или не ленивому ничего не делает. */
   wake(pluginId: string): Promise<void>;
-  /** Вид плагина открывает pty по билету `share()` его главной части; вывод идёт в `sink` мимо хоста. */
-  openTerminal(pluginId: string, ticket: string, sink: TerminalSink): TerminalView;
+  /** Вид плагина открывает pty по билету `share()` его главной части; вывод идёт из pty-хоста в порт `channel` мимо хоста плагинов и мимо главного процесса. */
+  openTerminal(pluginId: string, ticket: string, channel: TerminalChannel): Promise<TerminalView>;
   /** Процессы, оставленные человеком при выключении плагинов, пока плагин не вернулся: без показа приложением их не видно до выхода. */
   keptPty(): KeptPty[];
   /** Человек завершил оставленный процесс или убрал завершившийся; чужой или не оставленный id - `NotFound`. */

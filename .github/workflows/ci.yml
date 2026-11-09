@@ -43,6 +43,8 @@ jobs:
       - name: contracts (снимок API)
         if: github.event_name != 'pull_request'
         run: npm run check:contracts
+      - name: пример адаптера Electron собирается (README, electron/test/example.test.ts)
+        run: node --test electron/test/example.test.ts
       - name: smoke (macOS)
         if: runner.os == 'macOS'
         run: node playground/scripts/smoke.mjs
@@ -50,3 +52,14 @@ jobs:
       - name: smoke (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum node playground/scripts/smoke.mjs --no-sandbox
+      # Пилот PL-05 (docs/05-verification/spike-monaco-xterm.md): память и время Monaco, кадр sandbox; числа смотрят в журнале шага, шаг не гейт.
+      - name: пилот Monaco и xterm (macOS)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        timeout-minutes: 6
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON playground/scripts/spike-monaco.mjs memory sandbox
+      - name: пилот Monaco и xterm (Linux)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        timeout-minutes: 6
+        run: xvfb-run --auto-servernum node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON playground/scripts/spike-monaco.mjs memory sandbox --no-sandbox

@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import type { SectionResult } from './config.ts';
+import { TRUSTED_LAYER, type SectionResult } from './config.ts';
 import { CoreError, errorMessage } from './errors.ts';
 import type { SectionInput } from './host-runtime.ts';
 import { compileSchema } from './json-schema.ts';
@@ -12,10 +12,11 @@ export function createSections(ctx: KernelContext): Sections {
   const { options } = ctx;
 
   // Поле из net "config:<поле>" задаёт человек: запись плагина в него расширила бы его сеть после перезапуска.
-  function guardNetFields(m: PluginManifest, data: Record<string, unknown>): void {
-    const layers = (options.config?.raw(m.id) ?? []).map(([, d]) => (isRecord(d) ? d : {}));
+  function guardNetFields(m: PluginManifest, target: string, data: Record<string, unknown>): void {
+    // В слой пользователя повторить можно только его же значение: значение из файла воркспейса стало бы там доверенным. В остальные слои - значение любого слоя: права из них не берутся, а миграция и пересохранение раздела повторяют значение воркспейса.
+    const layers = (options.config?.raw(m.id) ?? []).filter(([layer]) => target !== TRUSTED_LAYER || layer === TRUSTED_LAYER).map(([, d]) => (isRecord(d) ? d : {}));
     const fields = (m.permissions.net ?? []).filter((h) => h.startsWith('config:')).map((h) => h.slice('config:'.length));
-    // Удалить поле или повторить значение, заданное человеком в любом слое, можно: новых хостов это не даёт.
+    // Удалить поле или повторить значение, заданное человеком в слое пользователя, можно: новых хостов это не даёт.
     const touched = fields.filter((f) => data[f] !== undefined && !layers.some((d) => isDeepStrictEqual(d[f], data[f])));
     if (touched.length === 0) return;
     const detail = `поля ${touched.join(', ')} задают хосты net - их меняет только человек`;
@@ -48,7 +49,7 @@ export function createSections(ctx: KernelContext): Sections {
       if (p.version !== declared.version) {
         throw new CoreError('Invalid', `${p.pluginId}: раздел ${p.kind} версии ${p.version}, а в манифесте ${declared.version}`);
       }
-      if (p.kind === 'config') guardNetFields(live(p.pluginId), p.data);
+      if (p.kind === 'config') guardNetFields(live(p.pluginId), p.layer, p.data);
       await options[p.kind]?.write(p.layer, p.pluginId, p.version, p.data);
     });
   }

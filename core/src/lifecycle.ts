@@ -216,7 +216,8 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     await idle();
     ctx.unloading = true;
     idleWatch.sync();
-    for (const pluginId of [...active].reverse()) {
+    const unloaded = [...active].reverse();
+    for (const pluginId of unloaded) {
       try {
         await pool.call(pool.live(pluginId), pluginId, 'deactivate', { pluginId }, ctx.activationTimeout);
         ctx.record({ pluginId, kind: 'deactivated' });
@@ -225,7 +226,10 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
       }
       dropPlugin(pluginId);
     }
-    gateway.releaseAllPty();
+    await gateway.releaseAllPty();
+    // Запасная зачистка: запрос `os` снятого плагина отклоняется на входе (K-10), слежение в пути теряет резерв в шлюзе, но хосты плагинов живы, пока ждали pty-хост.
+    // Хосты останавливаются следом в том же такте, поэтому эта зачистка последняя и ничего не оставляет.
+    for (const pluginId of unloaded) forgetOs(pluginId);
     layer.clear();
     pool.stopAll();
     ctx.flushRepeats();

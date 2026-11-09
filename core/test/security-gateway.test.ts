@@ -88,3 +88,18 @@ test('безопасность: отказ process.run не кладёт арг�
   assert.ok(text.includes('curl'), 'отказ записан');
   assert.ok(!text.includes('TOPSECRET'), `секрет аргумента попал в журнал: ${text}`);
 });
+
+test('безопасность: маска имени в env правила - только по префиксу до подчёркивания; чужие переменные и их двойники отбиты, значения в журнал не идут', async () => {
+  const node = { program: process.execPath, args: ['-e'], env: ['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_*', 'GIT_CONFIG_VALUE_*'] };
+  await using b = await box({ p: { process: [node] } });
+  const proc = b.ctx('p').os.process!;
+  const show = 'process.stdout.write(Object.keys(process.env).filter((k)=>k.startsWith("GIT_")).sort().join(","))';
+  // Число пар переменное (`filterOverrides` Cyborg): n заранее манифесту не известно.
+  const env = Object.fromEntries([['GIT_CONFIG_COUNT', '12'], ...Array.from({ length: 12 }, (_, n) => [`GIT_CONFIG_KEY_${String(n)}`, 'k'] as const)]);
+  assert.equal((await proc.run(process.execPath, ['-e', show], { env })).stdout, Object.keys(env).sort().join(','));
+  for (const name of ['GIT_CONFIG_KEY_', 'GIT_CONFIG_KEY', 'GIT_CONFIG_KEYS_0', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_VALUE', 'NODE_OPTIONS']) {
+    await assert.rejects(proc.run(process.execPath, ['-e', show], { env: { [name]: 'TOPSECRET' } }), { code: 'PermissionDenied', message: /переменные не в правиле process/ }, name);
+  }
+  const text = JSON.stringify(b.k.journal.filter((e) => e.kind === 'denied'));
+  assert.ok(text.includes('GIT_CONFIG_KEYS_0') && !text.includes('TOPSECRET'), 'имя в журнале, значение - нет');
+});

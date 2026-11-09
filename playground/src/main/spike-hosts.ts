@@ -5,7 +5,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { load, type JournalEntry, type Kernel, type WatchdogOptions } from '@cyborg-harness/core';
 import { PLUGIN_API_VERSION } from '@cyborg-harness/core';
-import { utilityHosts, type UtilityHosts } from './plugin-hosts.ts';
+import { utilityHosts, type UtilityHosts } from '@cyborg-harness/electron';
 import { pssKb, rssKb } from './proc-memory.ts';
 
 export interface HostsSpikeOptions {

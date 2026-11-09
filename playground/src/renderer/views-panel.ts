@@ -1,8 +1,8 @@
 // Виды плагинов во фреймах (SAD §3.8): фрейм живёт, пока плагин включён и не снят, и переживает перезапуск хоста.
 // Область вида и порядок задаёт раскладка ядра (`Kernel.layout`); окно только раскладывает виды по своим областям.
 
-import type { Area } from '@cyborg-harness/core';
-import type { PluginRow } from '../shared/plugins.ts';
+import type { Area } from '@cyborg-harness/core/window';
+import type { PluginRow } from '@cyborg-harness/electron/window';
 import { el } from './dom.ts';
 import { viewMode, type ViewSlot } from './plugins-model.ts';
 

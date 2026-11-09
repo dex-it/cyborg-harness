@@ -30,8 +30,9 @@ flowchart LR
 | `core/test/` | Тесты ядра на `node:test`; общие подделки и фикстуры |
 | `core/examples/` | Сценарии ядра в консоли (`npm run demo`) и демо-плагины на вымышленных контрактах |
 | `contracts/` | Пакет `@cyborg-harness/contracts`: карта контрактов, API плагина и вида, данные элементов. Типы без кода |
-| `playground/src/main/` | Склейка ядра с Electron: хосты в `utilityProcess`, адаптер ОС, схема `cyborg-plugin://`, мост видов, `PluginsService` |
-| `playground/src/renderer/` | Окно стенда: сессия слева, справа вкладки плагинов, видов, документов, сообщений, журнала и клавиш |
+| `electron/` | Пакет `@cyborg-harness/electron`: адаптер Electron для ядра - хосты в `utilityProcess`, среда `ctx.os`, схема `cyborg-plugin://`, мост видов, каналы IPC, `PluginsService`, слой окна, оболочка вида; описание - `electron/README.md` |
+| `playground/src/main/` | Приложение стенда поверх адаптера: аргументы, воркспейс, окно, замеры |
+| `playground/src/renderer/` | Раскладка окна стенда: сессия слева, справа вкладки плагинов, видов, документов, сообщений, журнала и клавиш |
 | `playground/plugins/` | Базовые плагины и демо (см. ниже) |
 | `playground/scripts/` | Сборка, дымовой тест, замеры фреймов и хостов |
 | `playground/bench/` | Плагины для замера цены вызова |
@@ -67,7 +68,7 @@ flowchart LR
 
 ## Документы
 
-Корпус в `docs/` повторяет раскладку корпуса Cyborg: `00-strategy`, `01-product`, `02-use-cases`, `04-architecture`, `05-verification`, `06-plans`, плюс `research`. Решения и их статусы - на странице [Решения](/development/decisions/). Вход в корпус - `docs/README.md`, краткий обзор - `docs/OVERVIEW.md`.
+Корпус в `docs/` повторяет раскладку корпуса Cyborg: `00-strategy`, `01-product`, `02-use-cases`, `03-requirements`, `04-architecture`, `05-verification`, `06-plans`, плюс `research`. Решения и их статусы - на странице [Решения](/development/decisions/). Вход в корпус - `docs/README.md`, краткий обзор - `docs/OVERVIEW.md`.
 
 ## Работа с репозиторием
 

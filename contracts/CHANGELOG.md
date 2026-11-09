@@ -15,6 +15,9 @@
 - Пакет собирается в декларации (`dist/*.d.ts`) без расширений `.ts` в путях и ставится по номеру версии; в `exports` только условие `types`, кода выполнения в пакете нет.
 - Снимок деклараций `api-snapshot.txt` и проверка `npm run check:contracts`: изменение публичных типов без повышения версии пакета - ошибка CI.
 - `PluginContext.keys`, `PluginKeys`, `KeyBinding`, `KeyWhen`, `KeyRegistration` [minor]: `ctx.keys.register` - сочетание клавиш с условиями во время работы плагина (K-07).
+- `ProcessOptions.signal` [minor]: отмена `ctx.os.process.run` сигналом `AbortSignal`, код отказа `Cancelled` (K-09); в пакете объявлен минимум `AbortSignal` (`aborted`), чтобы потребитель без lib DOM и @types/node собирал плагин.
+- `ProcessResult.truncated`, `ProcessOptions.maxOutputBytes` [minor]: вывод `process.run` до предела с признаком обрезки вместо тихой потери; предел задаёт плагин (K-12).
+- `OsFs.realpath` [minor]: настоящий путь с проверкой области; ссылка наружу - `PermissionDenied`, нет пути - `NotFound` (K-12).
 
 ## 1.0.0-dev - не выпущена
 
