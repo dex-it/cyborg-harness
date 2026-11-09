@@ -36,9 +36,9 @@ description: "Записи журнала плагинов: когда ядро 
 
 | Запись | Уровень | Когда пишется | Поля |
 |---|---|---|---|
-| `host-down` | предупреждение | Хост завис или упал | `hostId`, `reason` (`hang` или `crash`), `culprits`, `plugins`, `affects` |
+| `host-down` | предупреждение | Хост завис или упал; у pty-хоста `hostId: pty-host` | `hostId`, `reason` (`hang` или `crash`), `culprits`, `plugins`, `affects`; у pty-хоста `lostPtys` - владельцы потерянных pty, они получили выход `{ code: -1 }` |
 | `host-restart` | инфо | Хост перезапускается | `hostId`, `plugins` |
-| `host-abandoned` | ошибка | Хост падает без виновника несколько раз подряд и больше не перезапускается | `hostId`, `failures`, `plugins` |
+| `host-abandoned` | ошибка | Хост падает без виновника несколько раз подряд и больше не перезапускается; pty-хост поднимет снова следующий `spawn` | `hostId`, `failures`, `plugins` |
 | `key-ignored` | предупреждение | Привязка `plugins.keybindings` не применена | `key`, `command`, `reason` |
 
 ## Причины отказа графа (rejected)
