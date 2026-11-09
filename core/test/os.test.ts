@@ -5,6 +5,7 @@ import { EventEmitter } from 'node:events';
 import type { FSWatcher } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { PluginContext, PluginOs } from '@cyborg-harness/contracts';
 import { SectionStore, type LayerStore } from '../src/config.ts';
 import { load as loadKernel, type Kernel, type LoadOptions } from '../src/loader.ts';
@@ -195,8 +196,9 @@ test('process.run: SIGKILL после выхода лидера идёт тол�
   t.after(() => k.unload());
   const kill = t.mock.method(process, 'kill');
   // Лидер умирает от SIGTERM, а вывод держит потомок в своей сессии: close ждёт его, и таймер SIGKILL срабатывает уже после выхода лидера.
-  const daemon = `require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},2600)'],{detached:true,stdio:['ignore','inherit','inherit']}).unref();process.stderr.write(String(process.pid));setInterval(()=>{},1000)`;
-  const got = await os('runner').process!.run(process.execPath, ['-e', daemon], { timeoutMs: 200 });
+  // Тайм-аут с запасом на запуск node на занятом раннере (лидер успевает назвать pid), а потомок живёт дольше тайм-аута и отсрочки SIGKILL (2 с) вместе.
+  const daemon = `require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},4500)'],{detached:true,stdio:['ignore','inherit','inherit']}).unref();process.stderr.write(String(process.pid));setInterval(()=>{},1000)`;
+  const got = await os('runner').process!.run(process.execPath, ['-e', daemon], { timeoutMs: 1500 });
   const leader = Number(got.stderr);
   assert.ok(leader > 0);
   assert.deepEqual(kill.mock.calls.map((c) => c.arguments[0]).filter((pid) => pid === leader), [], 'собранный лидер не получает сигналов по своему pid');
@@ -589,21 +591,37 @@ test('fs.readSlice: кусок по байтам, символ UTF-8 не рвё
   await k.unload();
 });
 
+/**
+ * macOS (FSEvents) начинает доставку не в тот миг, когда fs.watch вернулся: запись сразу после него пропадает, и ждать её событие можно сколько угодно.
+ * До проверки поведения пишем в наблюдаемое место, пока слежение не отзовётся; потом тест идёт как обычно. Перед проверкой событий `heard` стирают служебные.
+ */
+async function armed(touch: (n: number) => Promise<unknown>, heard: () => boolean): Promise<void> {
+  let n = 0;
+  await waitFor('слежение отозвалось на пробную запись', async () => {
+    if (heard()) return true;
+    await touch(n++);
+    return undefined;
+  });
+}
+
+const ARMED = '.armed';
+
 test('fs.watch: имена изменённых в каталоге склеены, снятие и выгрузка закрывают наблюдение, вне области - отказ', async () => {
   await using box = await sandbox();
   const { k, os } = await kernel({ reader: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
   const fs = os('reader').fs;
   const batches: (readonly string[])[] = [];
   const sub = await fs.watch(box.work, (names) => batches.push(names));
+  await armed((n) => writeFile(path.join(box.work, ARMED), String(n)), () => batches.length > 0);
   await writeFile(path.join(box.work, 'a.jsonl'), '1\n');
   await appendFile(path.join(box.work, 'a.jsonl'), '2\n');
   await writeFile(path.join(box.work, 'b.jsonl'), '1\n');
   // macOS (FSEvents) в только что созданном каталоге присылает ещё и событие о самом каталоге (его имя - `work`), если создан он за миг до слежения: плагину оно не принадлежит.
   const own = path.basename(box.work);
-  const written = () => batches.flat().filter((name) => name !== own);
+  const written = () => batches.flat().filter((name) => name !== own && name !== ARMED);
   await waitFor('событие о b.jsonl', () => written().includes('b.jsonl'));
   assert.deepEqual([...new Set(written())].toSorted(), ['a.jsonl', 'b.jsonl']);
-  assert.ok(batches.filter((names) => names.some((name) => name !== own)).length < 4, `события не склеены: ${JSON.stringify(batches)}`);
+  assert.ok(batches.filter((names) => names.some((name) => name !== own && name !== ARMED)).length < 4, `события не склеены: ${JSON.stringify(batches)}`);
   sub.dispose();
   await new Promise((r) => setTimeout(r, 100));
   const seen = batches.length;
@@ -613,8 +631,8 @@ test('fs.watch: имена изменённых в каталоге склеен
 
   const fileEvents: (readonly string[])[] = [];
   await fs.watch(path.join(box.work, 'a.jsonl'), (names) => fileEvents.push(names));
-  await appendFile(path.join(box.work, 'a.jsonl'), '3\n');
-  await waitFor('событие дописанного файла', () => fileEvents.length > 0);
+  // Дописанный файл замечен: дописываем, пока слежение не отзовётся.
+  await armed((n) => appendFile(path.join(box.work, 'a.jsonl'), `3.${String(n)}\n`), () => fileEvents.length > 0);
 
   await assert.rejects(fs.watch(box.outside, () => undefined), { code: 'PermissionDenied' });
   await assert.rejects(fs.watch(path.join(box.work, 'нет'), () => undefined));
@@ -634,6 +652,10 @@ test('fs.watch файла: каждая из записей writeText (подм�
   const events: (readonly string[])[] = [];
   const closed: string[] = [];
   const sub = await fs.watch(file, (names) => events.push(names), (reason) => closed.push(reason));
+  // Пробные записи в тот же inode, пока слежение не отзовётся; их запоздалые события стираются, чтобы не засчитаться за события проверяемых записей.
+  await armed((n) => writeFile(file, `пробная ${String(n)}`), () => events.length > 0);
+  await sleep(200);
+  events.length = 0;
   const next = async (n: number) => {
     await waitFor(`событий ${String(n)}; onClose: ${closed.join()}`, () => events.length >= n);
   };
@@ -680,7 +702,9 @@ test('fs.watch файла: файл удалён - onClose с причиной, 
   const file = path.join(box.work, 'gone.json');
   await writeFile(file, '0');
   const closed: string[] = [];
-  await os('app').fs.watch(file, () => undefined, (reason) => closed.push(reason));
+  const touched: (readonly string[])[] = [];
+  await os('app').fs.watch(file, (names) => touched.push(names), (reason) => closed.push(reason));
+  await armed((n) => writeFile(file, `пробная ${String(n)}`), () => touched.length > 0);
   await rm(file);
   await waitFor('onClose после удаления файла', () => closed.length > 0);
   assert.equal(closed.length, 1, 'удаление файла закрывает наблюдение с причиной');
@@ -777,15 +801,17 @@ test('fs.watch: лимит не обходится параллельными в
   await os('projects').security!.setRoots([box.outside]);
   const seen: (readonly string[])[] = [];
   await fs.watch(box.outside, (names) => seen.push(names));
+  await armed((n) => writeFile(path.join(box.outside, ARMED), String(n)), () => seen.length > 0);
   await writeFile(path.join(box.outside, 'a'), '1');
-  await waitFor('событие о файле a', () => seen.length > 0);
-  assert.deepEqual(seen.flat(), ['a']);
+  const heardNames = () => seen.flat().filter((name) => name !== ARMED);
+  await waitFor('событие о файле a', () => heardNames().includes('a'));
+  assert.deepEqual([...new Set(heardNames())], ['a']);
   await os('projects').security!.setRoots([]);
   await writeFile(path.join(box.outside, 'b'), '1');
   await new Promise((r) => setTimeout(r, 200));
   await writeFile(path.join(box.outside, 'c'), '1');
   await new Promise((r) => setTimeout(r, 200));
-  assert.deepEqual(seen.flat(), ['a'], 'после сужения корней событий нет');
+  assert.deepEqual([...new Set(heardNames())], ['a'], 'после сужения корней событий нет');
   await k.unload();
 });
 
