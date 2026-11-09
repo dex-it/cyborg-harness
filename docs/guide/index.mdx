@@ -84,6 +84,8 @@ Cyborg Harness переворачивает это. В ядре нет ни аг
    npm test
    ```
 
+   Пакеты в клоне собирает `npm run build` (или `npm run build:packages`): после него в копии работают `npm run check`, `build` и `test`. `npm run typecheck` копии берёт `tsc` корня клона (TS 6 из алиаса), а по TS 7 шаблон проверяет `npm run typecheck` в корне.
+
 </Steps>
 
 :::caution[Пакеты ещё не опубликованы]

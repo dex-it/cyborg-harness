@@ -103,7 +103,7 @@ cd my-plugin
 npm test
 ```
 
-В клоне после `npm ci`; шаблон и порядок переименования - [Первый плагин](docs/guide/start/first-plugin.md).
+В клоне после `npm ci`; шаблон и порядок переименования - [Первый плагин](docs/guide/start/first-plugin.md). В копии внутри клона `npm run check`, `build` и `test` работают на пакетах клона после `npm run build:packages` (его зовут `build`, `test` и `lint`); `npm run typecheck` копии берёт `tsc` корня (TS 6 из алиаса), а по TS 7 шаблон проверяет `npm run typecheck` корня клона.
 
 Плагин - каталог с манифестом и точкой входа. Манифест:
 
