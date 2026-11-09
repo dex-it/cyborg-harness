@@ -4,7 +4,7 @@ feature: cyborg-harness
 status: review
 date: 2026-11-08
 origin: derived
-quality-checks: замер снят на одной машине (macOS); Linux - в журналах CI
+quality-checks: macOS - локально, Linux - в журнале CI
 ---
 
 # Пилот PL-05: Monaco и xterm во фреймах на cyborg-plugin://
@@ -60,28 +60,28 @@ default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src
 
 Кроме того, без `allow-same-origin` `localStorage` и IndexedDB бросают `SecurityError` (с ним - работают). Вывод: `sandbox` без `allow-same-origin` для видов с Monaco и xterm не годится, пока мост опознаёт плагин по origin кадра (K-04: изоляция DOM между плагинами группы остаётся статической проверкой, а границей доверия - группа/origin).
 
-## Буфер обмена (macOS; Linux - в журнале CI)
+## Буфер обмена (macOS и Linux)
 
-Шаг smoke «буфер обмена» (`playground/scripts/smoke.mjs`) печатает итог на каждой ОС; на macOS:
+Шаг smoke «буфер обмена» (`playground/scripts/smoke.mjs`) печатает итог на каждой ОС. **Linux** (ubuntu-24.04, Xvfb, CI): `role: copy` и `role: paste` из меню Edit **сработали сами** в Monaco и xterm (`{"copy":true,"paste":true}`), `navigator.clipboard` - `NotAllowedError`, как на macOS. **macOS** (локально):
 
 - **Monaco и xterm принимают `copy` и `paste`**: после выделения (Cmd+A в Monaco, тройной щелчок по строке xterm) `webContents.copy()` кладёт текст в системный буфер, `webContents.paste()` вставляет текст из буфера в Monaco и в pty через xterm. Это то, что делает `role: copy/paste` на Linux и Windows для сфокусированного вложенного кадра.
 - **Сама `role` из меню на macOS в этом прогоне не сработала** (`{"copy":false,"paste":false}`): на macOS role шлёт действие первому ответчику AppKit, а окно под управлением CDP не было ключевым. Это ограничение способа проверки (нажатие настоящего пункта меню живой клавиатурой не снималось), а не вывод о кадре: прямой вызов того же действия работает.
 - **`navigator.clipboard` из кадра вида недоступен**: политика разрешений кадра отвечает `clipboard-read` и `clipboard-write` = нет, и `writeText`/`readText` бросают `NotAllowedError`. С атрибутом `allow="clipboard-read; clipboard-write"` на `<iframe>` результат тот же (`NotAllowedError`: решает разрешение сессии Electron). Терминалу это не мешает: xterm работает через события `copy` и `paste`, которые идут от меню и клавиш. Плагину, которому нужен `navigator.clipboard` (r15 - копирование из терминала по OSC 52), нужен `ctx.os.clipboard` главной части, а не API кадра.
 
-## Память и время открытия (macOS, footprint)
+## Память и время открытия (macOS footprint, Linux PSS)
 
-`npm run spike:monaco -- memory`: окно без `editor` и с ним (`editor` открывает `settings.json`), по три запуска, обе сессии открыты, медианы; процессы - все процессы Electron.
+`npm run spike:monaco -- memory`: окно без `editor` и с ним (`editor` открывает `settings.json`), по три запуска, медианы, открыты обе сессии. Linux снят в CI (ubuntu-24.04, Xvfb, шаг «пилот», PSS), macOS - локально (footprint); меры разные, сравнивать порядок величины.
 
-| | Без вида editor | С видом editor |
-|---|---|---|
-| Процессов Electron | 15 | 16 |
-| Footprint всех процессов, МБ | 521 | 649 (разброс 585-662; без editor 502-535) |
-| Процесс кадра editor, МБ | - | 96 |
-| Процесс кадра sessions (xterm), МБ | 29 | 29 |
-| От начала навигации кадра до исполнения `mount`, мс | - | 234 |
-| До первого отрисованного файла, мс | - | 314 |
+| | macOS без editor | macOS с editor | Linux без editor | Linux с editor |
+|---|---|---|---|---|
+| Процессов Electron | 15 | 16 | 15 | 16 |
+| Все процессы, МБ | 521 (502-535) | 649 (585-662) | 582 | 708 |
+| Процесс кадра editor, МБ | - | 96 | - | 89 |
+| Процесс кадра sessions (xterm), МБ | 29 | 29 | 35 | 32 |
+| От начала навигации кадра до исполнения `mount`, мс | - | 234 | - | 583 |
+| До первого отрисованного файла, мс | - | 314 | - | 724 |
 
-Вид с Monaco стоит ~96 МБ своего процесса рендера против 29 МБ вида с xterm и +13-22 МБ за пустой фрейм из [spike-iframe-ui.md](spike-iframe-ui.md) (macOS footprint: 22-34 МБ за фрейм). То есть Monaco добавляет ещё ~65-75 МБ к цене фрейма; воркеры живут в потоках того же процесса, отдельных процессов не добавляют (15 -> 16: только процесс кадра). Размеры сборки без сжатия: `ui.js` 9,7 МБ (минифицированный 4,5 МБ, gzip 1,2 МБ), `ui.css` 0,2 МБ, воркеры `editor` 0,6, `json` 0,9, `css` 1,9, `html` 1,3, `ts` 12,8 МБ (грузится, только когда открыт файл TypeScript). Время получено при неминифицированной сборке и 15-16 процессах на нагруженной машине; Linux (PSS) снимет шаг CI «пилот» (журнал шага).
+Вид с Monaco стоит ~90-96 МБ своего процесса рендера против 29-35 МБ вида с xterm; прирост по всем процессам +126-128 МБ. Для сравнения, пустой фрейм из [spike-iframe-ui.md](spike-iframe-ui.md) стоит +13-22 МБ PSS (macOS footprint 22-34 МБ): Monaco добавляет ещё ~60-75 МБ к цене фрейма. Воркеры живут в потоках того же процесса, процессов не добавляют (15 -> 16: только процесс кадра). Размеры сборки без сжатия: `ui.js` 9,7 МБ (минифицированный 4,5 МБ, gzip 1,2 МБ), `ui.css` 0,2 МБ, воркеры `editor` 0,6, `json` 0,9, `css` 1,9, `html` 1,3, `ts` 12,8 МБ (грузится, только когда открыт файл TypeScript). Время получено при неминифицированной сборке на загруженной машине (macOS) и на раннере CI (Linux).
 
 ## Итог по критериям #25
 
@@ -89,6 +89,6 @@ default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src
 - xterm и Monaco в одном окне: закрыто (smoke).
 - Минимальный набор директив CSP и типов файлов: закрыто (раздел выше).
 - `sandbox` без `allow-same-origin`: закрыто (не работает, раздел выше).
-- `role: copy/paste` и буфер обмена: macOS снято, Linux - из журнала CI (шаг smoke печатает итог на каждой ОС).
-- Память и время: macOS снято, Linux - из журнала CI (шаг «пилот»).
+- `role: copy/paste` и буфер обмена: macOS и Linux сняты (smoke, раздел выше).
+- Память и время: macOS и Linux сняты, сопоставлено с ценой фрейма (раздел выше).
 - Вопрос 11 SAD обновлён: закрыт (`sandbox` не годится, воркеры работают под строгой CSP).

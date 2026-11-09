@@ -64,10 +64,21 @@ export async function launch({ config, args = [] } = {}) {
   let stderr = '';
   app.stderr.on('data', (d) => (stderr += d));
   const sockets = [];
-  const port = await waitFor('порт DevTools', () => /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//.exec(stderr)?.[1]);
-  const page = await waitFor('окно', async () => (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page'));
-  const ev = await connect(page.webSocketDebuggerUrl, sockets);
-  const main = await connect(await waitFor('инспектор главного процесса', () => /Debugger listening on (ws:\/\/\S+)/.exec(stderr)?.[1]), sockets);
+  // Приложение не должно пережить скрипт ни при отказе подключения, ни при падении самого скрипта.
+  const killApp = () => app.kill('SIGKILL');
+  process.once('exit', killApp);
+  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => process.exit(1));
+  let ev, main;
+  try {
+    const port = await waitFor('порт DevTools', () => /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//.exec(stderr)?.[1]);
+    const page = await waitFor('окно', async () => (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page'));
+    ev = await connect(page.webSocketDebuggerUrl, sockets);
+    main = await connect(await waitFor('инспектор главного процесса', () => /Debugger listening on (ws:\/\/\S+)/.exec(stderr)?.[1]), sockets);
+  } catch (error) {
+    killApp();
+    rmSync(userData, { recursive: true, force: true });
+    throw error;
+  }
   /** Выражение в документе вида плагина (по origin кадра); кадра нет - null. */
   const inView = (id, expression, match = '') =>
     main(`(async () => {
@@ -94,7 +105,8 @@ export async function launch({ config, args = [] } = {}) {
     for (const socket of sockets) socket.close();
     app.kill('SIGTERM');
     await Promise.race([new Promise((r) => app.once('exit', r)), sleep(8000)]);
-    if (app.exitCode === null) app.kill('SIGKILL');
+    if (app.exitCode === null) killApp();
+    process.removeListener('exit', killApp);
     rmSync(userData, { recursive: true, force: true });
   };
   return { app, ev, main, inView, clickIn, focusIn, stop, stderr: () => stderr };
