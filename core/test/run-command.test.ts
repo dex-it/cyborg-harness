@@ -40,5 +40,5 @@ test('runCommand: cwd и env доходят до команды, окружен�
 
 test('runCommand: без cwd сообщение об отказе не называет каталог; сигнал убитой команды попадает в сообщение', () => {
   assert.throws(() => runCommand(process.execPath, node('process.exit(2)')), (e: Error) => e.message.includes('код выхода 2') && !e.message.includes('cwd'));
-  assert.throws(() => runCommand(process.execPath, node('process.kill(process.pid,"SIGTERM");setInterval(()=>{},1000)')), (e: Error) => /SIGTERM/.test(e.message));
+  assert.throws(() => runCommand(process.execPath, node('process.kill(process.pid,"SIGTERM");setInterval(()=>{},1000)')), (e: Error) => e.message.includes("SIGTERM"));
 });
