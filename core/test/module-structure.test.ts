@@ -43,8 +43,8 @@ export function cyclesOf(graph: ReadonlyMap<string, readonly string[]>): string[
 /** Части `load()`: каждая отвечает за своё состояние или шов, который правят разные задачи (раскладка - в SAD, раздел 3.2). */
 const LOADER_PARTS = [
   'activation.ts', 'call-check.ts', 'commands.ts', 'context-build.ts', 'contract-calls.ts', 'host-bridge.ts', 'host-pool.ts', 'idle-watch.ts',
-  'kernel-api.ts', 'kernel-context.ts', 'kernel-types.ts', 'keybindings.ts', 'lifecycle.ts', 'loader.ts', 'manifest-fields.ts', 'manifest-provides.ts',
-  'manifest-ui.ts', 'manifest.ts', 'os-requests.ts', 'sections.ts', 'views-state.ts',
+  'kernel-api.ts', 'kernel-context.ts', 'kernel-types.ts', 'keybindings.ts', 'layout.ts', 'lifecycle.ts', 'loader.ts', 'manifest-fields.ts', 'manifest-layout.ts',
+  'manifest-provides.ts', 'manifest-ui.ts', 'manifest.ts', 'os-requests.ts', 'sections.ts', 'views-state.ts',
 ];
 
 /** Модули, которые импортируют общий контекст, но не названы в списке: предел длины на них не распространился бы. */

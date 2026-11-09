@@ -14,7 +14,7 @@ const api = {
   runCommand: (command: string): Promise<Reply> => ipcRenderer.invoke('plugins:run', command),
   onPluginsChanged: (listener: () => void): void => void ipcRenderer.on('plugins:changed', () => listener()),
   onWindowCommand: (listener: (command: string) => void): void => void ipcRenderer.on('window:command', (_event, command: string) => listener(command)),
-  setViewVisible: (id: string, visible: boolean): Promise<void> => ipcRenderer.invoke('views:visibility', { id, visible }),
+  setViewVisible: (id: string, view: string, visible: boolean): Promise<void> => ipcRenderer.invoke('views:visibility', { id, view, visible }),
   answerDialog: (id: number, choice: string | undefined): Promise<Reply> => ipcRenderer.invoke('window:answer', { id, choice }),
   closeDocument: (id: string): Promise<Reply> => ipcRenderer.invoke('documents:close', id),
   openWorkspace: (file?: string): Promise<Reply> => ipcRenderer.invoke('workspace:open', file),

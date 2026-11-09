@@ -26,7 +26,7 @@ import {
 } from '@cyborg-harness/core';
 import { isRecord } from '@cyborg-harness/core';
 import { WINDOW_OWNER, type WindowSnapshot } from '@cyborg-harness/core';
-import type { FeedLine, KeyRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from '../shared/plugins.ts';
+import type { FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from '../shared/plugins.ts';
 import { viewOrigin } from '../shared/views.ts';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
 import type { PluginUi } from './view-files.ts';
@@ -190,6 +190,9 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     },
     get documents() {
       return kernel.documents;
+    },
+    get layout() {
+      return kernel.layout;
     },
     workspace: ws.file,
     async unload() {
@@ -464,7 +467,6 @@ export class PluginsService {
         commands,
         permissions: manifest ? [...describePermissions(manifest.permissions), ...describeOpenCommands(manifest.commands)] : [],
         ...(manifest && { version: manifest.version }),
-        ...(s.state !== 'disabled' && manifest?.ui && Object.keys(manifest.ui.views).length > 0 && this.views.has(s.id) && { view: `${viewOrigin(s.id)}/` }),
         ...(manifest?.ui?.overlay !== undefined && this.views.has(s.id) && { overlay: `${viewOrigin(s.id)}/?view=overlay` }),
         ...(host !== undefined && { host }),
         ...(pid !== undefined && { pid }),
@@ -476,6 +478,8 @@ export class PluginsService {
         }),
       };
     });
+    // Адрес вида решает метка раскладки ядра: у не включённого в настройках плагина вида нет, у снятого окно рисует заглушку на том же месте.
+    const layout: LayoutRow[] = (kernel?.layout ?? []).map((e) => ({ ...e, ...(e.kind === 'view' && e.mark !== 'not-enabled' && this.views.has(e.pluginId) && { url: `${viewOrigin(e.pluginId)}/?view=${e.name}` }) }));
     const keys: KeyRow[] = (kernel?.keybindings ?? []).map((k) => ({
       key: k.key,
       command: k.command,
@@ -497,6 +501,7 @@ export class PluginsService {
       ...(this.error !== undefined && { error: this.error }),
       problems: [...this.problems],
       plugins,
+      layout,
       keys,
       feed: [...this.feed],
       journal,

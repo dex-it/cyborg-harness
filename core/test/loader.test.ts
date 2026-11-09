@@ -438,3 +438,72 @@ test('схема раздела из манифеста: значение не �
   assert.deepEqual(k.journal.at(-1), { pluginId: 'timer', kind: 'config', result: { status: 'invalid', errors: ['/minutes: ожидается >= 1'] } });
   await k.unload();
 });
+
+// K-03: упорядоченный снимок раскладки по манифестам, до запуска кода плагинов.
+const quiet: PluginModule = { activate() {} };
+const view = (module: string, area?: string, order?: number, title?: string) => ({ module, ...(area && { area }), ...(order !== undefined && { order }), ...(title && { title }) });
+const layoutOf = (k: { layout: readonly { pluginId: string; kind: string; name: string }[] }) => k.layout.map((e) => `${e.pluginId}/${e.name}`);
+
+test('раскладка: по order, при равенстве по id плагина, затем по имени; не зависит от порядка манифестов', async () => {
+  const set = [
+    manifest('zeta', { ui: { views: { main: view('./z.js', 'main', 100) } } }),
+    manifest('alpha', { ui: { views: { b: view('./b.js', 'sidebar', 200), a: view('./a.js', 'sidebar', 200) } } }),
+    manifest('beta', { ui: { views: { main: view('./m.js', 'main', 100) } }, documents: { note: { area: 'main', order: 50 } } }),
+    manifest('late', { ui: { views: { tail: view('./t.js', 'toolbar', 900) } } }),
+  ];
+  const expected = ['beta/note', 'beta/main', 'zeta/main', 'alpha/a', 'alpha/b', 'late/tail'];
+  const forward = await kernel({ zeta: quiet, alpha: quiet, beta: quiet, late: quiet }, { enabled: ['zeta', 'alpha', 'beta', 'late'], manifests: set });
+  const backward = await kernel({ zeta: quiet, alpha: quiet, beta: quiet, late: quiet }, { enabled: ['late', 'beta', 'alpha', 'zeta'], manifests: [...set].reverse() });
+  assert.deepEqual(layoutOf(forward), expected);
+  assert.deepEqual(forward.layout, backward.layout, 'снимок детерминирован');
+  assert.deepEqual(forward.layout[0], { pluginId: 'beta', kind: 'document', name: 'note', area: 'main', order: 50 });
+  assert.deepEqual(forward.layout[2], { pluginId: 'zeta', kind: 'view', name: 'main', area: 'main', order: 100 });
+  await forward.unload();
+  await backward.unload();
+});
+
+test('раскладка: вид без размещения - боковая колонка и order 1000, документ - основная область и после вида того же плагина; заголовок доходит до снимка', async () => {
+  const k = await kernel(
+    { a: quiet, b: quiet },
+    {
+      enabled: ['a', 'b'],
+      manifests: [manifest('a', { ui: { views: { plain: './p.js' } } }), manifest('b', { ui: { views: { tree: view('./t.js', undefined, undefined, 'Файлы') } }, documents: { doc: {} } })],
+    },
+  );
+  assert.deepEqual(k.layout, [
+    { pluginId: 'a', kind: 'view', name: 'plain', area: 'sidebar', order: 1000 },
+    { pluginId: 'b', kind: 'view', name: 'tree', area: 'sidebar', order: 1000, title: 'Файлы' },
+    { pluginId: 'b', kind: 'document', name: 'doc', area: 'main', order: 1000 },
+  ]);
+  await k.unload();
+});
+
+test('раскладка: невключённые, выключенные и плагины вне графа помечены, а не пропадают', async () => {
+  const ui = { views: { main: view('./m.js', 'main', 100) } };
+  const k = await kernel(
+    { on: quiet, user: quiet, orphan: quiet },
+    {
+      enabled: ['on', 'user', 'orphan'],
+      manifests: [
+        manifest('on', { ui }),
+        manifest('user', { ui }),
+        manifest('orphan', { ui, requires: { 'none.here': '^1' } }),
+        manifest('off', { ui }),
+      ],
+    },
+  );
+  const marks = () => Object.fromEntries(k.layout.map((e) => [e.pluginId, e.mark ?? 'ok']));
+  assert.deepEqual(marks(), { on: 'ok', orphan: 'out-of-graph', user: 'ok', off: 'not-enabled' });
+  await k.disable('user');
+  assert.deepEqual(marks(), { on: 'ok', orphan: 'out-of-graph', user: 'disabled', off: 'not-enabled' });
+  await k.enable('user');
+  assert.equal(marks().user, 'ok');
+  assert.deepEqual(layoutOf(k), ['off/main', 'on/main', 'orphan/main', 'user/main'], 'помеченные стоят на своём месте по order и id');
+  await k.unload();
+});
+
+test('раскладка: плагин без видов и документов в снимок не попадает, манифест с ошибкой - тоже', async () => {
+  const k = await kernel({ bare: quiet, bad: quiet }, { enabled: ['bare', 'bad'], manifests: [manifest('bare'), manifest('bad', { ui: { views: { x: view('./x.js', 'cellar') } } })] });
+  assert.deepEqual(k.layout, []);
+  await k.unload();
+});

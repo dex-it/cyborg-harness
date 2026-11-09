@@ -42,3 +42,12 @@ export function pluginOfOrigin(origin: string): string | undefined {
   const id = origin.slice(prefix.length);
   return /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/.test(id) ? id : undefined;
 }
+
+/** Вид, который открыт во фрейме: `?view=<вид>` в адресе; без параметра или с чужим адресом - undefined. */
+export function viewOfUrl(url: string): string | undefined {
+  try {
+    return new URL(url).searchParams.get('view') ?? undefined;
+  } catch {
+    return undefined;
+  }
+}

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, Notification, powerMonitor, screen, type IpcMainInvokeEvent, type WebContents } from 'electron';
-import { viewOrigin } from '../shared/views.ts';
+import { viewOfUrl, viewOrigin } from '../shared/views.ts';
 import { electronOs } from './os-env.ts';
 import { utilityHosts } from './plugin-hosts.ts';
 import { guardNavigation } from './navigation.ts';
@@ -48,7 +48,7 @@ if (!spiking && !app.requestSingleInstanceLock({ workspace: workspaceFile ?? nul
 /** Первый запуск: alice и bob делят хост c - видно, как падение одного процесса снимает обоих, а чат в хосте b живёт. */
 const DEFAULT_CONFIG = {
   plugins: {
-    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions', 'sessions', 'pin-lock'],
+    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions', 'sessions', 'pin-lock', 'panels'],
     hosts: { a: ['echo'], b: ['chat'], c: ['alice', 'bob'], d: ['flaky'], agents: ['agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions'] },
   },
 };
@@ -218,8 +218,9 @@ ipcMain.on('view:terminal:close', (event, tid: unknown) => {
 });
 ipcMain.handle('view:theme', () => themeTokens(nativeTheme.shouldUseDarkColors));
 windowChannel('views:visibility', (arg) => {
-  if (!isRecord(arg) || typeof arg.id !== 'string' || typeof arg.visible !== 'boolean' || !win) return;
-  for (const frame of framesOf(win.webContents, viewOrigin(arg.id))) frame.send('view:visibility', arg.visible);
+  if (!isRecord(arg) || typeof arg.id !== 'string' || typeof arg.view !== 'string' || typeof arg.visible !== 'boolean' || !win) return;
+  // Видов у плагина может быть несколько, каждый во фрейме со своим ?view=: свёрнутый вид не прячет остальные.
+  for (const frame of framesOf(win.webContents, viewOrigin(arg.id))) if (viewOfUrl(frame.url) === arg.view) frame.send('view:visibility', arg.visible);
 });
 /** Корень файлов, которые виды могут перетаскивать; в Cyborg это проекты, доступные плагину на чтение. */
 let workspace = '';
