@@ -9,7 +9,8 @@ import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
 import { describePermissions } from '../src/permissions.ts';
 import type { NoticeEvents } from '../src/notices.ts';
-import { OsGateway, type OsEnvironment, type SecretStore } from '../src/os-gateway.ts';
+import { memorySecrets } from '../../testing/src/memory.ts';
+import { OsGateway, type OsEnvironment } from '../src/os-gateway.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
@@ -21,16 +22,6 @@ async function sandbox() {
   const dirs = { data: path.join(root, 'data'), temp: path.join(root, 'temp'), work: path.join(root, 'work'), outside: path.join(root, 'outside') };
   for (const d of [dirs.work, dirs.outside]) await mkdir(d, { recursive: true });
   return { root, ...dirs, [Symbol.asyncDispose]: () => rm(root, { recursive: true, force: true }) };
-}
-
-function memorySecrets(available = true): SecretStore & { map: Map<string, string> } {
-  const map = new Map<string, string>();
-  const deletePrefix = async (prefix: string) => {
-    const keys = [...map.keys()].filter((k) => k.startsWith(prefix));
-    for (const k of keys) map.delete(k);
-    return keys.length;
-  };
-  return { map, available: () => available, get: async (k) => map.get(k), set: async (k, v) => void map.set(k, v), delete: async (k) => void map.delete(k), deletePrefix };
 }
 
 /** Плагины отдают свой ctx наружу: тест зовёт ctx.os так же, как плагин. */

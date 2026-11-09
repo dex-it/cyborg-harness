@@ -6,7 +6,7 @@ import path from 'node:path';
 import type { PluginContext, PtyExit } from '@cyborg-harness/contracts';
 import { load, type LoadOptions } from '../src/loader.ts';
 import { describePermissions } from '../src/permissions.ts';
-import { fakePty, type FakeProc } from './fake-pty.ts';
+import { fakePty, type FakeProc } from '../../testing/src/fake-pty.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 

@@ -41,7 +41,7 @@ quality-checks: входных записей нет
 | Включение плагина, которого не было в графе при запуске | отложено владельцем; сейчас - запись «включатся после перезапуска» |
 | Журнал вызовов `@deprecated` | сделано: `provides.<контракт>.deprecated`, запись `deprecated-call` в `checkCall`, `core/test/via-contract.test.ts` |
 | Род области и `order` вида в манифесте ([3.8](../03-architecture/design/sad.md#38-изоляция-рендера)) | сделано (K-03): `ui.views.<имя>.area/order/title`, `documents.<тип>.area/order`, `Kernel.layout`; окно playground строит области по снимку |
-| Набор тестов контракта, общий для всех поставщиков ([вопрос 10](../03-architecture/design/sad.md#8-открытые-вопросы)) | не начато |
+| Набор тестов контракта, общий для всех поставщиков ([вопрос 10](../03-architecture/design/sad.md#8-открытые-вопросы)) | сделано для `cyborg.agent` (`agentContractSuite`, пакет `@cyborg-harness/testing`); для `cyborg.secret-source` и `cyborg.project-settings` - каркасы, рабочими станут с типами контрактов |
 | Замеры на macOS: хосты и фреймы, клавиши во фрейме, шлюз `ctx.os` | хосты и фреймы сняты, [macos-check.md](../04-verification/macos-check.md); шлюз - нет, [spike-gateway.md](../04-verification/spike-gateway.md); клавиши и терминал человеком - [#2](https://github.com/dex-it/cyborg-harness/issues/2) |
 | pty на Windows | не проверялся; в области ли Windows - [вопрос 12](../03-architecture/design/sad.md#8-открытые-вопросы) |
 | Настройка `sessions.restore`, `cwd` и `projectId` сессии | подъём сейчас ручной |
