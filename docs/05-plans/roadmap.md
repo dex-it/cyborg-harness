@@ -24,7 +24,7 @@ quality-checks: входных записей нет
 | [3.3](../03-architecture/design/sad.md#33-версии-и-миграции) Версии, `migrate`, схема раздела | `core/src/config.ts`, `core/src/json-schema.ts` | журнал вызовов члена с `@deprecated` |
 | [3.4](../03-architecture/design/sad.md#34-связь-между-плагинами) Реестр контрактов и команд, права через контракт | `core/src/registry.ts`, `core/src/via-contract.ts` | - |
 | [3.5](../03-architecture/design/sad.md#35-изоляция-сбоев-хосты-и-сторож) Хосты и сторож | `core/src/host-runtime.ts`, `core/src/transports.ts`, [замер](../04-verification/spike-hosts.md) | - |
-| [3.6](../03-architecture/design/sad.md#36-ресурсы-дольше-плагина-pty) pty у ядра: `persist`, `attach`, билет вида | `core/src/pty.ts`, `electron/src/view-terminals.ts` | проверка на Windows |
+| [3.6](../03-architecture/design/sad.md#36-ресурсы-дольше-плагина-pty) pty у ядра: `persist`, `attach`, билет вида | `core/src/pty.ts`, `core/src/pty-host.ts`, `core/src/pty-link.ts`, `electron/src/pty-host-entry.ts`, `electron/src/view-terminals.ts` | Windows вне первой версии |
 | [3.7](../03-architecture/design/sad.md#37-безопасность-данных-и-контроль-плагинов) `ctx.os`, права словами, хранилище секретов, `$secret`, `granted` в state | `core/src/os-gateway.ts`, `core/src/permissions.ts` | источник секретов `cyborg.secret-source` плагином; удаление плагина со стиранием его данных, секретов и `granted` |
 | [3.8](../03-architecture/design/sad.md#38-изоляция-рендера) `<iframe>` и `mount`, тема, элементы ядра, диалоги, замок, документы, порядок фокуса | `core/src/ui-shell.ts`, `core/src/window-layer.ts`, `core/src/documents.ts`, `core/elements/` | род области и `order` вида в манифесте |
 | [3.9](../03-architecture/design/sad.md#39-системные-клавиши-и-события) Клавиши с переназначением, события окна и системы | `core/src/keys.ts`, `core/test/events.test.ts` | - |
@@ -44,9 +44,10 @@ quality-checks: входных записей нет
 | Род области и `order` вида в манифесте ([3.8](../03-architecture/design/sad.md#38-изоляция-рендера)) | не начато; область вида выбирает окно playground |
 | Набор тестов контракта, общий для всех поставщиков ([вопрос 10](../03-architecture/design/sad.md#8-открытые-вопросы)) | не начато |
 | Замеры на macOS: хосты и фреймы, клавиши во фрейме, шлюз `ctx.os` | хосты и фреймы сняты, [macos-check.md](../04-verification/macos-check.md); шлюз - нет, [spike-gateway.md](../04-verification/spike-gateway.md); клавиши и терминал человеком - [#2](https://github.com/dex-it/cyborg-harness/issues/2) |
-| pty на Windows | не проверялся; в области ли Windows - [вопрос 12](../03-architecture/design/sad.md#8-открытые-вопросы) |
+| pty на Windows | вне первой версии ([вопрос 12](../03-architecture/design/sad.md#8-открытые-вопросы), D-00 строка 7); не проверялся |
 | Настройка `sessions.restore`, `cwd` и `projectId` сессии | подъём сейчас ручной |
-| pty-хост - отдельный `utilityProcess` ядра, вывод к виду по `MessagePort` ([ADR-CH-0012](../03-architecture/adr/ADR-CH-0012-pty-host.md)) | не начато; `node-pty` и таблица pty в главном процессе |
+| pty-хост - отдельный `utilityProcess` ядра, вывод к виду по `MessagePort` ([ADR-CH-0012](../03-architecture/adr/ADR-CH-0012-pty-host.md)) | сделано в K-01: `core/src/pty-host.ts`, `core/src/pty-link.ts`, `electron/src/pty-host-entry.ts` |
+| Снимок терминала вместо хвоста после `attach` ([вопрос 14](../03-architecture/design/sad.md#8-открытые-вопросы)) | отложено: D-00 строка 11 принимает хвост + `resize`; вводится отдельной задачей, если длинные сессии покажут сломанный экран |
 | Льготное время осиротевшего pty ([3.6](../03-architecture/design/sad.md#36-ресурсы-дольше-плагина-pty)) | сделано в ядре: 60 с по умолчанию, `ptyOrphanGrace` |
 | Группы рендера: `ui.group`, `plugins.uiGroups`, origin кадра по группе ([3.8](../03-architecture/design/sad.md#38-изоляция-рендера)) | не начато; origin кадра - по id плагина |
 | Закрытая CSP вида `default-src 'none'` с явными источниками ([3.8](../03-architecture/design/sad.md#38-изоляция-рендера)) | не начато; `VIEW_CSP` - `default-src 'self'` |

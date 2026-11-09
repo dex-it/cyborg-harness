@@ -227,7 +227,7 @@ async function main() {
 
   assert.ok(await button('echo', 'echo.tty'), 'нет кнопки echo.tty');
   await waitFor('pty: /bin/sh в псевдотерминале ядра ответил своим tty и размером', () => lines().some((l) => /echo: pty \d+ вышел с 0: .*\/dev\/(pts\/|tty).* 10 100/.test(l)));
-  log('ctx.os.pty: процесс в главном процессе, вывод в хост плагина, размер дошёл до терминала');
+  log('ctx.os.pty: процесс в pty-хосте, вывод в хост плагина, размер дошёл до терминала');
 
   assert.equal(await state('later'), 'waiting', 'ленивый later поднят при старте');
   assert.ok(await button('later', 'later.hello'), 'нет кнопки later.hello у спящего плагина');
