@@ -633,3 +633,20 @@ test('enable поставщика поднимает зависимого, ес�
     { deprecated: ['read'] },
   );
 });
+
+test('enable поставщика поднимает зависимого, если перезагрузка раздела, шедшая при disable, отказала после его снятия', async () => {
+  const { store } = memory({});
+  const config = await SectionStore.open(store, ['user', 'workspace']);
+  const section = { config: { version: 1 } };
+  const k = await kernel(
+    { files: { activate: (ctx) => void ctx.contracts.provide('test.files', '1.0', {}) }, editor: { activate: () => {} } },
+    { enabled: ['files', 'editor'], manifests: [manifest('files', { ...section, provides: { 'test.files': '1.0' } }), manifest('editor', { ...section, requires: { 'test.files': '^1' } })], config },
+  );
+  void k.reloadSections('config', ['files', 'editor']);
+  await k.disable('files');
+  const of = (kind: string) => k.journal.findLastIndex((e) => e.pluginId === 'editor' && e.kind === kind);
+  assert.ok(of('config') < of('unloaded'), `после снятия плагина запись о перезагрузке его раздела не пишется: ${kinds(k).join(' ')}`);
+  await k.enable('files');
+  assert.deepEqual(k.active, ['files', 'editor']);
+  await k.unload();
+});
