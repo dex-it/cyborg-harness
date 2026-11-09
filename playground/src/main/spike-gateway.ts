@@ -6,7 +6,7 @@ import path from 'node:path';
 import type { LookupFunction } from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { safeStorage } from 'electron';
-import { load, OsGateway, parseManifest, PLUGIN_API_VERSION, type JournalEntry, type OsEnvironment, type PluginManifest } from '../../../core/src/index.ts';
+import { load, OsGateway, parseManifest, PLUGIN_API_VERSION, type JournalEntry, type OsEnvironment, type PluginManifest } from '@cyborg-harness/core';
 import { closePools, guardedLookup, isLocalAddress, transport, type Lookup } from '../../../core/src/net-transport.ts';
 import { measure, PTY_SCRIPT, SAMPLES, WARMUP, type ProbeOs, type ProbePath, type Sampled } from '../../bench/gateway-probe.ts';
 import { electronOs } from './os-env.ts';

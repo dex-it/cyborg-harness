@@ -4,12 +4,12 @@ import { fork } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { load, type JournalEntry } from '../../core/src/loader.ts';
-import type { SpawnHost } from '../../core/src/transports.ts';
+import { load, type JournalEntry } from '@cyborg-harness/core';
+import type { SpawnHost } from '@cyborg-harness/core';
 
 // Пакет electron под Node отдаёт путь к бинарнику: хост идёт на рантайме Electron, где queueMicrotask теряет AsyncLocalStorage.
 const electron = createRequire(import.meta.url)('electron') as string;
-const hostEntry = fileURLToPath(new URL('../../core/src/host-entry.ts', import.meta.url));
+const hostEntry = fileURLToPath(import.meta.resolve('@cyborg-harness/core/host-entry'));
 
 const electronHosts: SpawnHost = (hostId) => {
   const child = fork(hostEntry, [hostId], {
