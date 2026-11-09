@@ -64,6 +64,9 @@ for (const [name, text] of Object.entries(builtFiles)) {
 }
 const builtReport = await buildPlugin(builtSource, { out: join(userData, 'plugins', 'built-dep') });
 assert.ok(builtReport.ok, `cyborg-plugin build: ${builtReport.problems.map((p) => p.message).join('; ')}`);
+// P-05: шаблон плагина (templates/plugin) собирается тем же инструментом, как его собрал бы автор, и ложится в каталог пользователя рядом.
+const templateReport = await buildPlugin(join(repo, 'templates', 'plugin'), { out: join(userData, 'plugins', 'example') });
+assert.ok(templateReport.ok, `cyborg-plugin build templates/plugin: ${templateReport.problems.map((p) => p.message).join('; ')}`);
 // Плагин, которого не было при старте, ядро включает только после перезапуска, поэтому он входит в plugins.enabled заранее: настройки по умолчанию берутся из main.ts стенда.
 // Ветку первого запуска (main.ts записывает DEFAULT_CONFIG сам) проходит bareWindow: у него cyborg.json заранее нет, и он сверяет записанное с DEFAULT_CONFIG.
 /** DEFAULT_CONFIG из main.ts: текст объекта идёт через esbuild, который снимает типы (аннотация в объекте не ломает разбор). */
@@ -73,7 +76,7 @@ function defaultConfig() {
   return new Function(`return ${transformSync(`(${text})`, { loader: 'ts' }).code}`)();
 }
 const userConfig = defaultConfig();
-userConfig.plugins.enabled.push('built-dep');
+userConfig.plugins.enabled.push('built-dep', 'example');
 writeFileSync(join(userData, 'cyborg.json'), JSON.stringify(userConfig, null, 2));
 
 // --inspect=0 - инспектор главного процесса: нажатие оттуда идёт через before-input-event, как с клавиатуры.
@@ -225,12 +228,12 @@ async function main() {
   await waitFor('свободное сочетание дошло до окна', () => feedHas(re('Z', 'до окна дошло')));
   log('перехват клавиш, конфликт, обмен сообщениями через три хоста');
 
-  await waitFor('виды echo, alice и bob во фреймах', async () => (await views()) === 'alice/main,bob/main,built-dep/main,echo/main,editor/main,panels/bar,panels/panel,pin-lock/main,sessions/main' && (await inView('bob', "document.readyState")) === 'complete' && (await inView('alice', "!!document.getElementById('hello')")) === true);
+  await waitFor('виды echo, alice и bob во фреймах', async () => (await views()) === 'alice/main,bob/main,built-dep/main,echo/main,editor/main,example/main,panels/bar,panels/panel,pin-lock/main,sessions/main' && (await inView('bob', "document.readyState")) === 'complete' && (await inView('alice', "!!document.getElementById('hello')")) === true);
   // Область вида задаёт манифест, окно раскладывает по раскладке ядра: оба вида panels на своих местах, у каждого свой ctx.view.
   const area = (selector) => ev(`[...document.querySelectorAll(${JSON.stringify(selector + ' [data-plugin]')})].map((f) => f.dataset.plugin + '/' + f.dataset.view).sort().join(',')`);
   assert.equal(await area('#main-view'), 'sessions/main', 'основная область не по манифесту');
   assert.equal(await area('#toolbar-view'), 'panels/bar', 'панель инструментов не по манифесту');
-  assert.equal(await area('#views'), 'alice/main,bob/main,built-dep/main,echo/main,editor/main,panels/panel,pin-lock/main', 'боковая колонка не по манифесту');
+  assert.equal(await area('#views'), 'alice/main,bob/main,built-dep/main,echo/main,editor/main,example/main,panels/panel,pin-lock/main', 'боковая колонка не по манифесту');
   const panelsText = () =>
     main(`(async () => {
       const { webContents } = process.mainModule.require('electron');
@@ -291,7 +294,7 @@ async function main() {
     (await states({ chat: 'stopped', alice: 'stopped', bob: 'active' })) && lines().includes('[plugins] bob: чат пропал'),
   );
   assert.match(await text('#plugins-list [data-plugin="alice"] .plugin-reason'), /выгружен вместе с chat/);
-  await waitFor('на месте вида снятой alice - заглушка с причиной', async () => (await views()) === 'bob/main,built-dep/main,echo/main,editor/main,panels/bar,panels/panel,pin-lock/main,sessions/main' && /выгружен вместе с chat/.test(await text('#views [data-plugin="alice"] .view-reason')));
+  await waitFor('на месте вида снятой alice - заглушка с причиной', async () => (await views()) === 'bob/main,built-dep/main,echo/main,editor/main,example/main,panels/bar,panels/panel,pin-lock/main,sessions/main' && /выгружен вместе с chat/.test(await text('#views [data-plugin="alice"] .view-reason')));
   assert.ok(await ev(`[...document.querySelectorAll('#views [data-plugin="alice"] button')].some((b) => b.textContent === 'Журнал')`), 'у заглушки нет «Журнал»');
   assert.equal((await keyRow(combo('A')))?.live, 'false');
   await press(combo('A'));
@@ -301,7 +304,7 @@ async function main() {
     (await states({ chat: 'active', alice: 'active' })) && lines().includes('[plugins] bob: чат вернулся, подписываюсь снова'),
   );
   assert.notEqual(await pid('chat'), chatPid, 'после выгрузки chat должен подняться в новом процессе');
-  await waitFor('вид alice вернулся', async () => (await views()) === 'alice/main,bob/main,built-dep/main,echo/main,editor/main,panels/bar,panels/panel,pin-lock/main,sessions/main');
+  await waitFor('вид alice вернулся', async () => (await views()) === 'alice/main,bob/main,built-dep/main,echo/main,editor/main,example/main,panels/bar,panels/panel,pin-lock/main,sessions/main');
   await waitFor('новый документ alice помнит приветы из state воркспейса', async () => (await inView('alice', "document.getElementById('greeted')?.textContent")) === 'приветов: 1');
   log('выгрузка с зависимыми, загрузка в новый процесс, переподписка');
 
@@ -732,6 +735,13 @@ async function main() {
   assert.ok(lines().includes('[plugins] built-dep: зависимость внутри бандла: БАНДЛ!'), 'главная часть из index.mjs не исполнила код зависимости');
   assert.equal(await inView('built-dep', "document.getElementById('out')?.textContent"), 'ВИД!', 'вид из ui/ui.js не исполнил код зависимости');
   log('cyborg-plugin: собранный каталог с npm-зависимостью (manifest.json, index.mjs, ui/ui.js) загружен стендом, вид открыт');
+
+  // P-05: плагин из шаблона активен, его вид открыт, кнопка вида выполняет команду main-части и показывает ответ (значение config по умолчанию).
+  assert.equal(await state('example'), 'active', 'плагин из шаблона не включился');
+  await waitFor('вид шаблона открыт: в нём кнопка cy-button', async () => (await inView('example', "document.getElementById('hello')?.localName")) === 'cy-button');
+  await inView('example', "document.getElementById('hello').click()");
+  await waitFor('ответ команды example.hello во виде шаблона', async () => (await inView('example', "document.getElementById('answer')?.textContent")) === 'привет');
+  log('шаблон плагина: собран cyborg-plugin, активен, вид открыт, команда из вида ответила');
 
   const lock = JSON.parse(readFileSync(join(userData, 'workspace.cyborg.json.lock'), 'utf8'));
   assert.equal(typeof lock.pid, 'number', 'замок воркспейса без pid');
