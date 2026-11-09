@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import type { LogLevel } from '@cyborg-harness/contracts';
 import {
   describeEntry,
   describeOpenCommands,
@@ -131,7 +132,7 @@ export interface StartOptions {
   /** Секунды простоя пользователя по ОС - для `ctx.system.onIdle`. */
   readonly idleSeconds?: () => number;
   readonly onJournal?: (entry: JournalEntry) => void;
-  readonly onLog?: (pluginId: string, message: string) => void;
+  readonly onLog?: (pluginId: string, message: string, level: LogLevel) => void;
   /** Что не дошло до ядра; по умолчанию - в log. */
   readonly onProblem?: (problem: string) => void;
   readonly onDiscovered?: (found: Discovered) => void;
@@ -192,9 +193,9 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     onWindow: (snapshot) => options.onWindow?.(snapshot),
     onDocuments: () => options.onDocuments?.(),
     onKeptPty: () => options.onKeptPty?.(),
-    onLog: (id, message) => {
-      options.log(`[plugins] ${id}: ${message}`);
-      options.onLog?.(id, message);
+    onLog: (id, message, level) => {
+      options.log(`[plugins] ${id}${level === 'info' ? '' : ` [${level}]`}: ${message}`);
+      options.onLog?.(id, message, level);
     },
   }).catch((error: unknown) => {
     ws.close();

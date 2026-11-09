@@ -37,6 +37,10 @@ export const consumer: PluginModule = {
     // @ts-expect-error синхронный nowSync через границу хоста становится асинхронным
     const n: number | undefined = ctx.contracts.get('demo.clock', 1)?.nowSync();
     ctx.log(String(n));
+    // Уровень строки (K-29): необязательный, из трёх значений.
+    ctx.log('x', 'warn');
+    // @ts-expect-error уровней три: info, warn, error
+    ctx.log('x', 'debug');
     // @ts-expect-error обработчик команды принимает unknown, а не объявленный тип
     ctx.commands.register('x.open', (path: string) => path);
   },

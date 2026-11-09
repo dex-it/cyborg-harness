@@ -1,4 +1,4 @@
-import type { PtyInfo } from '@cyborg-harness/contracts';
+import type { LogLevel, PtyInfo } from '@cyborg-harness/contracts';
 import type { SectionResult, SectionStore } from './config.ts';
 import type { DocumentRow } from './documents.ts';
 import type { ContractGraph, Rejection } from './graph.ts';
@@ -155,7 +155,8 @@ export interface LoadOptions {
   /** Граф решён, код плагинов ещё не запускался. */
   readonly onGraph?: ((graph: ContractGraph) => Promise<void> | undefined) | undefined;
   readonly onJournal?: ((entry: JournalEntry) => void) | undefined;
-  readonly onLog?: ((pluginId: string, message: string) => void) | undefined;
+  /** Строка плагина (`ctx.log`) или хоста, с уровнем; `pluginId` у строки хоста, чей плагин определить нельзя, - `хост <id>`. */
+  readonly onLog?: ((pluginId: string, message: string, level: LogLevel) => void) | undefined;
   /** Из чего ядро собирает заголовок окна вокруг фрагментов плагинов. */
   readonly windowTitle?: WindowTitle | undefined;
   /** Диалог на экране, очередь и замки поменялись: приложение перерисовывает слой окна. */

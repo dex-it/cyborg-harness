@@ -61,6 +61,9 @@ export type CoreErrorCode =
   | 'PermissionDenied'
   | 'NotFound';
 
+/** Уровень строки `ctx.log`; те же три уровня у записей журнала ядра. */
+export type LogLevel = 'info' | 'warn' | 'error';
+
 /** Всё, что плагин видит от ядра; методы чужих контрактов всегда асинхронны - вызов идёт через границу хоста. */
 export interface PluginContext {
   readonly pluginId: string;
@@ -86,7 +89,12 @@ export interface PluginContext {
   readonly window: PluginWindow;
   readonly system: PluginSystem;
   readonly documents: PluginDocuments;
-  log(message: string): void;
+  /**
+   * Строка в журнал плагина с его id; уровень по умолчанию `info`, другой уровень вне `LogLevel` - `Invalid`.
+   * Ядро обрезает строку длиннее предела, не кладёт в журнал по одной строки сверх предела частоты, вычёркивает значения из хранилища секретов
+   * и выключает плагин, чей поток не стихает (FR-CH-4018): пределы - в `ResourceLimits` ядра.
+   */
+  log(message: string, level?: LogLevel): void;
 }
 
 /**

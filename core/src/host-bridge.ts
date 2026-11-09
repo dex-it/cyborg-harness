@@ -1,5 +1,6 @@
 import { CoreError, errorMessage } from './errors.ts';
 import type { Bridge, BridgeEnd, Host, KernelContext } from './kernel-context.ts';
+import { LOG_LEVELS } from './log-text.ts';
 import type { PluginManifest } from './manifest.ts';
 import { parseWire, type Parsed, type WireSpec } from './wire.ts';
 
@@ -29,7 +30,7 @@ export function createBridge(ctx: KernelContext): Bridge {
         try {
           handler(parseWire(method, raw, spec));
         } catch (error) {
-          options.onLog?.(`хост ${host.id}`, `ядро отказало: ${errorMessage(error)}`);
+          options.onLog?.(`хост ${host.id}`, `ядро отказало: ${errorMessage(error)}`, 'warn');
         }
       });
     };
@@ -70,10 +71,10 @@ function attachHostState(ctx: KernelContext, { host, mine, onNote }: BridgeEnd):
         await activation.activating.get(id);
         if (!ctx.unloading && ctx.active.includes(id)) await lifecycle.unloadPlugin(id);
       })
-      .catch((error: unknown) => options.onLog?.(id, `снятие после выключения не удалось: ${errorMessage(error)}`));
+      .catch((error: unknown) => options.onLog?.(id, `снятие после выключения не удалось: ${errorMessage(error)}`, 'error'));
   });
-  onNote('log', { pluginId: 'string', message: 'string' }, (p) => {
+  onNote('log', { pluginId: 'string', message: 'string', level: LOG_LEVELS }, (p) => {
     mine(p.pluginId);
-    options.onLog?.(p.pluginId, p.message);
+    options.onLog?.(p.pluginId, p.message, p.level);
   });
 }
