@@ -16,6 +16,8 @@ const common = { bundle: true, sourcemap: true, logLevel: 'warning' };
 await build({ ...common, entryPoints: [join(src, 'main/main.ts')], outfile: join(dist, 'main.js'), platform: 'node', format: 'cjs', target: 'node22', external: ['electron', 'node-pty'], logOverride: { 'empty-import-meta': 'silent' } });
 // ESM, а не cjs: в cjs esbuild заменил бы import(entry) плагина на require.
 await build({ ...common, stdin: { contents: "import '@cyborg-harness/electron/host-entry';", resolveDir: root }, outfile: join(dist, 'plugin-host.mjs'), platform: 'node', format: 'esm', target: 'node22' });
+// Процесс pty-хоста (K-01): cjs, как главный, - `node-pty` нативный и подгружается снаружи бандла.
+await build({ ...common, stdin: { contents: "import '@cyborg-harness/electron/pty-host-entry';", resolveDir: root }, outfile: join(dist, 'pty-host.js'), platform: 'node', format: 'cjs', target: 'node22', external: ['electron', 'node-pty'] });
 await build({ ...common, entryPoints: [join(src, 'main/preload.ts')], outfile: join(dist, 'preload.js'), platform: 'node', format: 'cjs', target: 'node22', external: ['electron'] });
 const browser = { ...common, platform: 'browser', format: 'iife', target: 'chrome130' };
 for (const page of ['app', 'spike', 'probe/probe']) await build({ ...browser, entryPoints: [join(src, `renderer/${page}.ts`)], outfile: join(dist, `renderer/${page}.js`) });

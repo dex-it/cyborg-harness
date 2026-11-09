@@ -22,6 +22,7 @@ import {
   showWindow,
   singleInstance,
   utilityHosts,
+  utilityPtyHost,
   watchPower,
   watchTheme,
   windowChannel,
@@ -148,6 +149,8 @@ void app.whenReady().then(() => {
     return;
   }
   const hosts = utilityHosts(path.join(__dirname, 'plugin-host.mjs'));
+  // node-pty живёт в своём процессе ядра: его зависание не замораживает окно (K-01).
+  const ptyHost = utilityPtyHost(path.join(__dirname, 'pty-host.js'));
   void plugins.start({
     userData,
     workspace: workspaceFile,
@@ -158,7 +161,7 @@ void app.whenReady().then(() => {
     spawnHost: hosts.spawn,
     pidOf: hosts.pidOf,
     idleSeconds: () => powerMonitor.getSystemIdleTime(),
-    os: electronOs({ userData, roots: () => [workspace], protectedPaths: [workspaceFile, `${workspaceFile}.lock`], workspaceFile, raiseWindow: () => showWindow(win) }),
+    os: electronOs({ userData, roots: () => [workspace], protectedPaths: [workspaceFile, `${workspaceFile}.lock`], workspaceFile, raiseWindow: () => showWindow(win), ptyHost: ptyHost.spawn }),
     // Короче, чем в Cyborg: зависание по кнопке «Повесить хост» видно через пару секунд.
     watchdog: { interval: 500, timeout: 2500 },
     // eslint-disable-next-line no-console -- журнал ядра в главном процессе - это stderr приложения
