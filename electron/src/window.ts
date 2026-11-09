@@ -60,7 +60,7 @@ export function windowEvents(getWindow: () => BrowserWindow | undefined): Plugin
 export function bindWindow(win: BrowserWindow, plugins: PluginsService): void {
   // Ядро видит нажатие раньше страницы: сочетание активного плагина до окна не доходит.
   win.webContents.on('before-input-event', (event, input) => {
-    if (input.type === 'keyDown' && !input.isAutoRepeat && plugins.press(input)) event.preventDefault();
+    if (input.type === 'keyDown' && plugins.press(input, input.isAutoRepeat)) event.preventDefault();
   });
   win.on('focus', () => plugins.emit({ kind: 'focus', focused: true }));
   win.on('blur', () => plugins.emit({ kind: 'focus', focused: false }));

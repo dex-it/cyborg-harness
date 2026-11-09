@@ -1,5 +1,5 @@
 import type { FeedLine, Reply } from '@cyborg-harness/contracts';
-import type { DocumentRow, WindowSnapshot } from '@cyborg-harness/core/window';
+import type { DocumentRow, LayoutEntry, WindowSnapshot } from '@cyborg-harness/core/window';
 
 export type { FeedLine, Reply };
 // Окно playground: снимок, который главный процесс отдаёт интерфейсу (SAD §3.2, §3.5).
@@ -23,21 +23,10 @@ export interface PluginRow {
   readonly commands: readonly string[];
   /** Права главной части словами - те же строки покажет окно согласия. */
   readonly permissions: readonly string[];
-  /** Адрес вида для <iframe>: есть у включённого плагина с `ui` в манифесте; у снятого окно рисует заглушку вместо фрейма. Это адрес первого вида из `views`. */
-  readonly view?: string;
-  /** Все виды `ui.views` по порядку манифеста, у каждого свой адрес: плагин с двумя видами показывает оба. */
-  readonly views?: readonly PluginViewRow[];
   /** Адрес экрана замка `ui.overlay`: окно показывает его, пока замок плагина стоит. */
   readonly overlay?: string;
   /** Процессы, оставленные человеком при выключении: без строки в окне их не видно до выхода. */
   readonly kept?: readonly KeptPtyRow[];
-}
-
-export interface PluginViewRow {
-  /** Имя вида из `ui.views`. */
-  readonly name: string;
-  /** Адрес для <iframe>: первый вид открывается по `cyborg-plugin://<id>/`, остальные по `/?view=<имя>`. */
-  readonly url: string;
 }
 
 export interface KeptPtyRow {
@@ -50,6 +39,9 @@ export interface KeptPtyRow {
   /** Код выхода, если процесс завершился сам. */
   readonly exitCode?: number;
 }
+
+/** Строка раскладки ядра (`Kernel.layout`); у вида `url` - адрес для <iframe>: нет у метки `not-enabled` (плагин не включён в настройках); у снятого (`disabled`) и отвергнутого графом (`out-of-graph`) окно рисует заглушку вместо фрейма. */
+export type LayoutRow = LayoutEntry & { readonly url?: string | undefined };
 
 export interface KeyRow {
   /** Как нажимать на этой платформе: `Ctrl+Shift+A`, на macOS `Meta+Shift+A`. */
@@ -89,6 +81,8 @@ export interface PluginsSnapshot {
   /** Что не дошло до ядра: битый cyborg.json, непрочитанный манифест. */
   readonly problems: readonly string[];
   readonly plugins: readonly PluginRow[];
+  /** Виды и типы документов по `order`: окно рисует области по этому списку и не называет плагины по именам. */
+  readonly layout: readonly LayoutRow[];
   readonly keys: readonly KeyRow[];
   readonly feed: readonly FeedLine[];
   readonly journal: readonly PluginJournalLine[];
@@ -113,7 +107,7 @@ export interface WindowApi {
   runCommand(command: string): Promise<Reply>;
   onPluginsChanged(listener: () => void): void;
   onWindowCommand(listener: (command: string) => void): void;
-  setViewVisible(id: string, visible: boolean): Promise<void>;
+  setViewVisible(id: string, view: string, visible: boolean): Promise<void>;
   answerDialog(id: number, choice: string | undefined): Promise<Reply>;
   closeDocument(id: string): Promise<Reply>;
   openWorkspace(file?: string): Promise<Reply>;

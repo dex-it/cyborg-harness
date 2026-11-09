@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { pluginOfOrigin, viewOrigin } from '../src/view-protocol.ts';
+import { pluginOfOrigin, viewOfUrl, viewOrigin } from '../src/view-protocol.ts';
 import { themeTokens } from '../src/theme.ts';
 import { cspOf, resolveStaticFile, resolveViewRequest, VIEW_CSP, type PluginUi } from '../src/view-files.ts';
 
@@ -23,6 +23,9 @@ test('вид: origin называет плагин, чужая схема и м�
   assert.equal(pluginOfOrigin('cyborg-plugin://cyborg.files'), 'cyborg.files');
   assert.equal(pluginOfOrigin('file://'), undefined);
   assert.equal(pluginOfOrigin('cyborg-plugin://Alice:80'), undefined);
+  assert.equal(viewOfUrl('cyborg-plugin://alice/?view=tree'), 'tree');
+  assert.equal(viewOfUrl('cyborg-plugin://alice/'), undefined);
+  assert.equal(viewOfUrl('не адрес'), undefined);
 });
 
 test('вид: корень - оболочка с модулем из манифеста, /.cyborg/ - файлы ядра, прочее - только из каталога своего плагина', () => {
