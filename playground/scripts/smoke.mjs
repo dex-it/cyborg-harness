@@ -462,6 +462,8 @@ async function main() {
 
   // PL-05: Monaco и xterm в одном окне, каждый во фрейме на своём origin cyborg-plugin://; воркеры, шрифт и таблицы - файлы того же origin под CSP вида.
   await ev("document.getElementById('tab-views').click()");
+  // Кросс-доменный фрейм вне видимой части колонки Chromium не рисует (Monaco не выкладывает строки): вида стало больше, и на небольшом окне CI редактор оказывается ниже края.
+  await ev(`document.querySelector('#views [data-plugin="editor"]')?.scrollIntoView({ block: 'start' })`);
   const editorData = (name) => inView('editor', `document.getElementById('cyborg-view').dataset.${name} ?? ''`);
   const editorText = () => inView('editor', "[...document.querySelectorAll('.monaco-editor .view-line')].map((l) => l.textContent).join('\\n').replaceAll('\\u00a0', ' ')");
   const editorState = () => inView('editor', "document.getElementById('editor-state')?.textContent ?? ''");
