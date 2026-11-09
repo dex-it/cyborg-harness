@@ -109,7 +109,7 @@ function readWhen(raw: unknown, m: PluginManifest): Resolved {
 
 /**
  * Динамические сочетания `ctx.keys.register` рядом со статической таблицей (`ctx.keys`: окно, меню, манифесты, выбор человека).
- * Статическая старше: динамическое на занятое сочетание проигрывает, окно и меню занять нельзя вовсе.
+ * Статическая старше: динамическое на занятое сочетание проигрывает, окно и меню занять нельзя вовсе (человек их через `plugins.keybindings` переопределяет раньше, чем плагин регистрирует).
  */
 export function createKeyRegistry(ctx: KernelContext): KeyRegistry {
   const platform = ctx.options.platform ?? process.platform;
