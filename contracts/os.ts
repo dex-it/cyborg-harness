@@ -1,6 +1,6 @@
 import type { Disposable } from './plugin.ts';
 
-/** Программа или программа с первыми аргументами; `env` - имена переменных, которые плагин может ей передать. */
+/** Программа или программа с первыми аргументами; `env` - имена переменных, которые плагин может ей передать: точное имя или маска `ПРЕФИКС_*` для номерных: хвост после префикса - только десятичные цифры (`GIT_CONFIG_KEY_*` покрывает `GIT_CONFIG_KEY_0`, `GIT_CONFIG_KEY_12`, но не `GIT_CONFIG_KEY_X`; `GIT_*` не покрывает `GIT_SSH_COMMAND`). */
 export type ProgramRule = string | { readonly program: string; readonly args: readonly string[]; readonly env?: readonly string[] };
 
 /** Права главной части плагина: что ядро пропустит через `ctx.os` (SAD §3.7). Нет права - нет члена в `ctx.os`. */
@@ -52,8 +52,11 @@ export interface FileSlice {
 export interface ProcessResult {
   readonly code: number | null;
   readonly signal: string | null;
+  /** Вывод до предела; обрезанный по `truncated` на границе символа. */
   readonly stdout: string;
   readonly stderr: string;
+  /** Вывод `stdout` или `stderr` дошёл до предела (`maxOutputBytes`, по умолчанию 16 МиБ): программа остановлена (`SIGTERM`, через 2 с глухой к нему - `SIGKILL`), а в ответе только прочитанное. Ошибка это или неполные данные, решает плагин: трекер отказывает («ответ больше N»), поиск берёт совпадения из прочитанного. */
+  readonly truncated: boolean;
 }
 
 // Пакет собирается без lib DOM и @types/node (потребитель может не ставить ни то, ни другое): объявляем минимум `AbortSignal`.
@@ -69,7 +72,10 @@ export interface ProcessOptions {
   /** Только имена из `env` правила `process`; база - PATH, HOME, локаль. Значения - данные, а не ссылки `$secret`. */
   readonly env?: Readonly<Record<string, string>>;
   readonly input?: string;
+  /** Срок программы, мс; истёк - `SIGTERM` всей группе, в ответе `signal: 'SIGTERM'`; не остановилась за 2 с (глушит сигнал) - `SIGKILL`, `signal: 'SIGKILL'`. */
   readonly timeoutMs?: number;
+  /** Предел вывода, байт на `stdout` и на `stderr` отдельно: целое от 1 до 64 МиБ, по умолчанию 16 МиБ. Превышение не ошибка вызова, а `truncated` в ответе. */
+  readonly maxOutputBytes?: number;
   /** Отмена: сигнал сработал - программе и её группе `SIGTERM`, вызов отклоняется `Cancelled`. Сработал до вызова - программа не запускается. */
   readonly signal?: AbortSignal;
 }
@@ -110,15 +116,18 @@ export interface HttpServer {
   dispose(): void;
 }
 
-/** Файлы: без права - только свои каталоги `paths`; чтение шире - по `fs.read`, запись - по `fs.write`. Путь вне области - `PermissionDenied`, никогда `NotFound`. */
+/** Файлы: без права - только свои каталоги `paths`; чтение шире - по `fs.read`, запись - по `fs.write`. Путь вне области - `PermissionDenied`, никогда `NotFound`; нет файла или каталога внутри области в `readText`, `readSlice`, `list`, `stat`, `watch`, `realpath` - `NotFound` (проверка существования - `stat` и ловля `NotFound`); `list` существующего файла - `Invalid`. Ни код, ни текст ошибки ОС не выдают путь вне области, названный плагином: ошибка раскрытия пути (`ENOTDIR`, `ELOOP`, `EACCES`) там тоже `PermissionDenied`. Путь через ссылку внутри области - путь внутри области, и ответ зависит от цели ссылки: цель вне области есть - `PermissionDenied`, ссылка висячая - `NotFound` (или ошибка операции), цель под закрытым снаружи каталогом - ошибка самой операции; ссылку создаёт человек или другая программа, плагин с `fs` её создать не может. */
 export interface OsFs {
   readText(path: string): Promise<string>;
   list(dir: string): Promise<DirEntry[]>;
   stat(path: string): Promise<FileStat>;
+  /** Настоящий путь: ссылки раскрыты, как `realpath` ОС. Нужен, чтобы сверять пути по имени (ключи `~/.claude.json`, корни проектов): `/tmp/x` и `/private/tmp/x` - один каталог. Ссылка наружу области - `PermissionDenied`, нет пути - `NotFound`. */
+  realpath(path: string): Promise<string>;
   /** Кусок файла с байта `offset`, от 4 байт до 1 МиБ: длинный журнал читается частями, а не целиком. */
   readSlice(path: string, offset: number, maxBytes: number): Promise<FileSlice>;
-  /** Изменения файла или каталога по праву чтения; у каталога - имена изменённых, события склеиваются за 50 мс. Ядро закрыло наблюдение само (ошибка ОС, путь ушёл из прав) - `onClose` с причиной. */
+  /** Изменения файла или каталога по праву чтения; у каталога - имена изменённых, события склеиваются за 50 мс. Наблюдение файла переживает подмену файла через `rename` (`writeText`, редакторы с атомарной записью), в том числе когда старый файл держит открытым другой процесс (`tail -f`): событие приходит на каждую запись. Ядро закрыло наблюдение само (ошибка ОС, путь ушёл из прав, файл удалён, на его месте каталог или ссылка) - `onClose` с причиной. */
   watch(path: string, listener: (names: readonly string[]) => void, onClose?: (reason: string) => void): Promise<Disposable>;
+  /** Атомарно: текст пишется во временный файл рядом (`<файл>.<hex>.tmp`) и переименовывается, читатель и оборванная запись видят прежний файл или новый целиком; режим существующего файла сохраняется; файл без права записи (0444) не заменяется - `EACCES`, как при записи на месте, так что `chmod a-w` защищает файл. Без `fsync`: падение процесса не страшно, потеря питания - не гарантия. Наблюдатель каталога видит имя временного файла. Временному файлу нужно право записи на его имя: если `fs.write` называет один файл или маску под имя (`*.json`), либо каталог цели закрыт для создания файлов, запись идёт на месте, без защиты от обрыва, зато ничего вне права не создаётся. Не обычный файл (каталог, ссылка, FIFO) - `Invalid`. */
   writeText(path: string, text: string): Promise<void>;
   mkdir(path: string): Promise<void>;
   remove(path: string): Promise<void>;
@@ -209,6 +218,7 @@ export interface PluginOs {
   readonly paths: { readonly data: string; readonly temp: string; readonly home: string };
   readonly fs: OsFs;
   readonly pty?: OsPty;
+  /** Программы нет в системе (или нет `cwd`) - `NotFound`; ненулевой код выхода ошибкой не считается и приходит в `ProcessResult.code`. */
   readonly process?: { run(program: string, args: readonly string[], options?: ProcessOptions): Promise<ProcessResult> };
   readonly net?: { fetch(url: string, request?: HttpRequest): Promise<HttpResponse> };
   readonly env?: { get(name: string): Promise<string | undefined> };

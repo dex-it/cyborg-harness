@@ -1,13 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFile, chmod, lstat, mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, lstat, mkdtemp, mkdir, open, readdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { EventEmitter } from 'node:events';
+import type { FSWatcher } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, PluginOs } from '@cyborg-harness/contracts';
 import { SectionStore, type LayerStore } from '../src/config.ts';
 import { load } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
-import { describePermissions } from '../src/permissions.ts';
+import { describePermissions, envNameAllowed } from '../src/permissions.ts';
 import type { NoticeEvents } from '../src/notices.ts';
 import { memorySecrets } from '../../testing/src/memory.ts';
 import { OsGateway, type OsEnvironment } from '../src/os-gateway.ts';
@@ -141,6 +143,69 @@ test('process.run: программа и префикс аргументов и�
   await assert.rejects(proc.run(process.execPath, ['--version']), { code: 'PermissionDenied' });
   await assert.rejects(proc.run('/bin/sh', ['-c', 'echo']), { code: 'PermissionDenied' });
   assert.deepEqual(denied(), ['runner:process.run', 'runner:process.run', 'runner:process.run', 'runner:process.run']);
+  await k.unload();
+});
+
+test('process.run: вывод больше предела - truncated, программа остановлена, прочитанное до предела целое по символам; предел в байтах и по потокам', async (t) => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ runner: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp, limits: { processOutput: 1000, processOutputMax: 4000 } });
+  // Иначе упавшая проверка оставит наблюдатель или программу живыми, и процесс файла не выйдет до срока job.
+  t.after(() => k.unload());
+  const run = (script: string, options?: object) => os('runner').process!.run(process.execPath, ['-e', script], options);
+  const small = await run(`process.stdout.write('я'.repeat(500));process.stderr.write('e')`);
+  assert.deepEqual([small.code, small.truncated, small.stdout.length], [0, false, 500], 'ровно в предел (1000 байт) - не обрезано');
+  const over = await run(`process.stdout.write('я'.repeat(501))`);
+  assert.equal(over.truncated, true, 'предел в байтах, а не в символах: 501 символ по 2 байта');
+  assert.equal(over.stdout, 'я'.repeat(500), 'обрыв на границе символа, без U+FFFD');
+  const odd = await run(`process.stdout.write('a'+'я'.repeat(600))`);
+  assert.deepEqual([odd.truncated, odd.stdout], [true, 'a' + 'я'.repeat(499)], 'половина символа на границе предела отброшена');
+  const err = await run(`process.stderr.write('x'.repeat(2000))`);
+  assert.deepEqual([err.truncated, err.stderr.length, err.stdout], [true, 1000, '']);
+  const endless = await run(`for(;;)process.stdout.write('x'.repeat(65536))`);
+  assert.deepEqual([endless.truncated, endless.signal, endless.stdout.length], [true, 'SIGTERM', 1000], 'бесконечный вывод останавливает программу');
+  const deaf = await run(`process.on('SIGTERM',()=>{});process.stdout.write('x'.repeat(2000));setInterval(()=>{},1000)`);
+  assert.deepEqual([deaf.truncated, deaf.signal], [true, 'SIGKILL'], 'программа, глушащая SIGTERM, добита');
+  const raised = await run(`process.stdout.write('x'.repeat(3000))`, { maxOutputBytes: 3000 });
+  assert.deepEqual([raised.truncated, raised.stdout.length], [false, 3000], 'опция поднимает предел');
+  const lowered = await run(`process.stdout.write('x'.repeat(100))`, { maxOutputBytes: 10 });
+  assert.deepEqual([lowered.truncated, lowered.stdout], [true, 'x'.repeat(10)], 'опция опускает предел');
+  for (const bad of [0, -1, 1.5, 4001, '10', Number.NaN]) await assert.rejects(run('0', { maxOutputBytes: bad }), { code: 'Invalid', message: /maxOutputBytes/ }, String(bad));
+});
+
+test('process.run: тайм-аут программы, глушащей SIGTERM, кончается SIGKILL, а не висит в пределе runs', async (t) => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ runner: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp, limits: {} });
+  // Иначе упавшая проверка оставит наблюдатель или программу живыми, и процесс файла не выйдет до срока job.
+  t.after(() => k.unload());
+  const started = Date.now();
+  const got = await os('runner').process!.run(process.execPath, ['-e', `process.on('SIGTERM',()=>{});setInterval(()=>{},1000)`], { timeoutMs: 200 });
+  assert.deepEqual([got.signal, got.truncated], ['SIGKILL', false]);
+  assert.ok(Date.now() - started < 8000, 'не ждали вечно');
+});
+
+test('process.run: SIGKILL после выхода лидера идёт только группе, а не его освободившемуся pid', { skip: process.platform === 'win32' && 'группы процессов POSIX' }, async (t) => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ runner: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp, limits: {} });
+  t.after(() => k.unload());
+  const kill = t.mock.method(process, 'kill');
+  // Лидер умирает от SIGTERM, а вывод держит потомок в своей сессии: close ждёт его, и таймер SIGKILL срабатывает уже после выхода лидера.
+  const daemon = `require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},2600)'],{detached:true,stdio:['ignore','inherit','inherit']}).unref();process.stderr.write(String(process.pid));setInterval(()=>{},1000)`;
+  const got = await os('runner').process!.run(process.execPath, ['-e', daemon], { timeoutMs: 200 });
+  const leader = Number(got.stderr);
+  assert.ok(leader > 0);
+  assert.deepEqual(kill.mock.calls.map((c) => c.arguments[0]).filter((pid) => pid === leader), [], 'собранный лидер не получает сигналов по своему pid');
+});
+
+test('process.run: предел вывода по умолчанию - 16 МиБ, как и записано в SAD', async () => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ runner: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp });
+  const script = (mib: number) => `const b=Buffer.alloc(1048576,97);for(let i=0;i<${String(mib)};i++)process.stdout.write(b)`;
+  const exact = await os('runner').process!.run(process.execPath, ['-e', script(16)]);
+  assert.deepEqual([exact.truncated, exact.stdout.length], [false, 16 * 1024 * 1024]);
+  const over = await os('runner').process!.run(process.execPath, ['-e', script(17)]);
+  assert.deepEqual([over.truncated, over.stdout.length], [true, 16 * 1024 * 1024]);
+  const big = await os('runner').process!.run(process.execPath, ['-e', script(64)], { maxOutputBytes: 64 * 1024 * 1024 });
+  assert.deepEqual([big.truncated, big.stdout.length], [false, 64 * 1024 * 1024], 'буфер трекеров Cyborg - 64 МиБ - укладывается в потолок');
   await k.unload();
 });
 
@@ -286,6 +351,214 @@ test('секреты: ключи своего плагина, $secret, без ш
   await locked.k.unload();
 });
 
+test('NotFound: нет файла, каталога или программы - NotFound, а не безымянный Remote; чужой путь по-прежнему PermissionDenied', async () => {
+  await using box = await sandbox();
+  await writeFile(path.join(box.work, 'file.txt'), 'x');
+  const { k, os, denied } = await kernel({ reader: { 'fs.read': [box.work], 'fs.write': [box.work], process: [{ program: process.execPath, args: ['-e'] }, 'cyborg-no-such-program'] } }, { dataDir: box.data, tempDir: box.temp });
+  const fs = os('reader').fs;
+  const gone = path.join(box.work, 'gone');
+  for (const [name, call] of Object.entries({
+    readText: () => fs.readText(gone),
+    readSlice: () => fs.readSlice(gone, 0, 16),
+    stat: () => fs.stat(gone),
+    list: () => fs.list(gone),
+    'stat под файлом': () => fs.stat(path.join(box.work, 'file.txt', 'child')),
+    watch: () => fs.watch(gone, () => undefined),
+  })) await assert.rejects(call(), { code: 'NotFound', message: /ENOENT|ENOTDIR/ }, name);
+  await assert.rejects(fs.stat(path.join(box.outside, 'gone')), { code: 'PermissionDenied' }, 'вне области существования файла не выдаём');
+  await assert.rejects(os('reader').process!.run('cyborg-no-such-program', []), { code: 'NotFound', message: /cyborg-no-such-program/ });
+  await assert.rejects(os('reader').process!.run(process.execPath, ['-e', '0'], { cwd: gone }), { code: 'NotFound' }, 'каталога запуска нет - тоже ENOENT от spawn');
+  assert.deepEqual(denied(), ['reader:fs.stat'], 'NotFound в журнал отказов не идёт');
+  await k.unload();
+});
+
+test('вне области любая ошибка ОС при раскрытии пути (ENOTDIR, ELOOP, EACCES) - PermissionDenied: файл вне области не выдаёт себя ни кодом, ни текстом', async () => {
+  await using box = await sandbox();
+  const secret = path.join(box.outside, 'secret');
+  await writeFile(secret, 'x');
+  await symlink(path.join(box.outside, 'loop'), path.join(box.outside, 'loop'));
+  const locked = path.join(box.outside, 'locked');
+  await mkdir(path.join(locked, 'dir'), { recursive: true });
+  const { k, os, denied } = await kernel({ reader: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  const fs = os('reader').fs;
+  const paths = { 'под файлом (ENOTDIR)': path.join(secret, 'child'), 'под файлом глубже': path.join(secret, 'a', 'b'), 'петля ссылок (ELOOP)': path.join(box.outside, 'loop'), 'под петлёй': path.join(box.outside, 'loop', 'x') };
+  const calls = (p: string) => ({ stat: () => fs.stat(p), readText: () => fs.readText(p), readSlice: () => fs.readSlice(p, 0, 16), list: () => fs.list(p), realpath: () => fs.realpath(p), watch: () => fs.watch(p, () => undefined) });
+  let count = 0;
+  for (const [name, p] of Object.entries(paths)) for (const [method, call] of Object.entries(calls(p))) {
+    await assert.rejects(call(), { code: 'PermissionDenied' }, `${method} ${name}`);
+    count++;
+  }
+  if (process.platform !== 'win32' && process.getuid?.() !== 0) {
+    await chmod(locked, 0);
+    try {
+      for (const [method, call] of Object.entries(calls(path.join(locked, 'dir', 'x')))) {
+        await assert.rejects(call(), { code: 'PermissionDenied' }, `${method} под каталогом без доступа (EACCES)`);
+        count++;
+      }
+    } finally {
+      await chmod(locked, 0o700);
+    }
+  }
+  assert.equal(denied().length, count, 'каждый отказ - запись в журнале');
+  assert.deepEqual(new Set(denied()), new Set(['reader:fs.stat', 'reader:fs.readText', 'reader:fs.readSlice', 'reader:fs.list', 'reader:fs.realpath', 'reader:fs.watch']));
+  await k.unload();
+});
+
+test('fs.list на существующем файле - Invalid «не каталог», а не NotFound; нет пути под файлом - по-прежнему NotFound', async () => {
+  await using box = await sandbox();
+  await writeFile(path.join(box.work, 'file.txt'), 'x');
+  const { k, os } = await kernel({ reader: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  const fs = os('reader').fs;
+  await assert.rejects(fs.list(path.join(box.work, 'file.txt')), { code: 'Invalid', message: /не каталог/ });
+  await assert.rejects(fs.list(path.join(box.work, 'file.txt', 'child')), { code: 'NotFound' });
+  await assert.rejects(fs.list(path.join(box.work, 'gone')), { code: 'NotFound' });
+  await k.unload();
+});
+
+test('fs.realpath: настоящий путь внутри области - ссылки раскрыты; нет пути - NotFound; ссылка наружу и чужой путь - PermissionDenied с записью в журнале', async () => {
+  await using box = await sandbox();
+  await mkdir(path.join(box.work, 'real'));
+  await writeFile(path.join(box.work, 'real', 'a.txt'), 'x');
+  await symlink(path.join(box.work, 'real'), path.join(box.work, 'alias'));
+  await symlink(box.outside, path.join(box.work, 'escape'));
+  const { k, os, denied } = await kernel({ reader: { 'fs.read': [box.work] }, plain: undefined }, { dataDir: box.data, tempDir: box.temp });
+  const fs = os('reader').fs;
+  assert.equal(await fs.realpath(path.join(box.work, 'alias', 'a.txt')), path.join(box.work, 'real', 'a.txt'), 'ссылка раскрыта: так ключ ~/.claude.json совпадает с каталогом проекта');
+  assert.equal(await fs.realpath(path.join(box.work, 'real', '..', 'real')), path.join(box.work, 'real'));
+  assert.equal(await fs.realpath(box.work), box.work);
+  await assert.rejects(fs.realpath(path.join(box.work, 'gone')), { code: 'NotFound' });
+  await symlink(path.join(box.work, 'gone'), path.join(box.work, 'dangling'));
+  await assert.rejects(fs.realpath(path.join(box.work, 'dangling')), { code: 'NotFound' }, 'висячая ссылка не отдаётся как настоящий путь');
+  await assert.rejects(fs.realpath(path.join(box.work, 'escape')), { code: 'PermissionDenied' }, 'ссылка наружу области');
+  await assert.rejects(fs.realpath(box.outside), { code: 'PermissionDenied' });
+  await assert.rejects(fs.realpath('relative'), { code: 'PermissionDenied' });
+  await assert.rejects(os('plain').fs.realpath(path.join(box.work, 'real')), { code: 'PermissionDenied' }, 'без fs.read - только свои каталоги');
+  const own = os('plain').paths.data;
+  await os('plain').fs.mkdir(path.join(own, 'd'));
+  assert.equal(await os('plain').fs.realpath(path.join(own, 'd')), path.join(own, 'd'), 'свой каталог доступен без права');
+  assert.deepEqual(denied(), ['reader:fs.realpath', 'reader:fs.realpath', 'reader:fs.realpath', 'plain:fs.realpath']);
+  await k.unload();
+});
+
+test('fs.writeText атомарна: читатель видит прежний или новый файл целиком, режим сохраняется, временных файлов не остаётся, не обычный файл - Invalid', { skip: process.platform === 'win32' && 'режимы POSIX' }, async () => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ writer: { 'fs.read': [box.work], 'fs.write': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  const fs = os('writer').fs;
+  const file = path.join(box.work, 'state.json');
+  const a = 'a'.repeat(3 * 1024 * 1024);
+  const b = 'я'.repeat(1024 * 1024);
+  await fs.writeText(file, a);
+  await chmod(file, 0o600);
+  const run = { writing: true };
+  const seen = new Set<string>();
+  const reader = (async () => {
+    while (run.writing) {
+      const text = await fs.readText(file);
+      seen.add(text === a ? 'a' : text === b ? 'b' : `порча:${String(text.length)}`);
+    }
+  })();
+  for (let i = 0; i < 30; i++) await fs.writeText(file, i % 2 === 0 ? b : a);
+  run.writing = false;
+  await reader;
+  assert.deepEqual([...seen].filter((v) => v.startsWith('порча')), [], 'читатель не видит пустой или недописанный файл');
+  assert.equal((await stat(file)).mode & 0o777, 0o600, 'режим существующего файла сохранён');
+  assert.deepEqual((await fs.list(box.work)).map((e) => e.name), ['state.json'], 'временный файл убран');
+  await fs.writeText(path.join(box.work, 'new.txt'), 'новый');
+  assert.equal(await readFile(path.join(box.work, 'new.txt'), 'utf8'), 'новый');
+  await mkdir(path.join(box.work, 'dir'));
+  await assert.rejects(fs.writeText(path.join(box.work, 'dir'), 'x'), { code: 'Invalid', message: /не обычный файл/ });
+  await symlink(path.join(box.work, 'gone'), path.join(box.work, 'dangling'));
+  await assert.rejects(fs.writeText(path.join(box.work, 'dangling'), 'x'), { code: 'Invalid', message: /не обычный файл/ }, 'висячая ссылка не заменяется файлом');
+  assert.deepEqual((await fs.list(box.work)).map((e) => e.name).sort(), ['dangling', 'dir', 'new.txt', 'state.json']);
+  await k.unload();
+});
+
+test('fs.writeText: временный файл не ложится вне fs.write - область-файл и маска пишутся на месте, режим каталога без записи не ломает запись', { skip: process.platform === 'win32' && 'режимы POSIX' }, async () => {
+  await using box = await sandbox();
+  const one = path.join(box.outside, 'one.json');
+  const masked = path.join(box.outside, 'masked.json');
+  const free = path.join(box.work, 'free.json');
+  const ro = path.join(box.work, 'ro');
+  await mkdir(ro);
+  for (const f of [one, masked, free, path.join(ro, 'kept.json')]) await writeFile(f, 'old');
+  const { k, os, denied } = await kernel({ w: { 'fs.read': [box.outside, box.work], 'fs.write': [one, path.join(box.outside, '*.json'), box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  // Область «только один файл»: временный файл рядом был бы вне права, поэтому запись на месте (inode тот же).
+  const fs = os('w').fs;
+  const ino = async (f: string) => (await stat(f)).ino;
+  const before = [await ino(one), await ino(masked), await ino(free)];
+  const seen: string[] = [];
+  const watcher = (await import('node:fs')).watch(box.outside, (_e, name) => {
+    if (name) seen.push(name);
+  });
+  await fs.writeText(one, 'new-one');
+  await fs.writeText(masked, 'new-masked');
+  await fs.writeText(free, 'new-free');
+  await new Promise((r) => setTimeout(r, 100));
+  watcher.close();
+  assert.deepEqual([await readFile(one, 'utf8'), await readFile(masked, 'utf8'), await readFile(free, 'utf8')], ['new-one', 'new-masked', 'new-free']);
+  assert.equal(await ino(one), before[0], 'one.json записан на месте: временный файл вне права не создавался');
+  assert.equal(await ino(masked), before[1], 'masked.json под маску *.json - сосед masked.json.<hex>.tmp под маску не подходит');
+  assert.notEqual(await ino(free), before[2], 'где временный файл разрешён, запись по-прежнему атомарна');
+  assert.deepEqual(seen.filter((n) => n.endsWith('.tmp')), [], 'во внешнем каталоге временных файлов не было');
+  if (process.getuid?.() !== 0) {
+    await chmod(ro, 0o555);
+    try {
+      await fs.writeText(path.join(ro, 'kept.json'), 'rw-file-in-ro-dir');
+      assert.equal(await readFile(path.join(ro, 'kept.json'), 'utf8'), 'rw-file-in-ro-dir', 'файл в каталоге без записи записывался и раньше');
+    } finally {
+      await chmod(ro, 0o755);
+    }
+  }
+  assert.deepEqual(denied(), []);
+  await k.unload();
+});
+
+test('fs.writeText: файл только для чтения (0444) в каталоге с записью не заменяется - EACCES, как на O_TRUNC; хоть область каталог, хоть сам файл', { skip: (process.platform === 'win32' || process.getuid?.() === 0) && 'режимы POSIX, не root' }, async () => {
+  await using box = await sandbox();
+  const ro = path.join(box.work, 'ro.json');
+  await writeFile(ro, 'old');
+  await chmod(ro, 0o444);
+  const { k, os } = await kernel({ dir: { 'fs.read': [box.work], 'fs.write': [box.work] }, one: { 'fs.read': [box.work], 'fs.write': [ro] } }, { dataDir: box.data, tempDir: box.temp });
+  const before = await stat(ro);
+  for (const id of ['dir', 'one']) {
+    await assert.rejects(os(id).fs.writeText(ro, 'new'), /EACCES/, id);
+    assert.equal(await readFile(ro, 'utf8'), 'old', `${id}: содержимое цело`);
+    const after = await stat(ro);
+    assert.equal(after.mode & 0o777, 0o444, `${id}: режим прежний`);
+    assert.equal(after.ino, before.ino, `${id}: inode прежний`);
+  }
+  assert.deepEqual((await readdir(box.work)).filter((n) => n.endsWith('.tmp')), [], 'временных файлов не осталось');
+  await chmod(ro, 0o644);
+  await os('dir').fs.writeText(ro, 'new');
+  assert.equal(await readFile(ro, 'utf8'), 'new', 'разрешённый chmod снова открывает запись');
+  await k.unload();
+});
+
+test('fs: ссылка внутри области - ответ зависит от цели (вне существует - PermissionDenied, висячая - NotFound или ошибка операции, под закрытым каталогом снаружи - EACCES операции); обещание контракта только про путь, названный плагином', { skip: (process.platform === 'win32' || process.getuid?.() === 0) && 'ссылки и режимы POSIX, не root' }, async () => {
+  await using box = await sandbox();
+  const closed = path.join(box.outside, 'closed');
+  await mkdir(closed);
+  await writeFile(path.join(closed, 'x'), 'секрет');
+  await writeFile(path.join(box.outside, 'there'), 'секрет');
+  await chmod(closed, 0o000);
+  try {
+    await symlink(path.join(box.outside, 'there'), path.join(box.work, 'to-existing'));
+    await symlink(path.join(box.outside, 'нет'), path.join(box.work, 'to-missing'));
+    await symlink(path.join(closed, 'x'), path.join(box.work, 'to-closed'));
+    const { k, os } = await kernel({ app: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+    const fs = os('app').fs;
+    await assert.rejects(fs.readText(path.join(box.work, 'to-existing')), { code: 'PermissionDenied' });
+    await assert.rejects(fs.stat(path.join(box.work, 'to-missing')), { code: 'NotFound' });
+    await assert.rejects(fs.readText(path.join(box.work, 'to-missing')), (error: Error & { code?: string }) => error.code !== 'PermissionDenied', 'чтение висячей ссылки: ошибка самой операции, не отказ области');
+    await assert.rejects(fs.stat(path.join(box.work, 'to-closed')), (error: Error & { code?: string }) => error.code === 'Remote' && error.message.includes('EACCES'));
+    // Названный плагином путь вне области остаётся PermissionDenied при любом состоянии цели.
+    for (const named of [path.join(box.outside, 'there'), path.join(box.outside, 'нет'), path.join(closed, 'x')]) await assert.rejects(fs.readText(named), { code: 'PermissionDenied' }, named);
+    await k.unload();
+  } finally {
+    await chmod(closed, 0o755);
+  }
+});
+
 test('fs.readSlice: кусок по байтам, символ UTF-8 не рвётся, пределы и права', async () => {
   await using box = await sandbox();
   const file = path.join(box.work, 'log.jsonl');
@@ -340,6 +613,151 @@ test('fs.watch: имена изменённых в каталоге склеен
   await k.unload();
   await appendFile(path.join(box.work, 'a.jsonl'), '4\n');
   await new Promise((r) => setTimeout(r, 100));
+});
+
+test('fs.watch файла: каждая из записей writeText (подмена inode через rename) и запись на месте дают событие; наблюдение не молчит и onClose не зовётся', { skip: process.platform === 'win32' && 'rename поверх открытого' }, async (t) => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ app: { 'fs.read': [box.work], 'fs.write': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  // Иначе упавшая проверка оставит наблюдатель или программу живыми, и процесс файла не выйдет до срока job.
+  t.after(() => k.unload());
+  const fs = os('app').fs;
+  const file = path.join(box.work, 'state.json');
+  await fs.writeText(file, '0');
+  const events: (readonly string[])[] = [];
+  const closed: string[] = [];
+  const sub = await fs.watch(file, (names) => events.push(names), (reason) => closed.push(reason));
+  const next = async (n: number) => {
+    for (let i = 0; i < 100 && events.length < n; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.ok(events.length >= n, `событий ${String(events.length)} из ${String(n)}; onClose: ${closed.join()}`);
+  };
+  for (let i = 1; i <= 4; i++) {
+    await fs.writeText(file, String(i));
+    await next(i);
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  await writeFile(file, 'прямая запись');
+  await next(5);
+  assert.deepEqual(closed, []);
+  sub.dispose();
+});
+
+test('fs.watch файла: старый inode держит открытым другой процесс (tail -f) - каждая из записей writeText всё равно даёт событие', { skip: process.platform !== 'linux' && 'rename-события без IN_DELETE_SELF - особенность inotify' }, async (t) => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ app: { 'fs.read': [box.work], 'fs.write': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  t.after(() => k.unload());
+  const fs = os('app').fs;
+  const file = path.join(box.work, 'state.json');
+  await fs.writeText(file, '0');
+  const events: (readonly string[])[] = [];
+  const closed: string[] = [];
+  const sub = await fs.watch(file, (names) => events.push(names), (reason) => closed.push(reason));
+  const holder = await open(file, 'r');
+  try {
+    for (let i = 1; i <= 3; i++) {
+      await fs.writeText(file, String(i));
+      await waitFor(() => events.length >= i, `событий ${String(events.length)} из ${String(i)}; onClose: ${closed.join()}`);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  } finally {
+    await holder.close();
+  }
+  assert.deepEqual(closed, []);
+  sub.dispose();
+});
+
+test('fs.watch файла: файл удалён - onClose с причиной, а не тишина', async (t) => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ app: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  // Иначе упавшая проверка оставит наблюдатель или программу живыми, и процесс файла не выйдет до срока job.
+  t.after(() => k.unload());
+  const file = path.join(box.work, 'gone.json');
+  await writeFile(file, '0');
+  const closed: string[] = [];
+  await os('app').fs.watch(file, () => undefined, (reason) => closed.push(reason));
+  await rm(file);
+  for (let i = 0; i < 100 && closed.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(closed.length, 1, 'удаление файла закрывает наблюдение с причиной');
+});
+
+/** Наблюдатели, подставленные шлюзу: Linux не присылает `rename`, пока старый inode держит открытым другой процесс (`tail -f`) - приходит только `change`. */
+function fakeWatchers() {
+  const list: { w: FSWatcher; closed: boolean; fire: (event: string, name?: string) => void }[] = [];
+  const watch = ((_path: string, listener: (event: string, name: string) => void) => {
+    const w = Object.assign(new EventEmitter(), {
+      close: () => {
+        item.closed = true;
+      },
+    });
+    const item = { w: w as unknown as FSWatcher, closed: false, fire: (event: string, name = 'state.json') => listener(event, name) };
+    list.push(item);
+    return w as unknown as FSWatcher;
+  }) as unknown as NonNullable<OsEnvironment['watch']>;
+  return { list, watch };
+}
+
+async function waitFor(cond: () => boolean, what: string) {
+  for (let i = 0; i < 100 && !cond(); i++) await new Promise((r) => setTimeout(r, 20));
+  assert.ok(cond(), what);
+}
+
+test('fs.watch файла: на change inode пути сверяется со старым - подмена без rename (старый inode держит другой процесс) переоткрывает наблюдение', async (t) => {
+  await using box = await sandbox();
+  const { list, watch } = fakeWatchers();
+  const { k, os } = await kernel({ app: { 'fs.read': [box.work], 'fs.write': [box.work] } }, { dataDir: box.data, tempDir: box.temp, watch });
+  t.after(() => k.unload());
+  const fs = os('app').fs;
+  const file = path.join(box.work, 'state.json');
+  await fs.writeText(file, '0');
+  const events: (readonly string[])[] = [];
+  const closed: string[] = [];
+  const sub = await fs.watch(file, (names) => events.push(names), (reason) => closed.push(reason));
+  assert.equal(list.length, 1);
+  // Тот же inode (дописали на месте): change не переоткрывает.
+  await writeFile(file, 'на месте');
+  list[0]!.fire('change');
+  await waitFor(() => events.length === 1, 'событие дописанного файла');
+  assert.equal(list.length, 1, 'inode тот же - наблюдатель прежний');
+  // Файл подменён через rename, а rename-события нет: пришёл только change.
+  for (let i = 1; i <= 3; i++) {
+    await fs.writeText(file, String(i));
+    list[i - 1]!.fire('change');
+    await waitFor(() => list.length === i + 1, `переоткрытие после подмены ${String(i)}`);
+    assert.equal(list[i - 1]!.closed, true, 'прежний наблюдатель закрыт');
+    await waitFor(() => events.length === i + 1, `событие подмены ${String(i)}`);
+  }
+  list[0]!.fire('change');
+  await new Promise((r) => setTimeout(r, 120));
+  assert.equal(events.length, 4, 'поздние события закрытого наблюдателя отброшены');
+  assert.deepEqual(closed, []);
+  sub.dispose();
+});
+
+test('fs.watch файла: заменён каталогом с тем же именем - наблюдение закрыто с причиной, а не переходит на детей каталога; ссылка вместо файла - так же', async (t) => {
+  await using box = await sandbox();
+  const { list, watch } = fakeWatchers();
+  const { k, os } = await kernel({ app: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp, watch });
+  t.after(() => k.unload());
+  const fs = os('app').fs;
+  for (const [name, replace] of [
+    ['dir.json', async (f: string) => mkdir(f)],
+    ['link.json', async (f: string) => symlink(path.join(box.work, 'other'), f)],
+  ] as const) {
+    const file = path.join(box.work, name);
+    await writeFile(file, '0');
+    await writeFile(path.join(box.work, 'other'), 'x');
+    const events: (readonly string[])[] = [];
+    const closed: string[] = [];
+    const before = list.length;
+    await fs.watch(file, (names) => events.push(names), (reason) => closed.push(reason));
+    await rm(file);
+    await replace(file);
+    list[before]!.fire('rename', name);
+    await waitFor(() => closed.length === 1, `${name}: onClose`);
+    assert.match(closed[0]!, /не обычный файл/);
+    assert.equal(list.length, before + 1, `${name}: новый наблюдатель на подмену не ставился`);
+    assert.equal(list[before]!.closed, true);
+    assert.deepEqual(events.flat().filter((n) => n !== name), [], `${name}: имена детей плагину не уходят`);
+  }
 });
 
 test('fs.watch: лимит не обходится параллельными вызовами; сузились корни - наблюдение закрыто', async () => {
@@ -710,6 +1128,41 @@ test('granted: выбор в dialog лежит в state воркспейса и 
   assert.equal(await second.os('picker').fs.readText(late!), 'текст');
   assert.deepEqual((doc.$granted as { byPlugin: Record<string, string[]> }).byPlugin.picker, [realPicked]);
   await second.k.unload();
+});
+
+test('env правила: маска имени `ПРЕФИКС_*` принимается манифестом, звёздочка в иных местах - ошибка; права словами называют маску', () => {
+  const rule = (env: unknown) => ({ process: [{ program: 'git', args: [], env }] });
+  const ok = parseManifest(manifest('p', rule(['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_*', 'GIT_CONFIG_VALUE_*'])));
+  assert.ok(ok.ok);
+  assert.deepEqual(describePermissions(ok.manifest.permissions), ['запускает программы: git (окружение: GIT_CONFIG_COUNT, GIT_CONFIG_KEY_*, GIT_CONFIG_VALUE_*) - полный доступ через программу']);
+  for (const bad of [['*'], ['GIT*'], ['GIT_*_X'], ['_*'], ['GIT_CONFIG_*_*'], ['*_KEY'], ['1_*'], [' GIT_*']]) assert.equal(parseManifest(manifest('p', rule(bad))).ok, false, JSON.stringify(bad));
+  assert.equal(parseManifest(manifest('p', { env: ['GIT_CONFIG_KEY_*'] })).ok, false, 'право env.get маски не принимает: читать можно только названную переменную');
+});
+
+test('env правила: маска ПРЕФИКС_* покрывает только номерной хвост - GIT_CONFIG_KEY_X, GIT_SSH_COMMAND и LD_PRELOAD под неё не проходят', async () => {
+  assert.equal(envNameAllowed('GIT_CONFIG_KEY_*', 'GIT_CONFIG_KEY_0'), true);
+  assert.equal(envNameAllowed('GIT_CONFIG_KEY_*', 'GIT_CONFIG_KEY_12'), true);
+  for (const name of ['GIT_CONFIG_KEY_X', 'GIT_CONFIG_KEY_', 'GIT_CONFIG_KEY_1a', 'GIT_CONFIG_KEY', 'GIT_CONFIG_KEY_-1']) assert.equal(envNameAllowed('GIT_CONFIG_KEY_*', name), false, name);
+  assert.equal(envNameAllowed('GIT_*', 'GIT_SSH_COMMAND'), false);
+  assert.equal(envNameAllowed('LD_*', 'LD_PRELOAD'), false);
+  assert.equal(envNameAllowed('GIT_CONFIG_COUNT', 'GIT_CONFIG_COUNT'), true);
+  await using box = await sandbox();
+  const rule = { program: process.execPath, args: ['-e'], env: ['GIT_CONFIG_KEY_*', 'LD_*'] };
+  const { k, os, denied } = await kernel({ vcs: { process: [rule] } }, { dataDir: box.data, tempDir: box.temp });
+  for (const name of ['GIT_CONFIG_KEY_X', 'LD_PRELOAD']) await assert.rejects(os('vcs').process!.run(process.execPath, ['-e', '0'], { env: { [name]: '1' } }), { code: 'PermissionDenied' }, name);
+  assert.equal((await os('vcs').process!.run(process.execPath, ['-e', '0'], { env: { GIT_CONFIG_KEY_3: 'a' } })).code, 0);
+  assert.equal(denied().length, 2);
+  await k.unload();
+});
+
+test('env правила: программа получает GIT_CONFIG_COUNT, KEY_<n>, VALUE_<n> через маску и применяет их', async () => {
+  await using box = await sandbox();
+  const rule = { program: process.execPath, args: ['-e'], env: ['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_*', 'GIT_CONFIG_VALUE_*'] };
+  const { k, os } = await kernel({ vcs: { process: [rule] } }, { dataDir: box.data, tempDir: box.temp });
+  const env = { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'filter.lfs.clean', GIT_CONFIG_VALUE_0: '', GIT_CONFIG_KEY_1: 'filter.lfs.required', GIT_CONFIG_VALUE_1: 'false' };
+  const got = await os('vcs').process!.run(process.execPath, ['-e', 'process.stdout.write(JSON.stringify(Object.entries(process.env).filter(([k]) => k.startsWith("GIT_CONFIG_")).sort()))'], { env });
+  assert.deepEqual(JSON.parse(got.stdout), Object.entries(env).sort());
+  await k.unload();
 });
 
 const gatewayFor = (env: OsEnvironment, grants?: ConstructorParameters<typeof OsGateway>[5]) => new OsGateway(env, () => undefined, undefined, undefined, undefined, grants);

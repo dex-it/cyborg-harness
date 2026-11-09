@@ -107,6 +107,39 @@ test('process.run: timeoutMs завершает и потомков програ
   }
 });
 
+test('process.run: многобайтный вывод длиннее одного куска возвращается без U+FFFD - и stdout, и stderr', async () => {
+  await using box = await sandbox();
+  const { k, ctx } = await kernel({ a: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp });
+  try {
+    // 'a' сдвигает 'я' (2 байта) на нечётную границу: кусок трубы (64 КиБ) рвёт символ пополам.
+    const text = 'a' + 'я'.repeat(300_000);
+    const script = `const t='a'+'я'.repeat(300000);process.stdout.write(t);process.stderr.write('€'+t)`;
+    const result = await ctx('a').os.process!.run(process.execPath, ['-e', script]);
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout.length, text.length);
+    assert.equal(result.stdout, text, 'stdout');
+    assert.equal(result.stderr, `€${text}`, 'stderr');
+    assert.ok(!result.stdout.includes('\uFFFD') && !result.stderr.includes('\uFFFD'));
+  } finally {
+    await k.unload();
+  }
+});
+
+test('fs.readText: предел по умолчанию - 8 МиБ (JSON Cyborg до 8 МиБ), больше - Invalid с отсылкой к readSlice; просмотр до 5 МиБ плагин держит сам по stat', async () => {
+  await using box = await sandbox();
+  const { k, ctx } = await kernel({ a: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  try {
+    const eight = 8 * 1024 * 1024;
+    await writeFile(path.join(box.work, 'json8.json'), 'x'.repeat(eight));
+    await writeFile(path.join(box.work, 'big.json'), 'x'.repeat(eight + 1));
+    assert.equal((await ctx('a').os.fs.readText(path.join(box.work, 'json8.json'))).length, eight, 'файл ровно в предел читается');
+    await assert.rejects(ctx('a').os.fs.readText(path.join(box.work, 'big.json')), { code: 'Invalid', message: new RegExp(`больше ${String(eight)} байт.*fs\\.readSlice`) });
+    assert.equal((await ctx('a').os.fs.stat(path.join(box.work, 'big.json'))).size, eight + 1, 'размер для своего предела просмотра плагин берёт из stat');
+  } finally {
+    await k.unload();
+  }
+});
+
 test('process.run: signal в options - отмена завершает программу и её потомков, вызывающий получает Cancelled, место в пределе освобождается', { skip: !posix && 'группы процессов - POSIX' }, async () => {
   await using box = await sandbox();
   const { k, ctx } = await kernel({ a: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp }, { runs: 1 });

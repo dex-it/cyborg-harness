@@ -1,10 +1,12 @@
 import { spawn } from 'node:child_process';
 import dns from 'node:dns';
 import fs from 'node:fs/promises';
-import { constants, watch as watchFs, type Dirent, type Stats } from 'node:fs';
+import { constants, watch as watchFs, type Dirent, type FSWatcher, type Stats } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { StringDecoder } from 'node:string_decoder';
 import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, ProcessResult, PtyInfo, SecretValue } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
 import { limitsOf, type ResourceLimits } from './limits.ts';
@@ -12,7 +14,7 @@ import { isValidId } from './manifest-fields.ts';
 import type { PluginManifest } from './manifest.ts';
 import { closePools, guardedLookup, isLocalAddress, transport } from './net-transport.ts';
 import type { NotifyLimits, ShowNotice } from './notices.ts';
-import { ANY_PATH, LOGIN_SHELL } from './permissions.ts';
+import { ANY_PATH, envNameAllowed, LOGIN_SHELL } from './permissions.ts';
 import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type KeptPty, type PtyExpiry, type PtyHostEvents, type TerminalChannel, type TerminalView } from './pty.ts';
 import { inlinePtyHost, type PtyWatchdog, type SpawnPtyHost } from './pty-link.ts';
 import { HttpServes, type AskHost } from './serve.ts';
@@ -112,8 +114,9 @@ export interface Denial {
   readonly reason?: 'via-contract';
 }
 
-const MAX_OUTPUT = 16 * 1024 * 1024;
 const MAX_BODY = 16 * 1024 * 1024;
+/** Сколько программа, остановленная `SIGTERM` (тайм-аутом или пределом вывода), может его глушить до `SIGKILL`. */
+const KILL_GRACE_MS = 2000;
 const FETCH_TIMEOUT_MS = 30_000;
 const MAX_SLICE = 1024 * 1024;
 const MAX_WATCHES = 64;
@@ -160,6 +163,57 @@ async function readAtMost(method: string, handle: fs.FileHandle, size: number, m
   }
 }
 
+/** Запись через соседний временный файл и `rename`: читатель и оборванная запись видят прежний файл или новый целиком, а не пустой или недописанный. Режим существующего файла сохраняется; файл без права записи (0444) не заменяется - `EACCES`, как при записи на месте. Без `fsync`: он не вошёл бы в бюджет шлюза (1 мс на p99), так что защита от падения процесса, а не питания.
+ * Временный файл лежит рядом с целью, поэтому ему нужно право записи на его имя (`tempAllowed`): область из одного файла или маска `*.json` его не покрывают. Нет права на имя или каталог цели закрыт для создания файлов (`EACCES`) - запись идёт на месте, как до атомарной: цель целиком, но без защиты от обрыва. Ни временного файла вне права, ни отказа записи, которая раньше проходила. */
+async function writeAtomic(method: string, file: string, text: string, tempAllowed: (temp: string) => boolean): Promise<void> {
+  const old = await fs.lstat(file).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  });
+  if (old !== undefined && !old.isFile()) throw new CoreError('Invalid', `${method}: не обычный файл: ${file}`);
+  // `rename` проверяет право на каталог, а не на файл: без этой проверки файл 0444 молча заменялся бы, а `O_TRUNC` (запись на месте) даёт EACCES. Отказ тот же, и `chmod a-w` пользователя продолжает защищать файл.
+  if (old !== undefined) await fs.access(file, constants.W_OK);
+  const mode = old === undefined ? 0o644 : old.mode & 0o777;
+  // Имя `<файл>.<n>.tmp`: соседи защищённого файла закрыты для плагинов (`sibling`), в том числе временный файл его записи.
+  const temp = `${file}.${randomBytes(6).toString('hex')}.tmp`;
+  const handle = tempAllowed(temp)
+    ? await fs.open(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode).catch((error: unknown) => {
+        if (['EACCES', 'EPERM', 'EROFS'].includes((error as NodeJS.ErrnoException).code ?? '')) return undefined;
+        throw error;
+      })
+    : undefined;
+  if (handle === undefined) {
+    const direct = await fs.open(file, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, mode);
+    try {
+      await direct.writeFile(text, 'utf8');
+    } finally {
+      await direct.close();
+    }
+    return;
+  }
+  try {
+    try {
+      await handle.writeFile(text, 'utf8');
+      // mode у open урезан umask, а у существующего файла режим должен остаться как был.
+      if (old !== undefined) await handle.chmod(mode);
+    } finally {
+      await handle.close();
+    }
+    await fs.rename(temp, file);
+  } catch (error) {
+    await fs.rm(temp, { force: true });
+    throw error;
+  }
+}
+
+const READS = new Set(['fs.readText', 'fs.readSlice', 'fs.list', 'fs.stat', 'fs.watch', 'fs.realpath']);
+
+/** Чтение несуществующего: плагин различает «нет» и «ошибка» по коду, а не по тексту ОС. До этой точки путь уже проверен областью, поэтому чужой путь отвечает `PermissionDenied`, а не `NotFound`. */
+function missing(method: string, error: unknown): unknown {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return error instanceof Error && !(error instanceof CoreError) && (code === 'ENOENT' || code === 'ENOTDIR') && READS.has(method) ? new CoreError('NotFound', error.message) : error;
+}
+
 const int = (method: string, v: unknown, name: string, min: number, max: number): number => {
   if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < min || v > max) throw new CoreError('Invalid', `${method}: ${name} - целое от ${String(min)} до ${String(max)}`);
   return v;
@@ -180,15 +234,14 @@ async function real(p: string): Promise<string> {
   }
 }
 
-/** Ближайший существующий предок после realpath плюс несуществующий хвост: так проверяется путь, которого ещё нет. */
+/** Ближайший раскрываемый предок после realpath плюс хвост, который раскрыть не удалось: так проверяется путь, которого ещё нет, и путь, который ОС не раскрывает (ENOENT, ENOTDIR, ELOOP, EACCES). Любая ошибка `realpath` идёт вверх, а не наружу: иначе её код дошёл бы до плагина раньше проверки области и выдал бы файл вне неё. Область решает по раскрытому пути; ошибка ОС достаётся плагину только из операции внутри области. */
 async function realOrParent(p: string): Promise<string> {
   const rest: string[] = [];
   let current = path.resolve(p);
   for (;;) {
     try {
       return path.join(await fs.realpath(current), ...rest.reverse());
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    } catch {
       const parent = path.dirname(current);
       if (parent === current) return path.resolve(p);
       rest.push(path.basename(current));
@@ -295,9 +348,9 @@ function ruleRefusal(m: PluginManifest, key: 'process' | 'pty' | 'launch', progr
   });
   // Аргументы в журнал не идут: в них бывают токены (`--header 'Authorization: …'`).
   if (rule === undefined) return (m.permissions[key] ?? []).some((r) => (typeof r === 'string' ? r : r.program) === program) ? `аргументы не по правилу ${key}: ${program}` : `программа не в ${key}: ${program}`;
-  // Окружение - тоже ввод программы (GIT_CONFIG_*, NODE_OPTIONS, LD_PRELOAD): только имена из правила.
+  // Окружение - тоже ввод программы (GIT_CONFIG_*, NODE_OPTIONS, LD_PRELOAD): только имена из правила, маска `ПРЕФИКС_*` - для номерных `GIT_CONFIG_KEY_<n>`.
   const allowedEnv = typeof rule === 'string' ? [] : (rule.env ?? []);
-  const foreign = envNames.filter((k) => !allowedEnv.includes(k));
+  const foreign = envNames.filter((k) => !allowedEnv.some((a) => envNameAllowed(a, k)));
   return foreign.length > 0 ? `переменные не в правиле ${key}: ${foreign.join(', ')}` : undefined;
 }
 
@@ -620,6 +673,14 @@ export class OsGateway {
 
   /** `signal` - отмена запроса плагина: пока её слышит только `process.run` (программа и её группа завершаются). */
   async call(m: PluginManifest, method: string, args: readonly unknown[], signal?: AbortSignal): Promise<unknown> {
+    try {
+      return await this.#call(m, method, args, signal);
+    } catch (error) {
+      throw missing(method, error);
+    }
+  }
+
+  async #call(m: PluginManifest, method: string, args: readonly unknown[], signal?: AbortSignal): Promise<unknown> {
     const p = m.permissions;
     switch (method) {
       case 'fs.readText': {
@@ -659,10 +720,11 @@ export class OsGateway {
         const reserved = () => void this.#watches.delete(key);
         this.#watches.set(key, reserved);
         let target: string;
+        let first: Stats;
         try {
           await this.#ownDirs(m.id);
           target = await this.#checkPath(m, method, args[0], false);
-          await fs.stat(target);
+          first = await fs.stat(target);
         } catch (error) {
           if (this.#watches.get(key) === reserved) this.#watches.delete(key);
           throw error;
@@ -685,12 +747,67 @@ export class OsGateway {
           if ((await this.#checkPath(m, method, args[0], false).catch(() => undefined)) !== target) close('путь больше не в правах плагина');
           else if (this.#watches.get(key) === close) this.#push(m.id, 'fs.change', { pluginId: m.id, id, names: list });
         };
-        const watcher = (this.#env.watch ?? watchFs)(target, (_event, name) => {
-          if (name) names.add(name);
-          timer ??= setTimeout(() => void send(), WATCH_COALESCE_MS);
-        });
-        // Без слушателя ошибка наблюдателя (удалён каталог, кончились inotify) уронила бы главный процесс.
-        watcher.on('error', (error) => close(`наблюдение прервано: ${error.message}`));
+        // Файл под наблюдением подменяют новым (writeText, редакторы с атомарной записью): наблюдатель привязан к прежнему inode и молчал бы дальше. Поэтому у файла по событию `rename` путь сверяется заново, а по `change` - если inode пути не тот, что у наблюдателя: пока другой процесс (`tail -f`, второй плагин) держит старый файл открытым, Linux не шлёт `rename`, а только `change` старого inode. Само событие передаётся плагину: запись между переоткрытием и чтением не теряется, плагин читает файл после склейки.
+        // Не обычный файл по пути (каталог, ссылка) или нет пути - наблюдение закрыто с причиной: следить за детьми каталога плагин не просил.
+        const isFile = first.isFile();
+        let known = { ino: first.ino, dev: first.dev };
+        // Поля объекта, а не переменные: события приходят во время `await`, и анализ потока иначе считает `more` всегда ложным (отсюда и `again`).
+        const recheckState = { busy: false, more: false, forced: false };
+        const again = (): boolean => recheckState.more;
+        const recheck = async (force: boolean): Promise<void> => {
+          recheckState.forced ||= force;
+          if (recheckState.busy) {
+            recheckState.more = true;
+            return;
+          }
+          recheckState.busy = true;
+          try {
+            do {
+              recheckState.more = false;
+              const must = recheckState.forced;
+              recheckState.forced = false;
+              let now: Stats;
+              try {
+                now = await fs.lstat(target);
+              } catch (error) {
+                close(`файл исчез или заменён: ${(error as Error).message}`);
+                return;
+              }
+              if (this.#watches.get(key) !== close) return;
+              if (!now.isFile()) {
+                close('по пути больше не обычный файл');
+                return;
+              }
+              if (!must && now.ino === known.ino && now.dev === known.dev) continue;
+              const stale = watcher;
+              try {
+                watcher = attach();
+              } catch (error) {
+                close(`файл исчез или заменён: ${(error as Error).message}`);
+                return;
+              }
+              known = { ino: now.ino, dev: now.dev };
+              stale.close();
+            } while (again());
+          } finally {
+            recheckState.busy = false;
+          }
+        };
+        const open = this.#env.watch ?? watchFs;
+        const attach = (): FSWatcher => {
+          const w = open(target, (event, name) => {
+            if (w !== watcher) return;
+            if (name) names.add(name);
+            timer ??= setTimeout(() => void send(), WATCH_COALESCE_MS);
+            if (isFile) void recheck(event === 'rename');
+          });
+          // Без слушателя ошибка наблюдателя (удалён каталог, кончились inotify) уронила бы главный процесс.
+          w.on('error', (error) => {
+            if (w === watcher) close(`наблюдение прервано: ${error.message}`);
+          });
+          return w;
+        };
+        let watcher = attach();
         this.#watches.set(key, close);
         return undefined;
       }
@@ -701,7 +818,11 @@ export class OsGateway {
       case 'fs.list': {
         await this.#ownDirs(m.id);
         const dir = await this.#checkPath(m, method, args[0], false);
-        const entries = await fs.readdir(dir, { withFileTypes: true });
+        const entries = await fs.readdir(dir, { withFileTypes: true }).catch(async (error: unknown) => {
+          // ENOTDIR самого пути при существующем пути: он есть, но не каталог. ENOTDIR предка (`файл/x`) уйдёт как «нет такого пути».
+          if ((error as NodeJS.ErrnoException).code === 'ENOTDIR' && (await fs.lstat(dir).then(() => true, () => false))) throw new CoreError('Invalid', `${method}: не каталог: ${String(args[0])}`);
+          throw error;
+        });
         return entries.map((e): DirEntry => ({ name: e.name, kind: e.isFile() ? 'file' : e.isDirectory() ? 'dir' : e.isSymbolicLink() ? 'link' : 'other' }));
       }
       case 'fs.stat': {
@@ -710,16 +831,20 @@ export class OsGateway {
         const s = await fs.stat(file);
         return { kind: s.isFile() ? 'file' : s.isDirectory() ? 'dir' : 'other', size: s.size, mtimeMs: s.mtimeMs } satisfies FileStat;
       }
+      case 'fs.realpath': {
+        await this.#ownDirs(m.id);
+        // Ответ - сам проверенный путь, а не результат второго `realpath`: ссылка, подложенная между проверкой и ответом, вывела бы наружу область. Второе обращение к ОС нужно только за существованием.
+        // `stat`, а не `lstat`: висячая ссылка, которую `realOrParent` не раскрыл, иначе вернулась бы как «настоящий путь» вместо NotFound.
+        const target = await this.#checkPath(m, method, args[0], false);
+        await fs.stat(target);
+        return target;
+      }
       case 'fs.writeText': {
         await this.#ownDirs(m.id);
         const file = await this.#checkPath(m, method, args[0], true);
         const text = str(method, args[1], 'текст');
-        const handle = await fs.open(file, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o644);
-        try {
-          await handle.writeFile(text, 'utf8');
-        } finally {
-          await handle.close();
-        }
+        const areas = await this.#areas(m, 'fs.write');
+        await writeAtomic(method, file, text, (temp) => areas.some((a) => areaDir(a, temp) !== undefined));
         return undefined;
       }
       case 'fs.mkdir': {
@@ -915,18 +1040,19 @@ export class OsGateway {
     const options = isRecord(args[2]) ? args[2] : {};
     const { file, argv, cwd, env } = await this.#program(m, 'process', method, program, args[1], options);
     const timeout = typeof options.timeoutMs === 'number' ? options.timeoutMs : 0;
+    const maxOutput = options.maxOutputBytes === undefined ? this.#limits.processOutput : int(method, options.maxOutputBytes, 'maxOutputBytes', 1, this.#limits.processOutputMax);
     const runs = this.#runs.get(m.id) ?? { n: 0 };
     if (runs.n >= this.#limits.runs) throw new CoreError('Invalid', `${method}: у ${m.id} уже ${String(runs.n)} программ - дождитесь завершения прежних`);
     this.#runs.set(m.id, runs);
     runs.n++;
     try {
-      return await this.#spawnRun(m.id, program, file, argv, cwd, env, timeout, options.input, signal);
+      return await this.#spawnRun(m.id, program, file, argv, cwd, env, timeout, maxOutput, options.input, signal);
     } finally {
       runs.n--;
     }
   }
 
-  #spawnRun(pluginId: string, program: string, file: string, argv: string[], cwd: string | undefined, env: Record<string, string>, timeout: number, input: unknown, signal?: AbortSignal): Promise<ProcessResult> {
+  #spawnRun(pluginId: string, program: string, file: string, argv: string[], cwd: string | undefined, env: Record<string, string>, timeout: number, maxOutput: number, input: unknown, signal?: AbortSignal): Promise<ProcessResult> {
     return new Promise((resolve, reject) => {
       if (signal?.aborted) {
         reject(new CoreError('Cancelled', 'process.run: отменён до запуска'));
@@ -934,11 +1060,30 @@ export class OsGateway {
       }
       // Своя группа процессов: тайм-аут и выгрузка плагина гасят и то, что программа запустила сама.
       const child = spawn(file, argv, { cwd, env, shell: false, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
+      let exited = false;
+      child.once('exit', () => {
+        exited = true;
+      });
       const stop = (signal: NodeJS.Signals) => {
+        if (child.pid === undefined) return;
         // До close, а не до выхода лидера: потомки, держащие его вывод, ещё живы в группе.
-        if (child.pid !== undefined) killGroup(child.pid, signal);
+        if (!exited) killGroup(child.pid, signal);
+        // Лидер собран, его pid свободен для чужого процесса: сигнал только группе - её номер не переиспользуется, пока в ней кто-то жив.
+        else if (process.platform !== 'win32') {
+          try {
+            process.kill(-child.pid, signal);
+          } catch {
+            // Группа пуста: добивать некого.
+          }
+        }
       };
-      const timer = timeout > 0 ? setTimeout(() => stop('SIGTERM'), timeout) : undefined;
+      // Программа, глушащая SIGTERM, иначе жила бы без срока, не возвращала бы `run` и держала место в пределе `runs`; таймер снимает `done`.
+      let kill: NodeJS.Timeout | undefined;
+      const terminate = () => {
+        stop('SIGTERM');
+        kill ??= setTimeout(() => stop('SIGKILL'), KILL_GRACE_MS);
+      };
+      const timer = timeout > 0 ? setTimeout(terminate, timeout) : undefined;
       const untrack = this.#track(pluginId, () => stop('SIGKILL'));
       // Отмена вызывающего: SIGTERM всей группе, как по тайм-ауту; вызывающий уже получил Cancelled от канала, здесь ждём close и освобождаем место в пределе runs.
       let cancelled = false;
@@ -949,22 +1094,45 @@ export class OsGateway {
       signal?.addEventListener('abort', onAbort, { once: true });
       const done = () => {
         clearTimeout(timer);
+        clearTimeout(kill);
         untrack();
         signal?.removeEventListener('abort', onAbort);
       };
-      let stdout = '';
-      let stderr = '';
-      const cap = (s: string, chunk: Buffer) => (s.length < MAX_OUTPUT ? s + chunk.toString('utf8') : s);
-      child.stdout.on('data', (c: Buffer) => (stdout = cap(stdout, c)));
-      child.stderr.on('data', (c: Buffer) => (stderr = cap(stderr, c)));
+      let truncated = false;
+      // Предел в байтах и на каждый поток: символ UTF-8 бывает на границе кусков трубы, декодер держит недочитанные байты.
+      const collect = () => {
+        const decoder = new StringDecoder('utf8');
+        let text = '';
+        let bytes = 0;
+        let full = false;
+        return {
+          write: (chunk: Buffer) => {
+            if (full) return;
+            const room = maxOutput - bytes;
+            const part = chunk.length > room ? chunk.subarray(0, room) : chunk;
+            bytes += part.length;
+            text += decoder.write(part);
+            if (part !== chunk) {
+              full = truncated = true;
+              terminate();
+            }
+          },
+          // Оборванный символ на границе предела не дописывается: `end()` дал бы U+FFFD.
+          end: () => text + (full ? '' : decoder.end()),
+        };
+      };
+      const out = collect();
+      const err = collect();
+      child.stdout.on('data', (c: Buffer) => out.write(c));
+      child.stderr.on('data', (c: Buffer) => err.write(c));
       child.once('error', (error) => {
         done();
-        reject(new CoreError('Remote', `${program}: ${error.message}`));
+        reject(new CoreError((error as NodeJS.ErrnoException).code === 'ENOENT' ? 'NotFound' : 'Remote', `${program}: ${error.message}`));
       });
       child.once('close', (code, sig) => {
         done();
         if (cancelled) reject(new CoreError('Cancelled', 'process.run: отменён'));
-        else resolve({ code, signal: sig, stdout, stderr });
+        else resolve({ code, signal: sig, stdout: out.end(), stderr: err.end(), truncated });
       });
       child.stdin.end(typeof input === 'string' ? input : undefined);
     });

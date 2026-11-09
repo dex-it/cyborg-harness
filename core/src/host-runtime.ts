@@ -297,6 +297,7 @@ function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths:
       readText: call('fs.readText'),
       list: call('fs.list'),
       stat: call('fs.stat'),
+      realpath: call('fs.realpath'),
       readSlice: call('fs.readSlice'),
       watch: (target: string, listener: (names: readonly string[]) => void, onClose?: (reason: string) => void) => watches.watch(endpoint, pluginId, target, listener, onClose),
       writeText: call('fs.writeText'),

@@ -189,6 +189,7 @@ export interface ProcessResult {
     readonly signal: string | null;
     readonly stdout: string;
     readonly stderr: string;
+    readonly truncated: boolean;
 }
 declare global {
     interface AbortSignal {
@@ -200,6 +201,7 @@ export interface ProcessOptions {
     readonly env?: Readonly<Record<string, string>>;
     readonly input?: string;
     readonly timeoutMs?: number;
+    readonly maxOutputBytes?: number;
     readonly signal?: AbortSignal;
 }
 export interface HttpRequest {
@@ -232,6 +234,7 @@ export interface OsFs {
     readText(path: string): Promise<string>;
     list(dir: string): Promise<DirEntry[]>;
     stat(path: string): Promise<FileStat>;
+    realpath(path: string): Promise<string>;
     readSlice(path: string, offset: number, maxBytes: number): Promise<FileSlice>;
     watch(path: string, listener: (names: readonly string[]) => void, onClose?: (reason: string) => void): Promise<Disposable>;
     writeText(path: string, text: string): Promise<void>;
