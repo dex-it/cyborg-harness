@@ -92,6 +92,13 @@ test('withFileLock: замок снят после ошибки, замок ум
     withFileLock(file, () => 'забран'),
     'забран',
   );
+  // Процесс умер, держа охранный файл снятия: охрану снимает следующий, иначе замок умершего не забрать никогда.
+  await writeFile(`${file}.write.lock`, JSON.stringify({ pid: dead }));
+  await writeFile(`${file}.write.lock.reclaim`, JSON.stringify({ pid: dead }));
+  assert.equal(
+    withFileLock(file, () => 'охрана снята', { timeoutMs: 2000 }),
+    'охрана снята',
+  );
   await writeFile(`${file}.write.lock`, JSON.stringify({ pid: process.ppid }));
   assert.throws(() => withFileLock(file, () => 'не должно', { timeoutMs: 100 }), new RegExp(`pid ${String(process.ppid)}`));
 });

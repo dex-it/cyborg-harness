@@ -97,9 +97,13 @@ const until = async (what: string, probe: () => boolean, ms = 10_000) => {
   }
 };
 
-test('шесть процессов стартуют разом: владелец один, остальные его просили', async () => {
+test('шесть процессов стартуют разом: владелец один, остальные его просили', async (t) => {
   await using box = await sandbox();
   const procs = Array.from({ length: 6 }, (_, i) => start(box.dir, `p${String(i)}`));
+  // Упавшая проверка не должна вешать прогон: лишний «владелец» ждёт stdin и держит тест живым.
+  t.after(() => {
+    for (const p of procs) p.child.kill('SIGKILL');
+  });
   await until('все определились', () => procs.every((p) => p.lines.some((l) => l === 'owner' || l === 'handed' || l === 'unresponsive')));
   const kinds = procs.map((p) => p.lines.find((l) => l === 'owner' || l === 'handed' || l === 'unresponsive'));
   assert.deepEqual(kinds.filter((k) => k === 'owner').length, 1, `владельцев не один: ${kinds.join(',')}`);
@@ -111,7 +115,7 @@ test('шесть процессов стартуют разом: владеле�
   await Promise.all(procs.map((p) => p.exited));
 });
 
-test('сокет остался от убитого процесса: из шести стартующих владелец один, чужой живой сокет никто не удаляет', { skip: !posix }, async () => {
+test('сокет остался от убитого процесса: из шести стартующих владелец один, чужой живой сокет никто не удаляет', { skip: !posix }, async (t) => {
   await using box = await sandbox();
   const dead = start(box.dir, 'dead');
   await until('первый владелец', () => dead.lines.includes('owner'));
@@ -119,6 +123,9 @@ test('сокет остался от убитого процесса: из ше�
   await dead.exited;
   assert.ok(existsSync(instanceAddress(key, box.dir)), 'нет устаревшего сокета для проверки');
   const procs = Array.from({ length: 6 }, (_, i) => start(box.dir, `p${String(i)}`));
+  t.after(() => {
+    for (const p of procs) p.child.kill('SIGKILL');
+  });
   await until('все определились', () => procs.every((p) => p.lines.some((l) => l === 'owner' || l === 'handed' || l === 'unresponsive')));
   const kinds = procs.map((p) => p.lines.find((l) => l === 'owner' || l === 'handed' || l === 'unresponsive'));
   assert.deepEqual(kinds.filter((k) => k === 'owner').length, 1, `владельцев не один: ${kinds.join(',')}`);

@@ -29,7 +29,10 @@ const STARTUP_GRACE_MS = 500;
 /** Каталог адресов: личный, не общий. Длинный путь `userData` в адрес сокета не годится (предел около 104 байт на macOS). */
 export function instanceDir(): string {
   const uid = process.getuid?.();
-  return path.join(process.env.XDG_RUNTIME_DIR ?? os.tmpdir(), `cyborg-harness${uid === undefined ? '' : `-${String(uid)}`}`);
+  // XDG Base Directory: пустое или относительное значение недействительно, иначе каталог адресов окажется в текущем каталоге процесса.
+  const runtime = process.env.XDG_RUNTIME_DIR;
+  const base = runtime !== undefined && path.isAbsolute(runtime) ? runtime : os.tmpdir();
+  return path.join(base, `cyborg-harness${uid === undefined ? '' : `-${String(uid)}`}`);
 }
 
 export function instanceAddress(key: string, dir: string = instanceDir()): string {

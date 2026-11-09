@@ -42,8 +42,12 @@ export function fileSecrets(file: string, cipher: SecretCipher): SecretStore {
       const sealed = read()[key];
       if (sealed === undefined) return undefined;
       const { result, shouldReEncrypt } = await cipher.decrypt(Buffer.from(sealed, 'base64'));
-      // Ключ ОС сменился: старое шифрование ещё читается, но перезаписываем новым.
-      if (shouldReEncrypt) await set(key, result);
+      // Ключ ОС сменился: старое шифрование ещё читается, но перезаписываем новым. Пока шли шифры, значение могли
+      // переписать или стереть (этот или другой процесс): перешифровывается только то, что было прочитано.
+      if (shouldReEncrypt) {
+        const fresh = (await cipher.encrypt(result)).toString('base64');
+        update((data) => (data[key] === sealed ? { ...data, [key]: fresh } : data));
+      }
       return result;
     },
     set,

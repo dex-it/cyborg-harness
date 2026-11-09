@@ -46,6 +46,31 @@ test('fileSecrets: ключ ОС сменился - значение перез�
   assert.notEqual(await readFile(box.file, 'utf8'), before);
 });
 
+test('fileSecrets: перешифровка не возвращает значение, стёртое или переписанное во время расшифровки', async () => {
+  await using box = await sandbox();
+  await fileSecrets(box.file, cipher()).set('gone', 'старое');
+  await fileSecrets(box.file, cipher()).set('newer', 'старое');
+  let during: (() => Promise<void>) | undefined;
+  const base = cipher();
+  const rotated = fileSecrets(
+    box.file,
+    cipher({
+      decrypt: async (sealed) => {
+        const plain = await base.decrypt(sealed);
+        await during?.();
+        return { result: plain.result, shouldReEncrypt: true };
+      },
+    }),
+  );
+  const other = fileSecrets(box.file, cipher());
+  during = () => other.delete('gone');
+  assert.equal(await rotated.get('gone'), 'старое');
+  assert.equal(await other.get('gone'), undefined, 'стёртый секрет вернулся');
+  during = () => other.set('newer', 'новое');
+  assert.equal(await rotated.get('newer'), 'старое');
+  assert.equal(await other.get('newer'), 'новое', 'новое значение затёрто старым');
+});
+
 test('fileSecrets: запись не оставляет временных файлов и не рвёт файл', async () => {
   await using box = await sandbox();
   const store = fileSecrets(box.file, cipher());
