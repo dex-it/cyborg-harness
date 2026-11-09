@@ -3,7 +3,7 @@ import { isBuiltin } from 'node:module';
 import path from 'node:path';
 import { build as esbuild, type Message, type Metafile, type OutputFile } from 'esbuild';
 import { checkPlugin, CHECKED_KEYS, ENTRY_FILES, isTestPath, type Problem } from '@cyborg-harness/core/plugin-check';
-import { exists, inside, listFiles, realpathLoose, toPosix } from './fsx.ts';
+import { BUILD_MARKER, exists, inside, listFiles, realpathLoose, toPosix } from './fsx.ts';
 
 // P-06: сборка плагина. Две формы главной части: `bundle` - один файл index.mjs с npm-зависимостями внутри (формат поставки, SAD 6.1),
 // `source` - исходники как есть (стенд: его плагины без зависимостей, а загрузку `.ts` стенд проверяет сам). Виды `ui/*.ts` собираются одинаково.
@@ -66,19 +66,74 @@ async function uiEntries(home: string): Promise<string[]> {
 
 const jsName = (ts: string): string => ts.replace(TS_MODULE, '.js');
 
-/** Каталог результата: создаётся пустым. Чужой непустой каталог не стирается: у результата сборки есть manifest.json. */
-async function prepareOut(out: string): Promise<string | undefined> {
-  let names: string[] = [];
+const errorCode = (error: unknown): unknown => (error instanceof Error && 'code' in error ? error.code : undefined);
+
+/**
+ * Можно ли занять `out` результатом: нет такого пути, пустой каталог или каталог, который раньше создала сама сборка (в нём метка BUILD_MARKER).
+ * Любой другой каталог чужой, даже с manifest.json: это могут быть исходники соседнего плагина или `public/` веб-приложения. Текст отказа или undefined.
+ */
+async function outRefusal(out: string): Promise<string | undefined> {
+  let names: string[];
   try {
     names = await fs.readdir(out);
   } catch (error) {
-    // Стереть можно только каталог: файл на месте --out (опечатка, путь архива pack) остаётся нетронутым.
-    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) return `${out}: не каталог или не читается - укажите другой --out`;
+    // Занять можно только то, чего нет: файл на месте --out (опечатка, путь архива pack) остаётся нетронутым.
+    return errorCode(error) === 'ENOENT' ? undefined : `${out}: не каталог или не читается - укажите другой --out`;
   }
-  if (names.length > 0 && !names.includes('manifest.json')) return `${out}: каталог не пуст и не похож на результат сборки (нет manifest.json) - укажите другой --out`;
-  await fs.rm(out, { recursive: true, force: true });
-  await fs.mkdir(out, { recursive: true });
+  if (names.length === 0 || names.includes(BUILD_MARKER)) return undefined;
+  return `${out}: каталог не пуст и не результат сборки (нет метки ${BUILD_MARKER}) - укажите другой --out; результат сборки прежней версии инструмента удалите вручную`;
+}
+
+/** Результат встаёт на место `out` целиком: прежний результат (если был) убирается только после того, как новый собран и проверен. */
+async function replaceOut(staging: string, out: string): Promise<string | undefined> {
+  const refusal = await outRefusal(out);
+  if (refusal !== undefined) return refusal;
+  const previous = `${staging}.previous`;
+  let moved = false;
+  try {
+    await fs.rename(out, previous);
+    moved = true;
+  } catch (error) {
+    if (errorCode(error) !== 'ENOENT') throw error;
+  }
+  try {
+    await fs.rename(staging, out);
+  } catch (error) {
+    if (moved) await fs.rename(previous, out);
+    throw error;
+  }
+  if (moved) await fs.rm(previous, { recursive: true, force: true });
   return undefined;
+}
+
+/**
+ * Символические ссылки в `ui/`: ресурсы вида грузятся только из результата, и ссылка там не файл. Ссылка на файл внутри каталога плагина копируется
+ * как обычный файл, остальные (за пределы каталога, на каталог, битые, на исходник `.ts`) - нарушение: молча терять ресурс нельзя.
+ */
+async function uiLinks(home: string): Promise<{ readonly all: ReadonlySet<string>; readonly copy: readonly string[]; readonly problems: readonly Problem[] }> {
+  const all = new Set<string>();
+  const copy: string[] = [];
+  const problems: Problem[] = [];
+  const found: string[] = [];
+  await listFiles(path.join(home, 'ui'), (rel) => isTestPath(`ui/${rel}`), (rel) => found.push(`ui/${rel}`)).catch(() => []);
+  for (const rel of found) {
+    all.add(rel);
+    const refuse = (why: string): number => problems.push({ file: rel, message: `символическая ссылка не поддерживается: ${why}; положите в ui/ сам файл` });
+    let real: string;
+    let isFile: boolean;
+    try {
+      real = await fs.realpath(path.join(home, rel));
+      isFile = (await fs.stat(real)).isFile();
+    } catch {
+      refuse('цель не найдена');
+      continue;
+    }
+    if (!inside(home, real)) refuse('цель лежит вне каталога плагина');
+    else if (!isFile) refuse('цель не файл');
+    else if (isSourceTs(rel)) refuse('ссылка на исходник .ts');
+    else copy.push(rel);
+  }
+  return { all, copy, problems };
 }
 
 async function writeOutputs(files: readonly OutputFile[]): Promise<void> {
@@ -159,7 +214,9 @@ async function copyFile(home: string, out: string, rel: string): Promise<void> {
 
 /**
  * Собирает плагин из `dir` в каталог `out`.
- * `bundle`: проверка исходников -> сборка в памяти (главная часть + виды) -> запись -> проверка результата. Отказ до записи не трогает `out`.
+ * `bundle`: проверка исходников -> сборка в памяти (главная часть + виды) -> запись во временный каталог рядом с `out` -> проверка результата там -> замена `out`.
+ * Отказ на любом шаге не трогает `out`: прежний результат остаётся, временный каталог убирается. Занять `out` можно, только если его нет, он пуст
+ * или в нём метка, оставленная прежней сборкой (`BUILD_MARKER`): чужой каталог, даже с manifest.json, не стирается.
  * `source`: исходники копируются как есть без `ui/*.ts`, виды собираются.
  */
 export async function buildPlugin(dir: string, options: BuildOptions = {}): Promise<BuildReport> {
@@ -179,6 +236,9 @@ export async function buildPlugin(dir: string, options: BuildOptions = {}): Prom
   // fs.cp не копирует каталог в собственный подкаталог (ERR_FS_CP_EINVAL) и бросил бы уже после очистки out.
   if (mode === 'source' && ignore.length > 0) return fail([{ file: '.', message: `--out ${out}: в режиме source результат не может лежать внутри каталога плагина` }], { dir: home, out });
 
+  const occupied = await outRefusal(out);
+  if (occupied !== undefined) return fail([{ file: '.', message: occupied }], { dir: home, out });
+
   let id: string | undefined;
   let refs: readonly string[] = [];
   if (mode === 'bundle' || options.check !== false) {
@@ -195,46 +255,54 @@ export async function buildPlugin(dir: string, options: BuildOptions = {}): Prom
     refs = Object.values(CHECKED_KEYS).flatMap((reader) => reader(manifest).map((r) => r.file));
   }
 
-  const compiled: Compiled = { files: [], warnings: [], problems: [], meta: [] };
+  // Собирается рядом с `out` (одна файловая система, rename целиком); имя скрытое, чтобы проверка исходников, если `out` внутри плагина, его не читала.
+  const staging = path.join(path.dirname(out), `.${path.basename(out)}.build-${String(process.pid)}-${Date.now().toString(36)}`);
+  const links = await uiLinks(home);
+  const compiled: Compiled = { files: [], warnings: [], problems: [...links.problems], meta: [] };
   let viewSources: string[];
   let copied: string[];
   if (mode === 'bundle') {
     const entry = (await Promise.all(ENTRY_FILES.map(async (f) => ((await exists(path.join(home, f))) ? f : undefined)))).find((f) => f !== undefined);
     if (entry === undefined) return fail([{ file: ENTRY_FILES.join('|'), message: 'нет точки входа главной части' }], { dir: home, out, id });
-    await compile(home, entry, path.join(out, 'index.mjs'), 'main', compiled);
+    await compile(home, entry, path.join(staging, 'index.mjs'), 'main', compiled);
     const fromManifest = await manifestRefs(home, refs);
     viewSources = [...new Set([...(await uiEntries(home)), ...fromManifest.views])].sort();
     // Всё из ui/, что не исходник, едет как есть: стили и ресурсы вида грузятся только со своего origin.
     const ui = (await listFiles(path.join(home, 'ui')).catch(() => [])).map((f) => `ui/${f}`).filter((f) => !TS_MODULE.test(f) && !f.endsWith('.d.ts') && !isTestPath(f));
-    copied = [...new Set(['manifest.json', ...fromManifest.copy, ...ui])].sort();
+    copied = [...new Set(['manifest.json', ...fromManifest.copy, ...ui, ...links.copy])].sort();
   } else {
     viewSources = await uiEntries(home);
-    copied = [];
+    copied = [...links.copy];
   }
-  for (const source of viewSources) await compile(home, source, path.join(out, jsName(source)), 'view', compiled);
+  for (const source of viewSources) await compile(home, source, path.join(staging, jsName(source)), 'view', compiled);
   const problems = [...compiled.problems, ...compiled.meta.flatMap((m) => bundleProblems(m, home))];
   if (problems.length > 0) return fail(problems, { dir: home, out, id, warnings: compiled.warnings });
 
-  const refusal = await prepareOut(out);
-  if (refusal !== undefined) return fail([{ file: '.', message: refusal }], { dir: home, out, id });
-  // Сборка выигрывает у одноимённого готового файла: рядом с ui/x.ts лежал бы старый ui/x.js.
-  const built = new Set(compiled.files.map((f) => toPosix(path.relative(out, f.path))));
-  if (mode === 'source') {
-    const skipUiTs = (rel: string): boolean => /^ui\/[^/]+\.ts$/.test(toPosix(rel));
-    await fs.cp(home, out, { recursive: true, filter: (from) => !skipUiTs(path.relative(home, from)) });
-  } else {
-    for (const rel of copied) if (!built.has(rel)) await copyFile(home, out, rel);
-  }
-  await writeOutputs(compiled.files);
-
-  const files = await listFiles(out);
-  if (mode === 'bundle') {
-    // Вторая проверка - на результате, а не на исходниках: в нём нет ничего, кроме того, что уйдёт в поставку.
-    const result = await checkPlugin(out, options.apiVersion === undefined ? {} : { apiVersion: options.apiVersion });
-    if (!result.ok) {
-      const label = inside(home, out) ? toPosix(path.relative(home, out)) : path.basename(out);
-      return fail(result.problems.map((p) => ({ ...p, file: `${label}/${p.file}` })), { dir: home, out, id, warnings: compiled.warnings, files });
+  try {
+    await fs.mkdir(staging, { recursive: true });
+    // Сборка выигрывает у одноимённого готового файла: рядом с ui/x.ts лежал бы старый ui/x.js.
+    const built = new Set(compiled.files.map((f) => toPosix(path.relative(staging, f.path))));
+    if (mode === 'source') {
+      const skipUiTs = (rel: string): boolean => /^ui\/[^/]+\.ts$/.test(toPosix(rel));
+      await fs.cp(home, staging, { recursive: true, filter: (from) => !skipUiTs(path.relative(home, from)) && !links.all.has(toPosix(path.relative(home, from))) });
     }
+    for (const rel of copied) if (!built.has(rel)) await copyFile(home, staging, rel);
+    await writeOutputs(compiled.files);
+
+    if (mode === 'bundle') {
+      // Вторая проверка - на результате, а не на исходниках: в нём нет ничего, кроме того, что уйдёт в поставку. Идёт до замены `out`.
+      const result = await checkPlugin(staging, options.apiVersion === undefined ? {} : { apiVersion: options.apiVersion });
+      if (!result.ok) {
+        const label = inside(home, out) ? toPosix(path.relative(home, out)) : path.basename(out);
+        return fail(result.problems.map((p) => ({ ...p, file: `${label}/${p.file}` })), { dir: home, out, id, warnings: compiled.warnings });
+      }
+    }
+    await fs.writeFile(path.join(staging, BUILD_MARKER), 'cyborg-plugin build: этот каталог создала сборка, следующая может его заменить\n');
+    const files = await listFiles(staging);
+    const refusal = await replaceOut(staging, out);
+    if (refusal !== undefined) return fail([{ file: '.', message: refusal }], { dir: home, out, id });
+    return { ok: true, dir: home, out, id, problems: [], warnings: compiled.warnings, files };
+  } finally {
+    await fs.rm(staging, { recursive: true, force: true });
   }
-  return { ok: true, dir: home, out, id, problems: [], warnings: compiled.warnings, files };
 }

@@ -17,8 +17,17 @@ export async function realpathLoose(p: string): Promise<string> {
   }
 }
 
-/** Файлы каталога, пути от него через `/`, по алфавиту (порядок не зависит от ОС). Скрытые каталоги и `node_modules` пропускаются. */
-export async function listFiles(root: string, skip: (rel: string, isDir: boolean) => boolean = () => false): Promise<string[]> {
+/**
+ * Метка каталога, который создала сама сборка: только такой каталог `build` вправе стереть при следующей сборке. Файл служебный: в составе результата
+ * (`listFiles`), в отчёте и в архиве его нет.
+ */
+export const BUILD_MARKER = '.cyborg-plugin-build';
+
+/**
+ * Файлы каталога, пути от него через `/`, по алфавиту (порядок не зависит от ОС). Скрытые каталоги, `node_modules` и метка сборки пропускаются.
+ * Символическая ссылка не файл и не каталог: молча её не теряем, а отдаём в `onLink` (путь от корня через `/`).
+ */
+export async function listFiles(root: string, skip: (rel: string, isDir: boolean) => boolean = () => false, onLink: (rel: string) => void = () => undefined): Promise<string[]> {
   const out: string[] = [];
   const walk = async (dir: string): Promise<void> => {
     const entries = (await fs.readdir(dir, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -27,7 +36,9 @@ export async function listFiles(root: string, skip: (rel: string, isDir: boolean
       const rel = toPosix(path.relative(root, full));
       if (entry.isDirectory()) {
         if (entry.name !== 'node_modules' && !entry.name.startsWith('.') && !skip(rel, true)) await walk(full);
-      } else if (entry.isFile() && !skip(rel, false)) out.push(rel);
+      } else if (entry.isSymbolicLink()) {
+        if (entry.name !== 'node_modules' && !entry.name.startsWith('.') && !skip(rel, false)) onLink(rel);
+      } else if (entry.isFile() && !skip(rel, false) && rel !== BUILD_MARKER) out.push(rel);
     }
   };
   await walk(root);

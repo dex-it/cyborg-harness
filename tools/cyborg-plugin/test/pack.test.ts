@@ -213,3 +213,16 @@ describe('cyborg-plugin build и pack: командная строка', () => {
     assert.match(src.err.join('\n'), /исходник \.ts в поставке/);
   });
 });
+
+describe('packPlugin: символические ссылки (ревью P-06: fsx.ts:30)', () => {
+  it('ссылка в собранном каталоге: отказ с путём, архив не создан (а не молчаливый пропуск)', async () => {
+    const dir = await built();
+    fs.symlinkSync('ui.css', path.join(dir, 'ui', 'alias.css'));
+    const archive = path.join(fresh('arch'), 'x.tgz');
+    fs.mkdirSync(path.dirname(archive));
+    const report = await packPlugin(dir, { out: archive });
+    assert.equal(report.ok, false);
+    assert.match(problems(report)[0] ?? '', /^ui\/alias\.css: символическая ссылка/);
+    assert.ok(!fs.existsSync(archive));
+  });
+});

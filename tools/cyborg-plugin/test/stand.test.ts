@@ -7,6 +7,9 @@ import { cleanup, fresh } from './fixture.ts';
 
 after(cleanup);
 
+// Кроме служебной метки, по которой следующая сборка узнаёт свой каталог (BUILD_MARKER).
+const withoutMarker = (files: string[]): string[] => files.filter((f) => f !== '.cyborg-plugin-build');
+
 // P-06 п. 4: стенд собирается инструментом, и состав playground/dist/plugins не изменился: исходники плагина как есть, кроме ui/*.ts, плюс ui/*.js и карты.
 const plugins = path.resolve(import.meta.dirname, '..', '..', '..', 'playground', 'plugins');
 
@@ -31,7 +34,8 @@ describe('стенд на инструменте: состав результа�
       const sources = walk(src);
       const views = sources.filter((f) => /^ui\/[^/]+\.ts$/.test(f));
       const want = [...sources.filter((f) => !views.includes(f)), ...views.flatMap((f) => [f.replace(/\.ts$/, '.js'), f.replace(/\.ts$/, '.js.map')])];
-      assert.deepEqual(walk(out), [...new Set(want)].sort());
+      assert.ok(walk(out).includes('.cyborg-plugin-build'), 'нет метки сборки');
+      assert.deepEqual(withoutMarker(walk(out)), [...new Set(want)].sort());
       for (const f of sources.filter((s) => !views.includes(s))) {
         assert.deepEqual(fs.readFileSync(path.join(out, f)), fs.readFileSync(path.join(src, f)), `${f} изменён`);
       }

@@ -43,7 +43,7 @@ export async function packPlugin(dir: string, options: PackOptions = {}): Promis
 
   // Поставка - уже собранный каталог: исходник вместо результата сборки загрузил бы плагин без бандла, а `.ts` в `node_modules` Node не снимает.
   const skipped = (rel: string): boolean => isTestPath(rel);
-  const all = await listFiles(home, skipped);
+  const all = await listFiles(home, skipped, (rel) => problems.push({ file: rel, message: 'символическая ссылка не входит в поставку: положите в каталог сам файл' }));
   for (const rel of all) {
     if (/\.(?:m|c)?ts$/.test(rel) && !rel.endsWith('.d.ts')) problems.push({ file: rel, message: 'исходник .ts в поставке: сначала `cyborg-plugin build`' });
   }

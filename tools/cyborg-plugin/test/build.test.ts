@@ -6,7 +6,7 @@ import { after, describe, it } from 'node:test';
 import { forkHosts, load, PLUGIN_API_VERSION } from '@cyborg-harness/core';
 import { formatProblem } from '@cyborg-harness/core/plugin-check';
 import { buildPlugin } from '../src/build.ts';
-import { cleanup, fresh, plugin, write } from './fixture.ts';
+import { cleanup, fresh, packages as packagesOf, plugin, write } from './fixture.ts';
 
 after(cleanup);
 
@@ -204,7 +204,7 @@ describe('buildPlugin: запрещённое и отказ до записи (P
     const out = fresh('foreign');
     write(out, { 'notes.txt': 'мои записи' });
     const report = await buildPlugin(plugin(), { out });
-    assert.match(problems(report)[0] ?? '', /каталог не пуст и не похож на результат сборки/);
+    assert.match(problems(report)[0] ?? '', /каталог не пуст и не результат сборки/);
     assert.equal(read(out, 'notes.txt'), 'мои записи');
   });
 
@@ -265,5 +265,122 @@ describe('buildPlugin: source - стенд (P-06 п. 4)', () => {
     const report = await buildPlugin(dir, { main: 'source', check: false });
     assert.match(problems(report)[0] ?? '', /в режиме source результат не может лежать внутри каталога плагина/);
     assert.ok(!fs.existsSync(path.join(dir, 'dist')));
+  });
+});
+
+const COMPUTED_IMPORT_DEP = {
+  'tiny-dep': {
+    'package.json': '{"name":"tiny-dep","main":"index.js","type":"module"}',
+    'index.js': 'export const load = (n) => import(n);\nexport const shout = (t) => String(t);\n',
+  },
+};
+
+// Главная часть вызывает load, поэтому import(n) из зависимости доезжает до бандла (иначе сборщик выбросил бы неиспользуемое).
+const USES_LOAD = [
+  "import { load, shout } from 'tiny-dep';",
+  'export default {',
+  '  activate(ctx: { commands: { register(n: string, f: (t: unknown) => unknown): void } }) {',
+  "    ctx.commands.register('acme.dep.shout', (t) => [load, shout(t)]);",
+  '  },',
+  '};',
+  '',
+].join('\n');
+
+describe('buildPlugin: чужой каталог и порядок записи (ревью P-06: build.ts:79, :234)', () => {
+  it('--out указывает на исходники другого плагина (есть manifest.json): отказ, исходники нетронуты', async () => {
+    const mine = plugin();
+    const other = plugin({ 'notes.md': 'мои записи' });
+    const before = new Map(['index.ts', 'notes.md', 'manifest.json', 'ui/ui.ts'].map((f) => [f, read(other, f)]));
+    const report = await buildPlugin(mine, { out: other });
+    assert.equal(report.ok, false);
+    assert.match(problems(report)[0] ?? '', /не результат сборки/);
+    for (const [f, text] of before) assert.equal(read(other, f), text, f);
+  });
+
+  it('то же для каталога веб-приложения с manifest.json рядом с плагином', async () => {
+    const mine = plugin();
+    const web = path.join(path.dirname(mine), 'public');
+    write(web, { 'manifest.json': '{"name":"web"}', 'index.html': '<html></html>' });
+    const report = await buildPlugin(mine, { out: web });
+    assert.equal(report.ok, false);
+    assert.equal(read(web, 'index.html'), '<html></html>');
+    assert.equal(read(web, 'manifest.json'), '{"name":"web"}');
+  });
+
+  it('прежний результат сборки (с меткой) заменяется, метка не попадает в отчёт', async () => {
+    const dir = plugin();
+    const out = fresh('out');
+    await buildPlugin(dir, { out });
+    assert.ok(fs.existsSync(path.join(out, '.cyborg-plugin-build')), 'метки результата сборки нет');
+    const again = await buildPlugin(dir, { out });
+    assert.equal(again.ok, true);
+    assert.ok(!again.files.some((f) => f.startsWith('.')), again.files.join(','));
+  });
+
+  it('результат не прошёл проверку (вычисляемый import() в зависимости): отказ, прежний результат цел, временных каталогов нет', async () => {
+    const dir = plugin();
+    const out = fresh('out');
+    const first = await buildPlugin(dir, { out });
+    assert.equal(first.ok, true);
+    const before = new Map(first.files.map((f) => [f, read(out, f)]));
+    packagesOf(dir, COMPUTED_IMPORT_DEP);
+    write(dir, { 'index.ts': USES_LOAD });
+    const report = await buildPlugin(dir, { out });
+    assert.equal(report.ok, false);
+    assert.match(problems(report).join('\n'), /index\.mjs:\d+: вычисляемый путь/);
+    assert.deepEqual(report.files, [], 'при отказе файлы результата не записаны');
+    for (const [f, text] of before) assert.equal(read(out, f), text, `${f}: прежний результат испорчен`);
+    assert.deepEqual(fs.readdirSync(path.dirname(out)).filter((n) => n.includes(path.basename(out)) && n !== path.basename(out)), [], 'остался временный каталог');
+  });
+
+  it('результат не прошёл проверку при первой сборке: out не создан', async () => {
+    const dir = plugin({ 'index.ts': USES_LOAD }, {}, COMPUTED_IMPORT_DEP);
+    const out = fresh('out');
+    assert.equal((await buildPlugin(dir, { out })).ok, false);
+    assert.ok(!fs.existsSync(out));
+  });
+});
+
+describe('buildPlugin: символические ссылки в ui/ (ревью P-06: fsx.ts:30)', () => {
+  it('ссылка на файл внутри каталога плагина: цель копируется как обычный файл', async () => {
+    const dir = plugin({ 'shared.css': 'p { margin: 0; }\n' });
+    fs.symlinkSync('../shared.css', path.join(dir, 'ui', 'theme.css'));
+    const out = fresh('out');
+    const report = await buildPlugin(dir, { out });
+    assert.deepEqual(problems(report), []);
+    assert.ok(report.files.includes('ui/theme.css'), report.files.join(','));
+    assert.equal(fs.lstatSync(path.join(out, 'ui', 'theme.css')).isSymbolicLink(), false);
+    assert.equal(read(out, 'ui/theme.css'), 'p { margin: 0; }\n');
+  });
+
+  it('ссылка за пределы каталога плагина, на каталог или битая: отказ с путём ссылки, результат не создан', async () => {
+    const makers = [
+      (dir: string) => {
+        const outside = fresh('elsewhere');
+        write(outside, { 'x.css': 'x' });
+        fs.symlinkSync(path.join(outside, 'x.css'), path.join(dir, 'ui', 'theme.css'));
+      },
+      (dir: string) => fs.symlinkSync('../lib', path.join(dir, 'ui', 'theme.css')),
+      (dir: string) => fs.symlinkSync('../nothing.css', path.join(dir, 'ui', 'theme.css')),
+    ];
+    for (const make of makers) {
+      const dir = plugin({ 'lib/a.txt': 'a' });
+      make(dir);
+      const out = fresh('out');
+      const report = await buildPlugin(dir, { out });
+      assert.equal(report.ok, false);
+      assert.match(problems(report)[0] ?? '', /^ui\/theme\.css: символическая ссылка/);
+      assert.ok(!fs.existsSync(out));
+    }
+  });
+
+  it('source: ссылка в ui/ копируется так же', async () => {
+    const dir = plugin({ 'shared.css': 'p { margin: 0; }\n' });
+    fs.symlinkSync('../shared.css', path.join(dir, 'ui', 'theme.css'));
+    const out = fresh('out');
+    const report = await buildPlugin(dir, { out, main: 'source', check: false });
+    assert.deepEqual(problems(report), []);
+    assert.equal(read(out, 'ui/theme.css'), 'p { margin: 0; }\n');
+    assert.equal(fs.lstatSync(path.join(out, 'ui', 'theme.css')).isSymbolicLink(), false);
   });
 });
