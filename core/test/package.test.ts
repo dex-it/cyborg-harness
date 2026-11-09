@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { describe, it } from 'node:test';
 
 // P-02: ядро как пакет @cyborg-harness/core. Тесты про состав и форму пакета; сборка - `npm run build:core` (её гоняют pretest/pretypecheck/prelint/prebuild).
@@ -13,6 +14,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(core, 'package.json'), 'ut
   type?: string;
   engines?: { node?: string };
   exports?: Record<string, string | Record<string, string>>;
+  bin?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   files?: string[];
   [key: string]: unknown;
@@ -36,11 +38,18 @@ describe('package.json ядра', () => {
     assert.equal(manifest.type, 'module');
   });
 
-  it('engines.node - мажор Node, на котором идёт CI и который несёт Electron playground (Node 24)', () => {
+  it('engines.node - мажор Node, который несёт Electron playground: берётся у самого Electron (ELECTRON_RUN_AS_NODE, process.versions.node)', () => {
+    const electron = createRequire(path.join(root, 'package.json'))('electron') as string;
+    const version = execFileSync(electron, ['-p', 'process.versions.node'], { encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 30_000, killSignal: 'SIGKILL' }).trim();
+    const major = /^(\d+)\./.exec(version)?.[1];
+    assert.ok(major, `версия Node в Electron: ${version}`);
+    assert.equal(manifest.engines?.node, `>=${major}`, `Node в Electron playground ${version}`);
+  });
+
+  it('engines.node совпадает с Node в CI (node-version в ci.yml): пакет проверяется на той версии, которую заявляет', () => {
     const ci = fs.readFileSync(path.join(root, '.github', 'workflows', 'ci.yml'), 'utf8');
     const major = /node-version:\s*(\d+)/.exec(ci)?.[1];
     assert.equal(manifest.engines?.node, `>=${major}`);
-    assert.equal(major, '24');
   });
 
   it('рантайм-зависимостей нет; единственная связь - peer на контракты', () => {
@@ -50,8 +59,8 @@ describe('package.json ядра', () => {
     assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}), ['@cyborg-harness/contracts']);
   });
 
-  it('точки входа: главный процесс, хост, вход хоста для fork, клавиши, оболочка вида, слой окна и элементы окна (имена в них - public-api.test.ts)', () => {
-    assert.deepEqual(Object.keys(manifest.exports ?? {}), ['.', './host', './host-entry', './keys', './ui-shell', './window', './elements', './package.json']);
+  it('точки входа: главный процесс, хост, вход хоста для fork, клавиши, оболочка вида, слой окна, проверка плагина и элементы окна (имена в них - public-api.test.ts)', () => {
+    assert.deepEqual(Object.keys(manifest.exports ?? {}), ['.', './host', './host-entry', './keys', './ui-shell', './window', './plugin-check', './elements', './package.json']);
     for (const target of exportTargets()) assert.match(target, /^\.\/dist\/.+\.(js|d\.ts)$/, target);
   });
 });
@@ -69,7 +78,8 @@ describe('собранный пакет (core/dist)', () => {
   it('JS и .d.ts без .ts-расширений в импортах и без чужих зависимостей', () => {
     const code = files.filter((f) => f.endsWith('.js') || f.endsWith('.d.ts'));
     assert.ok(code.length > 30, `файлов в dist: ${code.length}`);
-    const specs = /(?:from|import)\s*\(?\s*'([^']+)'/g;
+    // Слова from и import в кавычках (разбор импортов плагина сравнивает токены с ними) оператором не считаются.
+    const specs = /(?<![\w'"])(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g;
     for (const file of code) {
       const text = fs.readFileSync(file, 'utf8');
       for (const m of text.matchAll(specs)) {
@@ -84,9 +94,16 @@ describe('собранный пакет (core/dist)', () => {
   });
 
   it('импорты контрактов в собранном JS только типовые: рантайм-связи с пакетом контрактов нет', () => {
+    // Имя пакета в строке допустимо (проверка плагина сверяет с ним импорты плагина); связь - только `import` и `require`.
+    const link = /(?:from\s*|import\s*\(?\s*|require\s*\(\s*)['"]@cyborg-harness\/contracts['"]/;
     for (const file of files.filter((f) => f.endsWith('.js'))) {
-      assert.ok(!fs.readFileSync(file, 'utf8').includes('@cyborg-harness/contracts'), path.relative(core, file));
+      assert.doesNotMatch(fs.readFileSync(file, 'utf8'), link, path.relative(core, file));
     }
+  });
+
+  it('командной строки в ядре нет: cyborg-plugin живёт в своём пакете tools/cyborg-plugin (P-06)', () => {
+    assert.equal(manifest.bin, undefined);
+    assert.ok(!fs.existsSync(path.join(core, 'dist', 'src', 'plugin-cli-bin.js')), 'в сборке ядра остался вход команды');
   });
 
   it('npm pack: в архиве dist, package.json и README, без исходников и тестов', () => {

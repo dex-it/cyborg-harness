@@ -100,11 +100,11 @@ test('старт: включённый плагин активен, миграц
   await kernel.unload();
 });
 
-test('служба окна: снимок с причиной и журналом, «Включить снова» поднимает не поднявшийся плагин', async () => {
+test('служба окна: снимок с причиной и журналом, «Включить снова» поднимает не поднявшийся плагин', async (t) => {
   const userData = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['disk'], hosts: { io: ['disk'] } } }));
   plugin(path.join(userData, 'plugins'), 'disk', {}, 'export default {}');
-  plugin(path.join(userData, 'plugins'), 'spare', {}, 'export default {}');
+  plugin(path.join(userData, 'plugins'), 'spare', { ui: { views: { main: './ui/ui.js' } } }, 'export default {}');
   fs.mkdirSync(path.join(userData, 'plugins', 'broken'));
   let broken = true;
   let changes = 0;
@@ -121,6 +121,8 @@ test('служба окна: снимок с причиной и журнало�
     })),
     log: () => {},
   });
+  // Без выгрузки упавшая проверка держит слежение, и процесс файла не выходит.
+  t.after(() => service.unload());
   const before = service.snapshot();
   assert.equal(before.phase, 'ready');
   assert.equal(before.problems.length, 1);
@@ -128,6 +130,8 @@ test('служба окна: снимок с причиной и журнало�
     { id: 'spare', state: 'disabled', revivable: false, unloaded: false, commands: [], permissions: [], version: '1.0.0', reason: 'не включён в настройках (plugins.enabled)' },
     { id: 'disk', state: 'stopped', revivable: true, unloaded: false, commands: [], permissions: [], version: '1.0.0', host: 'io', reason: 'не поднялся в хосте io: нет диска' },
   ]);
+  // Не включённому в настройках плагину фрейма нет, метка раскладки не склеена с «выключен».
+  assert.deepEqual(before.layout, [{ pluginId: 'spare', kind: 'view', name: 'main', area: 'sidebar', order: 1000, mark: 'not-enabled' }]);
   assert.deepEqual(before.journal.at(-1), { at: 1000, subject: 'disk', plugins: ['disk'], text: 'не поднялся в хосте io: нет диска', level: 'error' });
 
   broken = false;
@@ -139,7 +143,6 @@ test('служба окна: снимок с причиной и журнало�
   assert.equal(service.snapshot().canHang, false);
   assert.ok(changes > 3);
   assert.deepEqual(alerts, []);
-  await service.unload();
 });
 
 test('служба окна: сочетания с конфликтом, перехват нажатия, лента, выгрузка с зависимым и загрузка обратно', async (t) => {
@@ -216,12 +219,60 @@ test('служба окна: сочетания с конфликтом, пер�
   );
 });
 
+test('служба окна: динамическое сочетание кнопки идёт с аргументами и условиями, автоповтор и поле ввода его не запускают, видимость сообщает окно', async (t) => {
+  const userData = tmp();
+  const dir = path.join(userData, 'plugins');
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['buttons'] } }));
+  plugin(dir, 'buttons', { commands: { 'buttons.run': { args: ['string'] } }, ui: { views: { main: './ui.js' } } }, 'export default {}');
+  const ran: unknown[][] = [];
+  const modules: Record<string, PluginModule> = {
+    buttons: {
+      async activate(ctx) {
+        ctx.commands.register('buttons.run', (name) => void ran.push([name]));
+        await ctx.keys.register({ key: 'F2', command: 'buttons.run', args: ['build'], when: { visible: true } });
+        await ctx.keys.register({ key: 'F3', command: 'buttons.run', args: ['again'], when: { repeat: true, input: 'any' } });
+      },
+    },
+  };
+  const service = new PluginsService({ changed: () => {}, alert: () => {} }, () => 5);
+  await service.start({
+    userData,
+    builtinDir: path.join(userData, 'нет'),
+    spawnHost: inlineHosts(async (entry) => modules[/\/(\w+)\/index\.mjs$/.exec(entry)?.[1] ?? ''] ?? { activate() {} }),
+    platform: 'linux',
+    log: () => {},
+  });
+  t.after(() => service.unload());
+  const f = (key: string) => ({ key, code: key, control: false, alt: false, shift: false, meta: false });
+
+  assert.equal(service.press(f('F2')), false, 'вид не показан - сочетание молчит');
+  service.setViewVisible('buttons', true);
+  service.setViewVisible('ghost', true);
+  service.setInputFocus('text');
+  assert.equal(service.press(f('F2')), false, 'фокус в поле ввода');
+  service.setInputFocus('terminal');
+  assert.equal(service.press(f('F2'), true), false, 'автоповтор');
+  assert.equal(service.press(f('F2')), true, 'терминал - не поле ввода');
+  service.setInputFocus('nonsense');
+  service.setInputFocus('text');
+  assert.equal(service.press(f('F3'), true), true, 'repeat и input: any');
+  for (let i = 0; i < 150 && ran.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(ran, [['build'], ['again']]);
+  assert.deepEqual(
+    service.snapshot().keys.filter((k) => k.pluginId === 'buttons').map((k) => [k.key, k.live]),
+    [
+      ['F2', true],
+      ['F3', true],
+    ],
+  );
+});
+
 test('виды: адрес у плагина с ui в манифесте и у снятого, лента вида - только свои строки, команда и контракт из вида - только свои', async () => {
   const userData = tmp();
   const dir = path.join(userData, 'plugins');
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['face', 'voice'] } }));
   plugin(dir, 'face', { commands: { 'face.hi': {}, 'face.sum': { args: ['number', 'number'] } }, optional: { 'demo.echo': '^1' }, ui: { views: { main: './ui/ui.js' } } }, 'export default {}');
-  plugin(dir, 'voice', { commands: ['voice.ping'], provides: { 'demo.echo': '1.0' } }, 'export default {}');
+  plugin(dir, 'voice', { commands: { 'voice.ping': { callers: 'plugins' } }, provides: { 'demo.echo': '1.0' } }, 'export default {}');
   const modules: Record<string, PluginModule> = {
     face: {
       activate(ctx) {
@@ -245,9 +296,11 @@ test('виды: адрес у плагина с ui в манифесте и у �
     log: () => {},
   });
 
-  assert.deepEqual(Object.fromEntries(service.snapshot().plugins.map((p) => [p.id, p.view])), { face: 'cyborg-plugin://face/', voice: undefined });
+  assert.deepEqual(service.snapshot().layout, [{ pluginId: 'face', kind: 'view', name: 'main', area: 'sidebar', order: 1000, url: 'cyborg-plugin://face/?view=main' }]);
   assert.deepEqual(service.uiOf('face'), { dir: path.join(dir, 'face'), views: { main: './ui/ui.js' } });
   assert.equal(service.uiOf('voice'), undefined);
+  assert.deepEqual(service.snapshot().plugins.find((p) => p.id === 'voice')?.permissions, ['другие плагины могут звать команды: voice.ping'], 'открытые чужим команды - в правах словами');
+  assert.deepEqual(service.snapshot().plugins.find((p) => p.id === 'face')?.permissions, []);
   assert.deepEqual(await service.runFor('face', 'face.hi'), {});
   assert.deepEqual(await service.runFor('face', 'face.sum', [2, 3]), { value: 5 });
   assert.deepEqual(await service.runFor('face', 'face.sum', 'x'), { error: 'face.sum: аргументы - не массив' });
@@ -274,7 +327,8 @@ test('виды: адрес у плагина с ui в манифесте и у �
   assert.deepEqual(await service.callFor('face', 'demo.echo', 1, 'say', ['x']), { error: 'demo.echo: поставщика сейчас нет' });
   assert.deepEqual(await service.disable('face'), {});
   const face = service.snapshot().plugins.find((p) => p.id === 'face');
-  assert.deepEqual([face?.state, face?.view], ['stopped', 'cyborg-plugin://face/'], 'снятому плагину окно рисует заглушку на месте вида');
+  assert.equal(face?.state, 'stopped');
+  assert.deepEqual(service.snapshot().layout, [{ pluginId: 'face', kind: 'view', name: 'main', area: 'sidebar', order: 1000, mark: 'disabled', url: 'cyborg-plugin://face/?view=main' }], 'снятому плагину окно рисует заглушку на месте вида');
   await service.unload();
 });
 
@@ -339,7 +393,7 @@ test('plugins.enabled из файла воркспейса без перезап
   assert.deepEqual(problems, ['plugins.enabled: c - включатся после перезапуска']);
 });
 
-test('несколько видов: оба адреса в строке плагина по порядку манифеста, первый остаётся в view; у невключённого и без ui видов нет', async () => {
+test('несколько видов: оба адреса в раскладке по порядку манифеста; у плагина без ui видов нет, невключённый помечен', async () => {
   const userData = tmp();
   const dir = path.join(userData, 'plugins');
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['duo', 'solo', 'bare'] } }));
@@ -350,17 +404,17 @@ test('несколько видов: оба адреса в строке пла�
   const service = new PluginsService({ changed: () => {}, alert: () => {} }, () => 1);
   await service.start({ userData, builtinDir: path.join(userData, 'нет'), spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {} });
   try {
-    const rows = Object.fromEntries(service.snapshot().plugins.map((p) => [p.id, p]));
-    assert.deepEqual(rows.duo?.views, [
-      { name: 'main', url: 'cyborg-plugin://duo/' },
-      { name: 'side-tree', url: 'cyborg-plugin://duo/?view=side-tree' },
+    const layout = service.snapshot().layout;
+    const of = (id: string) => layout.filter((e) => e.pluginId === id).map((e) => [e.name, e.url, e.mark]);
+    assert.deepEqual(of('duo'), [
+      ['main', 'cyborg-plugin://duo/?view=main', undefined],
+      ['side-tree', 'cyborg-plugin://duo/?view=side-tree', undefined],
     ]);
-    assert.equal(rows.duo.view, 'cyborg-plugin://duo/', 'view - адрес первого вида, как был');
-    assert.deepEqual(rows.solo?.views, [{ name: 'main', url: 'cyborg-plugin://solo/' }]);
-    assert.equal(rows.bare?.views, undefined);
-    assert.equal(rows.spare?.views, undefined, 'невключённому окно вид не рисует');
+    assert.deepEqual(of('solo'), [['main', 'cyborg-plugin://solo/?view=main', undefined]]);
+    assert.deepEqual(of('bare'), []);
+    assert.deepEqual(of('spare'), [['main', undefined, 'not-enabled']], 'невключённому окно вид не рисует');
     assert.deepEqual(await service.disable('duo'), {});
-    assert.equal(service.snapshot().plugins.find((p) => p.id === 'duo')?.views?.length, 2, 'снятому окно рисует заглушку на месте видов');
+    assert.equal(service.snapshot().layout.filter((e) => e.pluginId === 'duo' && e.mark === 'disabled').length, 2, 'снятому окно рисует заглушку на месте видов');
   } finally {
     await service.unload();
   }

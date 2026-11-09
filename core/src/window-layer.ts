@@ -7,6 +7,9 @@ import { isRecord } from './wire.ts';
 /** Владелец команд окна в таблице сочетаний: команды исполняет приложение, а не плагин. */
 export const WINDOW_OWNER = 'cyborg.window';
 
+/** Владелец акселераторов меню приложения в таблице сочетаний: нажатие обрабатывает меню ОС, ядро его не перехватывает. */
+export const MENU_OWNER = 'cyborg.menu';
+
 /** Переход между областями окна; сочетание ловится до страницы, поэтому выводит и из фрейма, который забирает Tab себе (терминал). */
 export const WINDOW_COMMANDS: Readonly<Record<string, string>> = {
   'cyborg.window.focus-next': 'F6',

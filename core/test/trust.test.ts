@@ -65,6 +65,7 @@ function forging(table: Record<string, PluginModule>) {
       });
     },
     notify: (hostId: string, m: string, p: unknown) => send(hostId, { t: 'note', m, p }),
+    cancel: (hostId: string, id: unknown) => send(hostId, { t: 'cancel', id }),
   };
 }
 
@@ -117,11 +118,11 @@ test('run: ядро сверяет аргументы со схемой мани
   const kernel = await load({
     apiVersion: PLUGIN_API_VERSION,
     enabled: ['victim', 'mallory'],
-    manifests: [manifest('victim', { commands: { 'victim.open': { args: ['string', 'number?'] } } }), manifest('mallory')],
+    manifests: [manifest('victim', { commands: { 'victim.open': { args: ['string', 'number?'], callers: 'plugins' } } }), manifest('mallory')],
     spawnHost: forger.spawn,
     hosts: { v: ['victim'], m: ['mallory'] },
   });
-  const run = (args: unknown) => forger.request('m', 'run', { name: 'victim.open', args });
+  const run = (args: unknown) => forger.request('m', 'run', { caller: 'mallory', name: 'victim.open', args });
 
   assert.equal((await run(['/a'])).v, 'открыл');
   assert.equal((await run(['/a', 3])).v, 'открыл');
@@ -132,6 +133,33 @@ test('run: ядро сверяет аргументы со схемой мани
   assert.equal(code(await run('/a')), 'Invalid');
   await assert.rejects(kernel.run('victim.open', 42), { code: 'Invalid', message: 'victim.open: аргумент 1 не string' });
   assert.deepEqual(seen, [['/a'], ['/a', 3]]);
+  await kernel.unload();
+});
+
+test('run: вызывающего называет канал - чужой плагин в caller и запрос без него отклоняются, команда без callers недоступна главной части', async () => {
+  const seen: unknown[][] = [];
+  const forger = forging({
+    victim: { activate: (ctx) => void ctx.commands.register('victim.pin', (...args) => void seen.push(args)) },
+    mallory: { activate: () => undefined },
+  });
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['victim', 'mallory'],
+    manifests: [manifest('victim', { commands: ['victim.pin', 'victim.open'] }), manifest('mallory')],
+    spawnHost: forger.spawn,
+    hosts: { v: ['victim'], m: ['mallory'] },
+  });
+  const run = (body: Record<string, unknown>) => forger.request('m', 'run', { name: 'victim.pin', args: [], ...body });
+
+  assert.equal(code(await run({ caller: 'mallory' })), 'PermissionDenied', 'victim.pin закрыта плагинам');
+  assert.equal(code(await run({ caller: 'victim' })), 'Unavailable', 'хост m не держит victim: от его имени не зовут');
+  assert.equal(code(await run({ caller: 'ghost' })), 'Unavailable');
+  assert.equal(code(await run({})), 'Invalid', 'без caller запрос не принят: «пользователем» из хоста не назваться');
+  assert.deepEqual(seen, []);
+  assert.deepEqual(
+    kernel.journal.flatMap((e) => (e.kind === 'denied' ? [`${e.pluginId}:${e.method}:${e.reason ?? '-'}`] : [])),
+    ['mallory:victim.pin:command-callers'],
+  );
   await kernel.unload();
 });
 
@@ -311,5 +339,90 @@ test('emit и release: чужой хост не стреляет в чужую �
   assert.deepEqual(seen, [1, 2]);
   assert.equal(await api.listeners(), 1);
   assert.equal(logs.filter((l) => l.startsWith('хост m: ядро отказало')).length, 3, logs.join('\n'));
+  await kernel.unload();
+});
+
+test('cancel: чужой хост не отменяет запрос другого плагина, подделанные номера ничего не рвут', async () => {
+  let victim!: PluginContext;
+  let providerSignal: AbortSignal | undefined;
+  let release: (() => void) | undefined;
+  const forger = forging({
+    provider: {
+      activate: (ctx) =>
+        ctx.commands.register('provider.slow', (...args) => {
+          providerSignal = args.at(-1) as AbortSignal;
+          return new Promise((resolve) => (release = () => resolve('готово')));
+        }),
+    },
+    victim: { activate: (ctx) => void (victim = ctx) },
+    mallory: { activate: () => undefined },
+  });
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['provider', 'victim', 'mallory'],
+    manifests: [manifest('provider', { commands: { 'provider.slow': { callers: 'plugins' } } }), manifest('victim'), manifest('mallory')],
+    spawnHost: forger.spawn,
+    hosts: { p: ['provider'], v: ['victim'], m: ['mallory'] },
+  });
+  const own = new AbortController();
+  const call = victim.commands.run('provider.slow', own.signal);
+  await settle();
+  await settle();
+  assert.equal(providerSignal!.aborted, false);
+
+  // номера запросов у каждого канала свои: cancel от чужого хоста попадает в его собственный канал
+  for (const host of ['m', 'p']) for (let id = -1; id < 30; id++) forger.cancel(host, id);
+  for (const id of ['1', null, {}, [1]]) forger.cancel('m', id);
+  await settle();
+  await settle();
+  assert.equal(providerSignal!.aborted, false, 'поставщик не отменён чужим cancel');
+  release?.();
+  assert.equal(await call, 'готово');
+
+  const second = new AbortController();
+  const again = victim.commands.run('provider.slow', second.signal);
+  again.catch(() => undefined);
+  await settle();
+  await settle();
+  second.abort();
+  await assert.rejects(again, { code: 'Cancelled' });
+  await settle();
+  await settle();
+  assert.equal(providerSignal!.aborted, true, 'свой cancel вызывающего доходит до поставщика');
+  await kernel.unload();
+});
+
+test('keys.register и keys.unregister: хост не занимает сочетания и не снимает регистрации от чужого имени', async () => {
+  const forger = forging({
+    victim: { activate: () => undefined },
+    mallory: { activate: () => undefined },
+  });
+  const logs: string[] = [];
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['victim', 'mallory'],
+    manifests: [manifest('victim', { commands: ['victim.save'] }), manifest('mallory', { commands: ['mallory.go'] })],
+    spawnHost: forger.spawn,
+    hosts: { v: ['victim'], m: ['mallory'] },
+    platform: 'linux',
+    onLog: (id, message) => logs.push(`${id}: ${message}`),
+  });
+  const register = (host: string, fields: Record<string, unknown>) =>
+    forger.request(host, 'keys.register', { pluginId: 'victim', key: 'Ctrl+K', command: 'victim.save', args: [], when: {}, ...fields });
+
+  assert.equal(code(await register('m', {})), 'Unavailable', 'от имени плагина чужого хоста');
+  assert.equal(code(await register('v', { command: 'mallory.go' })), 'NotDeclared');
+  assert.equal(code(await register('v', { key: {} })), 'Invalid');
+  assert.equal(code(await register('v', { when: [] })), 'Invalid');
+  assert.equal(code(await register('v', { args: {} })), 'Invalid');
+  assert.equal(code(await register('v', { when: { repeat: 'sometimes' } })), 'Invalid');
+  assert.equal(kernel.keybinding('Ctrl+K'), undefined);
+  assert.equal(code(await register('v', {})), 'ok');
+  forger.notify('m', 'keys.unregister', { pluginId: 'victim', id: 1 });
+  forger.notify('m', 'keys.unregister', { pluginId: 'mallory', id: 1 });
+  forger.notify('v', 'keys.unregister', { pluginId: 'victim', id: 'one' });
+  await settle();
+  assert.equal(kernel.keybinding('Ctrl+K')?.pluginId, 'victim', 'регистрацию victim чужой хост не снял');
+  assert.equal(logs.filter((l) => l.startsWith('хост m: ядро отказало')).length, 1, logs.join('\n'));
   await kernel.unload();
 });

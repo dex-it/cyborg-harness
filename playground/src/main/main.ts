@@ -29,6 +29,7 @@ import {
   workspaceInfo,
 } from '@cyborg-harness/electron';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
+import { quietPipes } from './quiet-pipes.ts';
 import { runSpike } from './spike.ts';
 import { runHostsSpike } from './spike-hosts.ts';
 import { runGatewaySpike } from './spike-gateway.ts';
@@ -76,7 +77,7 @@ if (!sole) app.exit(0);
 /** Первый запуск: alice и bob делят хост c - видно, как падение одного процесса снимает обоих, а чат в хосте b живёт. */
 const DEFAULT_CONFIG = {
   plugins: {
-    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions', 'sessions', 'pin-lock', 'editor'],
+    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions', 'sessions', 'pin-lock', 'panels', 'editor'],
     hosts: { a: ['echo'], b: ['chat'], c: ['alice', 'bob'], d: ['flaky'], agents: ['agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions'] },
   },
 };
@@ -116,6 +117,8 @@ quitAfterPlugins(plugins);
 app.on('window-all-closed', () => {
   if (!spiking) app.quit();
 });
+
+quietPipes();
 
 void app.whenReady().then(() => {
   if (gatewaySpikeOut !== undefined) {
