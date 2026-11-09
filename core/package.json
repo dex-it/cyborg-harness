@@ -16,7 +16,7 @@
     "./keys": { "types": "./dist/src/index-keys.d.ts", "default": "./dist/src/index-keys.js" },
     "./ui-shell": { "types": "./dist/src/index-ui-shell.d.ts", "default": "./dist/src/index-ui-shell.js" },
     "./window": { "types": "./dist/src/index-window.d.ts", "default": "./dist/src/index-window.js" },
-    "./plugin-check": { "types": "./dist/src/plugin-check.d.ts", "default": "./dist/src/plugin-check.js" },
+    "./plugin-check": { "types": "./dist/src/index-plugin-check.d.ts", "default": "./dist/src/index-plugin-check.js" },
     "./elements": { "types": "./dist/elements/elements.d.ts", "default": "./dist/elements/elements.js" },
     "./package.json": "./package.json"
   },

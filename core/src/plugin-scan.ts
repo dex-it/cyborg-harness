@@ -276,7 +276,7 @@ function closing(tokens: readonly Token[], from: number, open: string, close: st
   return -1;
 }
 
-/** `type` перед клаузой - модификатор, а не имя импортируемого по умолчанию (в `import type from "x"` имя импорта - type). */
+/** `type` перед клаузой - модификатор, а не имя импортируемого по умолчанию (в импорте `import type from` с путём модуля имя импорта - type). */
 function typeModifier(t: readonly Token[], at: number): boolean {
   if (!isId(t[at], 'type')) return false;
   const next = t[at + 1];
