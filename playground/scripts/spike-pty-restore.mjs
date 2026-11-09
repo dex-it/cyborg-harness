@@ -1,4 +1,4 @@
-// Спайк SP-01 (SAD, вопрос 14) на настоящем claude: нужен вход в аккаунт и сеть, поэтому не в CI; итоги - docs/04-verification/spike-pty-restore.md.
+// Спайк SP-01 (SAD, вопрос 14) на настоящем claude: нужен вход в аккаунт и сеть, поэтому не в CI; итоги - docs/05-verification/spike-pty-restore.md.
 import { Buffer } from 'node:buffer';
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';

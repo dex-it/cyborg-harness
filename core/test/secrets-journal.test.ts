@@ -40,7 +40,7 @@ test('секрет не попадает в журнал, его описани�
   const ws = opened.workspace;
 
   const store = new Map<string, string>();
-  const secrets: SecretStore = { available: () => true, get: async (k) => store.get(k), set: async (k, v) => void store.set(k, v), delete: async (k) => void store.delete(k) };
+  const secrets: SecretStore = { available: () => true, get: async (k) => store.get(k), set: async (k, v) => void store.set(k, v), delete: async (k) => void store.delete(k), deletePrefix: async () => 0 };
   const sent: string[] = [];
   const fakeFetch = (async (url: URL, init: RequestInit) => {
     const auth = new Headers(init.headers).get('authorization') ?? '';

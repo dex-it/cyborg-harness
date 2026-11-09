@@ -23,6 +23,7 @@
 | Замер горячего пути pty: задержка вывода и склейка | [05-verification/spike-pty.md](05-verification/spike-pty.md) |
 | Спайк экрана терминала после `attach`: хвост или снимок на настоящем `claude` | [05-verification/spike-pty-restore.md](05-verification/spike-pty-restore.md) |
 | Проверка на macOS: замеры хостов и фреймов, клавиши, терминал | [05-verification/macos-check.md](05-verification/macos-check.md) |
+| База Cyborg: старт, память, терминал, панели, бандлы и записанные сессии S1-S18 для сравнения с ядром | [05-verification/cyborg-baseline.md](05-verification/cyborg-baseline.md) |
 | Эпик «Микроядро»: цель, карта, итерации, реестр задач | [06-plans/epic-microkernel.md](06-plans/epic-microkernel.md) |
 | Анализ готовности ядра и инвентарь Cyborg | [research/microkernel-readiness.md](research/microkernel-readiness.md), [research/cyborg-migration-inventory.md](research/cyborg-migration-inventory.md) |
 | Сайт документации (источник страниц - `guide/`) | [guide/](guide/index.mdx), сборка - `site/` |
