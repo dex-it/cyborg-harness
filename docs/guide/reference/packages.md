@@ -36,7 +36,7 @@ flowchart LR
 
 - У `@cyborg-harness/core` нет зависимостей из npm. На `@cyborg-harness/contracts` он ссылается только типами (`import type`), поэтому контракты указаны как peer-зависимость.
 - Ядро не импортирует Electron и ничего из стенда. Эту границу держит тест, а не ревью.
-- Плагин импортирует только `@cyborg-harness/contracts` и свои модули: ни `node:*`, ни `electron`, ни чужих плагинов. Это проверяет `cyborg-plugin check`. Виду npm-пакеты разрешены, `node:*` и `electron` - нет.
+- Плагин импортирует только `@cyborg-harness/contracts` и свои модули: ни `node:*`, ни `electron`, ни чужих плагинов. Это проверяет `cyborg-plugin check`. Виду npm-пакеты разрешены, главной части - если её собирает `cyborg-plugin build` (пакеты уходят в бандл); `node:*` и `electron` - нет ни там, ни там, в том числе в зависимостях.
 
 ## Публичный API
 

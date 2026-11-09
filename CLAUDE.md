@@ -6,7 +6,7 @@ Cyborg Harness - микроядро для настольных приложен
 
 ## Сборка и гейты
 
-- Сборка - `npm run build` (playground в `playground/dist`); перед ним, `typecheck`, `lint` и `test` сама идёт `npm run build:core` (пакет ядра в `core/dist`)
+- Сборка - `npm run build` (playground в `playground/dist`); перед ним, `typecheck`, `lint` и `test` сама идёт `npm run build:packages` (пакет ядра в `core/dist`, `cyborg-plugin` в `tools/cyborg-plugin/dist`)
 - Проверка типов - `npm run typecheck` (строгий tsconfig; TS 7 из алиаса `typescript7`, а `typescript` - TS 6 под API typescript-eslint, поэтому `npx tsc` - не тот компилятор)
 - Линтер - `npm run lint` (ESLint с strictTypeChecked, ноль предупреждений; отключение правила - только директивой с `-- причина`)
 - Тесты - `npm test` (node --test, Node 24 снимает типы сам); подделки сообщений хоста - `core/test/trust.test.ts`

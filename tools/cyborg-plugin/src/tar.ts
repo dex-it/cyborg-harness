@@ -58,5 +58,8 @@ export function tarGz(entries: readonly TarEntry[]): Buffer {
     if (tail !== 0) blocks.push(Buffer.alloc(BLOCK - tail));
   }
   blocks.push(Buffer.alloc(BLOCK * 2));
-  return gzipSync(Buffer.concat(blocks), { level: 9 });
+  const gz = gzipSync(Buffer.concat(blocks), { level: 9 });
+  // Байт ОС заголовка gzip (RFC 1952) zlib берёт из платформы сборки: 3 на Linux, 19 на macOS, 10 на Windows. 255 - «неизвестно» везде.
+  gz[9] = 255;
+  return gz;
 }

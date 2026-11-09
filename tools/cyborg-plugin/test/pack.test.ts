@@ -147,6 +147,12 @@ describe('tar: ustar', () => {
     assert.equal(splitName(`${'a'.repeat(200)}/b`), undefined);
   });
 
+  it('заголовок gzip не зависит от ОС: время 0, байт ОС 255', () => {
+    const gz = tarGz([{ name: 'r/a', data: Buffer.from('a') }]);
+    assert.deepEqual([...gz.subarray(4, 8)], [0, 0, 0, 0]);
+    assert.equal(gz[9], 255);
+  });
+
   it('пустой набор записей - корректный пустой архив', () => {
     const archive = path.join(fresh('arch'), 'empty.tgz');
     fs.mkdirSync(path.dirname(archive));

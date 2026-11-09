@@ -208,6 +208,14 @@ describe('buildPlugin: запрещённое и отказ до записи (P
     assert.equal(read(out, 'notes.txt'), 'мои записи');
   });
 
+  it('--out на месте файла: отказ, файл не стёрт', async () => {
+    const file = path.join(fresh('file'), 'notes.md');
+    write(path.dirname(file), { 'notes.md': 'мои записи' });
+    const report = await buildPlugin(plugin(), { out: file });
+    assert.match(problems(report)[0] ?? '', /не каталог или не читается/);
+    assert.equal(read(file), 'мои записи');
+  });
+
   it('пакеты и объявления: пакет объявлений по имени - только import type, и сборка этого требует', async () => {
     const dir = plugin({ 'index.ts': "import { Kind } from '@acme/contracts';\nexport default { Kind };\n" }, {}, { '@acme/contracts': { 'package.json': '{"name":"@acme/contracts"}', 'index.js': 'exports.Kind = 1;\n' } });
     const report = await buildPlugin(dir, { out: fresh('out'), declarationPackages: ['@acme/contracts'] });
@@ -250,5 +258,12 @@ describe('buildPlugin: source - стенд (P-06 п. 4)', () => {
     const report = await buildPlugin(dir, { out: fresh('out') });
     assert.equal(report.ok, true, problems(report).join('\n'));
     assert.ok(report.warnings.some((w) => w.startsWith('ui/ui.ts:2:')), report.warnings.join('\n'));
+  });
+
+  it('source: результат внутри каталога плагина (в том числе ./dist по умолчанию) - отказ, а не исключение', async () => {
+    const dir = plugin();
+    const report = await buildPlugin(dir, { main: 'source', check: false });
+    assert.match(problems(report)[0] ?? '', /в режиме source результат не может лежать внутри каталога плагина/);
+    assert.ok(!fs.existsSync(path.join(dir, 'dist')));
   });
 });

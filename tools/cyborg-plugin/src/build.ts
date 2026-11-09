@@ -71,8 +71,9 @@ async function prepareOut(out: string): Promise<string | undefined> {
   let names: string[] = [];
   try {
     names = await fs.readdir(out);
-  } catch {
-    // каталога нет - создадим
+  } catch (error) {
+    // Стереть можно только каталог: файл на месте --out (опечатка, путь архива pack) остаётся нетронутым.
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) return `${out}: не каталог или не читается - укажите другой --out`;
   }
   if (names.length > 0 && !names.includes('manifest.json')) return `${out}: каталог не пуст и не похож на результат сборки (нет manifest.json) - укажите другой --out`;
   await fs.rm(out, { recursive: true, force: true });
@@ -175,6 +176,8 @@ export async function buildPlugin(dir: string, options: BuildOptions = {}): Prom
   const out = await realpathLoose(options.out ?? path.join(home, 'dist'));
   if (out === home || inside(out, home)) return fail([{ file: '.', message: `--out ${out}: результат не может совпадать с каталогом плагина или содержать его` }], { dir: home, out });
   const ignore = inside(home, out) ? [path.relative(home, out)] : [];
+  // fs.cp не копирует каталог в собственный подкаталог (ERR_FS_CP_EINVAL) и бросил бы уже после очистки out.
+  if (mode === 'source' && ignore.length > 0) return fail([{ file: '.', message: `--out ${out}: в режиме source результат не может лежать внутри каталога плагина` }], { dir: home, out });
 
   let id: string | undefined;
   let refs: readonly string[] = [];
@@ -218,7 +221,7 @@ export async function buildPlugin(dir: string, options: BuildOptions = {}): Prom
   const built = new Set(compiled.files.map((f) => toPosix(path.relative(out, f.path))));
   if (mode === 'source') {
     const skipUiTs = (rel: string): boolean => /^ui\/[^/]+\.ts$/.test(toPosix(rel));
-    await fs.cp(home, out, { recursive: true, filter: (from) => !skipUiTs(path.relative(home, from)) && !(ignore.length > 0 && inside(path.join(home, ignore[0] ?? ''), from)) });
+    await fs.cp(home, out, { recursive: true, filter: (from) => !skipUiTs(path.relative(home, from)) });
   } else {
     for (const rel of copied) if (!built.has(rel)) await copyFile(home, out, rel);
   }
