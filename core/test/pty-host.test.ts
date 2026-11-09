@@ -9,6 +9,7 @@ import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { describeEntry } from '../src/status.ts';
 import { load as loadKernel, type JournalEntry, type Kernel, type LoadOptions } from '../src/loader.ts';
 import { trackKernels } from './kernels.ts';
+import { waitFor } from './wait-for.ts';
 import { inlinePtyHost } from '../src/pty-link.ts';
 import { PTY_HOST_LOST, type PtyBackend } from '../src/pty.ts';
 import { Endpoint } from '../src/rpc.ts';
@@ -106,7 +107,8 @@ test('pty-хост упал: владельцы получают onExit, жур�
   first.onExit((e) => exits.push(e));
   await tick();
   s.hosts[0]!.handle.kill();
-  await tick();
+  // Ждём факта (владелец узнал, сторож поднял хост заново), а не 30 мс: до перезапуска любой вызов pty отвечает HostGone.
+  await waitFor('владелец узнал о потере pty и сторож поднял pty-хост заново', () => exits.length > 0 && s.hosts.length === 2 && s.journal('host-restart').length > 0);
   assert.deepEqual(exits, [PTY_HOST_LOST], 'владелец не узнал, что pty потерян');
   assert.deepEqual(await s.pty().list(), [], 'потерянный pty с владельцем остался в списке');
   assert.equal(s.backend.procs[0]?.killed, 'SIGHUP', 'процессы упавшего хоста не завершены');
