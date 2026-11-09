@@ -2,7 +2,7 @@
 level: plan
 feature: cyborg-harness
 status: review
-date: 2026-11-08
+date: 2026-11-09
 origin: derived
 quality-checks: входных записей нет
 ---
@@ -48,7 +48,7 @@ quality-checks: входных записей нет
 | pty-хост - отдельный `utilityProcess` ядра, вывод к виду по `MessagePort` ([ADR-CH-0012](../03-architecture/adr/ADR-CH-0012-pty-host.md)) | сделано в K-01: `core/src/pty-host.ts`, `core/src/pty-link.ts`, `electron/src/pty-host-entry.ts` |
 | Снимок терминала вместо хвоста после `attach` ([вопрос 14](../03-architecture/design/sad.md#8-открытые-вопросы)) | отложено: D-00 строка 11 принимает хвост + `resize`; вводится отдельной задачей, если длинные сессии покажут сломанный экран |
 | Льготное время осиротевшего pty ([3.6](../03-architecture/design/sad.md#36-ресурсы-дольше-плагина-pty)) | сделано в ядре: 60 с по умолчанию, `ptyOrphanGrace` |
-| Группы рендера: `ui.group`, `plugins.uiGroups`, origin кадра по группе ([3.8](../03-architecture/design/sad.md#38-изоляция-рендера)) | не начато; origin кадра - по id плагина |
+| Группы рендера: `ui.group`, `plugins.uiGroups`, origin кадра по группе ([3.8](../03-architecture/design/sad.md#38-изоляция-рендера)) | сделано (K-04, 2026-11-09): `ui.group` в манифесте, `plugins.uiGroups` в config, `Kernel.groupOf`, адрес `cyborg-plugin://<группа>/<плагин>/`, плагин внутри группы - из пути адреса кадра, сторонний один в группе ([замер десяти видов](../04-verification/spike-render-groups.md)); осталось: общая группа для стороннего на этапе 2 |
 | Закрытая CSP вида `default-src 'none'` с явными источниками ([3.8](../03-architecture/design/sad.md#38-изоляция-рендера)) | не начато; `VIEW_CSP` - `default-src 'self'`; набор, которого хватает Monaco и xterm, снят пилотом PL-05 ([итоги](../04-verification/spike-monaco-xterm.md)) |
 | Форма API: вклады в меню, отмена запросов ([вопрос 15](../03-architecture/design/sad.md#8-открытые-вопросы)) | `ctx.keys.register` с условием сделан (K-07, [3.9](../03-architecture/design/sad.md#39-системные-клавиши-и-события)); меню и отмена - не начато |
 | Сборка и упаковка плагина: `cyborg-plugin build` и `pack` ([поставка плагина](../03-architecture/design/sad.md#1-общая-архитектура)) | сделано (P-06): бандл главной части, виды, проверка состава, предварительный `tar.gz`; осталось: публикация пакета (P-10), загрузка поставки приложением (P-07, T-10), подпись и хеш (этап 2, вопрос 8) |

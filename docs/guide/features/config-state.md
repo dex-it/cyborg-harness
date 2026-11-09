@@ -26,7 +26,7 @@ Config делится на слои **user** и **workspace**: верхний с
 }
 ```
 
-Разделы плагинов лежат в `settings`, ядро знает только своё: `plugins.enabled`, `plugins.hosts`, `plugins.uiGroups`, `plugins.keybindings`.
+Разделы плагинов лежат в `settings`, ядро знает только своё: `plugins.enabled`, `plugins.hosts`, `plugins.uiGroups`, `plugins.keybindings`. Ошибки в `plugins.uiGroups` (имя группы, не список, не строка в списке, плагин в двух группах) идут в «не дошло до ядра» с именем поля; годные группы действуют.
 
 ## Схемы и версии
 
