@@ -11,6 +11,7 @@
   "exports": {
     ".": { "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" },
     "./host-entry": { "types": "./dist/src/host-entry.d.ts", "default": "./dist/src/host-entry.js" },
+    "./pty-host-entry": { "types": "./dist/src/pty-host-entry.d.ts", "default": "./dist/src/pty-host-entry.js" },
     "./preload": { "types": "./dist/src/index-preload.d.ts", "default": "./dist/src/index-preload.js" },
     "./window": { "types": "./dist/src/index-window.d.ts", "default": "./dist/src/index-window.js" },
     "./shell/shell.js": "./dist/shell/shell.js",

@@ -9,6 +9,7 @@ import { describePermissions } from '../src/permissions.ts';
 import { fakePty, type FakeProc } from '../../testing/src/fake-pty.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
+import { fakeView } from './view-channel.ts';
 
 const tick = () => new Promise((r) => setTimeout(r, 30));
 
@@ -143,6 +144,7 @@ test('падение хоста: pty с persist живёт и копит выв�
   assert.deepEqual(seen, ['дальше']);
 
   await s.k.disable('agent');
+  await tick();
   assert.equal(keptProc.killed, 'SIGHUP', 'выключенный плагин оставил pty');
 });
 
@@ -171,6 +173,7 @@ test('pty завершился без владельца: list показыва�
   await s.k.idle();
   proc.emit('bye');
   proc.exit(0);
+  await tick();
   assert.deepEqual((await s.pty('agent').list()).map((i) => i.exit), [{ code: 0 }]);
   const h = await s.pty('agent').attach(kept.id);
   assert.equal(h.backlog, '$ bye');
@@ -186,41 +189,42 @@ test('share: билет одноразовый и только для своег
   const h = await s.pty('term').spawn({ program: '/bin/bash', persist: true, cols: 80, rows: 24 });
   const proc = s.backend.procs[0]!;
   await tick();
-  const sink = () => {
-    const got = { data: [] as string[], exit: [] as PtyExit[] };
-    return { got, sink: { data: (c: string) => void got.data.push(c), exit: (e: PtyExit) => void got.exit.push(e) } };
-  };
-
   const stolen = await h.share();
-  assert.throws(() => s.k.openTerminal('other', stolen, sink().sink), { code: 'NotFound' }, 'чужой плагин открыл билет');
-  assert.throws(() => s.k.openTerminal('term', stolen, sink().sink), { code: 'NotFound' }, 'билет пережил первое предъявление');
-  assert.throws(() => s.k.openTerminal('term', 'выдуманный', sink().sink), { code: 'NotFound' });
+  await assert.rejects(s.k.openTerminal('other', stolen, fakeView().channel), { code: 'NotFound' }, 'чужой плагин открыл билет');
+  await assert.rejects(s.k.openTerminal('term', stolen, fakeView().channel), { code: 'NotFound' }, 'билет пережил первое предъявление');
+  await assert.rejects(s.k.openTerminal('term', 'выдуманный', fakeView().channel), { code: 'NotFound' });
 
-  const a = sink();
-  const view = s.k.openTerminal('term', await h.share(), a.sink);
+  const a = fakeView();
+  const view = await s.k.openTerminal('term', await h.share(), a.channel);
   assert.deepEqual([view.id, view.pid, view.backlog], [h.id, proc.pid, '$ ']);
-  view.write('ls\r');
-  view.resize(100, 30);
+  assert.deepEqual(await a.write('ls\r'), { ok: true });
+  assert.deepEqual(await a.resize(100, 30), { ok: true });
   assert.deepEqual([proc.writes, proc.resizes.at(-1)], [['ls\r'], [100, 30]]);
   await assert.rejects(s.pty('other').attach(h.id), { code: 'NotFound' });
 
   s.handles.get('term')!.kill();
   proc.emit('хост лежит, вид видит');
-  view.write('pwd\r');
-  assert.deepEqual(a.got.data, ['хост лежит, вид видит'], 'вывод в вид ходит через хост');
+  assert.deepEqual(await a.write('pwd\r'), { ok: true });
+  await tick();
+  assert.deepEqual(a.data, ['хост лежит, вид видит'], 'вывод в вид ходит из pty-хоста по порту, хост плагина не нужен');
   assert.equal(proc.writes.at(-1), 'pwd\r');
   await s.k.idle();
 
   view.close();
+  await tick();
   proc.emit('после close');
-  assert.deepEqual(a.got.data, ['хост лежит, вид видит']);
-  assert.throws(() => view.write('x'), { code: 'NotFound' });
+  void a.write('x');
+  await tick();
+  assert.deepEqual(a.data, ['хост лежит, вид видит']);
+  assert.equal(proc.writes.at(-1), 'pwd\r', 'ввод после close дошёл до pty');
 
-  const b = sink();
+  const b = fakeView();
   const back = await s.pty('term').attach(h.id);
-  s.k.openTerminal('term', await back.share(), b.sink);
+  await s.k.openTerminal('term', await back.share(), b.channel);
   proc.exit(0);
-  assert.deepEqual(b.got.exit, [{ code: 0 }]);
+  await tick();
+  assert.deepEqual(b.exit, [{ code: 0 }]);
+  assert.equal(b.closed.length, 1, 'главный процесс не узнал, что канал вида больше не нужен');
   await assert.rejects(back.share(), { code: 'NotFound' }, 'билет на завершённый pty');
 });
 
@@ -231,7 +235,7 @@ test('share: просроченный билет не открывается', a
   const realNow = Date.now;
   Date.now = () => realNow() + 31_000;
   try {
-    assert.throws(() => s.k.openTerminal('term', ticket, { data: () => {}, exit: () => {} }), { code: 'NotFound' });
+    await assert.rejects(s.k.openTerminal('term', ticket, fakeView().channel), { code: 'NotFound' });
   } finally {
     Date.now = realNow;
   }
@@ -259,6 +263,7 @@ test('выключение: preview называет живые pty; keepPty о�
   assert.match(back.backlog, /пока плагин выключен$/);
 
   await s.k.disable('agent');
+  await tick();
   assert.equal(termProc.killed, 'SIGHUP', 'выключение без keepPty оставило процесс');
 
   const parked = await s.pty('quiet').spawn({ program: '/bin/bash' });
@@ -283,6 +288,7 @@ test('оставленный: ждёт без срока, пока плагин 
   assert.equal(leftProc.killed, undefined, 'срок сработал, пока плагин выключен');
 
   s.k.endKeptPty(ended.id);
+  await tick();
   assert.equal(endedProc.killed, 'SIGHUP');
   assert.deepEqual(s.k.keptPty().map((p) => p.id), [left.id]);
   assert.throws(() => s.k.endKeptPty(ended.id), { code: 'NotFound' });
@@ -330,9 +336,10 @@ test('пределы pty: ввод больше предела - Invalid, pty ж
   await assert.rejects(a.write('123456789'), { code: 'Invalid', message: /больше 8 байт/ });
   await assert.rejects(a.write('ёёёёё'), { code: 'Invalid' }, 'пять символов - десять байт UTF-8');
   await a.write('12345678');
-  const view = s.k.openTerminal('term', await a.share(), { data: () => undefined, exit: () => undefined });
-  assert.throws(() => view.write('x'.repeat(9)), { code: 'Invalid', message: /больше 8 байт/ });
-  view.write('ok');
+  const view = fakeView();
+  await s.k.openTerminal('term', await a.share(), view.channel);
+  assert.match((await view.write('x'.repeat(9))).error ?? '', /больше 8 байт/);
+  assert.deepEqual(await view.write('ok'), { ok: true });
   assert.deepEqual(proc.writes, ['12345678', 'ok']);
 
   const own = await s.pty('term').spawn({ program: '/bin/bash', env: { COLORTERM: '24bit' } });

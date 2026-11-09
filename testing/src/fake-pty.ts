@@ -11,7 +11,8 @@ export interface FakeProc extends PtyProcess {
   exit(code: number): void;
 }
 
-export type FakePty = PtyBackend & { procs: FakeProc[] };
+/** `spawn` у подделки синхронный: ядро принимает и промис (pty-хост в другом процессе), тесту удобнее сразу процесс. */
+export type FakePty = Omit<PtyBackend, 'spawn'> & { spawn(...args: Parameters<PtyBackend['spawn']>): FakeProc; procs: FakeProc[] };
 
 /** Псевдотерминал без ОС: тест сам пишет вывод и завершает процесс. */
 export function fakePty(): FakePty {

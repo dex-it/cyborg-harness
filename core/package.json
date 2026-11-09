@@ -12,6 +12,7 @@
     ".": { "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" },
     "./host": { "types": "./dist/src/index-host.d.ts", "default": "./dist/src/index-host.js" },
     "./host-entry": { "types": "./dist/src/host-entry.d.ts", "default": "./dist/src/host-entry.js" },
+    "./pty-host": { "types": "./dist/src/index-pty-host.d.ts", "default": "./dist/src/index-pty-host.js" },
     "./keys": { "types": "./dist/src/index-keys.d.ts", "default": "./dist/src/index-keys.js" },
     "./ui-shell": { "types": "./dist/src/index-ui-shell.d.ts", "default": "./dist/src/index-ui-shell.js" },
     "./window": { "types": "./dist/src/index-window.d.ts", "default": "./dist/src/index-window.js" },

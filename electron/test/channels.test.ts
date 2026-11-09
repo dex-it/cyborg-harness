@@ -42,8 +42,8 @@ describe('каналы IPC: preload и главный процесс', () => {
   it('каждый канал, который preload слушает, главный процесс где-то отправляет', () => {
     const listened = unique(names(preload, /ipcRenderer\.on\('([^']+)'/g));
     const sources = ['channels.ts', 'window.ts', 'views.ts', 'view-terminals.ts', 'plugins.ts'].map(read).join('\n');
-    const sent = unique(names(sources, /\.send\('([^']+)'/g));
-    // Терминал шлёт через фрейм: имя канала в view-terminals.ts.
+    const sent = unique(names(sources, /\.(?:send|postMessage)\('([^']+)'/g));
+    // Терминал шлёт через фрейм: событие управления - send, порт вывода - postMessage; имена каналов в view-terminals.ts.
     assert.ok(listened.length >= 6, `слушателей в preload: ${String(listened.length)}`);
     assert.deepEqual(
       listened.filter((c) => !sent.includes(c)),

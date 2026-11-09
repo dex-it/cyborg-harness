@@ -165,6 +165,8 @@ void refresh();
 esbuild main.ts --bundle --platform=node --format=cjs --external:electron --external:node-pty --outfile=dist/main.js
 # preload: песочница даёт только electron
 esbuild preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/preload.js
+# процесс pty-хоста (utilityProcess с node-pty): cjs, node-pty снаружи
+echo "import '@cyborg-harness/electron/pty-host-entry';" | esbuild --bundle --platform=node --format=cjs --external:electron --external:node-pty --resolve-dir=. --outfile=dist/pty-host.js
 # файл хоста для utilityProcess: ESM (в cjs esbuild заменил бы import() плагина на require)
 echo "import '@cyborg-harness/electron/host-entry';" | esbuild --bundle --platform=node --format=esm --outfile=dist/plugin-host.mjs
 # окно и оболочка вида (готовые файлы пакета кладутся рядом с окном)
@@ -180,7 +182,7 @@ cp node_modules/@cyborg-harness/electron/dist/shell/shell.{js,js.map,css} dist/s
 
 | Задача | Точка |
 |---|---|
-| K-01, pty-хост отдельным процессом ядра | `electronOs({ pty })`: вместо `node-pty` в главном процессе подставляется `OsEnvironment['pty']` с другой реализацией |
+| K-01, pty-хост отдельным процессом ядра | сделано: `electronOs({ ptyHost: utilityPtyHost('dist/pty-host.js').spawn })`, точка входа процесса - `@cyborg-harness/electron/pty-host-entry`; без `ptyHost` pty остаются в главном процессе (`pty` или `node-pty`). `ViewTerminals` раздаёт виду порт `MessageChannelMain`, preload принимает его сам |
 | K-04, группы рендера (origin по группе) | origin вида строится в одном месте - `viewOrigin` и `pluginOfOrigin` в `view-protocol.ts`; адрес вида в `LayoutRow.url` |
 | K-05, строгая CSP вида | `serveViews(resolve, shellDir, { csp })`: строка или функция от плагина из адреса запроса; по умолчанию `VIEW_CSP` |
 | K-09, K-13, каналы «главная часть - вид», отмена запросов | `viewChannel(channel, handler)`: канал, который принимает только вид плагина, плагин берётся из origin фрейма; `windowChannel` - то же для документа окна. Имена каналов приложения не пересекаются с `plugins:`, `view:`, `window:`, `documents:`, `views:` |

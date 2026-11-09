@@ -1,6 +1,6 @@
 import type { SectionResult } from './config.ts';
 import type { Rejection } from './graph.ts';
-import { DENIED_WINDOW_MS, DEPRECATED_WINDOW_MS } from './journal.ts';
+import { DENIED_WINDOW_MS, DEPRECATED_WINDOW_MS, PTY_HOST_ID } from './journal.ts';
 import type { JournalEntry } from './kernel-types.ts';
 
 /** Что показать на месте плагина: работает, ждёт перезапуска хоста, выключен (сбоем или человеком) или не включён в настройках. */
@@ -165,12 +165,14 @@ export function describeEntry(e: JournalEntry): string {
       return `выключен, сбоев подряд: ${e.strikes}` + (e.affects.length ? `; его контракты брали: ${list(e.affects)}` : '');
     case 'host-down': {
       const what = e.reason === 'hang' ? 'завис' : 'упал';
+      if (e.hostId === PTY_HOST_ID) return `pty-хост ${what}: процессы pty потеряны${e.lostPtys?.length ? `, их владельцы получили выход: ${list(e.lostPtys)}` : ''}`;
       const blame = e.culprits.length ? `виновник: ${list(e.culprits)}` : 'виновник не установлен';
       return `хост ${e.hostId} ${what}, ${blame}; сняты: ${list(e.plugins) || 'никто'}` + (e.affects.length ? `; задеты: ${list(e.affects)}` : '');
     }
     case 'host-restart':
-      return `хост ${e.hostId} перезапускается: ${list(e.plugins)}`;
+      return e.hostId === PTY_HOST_ID ? 'pty-хост перезапущен: новые pty запускаются' : `хост ${e.hostId} перезапускается: ${list(e.plugins)}`;
     case 'host-abandoned':
+      if (e.hostId === PTY_HOST_ID) return `pty-хост больше не перезапускается сам, падений подряд: ${e.failures}; следующий запуск pty попробует снова`;
       return `хост ${e.hostId} больше не перезапускается, сбоев без виновника подряд: ${e.failures}; выключены: ${list(e.plugins) || 'никто'}`;
   }
 }

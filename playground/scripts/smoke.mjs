@@ -276,7 +276,7 @@ async function main() {
 
   assert.ok(await button('echo', 'echo.tty'), 'нет кнопки echo.tty');
   await waitFor('pty: /bin/sh в псевдотерминале ядра ответил своим tty и размером', () => lines().some((l) => /echo: pty \d+ вышел с 0: .*\/dev\/(pts\/|tty).* 10 100/.test(l)));
-  log('ctx.os.pty: процесс в главном процессе, вывод в хост плагина, размер дошёл до терминала');
+  log('ctx.os.pty: процесс в pty-хосте, вывод в хост плагина, размер дошёл до терминала');
 
   assert.equal(await state('later'), 'waiting', 'ленивый later поднят при старте');
   assert.ok(await button('later', 'later.hello'), 'нет кнопки later.hello у спящего плагина');
@@ -382,6 +382,57 @@ async function main() {
     assert.equal(await load(), true);
     await waitFor('echo снова активен', async () => (await state('echo')) === 'active' && /^pty \d+$/.test(await inView('echo', "document.getElementById('term-state').textContent")));
     log('выключение спрашивает о pty: оставленный процесс виден в строке плагина и ждёт его, завершённый уходит, оставленный завершается человеком');
+
+    // pty-хост (K-01) - процесс ядра, а не хост плагинов: зависание node-pty не замораживает окно и виды, сторож убивает его, владельцы получают выход.
+    const ptyHostPid = async () => Number(await main("process.mainModule.require('electron').app.getAppMetrics().find((m) => m.name === 'Cyborg pty')?.pid ?? 0"));
+    const stat = (p) => main(`(() => { try { return process.mainModule.require('child_process').execSync('ps -o stat= -p ${p}').toString().trim(); } catch { return ''; } })()`);
+    const frozen = await waitFor('pty-хост запущен', ptyHostPid);
+    await main(`process.kill(${frozen}, 'SIGSTOP')`);
+    await waitFor('pty-хост остановлен SIGSTOP', async () => /^T/.test(await stat(frozen)));
+    const asked = Date.now();
+    assert.equal(await ev('1 + 1'), 2, 'окно не отвечает при остановленном pty-хосте');
+    assert.equal(await main('1 + 1'), 2, 'главный процесс не отвечает при остановленном pty-хосте');
+    assert.equal(await inView('alice', 'document.readyState'), 'complete', 'вид другого плагина не отвечает при остановленном pty-хосте');
+    assert.ok(Date.now() - asked < 1500, `остановленный pty-хост задержал окно на ${String(Date.now() - asked)} мс`);
+    await waitFor('сторож признал pty-хост зависшим', async () => /pty-хост завис/.test(await text('#plugins-journal')));
+    await waitFor('pty-хост перезапущен', async () => /pty-хост перезапущен/.test(await text('#plugins-journal')) && (await ptyHostPid()) !== frozen && (await ptyHostPid()) > 0);
+    assert.equal(await stat(frozen), '', 'зависший pty-хост не убит');
+    await waitFor('владелец терминала получил выход потерянного pty', async () => /вышел с -1/.test(await inView('echo', "document.getElementById('term-state').textContent")));
+    await inView('echo', "document.getElementById('connect').click()");
+    await waitFor('новый терминал echo на перезапущенном pty-хосте', async () => /^pty \d+$/.test(await inView('echo', "document.getElementById('term-state').textContent")));
+    await type('echo после-pty-хоста-$((3*5))');
+    await waitFor('новый spawn после перезапуска pty-хоста работает', async () => /после-pty-хоста-15/.test(await screen()));
+    log('pty-хост: SIGSTOP не замораживает окно, главный процесс и виды; сторож убил и перезапустил его, владелец получил выход, новый терминал работает');
+
+    // Поток 4 МиБ до моста вида: порт из pty-хоста во фрейм, без главного процесса на пути (замер - npm run spike:pty-stream).
+    const stream = await inView(
+      'echo',
+      `(async () => {
+        const bridge = window.cyborgView;
+        const ticket = (await bridge.run('echo.terminal', [])).value;
+        const opened = (await bridge.terminalOpen(ticket)).value;
+        let seen = 0;
+        let messages = 0;
+        let first = 0;
+        let done;
+        const finished = new Promise((r) => (done = r));
+        bridge.onTerminal((event) => {
+          if (event.tid !== opened.tid || !('data' in event)) return;
+          const q = event.data.split('Q').length - 1;
+          if (q === 0) return;
+          if (first === 0) first = performance.now();
+          messages++;
+          seen += q;
+          if (seen >= 4194305) done(performance.now());
+        });
+        await bridge.terminalWrite(opened.tid, "dd if=/dev/zero bs=1048576 count=4 2>/dev/null | tr '\\\\0' 'Q'\\r");
+        const last = await Promise.race([finished, new Promise((r) => setTimeout(() => r(0), 30000))]);
+        bridge.terminalClose(opened.tid);
+        return { seen, messages, ms: last - first };
+      })()`,
+    );
+    assert.ok(stream.seen >= 4194305, `до вида дошло ${String(stream.seen)} из 4194305 символов потока`);
+    log(`поток 4 МиБ до моста вида по порту: ${stream.ms.toFixed(0)} мс, ${String(stream.messages)} сообщений`);
   }
   log('падение и зависание хоста: сторож перезапускает');
 

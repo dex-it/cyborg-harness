@@ -1,5 +1,5 @@
 // Каналы IPC главного процесса: окно -> служба плагинов и виды -> служба плагинов. Имена те же, что в preload.ts (test/channels.test.ts).
-import { BrowserWindow, ipcMain, nativeImage, nativeTheme, screen, type IpcMainInvokeEvent, type WebContents } from 'electron';
+import { BrowserWindow, ipcMain, MessageChannelMain, nativeImage, nativeTheme, screen, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { isRecord } from './guards.ts';
 import type { PluginsService } from './plugins.ts';
 import { themeTokens } from './theme.ts';
@@ -84,7 +84,7 @@ export function registerViewChannels({ plugins, dragRoot }: ViewChannelsOptions)
   viewChannel('view:call', (pluginId, contract, major, method, args) => plugins.callFor(pluginId, contract, major, method, args));
   viewChannel('view:state', (pluginId, view) => plugins.viewStateFor(pluginId, view));
   viewChannel('view:state:set', (pluginId, view, value) => plugins.setViewStateFor(pluginId, view, value));
-  const terminals = new ViewTerminals((pluginId, ticket, sink) => plugins.openTerminal(pluginId, ticket, sink));
+  const terminals = new ViewTerminals((pluginId, ticket, channel) => plugins.openTerminal(pluginId, ticket, channel), () => new MessageChannelMain());
   const terminalChannel = (channel: string, handler: (frame: TerminalFrame, pluginId: string, ...args: unknown[]) => unknown): void => {
     ipcMain.handle(channel, (event: IpcMainInvokeEvent, ...args: unknown[]) => {
       const pluginId = senderPlugin(event);
@@ -92,8 +92,6 @@ export function registerViewChannels({ plugins, dragRoot }: ViewChannelsOptions)
     });
   };
   terminalChannel('view:terminal:open', (frame, pluginId, ticket) => terminals.open(frame, pluginId, ticket));
-  terminalChannel('view:terminal:write', (frame, _pluginId, tid, data) => terminals.write(frame, tid, data));
-  terminalChannel('view:terminal:resize', (frame, _pluginId, tid, cols, rows) => terminals.resize(frame, tid, cols, rows));
   ipcMain.on('view:terminal:close', (event, tid: unknown) => {
     if (senderPlugin(event) !== undefined && event.senderFrame) terminals.close(event.senderFrame, tid);
   });
