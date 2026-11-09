@@ -25,9 +25,9 @@ export function bindKeys(
       continue;
     }
     const key = resolveKey(normalized, platform);
-    // Окно и меню делят одну таблицу: пункт меню на сочетание команды окна ничего не меняет, но в журнале это видно.
+    // Окно и меню делят одну таблицу: пункт меню на занятое сочетание ничего не меняет, но в журнале это видно.
     const taken = table.get(key);
-    if (taken) record({ kind: 'key-ignored', key: raw, command: item, reason: `сочетание меню занято командой окна ${taken.command}` });
+    if (taken) record({ kind: 'key-ignored', key: raw, command: item, reason: `сочетание меню занято ${taken.pluginId === MENU_OWNER ? 'пунктом меню' : 'командой окна'} ${taken.command}` });
     else table.set(key, { key, command: item, pluginId: MENU_OWNER, shadowed: [] });
   }
   for (const m of sorted) {

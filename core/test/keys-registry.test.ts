@@ -237,6 +237,17 @@ test('сочетание меню на команде окна: пункт от�
   await k.unload();
 });
 
+test('два пункта меню на одном сочетании: второй отброшен с key-ignored, причина называет пункт меню, а не команду окна', async () => {
+  const { start } = harness({ buttons: idle }, { enabled: ['buttons'], manifests: [buttons], menuKeys: { 'menu.print': 'CmdOrCtrl+P', 'menu.preview': 'CmdOrCtrl+P' } });
+  const k = await start();
+  assert.equal(k.keybinding('Ctrl+P')?.command, 'menu.print');
+  assert.deepEqual(
+    k.journal.flatMap((e) => (e.kind === 'key-ignored' ? [`${e.command}:${e.reason}`] : [])),
+    ['menu.preview:сочетание меню занято пунктом меню menu.print'],
+  );
+  await k.unload();
+});
+
 test('победитель-динамика снят: проигравшие на том же сочетании снимаются вместе с ним и не наследуют его', async () => {
   const other = manifest('other', { commands: ['other.go'] });
   const { start, keys } = harness({ buttons: idle, other: idle }, { enabled: ['buttons', 'other'], manifests: [buttons, other] });
@@ -248,6 +259,7 @@ test('победитель-динамика снят: проигравшие н�
   await settle();
   assert.equal(k.keybinding('F3'), undefined, 'сочетание свободно, проигравший победителем не стал');
   assert.equal((await keys('other').register({ key: 'F3', command: 'other.go' })).active, true, 'плагин повторяет регистрацию сам и теперь побеждает');
+  assert.deepEqual(k.keybinding('F3')?.shadowed, [], 'прежняя проигравшая запись снята, а не висит проигравшей под новым победителем');
   await k.unload();
 });
 
