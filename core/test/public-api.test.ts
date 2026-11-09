@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { isBuiltin } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
@@ -230,38 +231,70 @@ describe('публичный API ядра: точки входа', () => {
   });
 });
 
-describe('публичный API ядра: типы в сигнатурах', () => {
-  it('всё, что торчит из публичных объявлений, тоже имеет имя в какой-то точке входа', () => {
-    const named = new Set<ts.Symbol>();
-    for (const entry of Object.values(ENTRIES)) for (const target of exportsOf(entry).targets) named.add(target);
-    const leaks = new Set<string>();
-    for (const entry of Object.values(ENTRIES)) {
-      const program = programFor(entry);
-      const checker = program.getTypeChecker();
-      const file = program.getSourceFile(path.join(core, entry.source));
-      const module = file && checker.getSymbolAtLocation(file);
-      for (const exported of module ? checker.getExportsOfModule(module) : []) {
-        const own = exported.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(exported) : exported;
-        for (const declaration of own.declarations ?? []) {
-          const visit = (node: ts.Node): void => {
-            // Тела и закрытые члены в .d.ts не попадают: только типы подписей.
-            if (ts.isBlock(node) || (ts.canHaveModifiers(node) && ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.PrivateKeyword)) || ('name' in node && ts.isPrivateIdentifier(node.name as ts.Node))) return;
-            // `typeof KINDS` (значение) в объявления попадает без имени: имя нужно только типам.
-            const reference = ts.isTypeReferenceNode(node) ? node.typeName : ts.isExpressionWithTypeArguments(node) ? node.expression : undefined;
-            if (reference) {
-              const raw = checker.getSymbolAtLocation(reference);
-              const symbol = raw && raw.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(raw) : raw;
-              const where = symbol?.declarations?.[0]?.getSourceFile().fileName ?? '';
-              const mine = where.startsWith(path.join(core, 'src') + path.sep) || where.startsWith(path.join(core, 'elements') + path.sep);
-              if (symbol && mine && !named.has(symbol) && !(symbol.flags & ts.SymbolFlags.TypeParameter) && !(symbol.name in NOT_NAMED)) leaks.add(`${symbol.name} (${path.relative(core, where)}) <- ${exported.name}`);
-            }
-            ts.forEachChild(node, visit);
-          };
-          visit(declaration);
-        }
+/**
+ * Типы, которые торчат из объявлений входов, но имени ни в одном входе не имеют: `Имя (файл) <- экспорт`.
+ * Обход идёт по `.d.ts`, а не по исходникам: выведенный тип возврата (`function f() { return hidden; }`) в исходнике не записан,
+ * а в объявлении компилятор выписывает его явно - это то, что видит потребитель пакета.
+ */
+function unnamedTypes(entryFiles: readonly string[], inside: (file: string) => boolean, allowed: Readonly<Record<string, string>>): string[] {
+  const program = ts.createProgram([...entryFiles], { noEmit: true, skipLibCheck: true, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext, types: [] });
+  const checker = program.getTypeChecker();
+  const resolve = (s: ts.Symbol) => (s.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s);
+  const modules = entryFiles.map((f) => {
+    const file = program.getSourceFile(f);
+    assert.ok(file, `нет ${f}`);
+    const symbol = checker.getSymbolAtLocation(file);
+    assert.ok(symbol, `${f}: не модуль`);
+    return checker.getExportsOfModule(symbol);
+  });
+  const named = new Set(modules.flatMap((m) => m.map(resolve)));
+  const leaks = new Set<string>();
+  for (const exports of modules) {
+    for (const exported of exports) {
+      for (const declaration of resolve(exported).declarations ?? []) {
+        const visit = (node: ts.Node): void => {
+          // Тела и закрытые члены в .d.ts не попадают: только типы подписей.
+          if (ts.isBlock(node) || (ts.canHaveModifiers(node) && ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.PrivateKeyword)) || ('name' in node && ts.isPrivateIdentifier(node.name as ts.Node))) return;
+          // `typeof KINDS` (значение) в объявления попадает без имени: имя нужно только типам.
+          const reference = ts.isTypeReferenceNode(node) ? node.typeName : ts.isExpressionWithTypeArguments(node) ? node.expression : undefined;
+          if (reference) {
+            const raw = checker.getSymbolAtLocation(reference);
+            const symbol = raw && resolve(raw);
+            const where = symbol?.declarations?.[0]?.getSourceFile().fileName ?? '';
+            if (symbol && inside(where) && !named.has(symbol) && !(symbol.flags & ts.SymbolFlags.TypeParameter) && !(symbol.name in allowed)) leaks.add(`${symbol.name} (${path.relative(core, where)}) <- ${exported.name}`);
+          }
+          ts.forEachChild(node, visit);
+        };
+        visit(declaration);
       }
     }
-    assert.deepEqual([...leaks].sort(), [], 'безымянный тип в публичной сигнатуре: добавь его в перечень точки входа или убери из сигнатуры');
+  }
+  return [...leaks].sort();
+}
+
+describe('публичный API ядра: типы в сигнатурах', () => {
+  const dist = path.join(core, 'dist') + path.sep;
+
+  it('всё, что торчит из публичных объявлений (core/dist/**/*.d.ts), тоже имеет имя в какой-то точке входа', () => {
+    const entryFiles = Object.keys(ENTRIES).map((name) => {
+      const file = path.join(core, defaultOf(manifest.exports[name]).replace(/\.js$/, '.d.ts'));
+      assert.ok(fs.existsSync(file), `нет ${file}: запусти npm run build:core`);
+      return file;
+    });
+    assert.deepEqual(unnamedTypes(entryFiles, (f) => f.startsWith(dist), NOT_NAMED), [], 'безымянный тип в публичной сигнатуре: добавь его в перечень точки входа или убери из сигнатуры');
+  });
+
+  it('проверка ловит безымянный тип, в том числе выведенный (в исходнике его нет)', () => {
+    const work = fs.mkdtempSync(path.join(os.tmpdir(), 'cyborg-leak-'));
+    try {
+      const entry = path.join(work, 'entry.d.ts');
+      // Так компилятор выписывает `function leakFn() { return hidden; }`: тип возврата явно, сам тип без экспорта.
+      fs.writeFileSync(entry, 'interface Hidden {\n  a: 1;\n}\nexport declare function leakFn(): Hidden;\nexport {};\n');
+      assert.deepEqual(unnamedTypes([entry], (f) => f.startsWith(work), {}), [`Hidden (${path.relative(core, entry)}) <- leakFn`]);
+      assert.deepEqual(unnamedTypes([entry], (f) => f.startsWith(work), { Hidden: 'проба' }), []);
+    } finally {
+      fs.rmSync(work, { recursive: true, force: true });
+    }
   });
 });
 
