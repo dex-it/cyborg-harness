@@ -8,6 +8,8 @@ const TYPES: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  // Шрифт значков Monaco (codicon.ttf) - единственный шрифт, который нужен Monaco и xterm (PL-05).
+  '.ttf': 'font/ttf',
 };
 
 /** Вид видит только свой origin: ни сети, ни чужих видов, ни inline-скриптов; инлайн-стили разрешены - xterm и Monaco вставляют <style>, а скрипту вида они не дают ничего сверх CSSOM. */

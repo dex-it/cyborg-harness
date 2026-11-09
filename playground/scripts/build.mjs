@@ -40,5 +40,9 @@ for (const entry of readdirSync(plugins, { withFileTypes: true })) {
   if (!report.ok) throw new Error(`плагин ${entry.name}: ${report.problems.map((p) => `${p.file}${p.line === undefined ? '' : `:${String(p.line)}`}: ${p.message}`).join('; ')}`);
 }
 cpSync(join(root, 'bench'), join(dist, 'bench'), { recursive: true });
+// Воркеры Monaco - файлы того же origin, а не blob: (PL-05): каждый - отдельный классический скрипт, у воркера нет общего модуля с видом.
+const monaco = join(root, '..', 'node_modules', 'monaco-editor', 'esm', 'vs');
+const workers = { editor: 'editor/editor.worker.js', json: 'language/json/json.worker.js', css: 'language/css/css.worker.js', html: 'language/html/html.worker.js', ts: 'language/typescript/ts.worker.js' };
+for (const [name, entry] of Object.entries(workers)) await build({ ...browser, entryPoints: [join(monaco, entry)], outfile: join(dist, 'plugins', 'editor', 'ui', 'workers', `${name}.worker.js`) });
 // Вид грузит стили только со своего origin: таблица xterm кладётся рядом с модулем вида sessions.
 cpSync(join(root, '..', 'node_modules', '@xterm', 'xterm', 'css', 'xterm.css'), join(dist, 'plugins', 'sessions', 'ui', 'xterm.css'));
