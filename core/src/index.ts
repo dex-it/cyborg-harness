@@ -29,7 +29,7 @@ export type { ResourceLimits } from './limits.ts';
 export type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Kernel, Keybinding, LoadOptions, UserKeybinding, WatchdogOptions } from './loader.ts';
 export type { ArgSpec, CommandSpec, KeybindingSpec, ManifestResult, PluginManifest, SectionDecl } from './manifest.ts';
 export type { WireKind } from './wire.ts';
-export type { Guard, MemberGuards } from './via-contract.ts';
+export type { Guard, GuardRight, MemberGuards } from './via-contract.ts';
 export type { NoticeEvents, NoticeHandle, NotifyLimits, ShowNotice } from './notices.ts';
 export type { GrantStore, OsEnvironment, SecretStore } from './os-gateway.ts';
 export type { PluginPermissions } from './permissions.ts';
