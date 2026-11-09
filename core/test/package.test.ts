@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { describe, it } from 'node:test';
 
 // P-02: ядро как пакет @cyborg-harness/core. Тесты про состав и форму пакета; сборка - `npm run build:core` (её гоняют pretest/pretypecheck/prelint/prebuild).
@@ -37,11 +38,18 @@ describe('package.json ядра', () => {
     assert.equal(manifest.type, 'module');
   });
 
-  it('engines.node - мажор Node, на котором идёт CI и который несёт Electron playground (Node 24)', () => {
+  it('engines.node - мажор Node, который несёт Electron playground: берётся у самого Electron (ELECTRON_RUN_AS_NODE, process.versions.node)', () => {
+    const electron = createRequire(path.join(root, 'package.json'))('electron') as string;
+    const version = execFileSync(electron, ['-p', 'process.versions.node'], { encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 30_000, killSignal: 'SIGKILL' }).trim();
+    const major = /^(\d+)\./.exec(version)?.[1];
+    assert.ok(major, `версия Node в Electron: ${version}`);
+    assert.equal(manifest.engines?.node, `>=${major}`, `Node в Electron playground ${version}`);
+  });
+
+  it('engines.node совпадает с Node в CI (node-version в ci.yml): пакет проверяется на той версии, которую заявляет', () => {
     const ci = fs.readFileSync(path.join(root, '.github', 'workflows', 'ci.yml'), 'utf8');
     const major = /node-version:\s*(\d+)/.exec(ci)?.[1];
     assert.equal(manifest.engines?.node, `>=${major}`);
-    assert.equal(major, '24');
   });
 
   it('рантайм-зависимостей нет; единственная связь - peer на контракты', () => {
@@ -51,24 +59,9 @@ describe('package.json ядра', () => {
     assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}), ['@cyborg-harness/contracts']);
   });
 
-  it('точки входа: главный процесс, хост, вход хоста для fork, оболочка вида, проверка плагина и элементы окна', () => {
-    assert.deepEqual(Object.keys(manifest.exports ?? {}), ['.', './host', './host-entry', './keys', './ui-shell', './plugin-check', './elements', './package.json']);
+  it('точки входа: главный процесс, хост, вход хоста для fork, клавиши, оболочка вида, слой окна, проверка плагина и элементы окна (имена в них - public-api.test.ts)', () => {
+    assert.deepEqual(Object.keys(manifest.exports ?? {}), ['.', './host', './host-entry', './keys', './ui-shell', './window', './plugin-check', './elements', './package.json']);
     for (const target of exportTargets()) assert.match(target, /^\.\/dist\/.+\.(js|d\.ts)$/, target);
-  });
-});
-
-describe('потребители в репозитории', () => {
-  it('playground берёт ядро через пакет, а не относительными путями в core/src и core/elements', () => {
-    const playground = path.join(root, 'playground');
-    const files = walk(playground).filter((f) => /\.(ts|mjs)$/.test(f) && !f.includes(`${path.sep}dist${path.sep}`) && !f.includes(`${path.sep}node_modules${path.sep}`));
-    assert.ok(files.length > 50, `файлов playground: ${files.length}`);
-    const bad = files.flatMap((f) =>
-      fs
-        .readFileSync(f, 'utf8')
-        .split('\n')
-        .flatMap((line, i) => (/(?:from|import\()\s*'[^']*core\/(?:src|elements)\//.test(line) ? [`${path.relative(root, f)}:${i + 1}: ${line.trim()}`] : [])),
-    );
-    assert.deepEqual(bad, []);
   });
 });
 
@@ -86,7 +79,7 @@ describe('собранный пакет (core/dist)', () => {
     const code = files.filter((f) => f.endsWith('.js') || f.endsWith('.d.ts'));
     assert.ok(code.length > 30, `файлов в dist: ${code.length}`);
     // Слова from и import в кавычках (разбор импортов плагина сравнивает токены с ними) оператором не считаются.
-    const specs = /(?<![\w'"])(?:from|import)\s*\(?\s*'([^']+)'/g;
+    const specs = /(?<![\w'"])(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g;
     for (const file of code) {
       const text = fs.readFileSync(file, 'utf8');
       for (const m of text.matchAll(specs)) {

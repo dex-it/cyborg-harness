@@ -162,6 +162,9 @@ describe('разбор импортов: регулярное выражение
     'else-блок': "if (a) { b(); } else { c(); }\n/`/.test(s);",
     'тело класса': "class A {}\n/`/.test(s);",
     'try-блок': "try { a(); } finally { b(); }\n/`/.test(s);",
+    'тело стрелки': "const f = () => {}\n/`/.test(s);",
+    'обобщённый класс': "class A<T> {}\n/`/.test(s);",
+    'тип результата функции': "function f(): Promise<void> {}\nfunction g(): string[] { return []; }\n/`/.test(s);",
   };
   for (const [name, head] of Object.entries(heads)) {
     it(`${name}: импорт после регулярного выражения виден и совпадает с компилятором`, () => {
@@ -175,7 +178,7 @@ describe('разбор импортов: регулярное выражение
   }
 
   it('деление после ) и } остаётся делением', () => {
-    for (const head of ['const a = (1 + 2) / 3 / 4;', 'const a = { b: 1 }.b / 2 / 3;', 'const a = f(x) / 2; const b = `p` / 2;', 'const a = (() => {}) / 2 / 3;', 'x = function () {} / 2 / 3;', 'const a = [1][0] / 2 / 3;', 'x = { y: 1 } / 2 / 3;', 'const g = `${a}` / 2; const h = `${{ a: 1 }}` / 2 / 3;']) {
+    for (const head of ['const a = (1 + 2) / 3 / 4;', 'const a = { b: 1 }.b / 2 / 3;', 'const a = f(x) / 2; const b = `p` / 2;', 'const a = (() => {}) / 2 / 3;', 'x = function () {} / 2 / 3;', 'const a = [1][0] / 2 / 3;', 'x = { y: 1 } / 2 / 3;', 'const g = `${a}` / 2; const h = `${{ a: 1 }}` / 2 / 3;', "const p = prices.for('a') / 100; log(`${p}/шт`);", 'const r = a.with(1) / 2; const q = `/`;']) {
       const text = `${head}\n${HIDDEN}\n`;
       assert.deepEqual(specs(text), ['node:fs'], text);
     }

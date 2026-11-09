@@ -10,7 +10,7 @@ npm install --save-dev @cyborg-harness/testing
 ```
 
 :::caution[Пакеты ещё не опубликованы]
-Пакеты `@cyborg-harness/*` и команда `cyborg-plugin` публикуются задачами [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-09](https://github.com/dex-it/cyborg-harness/issues/9). Пакеты scope `@cyborg` на npmjs.com к проекту не относятся. До выпуска работайте из репозитория (`npm ci`, `npm start`).
+Пакеты `@cyborg-harness/*` и команда `cyborg-plugin` ещё не в реестре. `@cyborg-harness/contracts` готов к выпуску ([P-01](https://github.com/dex-it/cyborg-harness/issues/29): собирается, упаковывается и ставится в пустой проект из tarball), его выпуск - [P-10](https://github.com/dex-it/cyborg-harness/issues/11); остальное публикуется задачами [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-05](https://github.com/dex-it/cyborg-harness/issues/39), [P-08](https://github.com/dex-it/cyborg-harness/issues/8), [P-09](https://github.com/dex-it/cyborg-harness/issues/9). Пакеты scope `@cyborg` на npmjs.com к проекту не относятся. До выпуска работайте из репозитория (`npm ci`, `npm start`).
 :::
 
 Тесты запускаются встроенным `node --test`: Node 24 снимает типы с `.ts` сам, сборка для теста не нужна.
@@ -20,14 +20,28 @@ npm install --save-dev @cyborg-harness/testing
 | Что | Зачем |
 |---|---|
 | `startKernel({ plugins, os })` | Собирает манифесты и точки входа ваших плагинов, запускает загрузку на хостах внутри процесса теста и возвращает ядро |
-| Ожидание записей журнала | Дождаться `activated`, `denied`, `switched-off`, не гадая со временем |
-| Выгрузка через `Symbol.asyncDispose` | Конструкция `await using` снимает ядро и все хосты в конце теста |
+| `kernel.waitForJournal(...)` | Дождаться `activated`, `denied`, `switched-off`, не гадая со временем |
+| Выгрузка через `Symbol.asyncDispose` | Конструкция `await using` снимает ядро и все хосты в конце теста и удаляет временный каталог |
 | `fakePty()` | Поддельный pty: проверить запуск терминала без процессов |
-| Поддельные секреты и память разделов | Хранилище секретов и слои `config` и `state` в памяти |
-| Каталог-песочница | Временный каталог с `realpath`: на macOS временный каталог - симлинк, и без этого пути не совпали бы с областями |
+| `memorySecrets()` и `memoryStore()` | Хранилище секретов и слои `config` и `state` в памяти |
+| `sandbox()` | Временный каталог с `realpath`: на macOS временный каталог - симлинк, и без этого пути не совпали бы с областями |
 | `agentContractSuite(provider)` | Общий набор проверок поставщика `cyborg.agent` |
 
-Объекты `os` в `startKernel` подменяют окружение ОС: так плагин с правом `pty` работает без настоящих процессов, а плагин с секретами - без хранилища системы.
+`plugins` принимает каталог плагина (в нём `manifest.json` и `index.ts`, `index.js` или `index.mjs`) или плагин из кода теста: `{ manifest, module }`. Среда по умолчанию - каталоги данных и `home` в песочнице, `fakePty()` и `memorySecrets()`; поле `os`, которое вы передали, заменяет умолчание целиком, так плагин с правом `pty` работает без настоящих процессов, а плагин с секретами - без хранилища системы. `config` и `state` принимают `memoryStore().store`.
+
+Минимальный тест:
+
+```ts
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { startKernel } from '@cyborg-harness/testing';
+
+test('плагин отвечает на команду', async () => {
+  await using kernel = await startKernel({ plugins: ['./my-plugin'] });
+  await kernel.waitForJournal({ kind: 'activated', pluginId: 'my-plugin' });
+  assert.equal(await kernel.run('my-plugin.say'), 'hello');
+});
+```
 
 ## Что проверить в тесте плагина
 
@@ -39,15 +53,29 @@ npm install --save-dev @cyborg-harness/testing
 
 ## Тест поставщика агента
 
-Поставщик контракта `cyborg.agent` проходит тот же набор, что и встроенные `agent-claude-code` и `agent-shell`. Набор проверяет:
+Поставщик контракта `cyborg.agent` проходит тот же набор, что и встроенные `agent-claude-code` и `agent-shell`. Набор вызывается на верхнем уровне тестового файла:
+
+```ts
+import { agentContractSuite } from '@cyborg-harness/testing';
+
+agentContractSuite(new URL('../my-agent', import.meta.url).pathname, {
+  // Среда, где находится программа агента: PATH с подставным исполняемым файлом, SHELL.
+  os: (box) => ({ home: box.root, env: { PATH: '/usr/bin:/bin', HOME: box.root } }),
+});
+```
+
+Потребителя набор поднимает сам: плагин с правом `pty`, равным праву `launch` вашего поставщика. Набор проверяет:
 
 - факты поставщика и то, что ответы клонируются;
+- `launch` отдаёт данные и сохраняет `cwd` запроса;
 - запуск через потребителя по его праву `pty`: описание из `launch` годится как вход `ctx.os.pty.spawn`;
-- код выхода 127 переводится в `notFound`;
+- код выхода 127 переводится в `notFound`, нормальный выход - в `null`;
 - `history` отвечает пустым списком там, где `capabilities.history` ложно;
-- в журнале нет записей `denied`.
+- в журнале нет записей `denied` и `failed`.
 
-Для контрактов `cyborg.secret-source` и `cyborg.project-settings` в пакете лежат каркасы наборов с перечнем обязательных проверок.
+Параметр `os` нужен, если поставщик ищет программу агента: без него `facts().found` ложно, и набор скажет об этом. Поля `pty` в нём нет: запуск набор наблюдает в своём `fakePty()`, и свой бэкенд оставил бы проверку слепой. Плагины, без которых поставщик не активируется, передайте в `plugins`. Те же проверки одной функцией, которая бросает на первой неудачной, - `checkAgentContract(provider, options)`.
+
+Для контрактов `cyborg.secret-source` и `cyborg.project-settings` в пакете лежат каркасы наборов (`secretSourceContractSuite`, `projectSettingsContractSuite`): они перечисляют обязательные проверки, каждая со ссылкой на место в SAD, и в отчёте теста стоят как `todo`. Проверка попадает в перечень только после того, как требование записано в SAD или SRS. Проверять они начнут, когда контракты появятся в `@cyborg-harness/contracts`.
 
 ## Собственный набор для своего контракта
 

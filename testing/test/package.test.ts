@@ -1,0 +1,173 @@
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { describe, it } from 'node:test';
+import { satisfies } from '../../core/src/semver.ts';
+import { COMPUTED, usesOf } from '../../core/test/imports.ts';
+
+// P-08: пакет @cyborg-harness/testing. Состав и форма пакета, граница зависимостей (T-04: в пакете нет импортов из playground) и отсутствие копий подделок в тестах репозитория.
+const pkg = path.resolve(import.meta.dirname, '..');
+const root = path.resolve(pkg, '..');
+interface Manifest {
+  name?: string;
+  version?: string;
+  type?: string;
+  engines?: { node?: string };
+  exports?: Record<string, string | Record<string, string>>;
+  peerDependencies?: Record<string, string>;
+  [key: string]: unknown;
+}
+const read = (dir: string): Manifest => JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')) as Manifest;
+const manifest = read(pkg);
+const coreManifest = read(path.join(root, 'core'));
+
+function walk(dir: string): string[] {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]));
+}
+
+function exportTargets(): string[] {
+  return Object.values(manifest.exports ?? {})
+    .flatMap((v) => (typeof v === 'string' ? [v] : Object.values(v)))
+    .filter((p) => p !== './package.json');
+}
+
+describe('package.json тест-кита', () => {
+  it('имя, ESM и Node как у ядра', () => {
+    assert.equal(manifest.name, '@cyborg-harness/testing');
+    assert.equal(manifest.type, 'module');
+    assert.equal(manifest.engines?.node, coreManifest.engines?.node);
+  });
+
+  it('версия совпадает с версией ядра, а peer на ядро её допускает', () => {
+    assert.equal(manifest.version, coreManifest.version);
+    const range = manifest.peerDependencies?.['@cyborg-harness/core'];
+    assert.ok(range, 'нет peer на ядро');
+    assert.ok(satisfies(coreManifest.version ?? '', range), `${range} не допускает ядро ${coreManifest.version ?? ''}`);
+  });
+
+  it('зависимостей нет; связи - peer на ядро и на контракты', () => {
+    for (const field of ['dependencies', 'optionalDependencies', 'bundledDependencies', 'bundleDependencies']) assert.equal(manifest[field], undefined, field);
+    assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).toSorted(), ['@cyborg-harness/contracts', '@cyborg-harness/core']);
+  });
+
+  it('peer на контракты допускает предрелиз 1.0.0-dev: ^1.0.0 его не покрывает и даёт ERESOLVE', () => {
+    // Диапазон основы стопки (#103): нижняя граница 1.0.0-0 пускает предрелизы серии 1.
+    assert.equal(manifest.peerDependencies?.['@cyborg-harness/contracts'], '>=1.0.0-0 <2.0.0');
+  });
+
+  it('одна точка входа, цели - собранные файлы', () => {
+    assert.deepEqual(Object.keys(manifest.exports ?? {}), ['.', './package.json']);
+    for (const target of exportTargets()) assert.match(target, /^\.\/dist\/.+\.(js|d\.ts)$/, target);
+  });
+});
+
+describe('граница пакета', () => {
+  const src = path.join(pkg, 'src');
+  const sources = walk(src).filter((f) => f.endsWith('.ts'));
+
+  /** Почему импорт из `file` запрещён; undefined - разрешён. */
+  function refusal(file: string, spec: string): string | undefined {
+    // Точка входа каталога плагина вычисляется: startKernel и есть загрузчик кода плагина автора.
+    if (spec === COMPUTED && path.basename(file) === 'kernel.ts') return undefined;
+    if (spec.startsWith('node:') || spec === '@cyborg-harness/core' || spec === '@cyborg-harness/contracts') return undefined;
+    if (spec.startsWith('.')) return path.resolve(path.dirname(file), spec).startsWith(src + path.sep) ? undefined : 'модуль вне testing/src';
+    return 'чужой пакет';
+  }
+
+  it('src импортирует только node:*, ядро, контракты и свои модули: ни playground, ни core/src', () => {
+    assert.ok(sources.length >= 6, `файлов: ${sources.length}`);
+    const bad = sources.flatMap((file) =>
+      usesOf(file, fs.readFileSync(file, 'utf8')).flatMap((use) => {
+        const why = refusal(file, use.spec);
+        return why === undefined ? [] : [`${path.relative(pkg, file)}:${use.line} '${use.spec}': ${why}`];
+      }),
+    );
+    assert.deepEqual(bad, []);
+  });
+
+  it('проверка ловит то, что запрещает', () => {
+    const file = path.join(src, 'x.ts');
+    const text = "import { x } from '../../playground/src/main/plugins.ts';\nimport { s } from '../../core/src/loader.ts';\nimport { y } from '@cyborg-harness/core/host';\nimport z from 'electron';\nimport { k } from './kernel.ts';\n";
+    const verdicts = usesOf(file, text).map((u) => [u.spec, refusal(file, u.spec)]);
+    assert.deepEqual(verdicts, [
+      ['../../playground/src/main/plugins.ts', 'модуль вне testing/src'],
+      ['../../core/src/loader.ts', 'модуль вне testing/src'],
+      ['@cyborg-harness/core/host', 'чужой пакет'],
+      ['electron', 'чужой пакет'],
+      ['./kernel.ts', undefined],
+    ]);
+  });
+});
+
+describe('тесты репозитория берут подделки из тест-кита', () => {
+  const dirs = [path.join(root, 'core', 'test'), path.join(root, 'playground', 'test'), path.join(root, 'playground', 'src')];
+  // В playground/src лежат ещё замеры памяти с функцией memory(): смотрим только тесты.
+  const files = dirs.flatMap(walk).filter((f) => f.endsWith('.ts') && (f.endsWith('.test.ts') || !path.relative(root, f).includes(`${path.sep}src${path.sep}`)));
+
+  it('нет копий fakePty, memory() и memorySecrets, нет core/test/fake-pty.ts', () => {
+    assert.ok(files.length > 50, `файлов: ${files.length}`);
+    assert.ok(!fs.existsSync(path.join(root, 'core', 'test', 'fake-pty.ts')));
+    const copies = /(?:function|const)\s+(?:fakePty|memory|memoryStore|memorySecrets)\b/;
+    const bad = files.flatMap((f) =>
+      fs
+        .readFileSync(f, 'utf8')
+        .split('\n')
+        .flatMap((line, i) => (copies.test(line) ? [`${path.relative(root, f)}:${i + 1}: ${line.trim()}`] : [])),
+    );
+    assert.deepEqual(bad, []);
+  });
+
+  it('никто не импортирует поддельный pty из core/test', () => {
+    const gone = path.join(root, 'core', 'test', 'fake-pty.ts');
+    const bad = files.flatMap((f) =>
+      [...fs.readFileSync(f, 'utf8').matchAll(/from\s+'(\.[^']*fake-pty(?:\.ts)?)'/g)]
+        .filter((m) => path.resolve(path.dirname(f), m[1] ?? '').replace(/(?:\.ts)?$/, '.ts') === gone)
+        .map(() => path.relative(root, f)),
+    );
+    assert.deepEqual(bad, []);
+  });
+
+  it('тесты ядра не требуют сборки тест-кита: подделки берутся из testing/src, а не из пакета', () => {
+    // CLAUDE.md: «тесты идут на Node без сборки». Пакет ведёт в testing/dist, а тот при загрузке поднимает ещё core/dist.
+    const bad = files.filter((f) => f.startsWith(path.join(root, 'core', 'test')) && /from\s+'@cyborg-harness\/testing'/.test(fs.readFileSync(f, 'utf8'))).map((f) => path.relative(root, f));
+    assert.deepEqual(bad, []);
+  });
+});
+
+describe('собранный пакет (testing/dist)', () => {
+  const dist = path.join(pkg, 'dist');
+  const files = fs.existsSync(dist) ? walk(dist) : [];
+
+  it('собран: каждая цель exports существует', () => {
+    assert.ok(files.length > 0, 'нет testing/dist - запусти `npm run build:testing`');
+    for (const target of exportTargets()) assert.ok(fs.existsSync(path.join(pkg, target)), target);
+  });
+
+  it('JS и .d.ts без .ts-расширений в импортах; снаружи только ядро и контракты', () => {
+    const code = files.filter((f) => f.endsWith('.js') || f.endsWith('.d.ts'));
+    assert.ok(code.length >= 12, `файлов в dist: ${code.length}`);
+    const specs = /(?:from|import)\s*\(?\s*'([^']+)'/g;
+    for (const file of code) {
+      for (const m of fs.readFileSync(file, 'utf8').matchAll(specs)) {
+        const spec = m[1] ?? '';
+        const where = `${path.relative(pkg, file)} '${spec}'`;
+        if (spec.startsWith('.')) assert.ok(spec.endsWith('.js'), `${where}: относительный импорт без .js`);
+        else assert.ok(spec.startsWith('node:') || spec === '@cyborg-harness/core' || spec === '@cyborg-harness/contracts', `${where}: чужой пакет`);
+      }
+    }
+    assert.ok(!files.some((f) => f.endsWith('.ts') && !f.endsWith('.d.ts')), 'в dist лежит исходный .ts');
+  });
+
+  it('npm pack: в архиве dist, package.json и README, без исходников и тестов', () => {
+    const out = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: pkg, encoding: 'utf8', timeout: 90_000, killSignal: 'SIGKILL' });
+    const [pack] = JSON.parse(out) as [{ files: { path: string }[] }];
+    const names = pack.files.map((f) => f.path);
+    assert.ok(names.includes('package.json') && names.includes('README.md'), 'нет package.json или README.md');
+    for (const name of names) {
+      assert.ok(name === 'package.json' || name === 'README.md' || name.startsWith('dist/'), `лишний файл в архиве: ${name}`);
+      assert.ok(!name.endsWith('.ts') || name.endsWith('.d.ts'), `исходный .ts в архиве: ${name}`);
+    }
+    for (const target of exportTargets()) assert.ok(names.includes(target.slice(2)), `в архиве нет ${target}`);
+  });
+});

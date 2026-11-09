@@ -1,4 +1,4 @@
-import type { PtyBackend, PtyProcess } from '../src/pty.ts';
+import type { PtyBackend, PtyProcess } from '@cyborg-harness/core';
 
 export interface FakeProc extends PtyProcess {
   readonly file: string;
@@ -11,8 +11,10 @@ export interface FakeProc extends PtyProcess {
   exit(code: number): void;
 }
 
+export type FakePty = PtyBackend & { procs: FakeProc[] };
+
 /** Псевдотерминал без ОС: тест сам пишет вывод и завершает процесс. */
-export function fakePty(): PtyBackend & { procs: FakeProc[] } {
+export function fakePty(): FakePty {
   const procs: FakeProc[] = [];
   return {
     procs,

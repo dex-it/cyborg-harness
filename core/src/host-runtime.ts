@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { splitSignal, withSignal } from './cancel.ts';
 import { resolveSection, VERSION_KEY, type SectionResult } from './config.ts';
 import { DisposableStore, toDisposable, type Disposable } from './disposable.ts';
 import { compileSchema } from './json-schema.ts';
@@ -302,7 +303,15 @@ function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths:
       remove: call('fs.remove'),
     }),
     secrets: Object.freeze({ get: call('secrets.get'), set: call('secrets.set'), delete: call('secrets.delete') }),
-    ...(p.process && { process: Object.freeze({ run: call('process.run') }) }),
+    ...(p.process && {
+      process: Object.freeze({
+        run(program: string, args: readonly string[], options?: { signal?: AbortSignal }) {
+          // Сигнал не переживает structuredClone: отмена едет сообщением cancel, ядро завершает программу и её группу.
+          const { signal, ...rest } = options ?? {};
+          return endpoint.request('os', { pluginId, method: 'process.run', args: options === undefined ? [program, args] : [program, args, rest] }, signal);
+        },
+      }),
+    }),
     ...(p.pty && {
       pty: Object.freeze({
         spawn: async (options: unknown) => ptys.open(endpoint, pluginId, await call<PtyWire>('pty.spawn')(options)),
@@ -451,9 +460,9 @@ export function runHost(port: Port, importer: Importer, options: HostOptions = {
   const reloaders = new Map<string, (layers: SectionInput['layers']) => Promise<SectionResult>>();
   const proxies = new Proxies(endpoint, (caller) => plugins.get(caller)?.store, running);
   const to =
-    <P extends { pluginId: string }, R>(fn: (p: P) => R) =>
-    (p: P): R =>
-      running.run(p.pluginId, () => fn(p));
+    <P extends { pluginId: string }, R>(fn: (p: P, signal: AbortSignal) => R) =>
+    (p: P, signal: AbortSignal): R =>
+      running.run(p.pluginId, () => fn(p, signal));
   const ptys = new HostPtys();
   endpoint.handle('pty.data', to((p: { pluginId: string; id: string; data: string }) => ptys.data(p)));
   endpoint.handle('pty.exit', to((p: { pluginId: string; id: string; exit: PtyExit }) => ptys.exit(p)));
@@ -526,16 +535,19 @@ export function runHost(port: Port, importer: Importer, options: HostOptions = {
     system.forget(p.pluginId);
   }));
 
-  endpoint.handle('call', to(async (p: { pluginId: string; contract: string; version: string; member: string; args: unknown[]; subscription?: number }) => {
+  endpoint.handle('call', to(async (p: { pluginId: string; contract: string; version: string; member: string; args: unknown[]; subscription?: number }, signal) => {
     const loaded = plugins.get(p.pluginId);
     const impl = loaded?.provided.get(handleKey(p.pluginId, p.contract, p.version));
     const member = impl?.[p.member];
     if (!loaded || typeof member !== 'function') throw new CoreError('Unavailable', `${p.contract}@${p.version}.${p.member} у ${p.pluginId} нет`);
     const subscription = p.subscription;
-    if (subscription === undefined) return member.apply(impl, p.args) as unknown;
+    // Метка сигнала на последнем месте становится сигналом запроса: он срабатывает по отмене вызывающего, по сроку и при закрытии канала.
+    const given = withSignal(p.args, signal);
+    if (subscription === undefined) return member.apply(impl, given) as unknown;
 
     let alive = true;
-    const args = p.args.map((arg) => {
+    signal.addEventListener('abort', () => (alive = false), { once: true });
+    const args = given.map((arg) => {
       const index = marker(arg, CALLBACK);
       if (typeof index !== 'number') return arg;
       return (...values: unknown[]) => {
@@ -546,6 +558,12 @@ export function runHost(port: Port, importer: Importer, options: HostOptions = {
     if (!isDisposable(result)) {
       alive = false;
       return result;
+    }
+    // Вызов отменён, пока поставщик готовил подписку: открытое снимается сразу, вызывающему оно не достанется.
+    if (signal.aborted) {
+      alive = false;
+      result.dispose();
+      throw signal.reason;
     }
     loaded.served.set(
       subscription,
@@ -569,10 +587,10 @@ export function runHost(port: Port, importer: Importer, options: HostOptions = {
   endpoint.handle('callback', (p: { id: string; args: unknown[] }) => proxies.deliver(p.id, p.args));
   endpoint.handle('forget', (p: { ids: string[] }) => proxies.forget(p.ids));
 
-  endpoint.handle('command', to((p: { pluginId: string; name: string; args: unknown[] }) => {
+  endpoint.handle('command', to((p: { pluginId: string; name: string; args: unknown[] }, signal) => {
     const handler = plugins.get(p.pluginId)?.commands.get(p.name);
     if (!handler) throw new CoreError('CommandNotFound', `команды ${p.name} нет`);
-    return handler(...p.args);
+    return handler(...withSignal(p.args, signal));
   }));
 
   return endpoint;
@@ -628,8 +646,10 @@ class Proxies {
   }
 
   // Функция пересекает границу только аргументом верхнего уровня: вложенная упадёт на structuredClone, как и раньше.
-  async #invoke(d: ContractDescriptor, caller: string, member: string, args: unknown[]): Promise<unknown> {
+  async #invoke(d: ContractDescriptor, caller: string, member: string, given: unknown[]): Promise<unknown> {
     const ids: string[] = [];
+    // Сигнал отмены - последний аргумент: на провод уходит меткой, сама отмена едет сообщением cancel.
+    const { args, signal } = splitSignal(given);
     const wire = args.map((arg) => {
       if (typeof arg !== 'function') return arg;
       const id = `${caller}#${++this.#seq}`;
@@ -638,8 +658,13 @@ class Proxies {
       return { [CALLBACK]: id };
     });
     let result: unknown;
+    // Ответ, обогнавший отмену, мог открыть подписку: её снимает ядро по этому release.
+    const discard = (late: unknown) => {
+      const opened = marker(late, SUBSCRIPTION);
+      if (typeof opened === 'number') this.#endpoint.notify('release', { caller, subscription: opened });
+    };
     try {
-      result = await this.#endpoint.request('invoke', { caller, pluginId: d.pluginId, contract: d.contract, version: d.version, member, args: wire });
+      result = await this.#endpoint.request('invoke', { caller, pluginId: d.pluginId, contract: d.contract, version: d.version, member, args: wire }, signal, discard);
     } catch (error) {
       this.forget(ids);
       throw error;
@@ -749,7 +774,23 @@ function context(
           }),
         );
       },
-      run: (name, ...args) => endpoint.request('run', { name, args }),
+      run(name, ...given) {
+        const { args, signal } = splitSignal(given);
+        return endpoint.request('run', { caller: pluginId, name, args }, signal);
+      },
+    },
+    keys: {
+      async register(binding) {
+        const reply = await endpoint.request<{ id: number; active: boolean; winner?: string }>('keys.register', {
+          pluginId,
+          key: binding.key,
+          command: binding.command,
+          args: binding.args ?? [],
+          when: binding.when ?? {},
+        });
+        const registration = track(toDisposable(() => endpoint.notify('keys.unregister', { pluginId, id: reply.id })));
+        return { dispose: () => registration.dispose(), active: reply.active, ...(reply.winner !== undefined && { winner: reply.winner }) };
+      },
     },
     ...(config && { config: trackedSection(config, track) }),
     ...(state && { state: trackedSection(state, track) }),

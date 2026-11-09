@@ -256,6 +256,27 @@ describe('checkPlugin: манифест и файлы из него', () => {
       assert.deepEqual(strings(await checkPlugin(dir)), []);
     });
 
+    it('каталог главной части, подключённый ссылкой в ui/, проверяется как главная часть', async () => {
+      const dir = plugin({ 'index.ts': "import './utils/x.ts';\n", 'utils/x.ts': "import _ from 'lodash';\nexport default _;\n", 'ui/view.ts': 'export {};\n' });
+      fs.symlinkSync(path.join(dir, 'utils'), path.join(dir, 'ui', 'utils'), 'dir');
+      assert.deepEqual(strings(await checkPlugin(dir)), ["ui/utils/x.ts:1: 'lodash': только @cyborg-harness/contracts и свои модули"]);
+    });
+
+    it('тестовый модуль за ссылкой остаётся тестовым', async () => {
+      const dir = plugin({ 'index.ts': "import h from './lib/helper.ts';\nexport default h;\n", 'test/helper.ts': 'export default 1;\n' });
+      fs.symlinkSync(path.join(dir, 'test'), path.join(dir, 'lib'), 'dir');
+      assert.deepEqual(strings(await checkPlugin(dir)), ["index.ts:1: './lib/helper.ts': тестовый модуль в коде плагина"]);
+    });
+
+    it('ссылка на подкаталог каталога-ссылки не обходит файлы второй раз', async () => {
+      const dir = plugin({ ...OK, 'b/c/x.ts': "import fs from 'node:fs';\n" });
+      fs.symlinkSync(path.join(dir, 'b'), path.join(dir, 'a'), 'dir');
+      fs.symlinkSync(path.join(dir, 'b', 'c'), path.join(dir, 'b', 'c', 'loop'), 'dir');
+      const report = await checkPlugin(dir);
+      assert.deepEqual(strings(report), ["a/c/x.ts:1: 'node:fs': только @cyborg-harness/contracts и свои модули"]);
+      assert.equal(report.files, 2);
+    });
+
     it('битая ссылка не роняет проверку', async () => {
       const dir = plugin(OK);
       fs.symlinkSync(path.join(scratch, 'no-such-target'), path.join(dir, 'gone.ts'));

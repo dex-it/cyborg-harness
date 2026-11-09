@@ -1,22 +1,34 @@
 import { CoreError } from './errors.ts';
 import { isValidRange, parseVersion, satisfies } from './semver.ts';
 import { normalizeKey } from './keys.ts';
+import { isValidId, show } from './manifest-fields.ts';
+import { readDocuments, type DocumentDecl, type Placement } from './manifest-layout.ts';
+import { readProvides } from './manifest-provides.ts';
+import { readUi } from './manifest-ui.ts';
 import { readPermissions, type PluginPermissions } from './permissions.ts';
-import { readGuard, type MemberGuards } from './via-contract.ts';
+import { readRights, type Guard, type MemberGuards } from './via-contract.ts';
 import { isRecord, isWireKind, matchesKind, own, type WireKind } from './wire.ts';
 import { KERNEL_COMMANDS, reservedId, WINDOW_COMMANDS } from './window-layer.ts';
 
 export { isRecord };
+export { isValidId } from './manifest-fields.ts';
 
 export interface ArgSpec {
   readonly kind: WireKind;
   readonly optional: boolean;
 }
 
+/** Кому открыта команда: `user` - палитре, клавишам, меню и виду своего плагина; `plugins` - ещё и главным частям других плагинов. */
+export type CommandCallers = 'user' | 'plugins';
+
 /** Аргументы команды: позиционные, необязательные только в хвосте; `rest` - вид всех остальных. */
 export interface CommandSpec {
   readonly args: readonly ArgSpec[];
   readonly rest?: WireKind;
+  /** Не объявлено - `user`. */
+  readonly callers?: CommandCallers;
+  /** Право чужого вызывающего на аргумент; только при `callers: "plugins"`. Ядро проверяет его до передачи вызова, как `guard` члена контракта. */
+  readonly guard?: readonly Guard[];
 }
 
 /** Сочетание клавиш -> своя команда без обязательных аргументов; `key` уже в записи `normalizeKey`. */
@@ -34,6 +46,8 @@ export interface PluginManifest {
   readonly provides: Readonly<Record<string, readonly string[]>>;
   /** Контракт -> член -> право вызывающего на аргумент: ядро проверит его до передачи вызова (`via-contract`). */
   readonly guards?: Readonly<Record<string, MemberGuards>>;
+  /** Контракт -> члены с пометкой `@deprecated` (для всех мажорных версий поставщика): их вызовы ядро пишет в журнал (`deprecated-call`). */
+  readonly deprecated?: Readonly<Record<string, readonly string[]>>;
   /** Кратность one, без поставщика плагин не активируется. */
   readonly requires: Readonly<Record<string, string>>;
   /** Кратность one, без поставщика плагин работает. */
@@ -54,21 +68,21 @@ export interface PluginManifest {
   /** Вид -> модуль с `mount` относительно каталога плагина; каждый вид живёт в своём `<iframe>`. */
   readonly ui?: {
     readonly views: Readonly<Record<string, string>>;
+    /** Вид -> что он объявил о своём месте (область, `order`, заголовок); у вида в краткой записи или без объявленного записи нет. */
+    readonly placement?: Readonly<Record<string, Placement>>;
     /** Модуль замка окна, вид с именем `overlay`: только при праве `ui.lock`. */
     readonly overlay?: string;
   };
   /** `onStart` - окно закрыто с первого кадра, плагин активируется сразу, даже `lazy`. */
   readonly lock?: { readonly onStart: true };
-  /** Типы документов плагина; `restorable` - документ переживает перезапуск окна. */
-  readonly documents?: Readonly<Record<string, { readonly restorable: boolean }>>;
+  /** Типы документов плагина; `restorable` - документ переживает перезапуск окна, `area` и `order` - место вкладки. */
+  readonly documents?: Readonly<Record<string, DocumentDecl>>;
   readonly permissions: PluginPermissions;
 }
 
 export type ManifestResult =
   | { readonly ok: true; readonly manifest: PluginManifest }
   | { readonly ok: false; readonly id?: string | undefined; readonly errors: readonly string[] };
-
-const ID = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/;
 
 const TOP_LEVEL = new Set([
   '$schema', 'id', 'version', 'engines', 'provides', 'requires', 'optional', 'consumes', 'commands', 'keybindings',
@@ -77,10 +91,6 @@ const TOP_LEVEL = new Set([
 
 /** Ключи верхнего уровня, которые знает разбор; по ним `checkPlugin` сверяет, что каждый новый ключ учтён в проверке файлов. */
 export const MANIFEST_KEYS: ReadonlySet<string> = TOP_LEVEL;
-
-export function isValidId(value: string): boolean {
-  return ID.test(value);
-}
 
 /** С `apiVersion` манифест под другой API при ошибках разбора отклоняется одной причиной - версией API. */
 export function parseManifest(raw: unknown, apiVersion?: string): ManifestResult {
@@ -101,7 +111,7 @@ export function parseManifest(raw: unknown, apiVersion?: string): ManifestResult
   const engines = isRecord(raw.engines) ? raw.engines.cyborg : undefined;
   if (typeof engines !== 'string' || !isValidRange(engines)) errors.push(`engines.cyborg: ожидается диапазон, получено ${show(engines)}`);
 
-  const { provides, guards } = readProvides(raw.provides, errors);
+  const { provides, guards, deprecated } = readProvides(raw.provides, errors);
   const requires = readRanges('requires', raw.requires, errors);
   const optional = readRanges('optional', raw.optional, errors);
   const consumes = readRanges('consumes', raw.consumes, errors);
@@ -142,6 +152,7 @@ export function parseManifest(raw: unknown, apiVersion?: string): ManifestResult
       engines: { cyborg: engines },
       provides,
       ...(guards && { guards }),
+      ...(deprecated && { deprecated }),
       requires,
       optional,
       consumes,
@@ -157,40 +168,6 @@ export function parseManifest(raw: unknown, apiVersion?: string): ManifestResult
       ...(documents && { documents }),
     },
   };
-}
-
-interface Provides {
-  readonly provides: Record<string, string[]>;
-  readonly guards?: Record<string, MemberGuards>;
-}
-
-/** Значение - версия, список версий или `{ version, guard? }`. */
-function readProvides(raw: unknown, errors: string[]): Provides {
-  const out: Record<string, string[]> = {};
-  const guards: Record<string, MemberGuards> = {};
-  if (raw === undefined) return { provides: out };
-  if (!isRecord(raw)) {
-    errors.push('provides: ожидается объект');
-    return { provides: out };
-  }
-  for (const [name, entry] of Object.entries(raw)) {
-    if (!isValidId(name)) errors.push(`provides.${name}: недопустимое имя контракта`);
-    const full = isRecord(entry) ? entry : undefined;
-    for (const key of Object.keys(full ?? {})) if (!['version', 'guard'].includes(key)) errors.push(`provides.${name}.${key}: неизвестное поле`);
-    const guard = readGuard(`provides.${name}.guard`, full?.guard, errors);
-    if (guard) guards[name] = guard;
-    const value = full ? full.version : entry;
-    const list: unknown = typeof value === 'string' ? [value] : value;
-    const versions = Array.isArray(list) ? list.filter((v): v is string => typeof v === 'string' && parseVersion(v) !== null) : [];
-    if (!Array.isArray(list) || versions.length === 0 || versions.length !== list.length) {
-      errors.push(`provides.${name}: ожидается версия или список версий, получено ${show(value)}`);
-      continue;
-    }
-    const majors = versions.map((v) => parseVersion(v)?.[0]);
-    if (new Set(majors).size !== majors.length) errors.push(`provides.${name}: две версии одной мажорной`);
-    out[name] = versions;
-  }
-  return { provides: out, ...(Object.keys(guards).length > 0 && { guards }) };
 }
 
 function readRanges(field: string, raw: unknown, errors: string[]): Record<string, string> {
@@ -238,9 +215,45 @@ function readCommands(raw: unknown, id: string | undefined, errors: string[]): R
 function readCommandSpec(name: string, raw: unknown, errors: string[]): CommandSpec | undefined {
   const where = `commands.${name}`;
   if (!isRecord(raw)) {
-    errors.push(`${where}: ожидается объект { args, rest }`);
+    errors.push(`${where}: ожидается объект { args, rest, callers, guard }`);
     return undefined;
   }
+  const callers = readCallers(where, raw.callers, errors);
+  const guard = readCommandGuard(where, raw.guard, callers, errors);
+  const shape = readCommandShape(where, raw, errors);
+  if (shape && guard) checkGuardKinds(where, shape, guard, errors);
+  return shape && { ...shape, ...(callers !== undefined && { callers }), ...(guard !== undefined && { guard }) };
+}
+
+function readCallers(where: string, raw: unknown, errors: string[]): CommandCallers | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === 'user' || raw === 'plugins') return raw;
+  errors.push(`${where}.callers: ожидается "user" или "plugins", получено ${show(raw)}`);
+  return undefined;
+}
+
+/** `guard` защищает исполнителя от чужого вызывающего; у команды только для своих он ничего бы не проверял, поэтому без `callers: "plugins"` это ошибка. */
+function readCommandGuard(where: string, raw: unknown, callers: CommandCallers | undefined, errors: string[]): readonly Guard[] | undefined {
+  if (raw === undefined) return undefined;
+  if (callers !== 'plugins') {
+    errors.push(`${where}.guard: проверяет аргумент для чужих главных частей - нужен callers: "plugins"`);
+    return undefined;
+  }
+  return readRights(`${where}.guard`, raw, errors);
+}
+
+/** Ядро берёт под проверку строку: без поля - сам аргумент, с полем - поле объекта. Схема команды должна допускать такой аргумент, иначе каждый чужой вызов получит `Invalid`. */
+function checkGuardKinds(where: string, spec: CommandSpec, guard: readonly Guard[], errors: string[]): void {
+  for (const g of guard) {
+    const at = `${where}.guard.${g.right}`;
+    const kind = spec.args[g.arg]?.kind ?? (g.arg >= spec.args.length ? spec.rest : undefined);
+    if (kind === undefined) errors.push(`${at}: аргумента ${g.arg} нет в args и rest`);
+    else if (g.field === undefined && kind !== 'string' && kind !== 'any') errors.push(`${at}: аргумент ${g.arg} - ${kind}, а право без поля проверяет строку: нужен string или any`);
+    else if (g.field !== undefined && kind !== 'record' && kind !== 'any') errors.push(`${at}: аргумент ${g.arg} - ${kind}, а поле ${g.field} есть только у record: нужен record или any`);
+  }
+}
+
+function readCommandShape(where: string, raw: Record<string, unknown>, errors: string[]): CommandSpec | undefined {
   const list = raw.args ?? [];
   if (!Array.isArray(list) || !list.every((a) => typeof a === 'string')) {
     errors.push(`${where}.args: ожидается список видов, например ["string", "number?"]`);
@@ -313,55 +326,6 @@ function readKeybindings(raw: unknown, commands: Readonly<Record<string, Command
   return out;
 }
 
-const VIEW_NAME = /^[a-z][a-z0-9-]*$/;
-// Путь попадает в атрибут страницы-оболочки и в import(): только вниз от каталога плагина, без экранируемых символов.
-const VIEW_ENTRY = /^\.\/(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*\/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\.js$/;
-
-const isEntry = (entry: unknown): entry is string => typeof entry === 'string' && VIEW_ENTRY.test(entry) && !entry.split('/').includes('..');
-
-function readUi(raw: unknown, errors: string[]): { views: Record<string, string>; overlay?: string } | undefined {
-  if (raw === undefined) return undefined;
-  if (!isRecord(raw) || (raw.views !== undefined && !isRecord(raw.views)) || (raw.views === undefined && raw.overlay === undefined)) {
-    errors.push('ui: ожидается { "views": { "<вид>": "./<модуль>.js" } } и/или { "overlay": "./<модуль>.js" }');
-    return undefined;
-  }
-  for (const key of Object.keys(raw)) if (key !== 'views' && key !== 'overlay') errors.push(`ui.${key}: ядро знает только ui.views и ui.overlay`);
-  const views: Record<string, string> = {};
-  const rawViews = isRecord(raw.views) ? raw.views : {};
-  for (const [name, entry] of Object.entries(rawViews)) {
-    if (!VIEW_NAME.test(name)) errors.push(`ui.views.${name}: имя вида - строчные латинские буквы, цифры и дефис`);
-    else if (name === 'overlay') errors.push('ui.views.overlay: имя занято экраном замка, его объявляют как ui.overlay');
-    else if (!isEntry(entry)) errors.push(`ui.views.${name}: ожидается путь "./<модуль>.js" внутри каталога плагина, получено ${show(entry)}`);
-    else views[name] = entry;
-  }
-  if (raw.views !== undefined && Object.keys(rawViews).length === 0) errors.push('ui.views: нет ни одного вида');
-  if (raw.overlay === undefined) return { views };
-  if (!isEntry(raw.overlay)) {
-    errors.push(`ui.overlay: ожидается путь "./<модуль>.js" внутри каталога плагина, получено ${show(raw.overlay)}`);
-    return { views };
-  }
-  return { views, overlay: raw.overlay };
-}
-
-const MAX_DOCUMENT_TYPES = 16;
-
-function readDocuments(raw: unknown, errors: string[]): Record<string, { restorable: boolean }> | undefined {
-  if (raw === undefined) return undefined;
-  const form = 'documents: ожидается { "<тип>": { "restorable": true } }';
-  if (!isRecord(raw) || Object.keys(raw).length === 0) {
-    errors.push(form);
-    return undefined;
-  }
-  if (Object.keys(raw).length > MAX_DOCUMENT_TYPES) errors.push(`documents: не больше ${String(MAX_DOCUMENT_TYPES)} типов`);
-  const out: Record<string, { restorable: boolean }> = {};
-  for (const [type, spec] of Object.entries(raw)) {
-    if (!VIEW_NAME.test(type)) errors.push(`documents.${type}: имя типа - строчные латинские буквы, цифры и дефис`);
-    else if (!isRecord(spec) || Object.keys(spec).some((k) => k !== 'restorable') || (spec.restorable !== undefined && typeof spec.restorable !== 'boolean')) errors.push(`documents.${type}: ${form.slice('documents: '.length)}`);
-    else out[type] = { restorable: spec.restorable === true };
-  }
-  return out;
-}
-
 /** Модуль вида по имени: `overlay` - экран замка из `ui.overlay`. */
 export function viewEntry(m: PluginManifest, view: string): string | undefined {
   if (typeof view !== 'string') return undefined;
@@ -391,8 +355,4 @@ function readSchemaVersion(field: string, raw: unknown, errors: string[]): Secti
     return undefined;
   }
   return { version, schema };
-}
-
-function show(value: unknown): string {
-  return value === undefined ? 'ничего' : JSON.stringify(value);
 }

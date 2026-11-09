@@ -130,9 +130,11 @@ export function importProblems(file: string, text: string, rules: ImportRules): 
   const rel = toPosix(path.relative(rules.home, file));
   // Node грузит модуль по реальному пути: относительные импорты считаются от настоящего места файла, а «внутри плагина» - по реальному каталогу.
   const home = realish(rules.home);
-  const from = path.dirname(realish(file));
+  const real = realish(file);
+  const from = path.dirname(real);
   // Вид - браузерный бандл во фрейме без Node (SAD §3.8): пакеты вроде xterm шлюз не обходят, а встроенные модули и electron - да.
-  const view = inside(path.join(rules.home, 'ui'), file);
+  // По реальному пути: каталог главной части, подключённый ссылкой внутрь `ui/`, остаётся главной частью.
+  const view = inside(realish(path.join(rules.home, 'ui')), real);
   const declarations = rules.declarations.map((d) => stem(path.resolve(d)));
   for (const use of usesOf(text)) {
     const report = (message: string) => found.push({ file: rel, line: use.line, message });
@@ -156,7 +158,7 @@ export function importProblems(file: string, text: string, rules: ImportRules): 
     }
     const target = path.resolve(from, use.spec);
     if (inside(home, target) && inside(home, realish(target))) {
-      if (isTestPath(path.relative(home, target))) report(`${quoted}: тестовый модуль в коде плагина`);
+      if (isTestPath(path.relative(home, realish(target)))) report(`${quoted}: тестовый модуль в коде плагина`);
     } else if (inside(home, target)) {
       report(`${quoted}: ведёт за пределы каталога плагина (символическая ссылка)`);
     } else if (declarations.includes(stem(realish(target)))) {
@@ -184,7 +186,7 @@ async function sources(home: string, ignore: ReadonlySet<string>, unreadable: (p
   const out: string[] = [];
   const seenDirs = new Set<string>([home]);
   const seenFiles = new Set<string>();
-  const walk = async (dir: string): Promise<void> => {
+  const walk = async (dir: string, realDir: string): Promise<void> => {
     let entries;
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
@@ -195,7 +197,8 @@ async function sources(home: string, ignore: ReadonlySet<string>, unreadable: (p
     for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
       const full = path.join(dir, entry.name);
       let directory = entry.isDirectory();
-      let real = full;
+      // Реальный путь и у записи под каталогом-ссылкой: иначе ссылка на его подкаталог обошла бы файлы второй раз.
+      let real = path.join(realDir, entry.name);
       if (entry.isSymbolicLink()) {
         try {
           real = await fs.realpath(full);
@@ -213,14 +216,14 @@ async function sources(home: string, ignore: ReadonlySet<string>, unreadable: (p
       if (directory) {
         if (entry.name === 'node_modules' || entry.name.startsWith('.') || isTestPath(entry.name) || ignore.has(full) || seenDirs.has(real)) continue;
         seenDirs.add(real);
-        await walk(full);
+        await walk(full, real);
       } else if (/\.(?:m|c)?[tj]s$/.test(entry.name) && !entry.name.endsWith('.d.ts') && !isTestPath(entry.name) && !seenFiles.has(real)) {
         seenFiles.add(real);
         out.push(full);
       }
     }
   };
-  await walk(home);
+  await walk(home, home);
   return out;
 }
 

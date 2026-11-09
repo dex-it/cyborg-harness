@@ -111,7 +111,11 @@ function tokenize(text: string): Token[] {
   const opensHeader = (): boolean => {
     const prev = tokens.at(-1);
     if (prev?.kind !== 'id') return false;
-    return HEADER_WORDS.has(prev.text) || (prev.text === 'await' && tokens.at(-2)?.text === 'for');
+    const word = prev.text === 'await' && tokens.at(-2)?.text === 'for' ? -2 : -1;
+    // `prices.for(x) / 100`: после точки это имя свойства, а не оператор, и за `)` стоит деление.
+    const before = tokens.at(word - 1);
+    if (before?.kind === 'p' && before.text === '.') return false;
+    return HEADER_WORDS.has(tokens.at(word)?.text ?? '');
   };
   /** `{` открывает блок (за `}` слеш - регулярное выражение), а не объект или тело выражения. После `)` это блок: тело оператора или функции. */
   const opensBlock = (): boolean => {
@@ -119,7 +123,8 @@ function tokenize(text: string): Token[] {
     if (prev === undefined) return true;
     if (prev.kind === 'id') return !VALUE_BEFORE_BRACE.has(prev.text);
     if (prev.kind !== 'p') return false;
-    return prev.text === ';' || prev.text === '{' || prev.text === '}' || prev.text === ')';
+    // `=> {` - тело стрелки; `class A<T> {` и `(): T[] {` - блок после типа.
+    return prev.text === ';' || prev.text === '{' || prev.text === '}' || prev.text === ')' || prev.text === '>' || prev.text === ']';
   };
 
   /** Читает шаблон с позиции после "`" или "}" подстановки до "`" или "${". */
@@ -271,7 +276,7 @@ function closing(tokens: readonly Token[], from: number, open: string, close: st
   return -1;
 }
 
-/** `type` перед клаузой - модификатор, а не имя импортируемого по умолчанию (в `import type from "x"` имя импорта - type). */
+/** `type` перед клаузой - модификатор, а не имя импортируемого по умолчанию (в импорте `import type from` с путём модуля имя импорта - type). */
 function typeModifier(t: readonly Token[], at: number): boolean {
   if (!isId(t[at], 'type')) return false;
   const next = t[at + 1];
