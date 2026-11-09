@@ -2,7 +2,7 @@
 // Область вида и порядок задаёт раскладка ядра (`Kernel.layout`); окно только раскладывает виды по своим областям.
 
 import type { Area } from '@cyborg-harness/core/window';
-import type { PluginRow } from '../shared/plugins.ts';
+import type { PluginRow } from '@cyborg-harness/electron/window';
 import { el } from './dom.ts';
 import { viewMode, type ViewSlot } from './plugins-model.ts';
 

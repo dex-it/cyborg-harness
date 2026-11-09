@@ -17,6 +17,7 @@ import {
   type Kernel,
   type KeyInput,
   type KeyPress,
+  type MigrateWorkspace,
   type OsEnvironment,
   type SpawnHost,
   type SystemEvent,
@@ -28,9 +29,8 @@ import {
   WINDOW_OWNER,
 } from '@cyborg-harness/core';
 import { errorMessage, isRecord } from './guards.ts';
-import type { FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from '../shared/plugins.ts';
-import { viewOrigin } from '../shared/views.ts';
-import { migrateLegacyWorkspace } from './legacy-workspace.ts';
+import type { FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from './snapshot.ts';
+import { viewOrigin } from './view-protocol.ts';
 import type { PluginUi } from './view-files.ts';
 
 const ENTRY_FILES = ['index.mjs', 'index.js', 'index.ts'];
@@ -94,7 +94,9 @@ export interface StartOptions {
   readonly userData: string;
   /** Файл воркспейса; по умолчанию `<userData>/workspace.cyborg.json`. */
   readonly workspace?: string;
-  /** Последний фрагмент заголовка окна. */
+  /** Перенос формата старого файла воркспейса при открытии; приложение, у которого такого формата не было, его не задаёт. */
+  readonly migrate?: MigrateWorkspace;
+  /** Последний фрагмент заголовка окна: имя приложения; по умолчанию «Cyborg». */
   readonly appName?: string;
   readonly builtinDir: string;
   readonly spawnHost: SpawnHost;
@@ -126,7 +128,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     options.onProblem?.(p);
   };
   const file = options.workspace ?? path.join(options.userData, 'workspace.cyborg.json');
-  const opened = await openWorkspace({ file, userFile: path.join(options.userData, 'cyborg.json'), stateDir: path.join(options.userData, 'state'), migrate: migrateLegacyWorkspace });
+  const opened = await openWorkspace({ file, userFile: path.join(options.userData, 'cyborg.json'), stateDir: path.join(options.userData, 'state'), ...(options.migrate !== undefined && { migrate: options.migrate }) });
   if (!opened.ok) throw new Error(`воркспейс ${file} уже открыт процессом ${opened.owner}`);
   const ws = opened.workspace;
   for (const p of ws.problems) report(p);
@@ -158,7 +160,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     os: options.os,
     platform: options.platform,
     idleSeconds: options.idleSeconds,
-    windowTitle: { workspace: path.basename(file), app: options.appName ?? 'Cyborg Playground' },
+    windowTitle: { workspace: path.basename(file), app: options.appName ?? 'Cyborg' },
     safeMode: options.safeMode,
     onWindow: (snapshot) => options.onWindow?.(snapshot),
     onDocuments: () => options.onDocuments?.(),

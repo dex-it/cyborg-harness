@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileSecrets, type SecretCipher } from './secrets-file.ts';
+import { fileSecrets, type SecretCipher } from '../src/secrets-file.ts';
 
 /** Подмена safeStorage: «шифр» обратим и не похож на открытый текст. */
 function cipher(overrides: Partial<SecretCipher> = {}): SecretCipher {

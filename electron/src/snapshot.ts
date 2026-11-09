@@ -95,3 +95,21 @@ export interface PluginsSnapshot {
   readonly workspace: WorkspaceInfo;
 }
 
+/** Что окно может просить у главного процесса. */
+export interface WindowApi {
+  pluginsSnapshot(): Promise<PluginsSnapshot>;
+  enablePlugin(id: string): Promise<Reply>;
+  disablePlugin(id: string, keepPty?: boolean): Promise<Reply>;
+  disablePreview(id: string): Promise<Reply>;
+  endKeptPty(id: string): Promise<Reply>;
+  crashHost(id: string): Promise<Reply>;
+  hangHost(id: string): Promise<Reply>;
+  runCommand(command: string): Promise<Reply>;
+  onPluginsChanged(listener: () => void): void;
+  onWindowCommand(listener: (command: string) => void): void;
+  setViewVisible(id: string, view: string, visible: boolean): Promise<void>;
+  answerDialog(id: number, choice: string | undefined): Promise<Reply>;
+  closeDocument(id: string): Promise<Reply>;
+  openWorkspace(file?: string): Promise<Reply>;
+  setSafeMode(on: boolean): Promise<Reply>;
+}

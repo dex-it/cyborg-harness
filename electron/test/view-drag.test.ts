@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { resolveDragFile, ViewDrags } from './view-drag.ts';
+import { resolveDragFile, ViewDrags } from '../src/view-drag.ts';
 
 test('перетаскивание: путь получает только вид под курсором, один раз', async () => {
   const drags = new ViewDrags();

@@ -4,7 +4,7 @@ import type { PtyExit } from '@cyborg-harness/contracts';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { TerminalSink } from '@cyborg-harness/core';
 import { PtyTable, type PtyProcess } from '@cyborg-harness/core';
-import { ViewTerminals, type TerminalFrame } from './view-terminals.ts';
+import { ViewTerminals, type TerminalFrame } from '../src/view-terminals.ts';
 
 function frame(routingId: number) {
   const sent: unknown[] = [];
