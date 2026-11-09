@@ -315,6 +315,18 @@ describe('buildPlugin: чужой каталог и порядок записи 
     const again = await buildPlugin(dir, { out });
     assert.equal(again.ok, true);
     assert.ok(!again.files.some((f) => f.startsWith('.')), again.files.join(','));
+    const leftovers = fs.readdirSync(path.dirname(out)).filter((n) => n.startsWith(`.${path.basename(out)}.`));
+    assert.deepEqual(leftovers, [], 'после замены остался временный каталог или прежний результат');
+  });
+
+  it('ссылка в ui/ с именем исходника .ts: отказ, а не копия исходника в результат', async () => {
+    const dir = plugin({ 'lib/view.ts': 'export const v = 1;\n' });
+    fs.symlinkSync('../lib/view.ts', path.join(dir, 'ui', 'extra.ts'));
+    const out = fresh('out');
+    const report = await buildPlugin(dir, { out });
+    assert.equal(report.ok, false);
+    assert.match(problems(report)[0] ?? '', /^ui\/extra\.ts: символическая ссылка не поддерживается: ссылка на исходник \.ts/);
+    assert.ok(!fs.existsSync(out));
   });
 
   it('результат не прошёл проверку (вычисляемый import() в зависимости): отказ, прежний результат цел, временных каталогов нет', async () => {
@@ -366,11 +378,33 @@ describe('buildPlugin: символические ссылки в ui/ (ревь�
     for (const make of makers) {
       const dir = plugin({ 'lib/a.txt': 'a' });
       make(dir);
+      fs.renameSync(path.join(dir, 'ui', 'theme.css'), path.join(dir, 'ui', '.theme.css'));
+      const report = await buildPlugin(dir, { out: fresh('out') });
+      assert.match(problems(report)[0] ?? '', /^ui\/\.theme\.css: символическая ссылка/, 'скрытая ссылка пропала молча');
+    }
+    for (const make of makers) {
+      const dir = plugin({ 'lib/a.txt': 'a' });
+      make(dir);
       const out = fresh('out');
       const report = await buildPlugin(dir, { out });
       assert.equal(report.ok, false);
       assert.match(problems(report)[0] ?? '', /^ui\/theme\.css: символическая ссылка/);
       assert.ok(!fs.existsSync(out));
+    }
+  });
+
+  it('ui/ - сам ссылка на каталог: отказ, в цель ссылки ничего не записано (bundle и source)', async () => {
+    for (const main of ['bundle', 'source'] as const) {
+      const dir = plugin();
+      const shared = path.join(dir, 'shared-ui');
+      fs.renameSync(path.join(dir, 'ui'), shared);
+      fs.symlinkSync('shared-ui', path.join(dir, 'ui'));
+      const out = fresh('out');
+      const report = await buildPlugin(dir, { out, main, check: main === 'bundle' });
+      assert.equal(report.ok, false, main);
+      assert.match(problems(report)[0] ?? '', /^ui: символическая ссылка/, main);
+      assert.deepEqual(fs.readdirSync(shared).sort(), ['ui.css', 'ui.ts'], `${main}: сборка записала в цель ссылки`);
+      assert.ok(!fs.existsSync(out), main);
     }
   });
 

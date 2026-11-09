@@ -37,7 +37,8 @@ export async function listFiles(root: string, skip: (rel: string, isDir: boolean
       if (entry.isDirectory()) {
         if (entry.name !== 'node_modules' && !entry.name.startsWith('.') && !skip(rel, true)) await walk(full);
       } else if (entry.isSymbolicLink()) {
-        if (entry.name !== 'node_modules' && !entry.name.startsWith('.') && !skip(rel, false)) onLink(rel);
+        // Скрытая ссылка - тоже: скрытый обычный файл в результат едет, и ссылка с тем же именем не должна пропадать молча.
+        if (entry.name !== 'node_modules' && !skip(rel, false)) onLink(rel);
       } else if (entry.isFile() && !skip(rel, false) && rel !== BUILD_MARKER) out.push(rel);
     }
   };

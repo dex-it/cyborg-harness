@@ -115,6 +115,10 @@ async function uiLinks(home: string): Promise<{ readonly all: ReadonlySet<string
   const copy: string[] = [];
   const problems: Problem[] = [];
   const found: string[] = [];
+  // Сам ui/ - ссылка: fs.cp в режиме source перенёс бы её ссылкой, и сборка видов записала бы ui/*.js в её цель, мимо временного каталога.
+  if ((await fs.lstat(path.join(home, 'ui')).catch(() => undefined))?.isSymbolicLink() === true) {
+    return { all, copy, problems: [{ file: 'ui', message: 'символическая ссылка не поддерживается: ui/ ведёт на другой каталог; положите в каталог плагина сам ui/' }] };
+  }
   await listFiles(path.join(home, 'ui'), (rel) => isTestPath(`ui/${rel}`), (rel) => found.push(`ui/${rel}`)).catch(() => []);
   for (const rel of found) {
     all.add(rel);
