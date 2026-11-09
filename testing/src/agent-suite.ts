@@ -9,8 +9,9 @@ export interface AgentSuiteOptions {
   /**
    * Среда, в которой программа агента находится: например PATH с подставным исполняемым файлом и `SHELL`, если поставщик запускает `$SHELL`.
    * Получает песочницу набора; её корень - `cwd` всех запросов набора. Без неё работает среда `startKernel` по умолчанию.
+   * `pty` здесь нет: запуск через потребителя набор наблюдает в своём `fakePty()`, а свой бэкенд оставил бы проверку слепой.
    */
-  readonly os?: (box: Sandbox) => Partial<OsEnvironment> | Promise<Partial<OsEnvironment>>;
+  readonly os?: (box: Sandbox) => Omit<Partial<OsEnvironment>, 'pty'> | Promise<Omit<Partial<OsEnvironment>, 'pty'>>;
   /** Плагины, без которых поставщик не активируется (его `requires`). */
   readonly plugins?: readonly TestPlugin[];
 }
@@ -58,6 +59,7 @@ async function openEnv(provider: TestPlugin, options: AgentSuiteOptions): Promis
   let kernel: TestKernel | undefined;
   try {
     const os = await options.os?.(box);
+    if (os && 'pty' in os) throw new Error('options.os вернул pty: свой pty в наборе не принимается, запуск наблюдается в fakePty() набора (уберите поле pty)');
     kernel = await startKernel({ plugins: [provider, ...(options.plugins ?? []), probe], ...(os && { os }) });
     const failed = kernel.journal.filter((e) => e.kind === 'failed' || e.kind === 'invalid' || e.kind === 'rejected');
     assert.ok(kernel.active.includes(resolved.id), `${resolved.id} не активирован: ${JSON.stringify(failed)}`);

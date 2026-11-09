@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Agent, AgentFacts, PluginModule } from '@cyborg-harness/contracts';
-import { agentContractSuite, AGENT_CHECK_NAMES, checkAgentContract, projectSettingsContractSuite, PROJECT_SETTINGS_REQUIRED_CHECKS, secretSourceContractSuite, SECRET_SOURCE_REQUIRED_CHECKS, type InlinePlugin } from '../src/index.ts';
+import { agentContractSuite, AGENT_CHECK_NAMES, checkAgentContract, fakePty, type AgentSuiteOptions, projectSettingsContractSuite, PROJECT_SETTINGS_REQUIRED_CHECKS, secretSourceContractSuite, SECRET_SOURCE_REQUIRED_CHECKS, type InlinePlugin } from '../src/index.ts';
 
 const FACTS: AgentFacts = { id: 'fake', title: 'Фальшивый', found: true, capabilities: { resume: false, history: false, events: false } };
 
@@ -81,6 +81,18 @@ describe('набор cyborg.agent на плохих поставщиках', () 
   it('плагин, который не активируется, назван в ошибке', async () => {
     const broken: InlinePlugin = { manifest: { id: 'fake-agent', version: '1.0.0', engines: { cyborg: '^1' }, provides: { 'cyborg.agent': '1.0' } }, module: { activate: () => Promise.reject(new Error('упал при активации')) } };
     await assert.rejects(checkAgentContract(broken), /fake-agent не активирован.*упал при активации/);
+  });
+
+  it('свой os.pty не принимается: набор сам наблюдает запуск, а не бэкенд теста', async () => {
+    // Тип os набора исключает pty; в JS и через приведение типа отказ должен быть понятным, а не «pty не запущен».
+    const withOwnPty = (() => ({ pty: fakePty() })) as unknown as NonNullable<AgentSuiteOptions['os']>;
+    await assert.rejects(checkAgentContract(provider(), { os: withOwnPty }), /options\.os вернул pty.*не принимается/);
+  });
+
+  it('тип os набора не допускает pty', () => {
+    // @ts-expect-error -- pty в os набора запрещён типом
+    const bad: AgentSuiteOptions = { os: () => ({ pty: fakePty() }) };
+    assert.ok(bad);
   });
 
   it('набор состоит из шести проверок, имена различны', () => {
