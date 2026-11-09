@@ -502,6 +502,44 @@ test('fs.watch: имена изменённых в каталоге склеен
   await new Promise((r) => setTimeout(r, 100));
 });
 
+test('fs.watch файла: каждая из записей writeText (подмена inode через rename) и запись на месте дают событие; наблюдение не молчит и onClose не зовётся', { skip: process.platform === 'win32' && 'rename поверх открытого' }, async () => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ app: { 'fs.read': [box.work], 'fs.write': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  const fs = os('app').fs;
+  const file = path.join(box.work, 'state.json');
+  await fs.writeText(file, '0');
+  const events: (readonly string[])[] = [];
+  const closed: string[] = [];
+  const sub = await fs.watch(file, (names) => events.push(names), (reason) => closed.push(reason));
+  const next = async (n: number) => {
+    for (let i = 0; i < 100 && events.length < n; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.ok(events.length >= n, `событий ${String(events.length)} из ${String(n)}; onClose: ${closed.join()}`);
+  };
+  for (let i = 1; i <= 4; i++) {
+    await fs.writeText(file, String(i));
+    await next(i);
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  await writeFile(file, 'прямая запись');
+  await next(5);
+  assert.deepEqual(closed, []);
+  sub.dispose();
+  await k.unload();
+});
+
+test('fs.watch файла: файл удалён - onClose с причиной, а не тишина', async () => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ app: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  const file = path.join(box.work, 'gone.json');
+  await writeFile(file, '0');
+  const closed: string[] = [];
+  await os('app').fs.watch(file, () => undefined, (reason) => closed.push(reason));
+  await rm(file);
+  for (let i = 0; i < 100 && closed.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(closed.length, 1, 'удаление файла закрывает наблюдение с причиной');
+  await k.unload();
+});
+
 test('fs.watch: лимит не обходится параллельными вызовами; сузились корни - наблюдение закрыто', async () => {
   await using box = await sandbox();
   const { k, os } = await kernel(

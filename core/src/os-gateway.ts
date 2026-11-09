@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
-import { constants, watch as watchFs, type Dirent, type Stats } from 'node:fs';
+import { constants, watch as watchFs, type Dirent, type FSWatcher, type Stats } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -595,10 +595,11 @@ export class OsGateway {
         const reserved = () => void this.#watches.delete(key);
         this.#watches.set(key, reserved);
         let target: string;
+        let isFile: boolean;
         try {
           await this.#ownDirs(m.id);
           target = await this.#checkPath(m, method, args[0], false);
-          await fs.stat(target);
+          isFile = (await fs.stat(target)).isFile();
         } catch (error) {
           if (this.#watches.get(key) === reserved) this.#watches.delete(key);
           throw error;
@@ -621,12 +622,31 @@ export class OsGateway {
           if ((await this.#checkPath(m, method, args[0], false).catch(() => undefined)) !== target) close('путь больше не в правах плагина');
           else if (this.#watches.get(key) === close) this.#push(m.id, 'fs.change', { pluginId: m.id, id, names: list });
         };
-        const watcher = (this.#env.watch ?? watchFs)(target, (_event, name) => {
-          if (name) names.add(name);
-          timer ??= setTimeout(() => void send(), WATCH_COALESCE_MS);
-        });
-        // Без слушателя ошибка наблюдателя (удалён каталог, кончились inotify) уронила бы главный процесс.
-        watcher.on('error', (error) => close(`наблюдение прервано: ${error.message}`));
+        // rename подменяет inode (writeText, редакторы с атомарной записью), а наблюдатель файла привязан к прежнему и молчал бы дальше: у файла по событию `rename` наблюдение переоткрывается на том же пути. Само событие передаётся плагину: запись между переоткрытием и чтением не теряется, плагин читает файл после склейки.
+        const open = this.#env.watch ?? watchFs;
+        const attach = (): FSWatcher => {
+          const w = open(target, (event, name) => {
+            if (w !== watcher) return;
+            if (name) names.add(name);
+            timer ??= setTimeout(() => void send(), WATCH_COALESCE_MS);
+            if (isFile && event === 'rename') {
+              const stale = watcher;
+              try {
+                watcher = attach();
+              } catch (error) {
+                close(`файл исчез или заменён: ${(error as Error).message}`);
+                return;
+              }
+              stale.close();
+            }
+          });
+          // Без слушателя ошибка наблюдателя (удалён каталог, кончились inotify) уронила бы главный процесс.
+          w.on('error', (error) => {
+            if (w === watcher) close(`наблюдение прервано: ${error.message}`);
+          });
+          return w;
+        };
+        let watcher = attach();
         this.#watches.set(key, close);
         return undefined;
       }
