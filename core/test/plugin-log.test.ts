@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { PluginContext } from '@cyborg-harness/contracts';
 import { memorySecrets } from '../../testing/src/memory.ts';
+import { sandbox } from '../../testing/src/sandbox.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { load, type JournalEntry, type Kernel, type LoadOptions } from '../src/loader.ts';
 import { describeEntry, entryLevel, pluginStatuses } from '../src/status.ts';
@@ -74,6 +77,27 @@ test('ctx.log: неизвестный уровень - Invalid в плагине
     ctx.a?.log('после');
     await until('строка после отказа', () => lines.length === 1);
     assert.deepEqual(lines, [['a', 'после', 'info']]);
+  } finally {
+    await k.unload();
+  }
+});
+
+test('ctx.log хоста: слушатель fs.watch, который бросил, и слушатель события окна пишутся строкой error с id плагина', async () => {
+  await using box = await sandbox();
+  const work = box.path('work');
+  await mkdir(work);
+  const { k, ctx, lines } = await rig(['a'], { manifests: [manifest('a', { permissions: { 'fs.read': [work] } })], os: { dataDir: box.path('data'), tempDir: box.path('temp') } });
+  try {
+    await ctx.a!.os.fs.watch(work, () => {
+      throw new Error('сломан в watch');
+    });
+    ctx.a!.window.onFocusChange(() => {
+      throw new Error('сломан в окне');
+    });
+    await writeFile(path.join(work, 'x.txt'), '1');
+    k.emit({ kind: 'focus', focused: false });
+    await until('обе строки об упавших слушателях', () => lines.length >= 2);
+    assert.deepEqual(lines.toSorted(), [['a', 'слушатель fs.watch упал: сломан в watch', 'error'], ['a', 'слушатель focus упал: сломан в окне', 'error']].toSorted());
   } finally {
     await k.unload();
   }

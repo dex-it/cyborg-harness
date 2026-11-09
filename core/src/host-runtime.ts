@@ -152,7 +152,7 @@ class HostWatches {
         item.onClose?.(p.closed);
       }
     } catch (error) {
-      endpoint.notify('log', { pluginId: p.pluginId, message: `слушатель fs.watch упал: ${error instanceof Error ? error.message : String(error)}` });
+      endpoint.notify('log', { pluginId: p.pluginId, message: `слушатель fs.watch упал: ${error instanceof Error ? error.message : String(error)}`, level: 'error' });
     }
   }
 
@@ -273,7 +273,7 @@ class HostSystem {
   }
 
   #log(pluginId: string, what: string, error: unknown): void {
-    this.endpoint.notify('log', { pluginId, message: `слушатель ${what} упал: ${error instanceof Error ? error.message : String(error)}` });
+    this.endpoint.notify('log', { pluginId, message: `слушатель ${what} упал: ${error instanceof Error ? error.message : String(error)}`, level: 'error' });
   }
 }
 
