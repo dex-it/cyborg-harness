@@ -94,8 +94,9 @@ export class Endpoint {
     if (signal?.aborted) return Promise.reject(cancelError(signal));
     const id = this.#next++;
     return new Promise<T>((resolve, reject) => {
-      const unlisten = signal ? this.#onAbort(id, signal, reject, discard) : () => undefined;
-      this.#pending.set(id, { resolve, reject, owner: this.#owner?.current(), unlisten });
+      const owner = this.#owner?.current();
+      const unlisten = signal ? this.#onAbort(id, signal, reject, discard, owner) : () => undefined;
+      this.#pending.set(id, { resolve, reject, owner, unlisten });
       try {
         this.#send({ t: 'req', id, m: method, p: params }, `${method}: аргументы`);
       } catch (error) {
@@ -107,9 +108,11 @@ export class Endpoint {
   }
 
   /** Отмена ждущего запроса: отказ вызывающему сразу, собеседнику `cancel`; ответ, что придёт позже, достаётся `discard`. */
-  #onAbort(id: number, signal: AbortSignal, reject: (error: unknown) => void, discard: ((value: unknown) => void) | undefined): () => void {
+  #onAbort(id: number, signal: AbortSignal, reject: (error: unknown) => void, discard: ((value: unknown) => void) | undefined, owner: string | undefined): () => void {
     const onAbort = () => {
       if (!this.#pending.delete(id)) return;
+      // Как на пути ответа: сигнал мог сработать вне входа плагина (внутренний таймер), а продолжение после отказа - его.
+      this.#owner?.enter(owner);
       this.#cancelled.set(id, discard);
       try {
         const reason = signal.reason as unknown;

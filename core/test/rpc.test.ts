@@ -186,6 +186,26 @@ test('cancel: причина вне Cancelled, Timeout и HostGone привод�
   );
 });
 
+test('отмена ждущего запроса входит в плагин-вызывающий, как ответ: продолжение после отказа не приписывается чужому', async () => {
+  let current: string | undefined = 'caller';
+  const entered: (string | undefined)[] = [];
+  const owner = {
+    current: () => current,
+    enter(id: string | undefined) {
+      current = id;
+      entered.push(id);
+    },
+  };
+  const endpoint = new Endpoint({ post: () => undefined, onMessage: () => undefined }, owner);
+  const abort = new AbortController();
+  const call = endpoint.request('work', null, abort.signal);
+  current = 'other'; // сигнал сработал вне входа плагина: последним отметился другой
+  entered.length = 0;
+  abort.abort();
+  await assert.rejects(call, { code: 'Cancelled' });
+  assert.deepEqual(entered, ['caller']);
+});
+
 test('close обрывает работу обработчиков: сигнал отменён с причиной закрытия', async () => {
   const [a, b] = pair();
   const s = slow();
