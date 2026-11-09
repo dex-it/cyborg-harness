@@ -1,7 +1,7 @@
 // Пилот PL-05: Monaco и xterm во фреймах на cyborg-plugin://. Нужен собранный playground и дисплей (на Linux - xvfb-run ... --no-sandbox).
 //   node playground/scripts/spike-monaco.mjs [csp] [sandbox] [memory] [--csp="<строка>"] [--json] [--no-sandbox]
 // csp: наборы директив CSP вида и что с ними делают Monaco и xterm; sandbox: кадр без allow-same-origin; memory: память и время открытия.
-// Без перечня разделов идут все. Результат - таблицы в stdout (docs/04-verification/spike-monaco-xterm.md) или JSON.
+// Без перечня разделов идут все. Результат - таблицы в stdout (docs/05-verification/spike-monaco-xterm.md) или JSON.
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { pssKb } from '../src/main/proc-memory.ts';
