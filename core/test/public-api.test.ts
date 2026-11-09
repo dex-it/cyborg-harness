@@ -431,7 +431,7 @@ describe('публичный API ядра: потребители в репоз�
       "import { x } from '@cyborg-harness/core/dist/src/index.js';",
       "import { y } from '@cyborg-harness/core/nothing';",
       "import type { WindowSnapshot } from '@cyborg-harness/core/window';",
-      "import { FakePty } from '../../core/test/fake-pty.ts';",
+      "import { FakePty } from '../../testing/src/fake-pty.ts';",
       "export { runHost } from '@cyborg-harness/core/host';",
       "import { elements } from '../../core/elements/elements.ts';",
       "const { Tail } = await import(join(repo, 'core', 'src', 'pty.ts'));",
