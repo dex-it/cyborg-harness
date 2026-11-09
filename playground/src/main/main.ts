@@ -30,6 +30,7 @@ import {
   workspaceInfo,
 } from '@cyborg-harness/electron';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
+import { quietPipes } from './quiet-pipes.ts';
 import { runSpike } from './spike.ts';
 import { runHostsSpike } from './spike-hosts.ts';
 import { runGatewaySpike } from './spike-gateway.ts';
@@ -115,6 +116,8 @@ quitAfterPlugins(plugins);
 app.on('window-all-closed', () => {
   if (!spiking) app.quit();
 });
+
+quietPipes();
 
 void app.whenReady().then(() => {
   if (gatewaySpikeOut !== undefined) {

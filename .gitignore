@@ -8,3 +8,4 @@ site/src/generated/
 site/public/favicon.svg
 core/dist/
 electron/dist/
+contracts/dist/
