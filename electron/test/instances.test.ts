@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { workspaceKey } from '@cyborg-harness/core';
+import { workspaceKey, type Claim } from '@cyborg-harness/core';
 import { claimWorkspace, instanceKey, newWindowArgs, NO_WORKSPACE_KEY, sessionDataDir } from '../src/instances.ts';
 
 // K-20: несколько процессов с общим userData. Ключ экземпляра и каталог сессии Chromium - по воркспейсу; новое окно - процесс с теми же флагами.
@@ -57,7 +57,7 @@ async function shortSandbox() {
 
 async function withoutRuntimeDir<T>(run: () => Promise<T>): Promise<T> {
   const saved = process.env.XDG_RUNTIME_DIR;
-  delete process.env.XDG_RUNTIME_DIR;
+  Reflect.deleteProperty(process.env, 'XDG_RUNTIME_DIR');
   try {
     return await run();
   } finally {
@@ -66,6 +66,11 @@ async function withoutRuntimeDir<T>(run: () => Promise<T>): Promise<T> {
 }
 
 const posix = process.platform !== 'win32';
+
+/** Закрывает адрес владельца; через параметр, потому что `assert.equal(kind)` сужает тип. */
+const release = (claim: Claim) => {
+  if (claim.kind === 'owner') claim.close();
+};
 
 test('claimWorkspace: адреса лежат в личном каталоге userData, второй запуск передаёт данные и уходит', { skip: !posix }, async () => {
   await using box = await shortSandbox();
@@ -79,7 +84,7 @@ test('claimWorkspace: адреса лежат в личном каталоге u
     const second = await claimWorkspace(box.root, file, { safeMode: true }, () => assert.fail('второй стал владельцем'));
     assert.equal(second.kind, 'handed');
     assert.deepEqual(asked, [{ safeMode: true }]);
-    if (first.kind === 'owner') first.close();
+    release(first);
   });
 });
 
@@ -93,6 +98,6 @@ test('claimWorkspace: контроль экземпляров недоступе
     assert.equal(claim.kind, 'owner', 'отказ контроля экземпляров оставил процесс без окна');
     assert.equal(reasons.length, 1);
     assert.match(reasons[0]?.message ?? '', /run/);
-    if (claim.kind === 'owner') assert.doesNotThrow(() => claim.close());
+    assert.doesNotThrow(() => release(claim));
   });
 });

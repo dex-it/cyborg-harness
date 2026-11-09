@@ -128,6 +128,8 @@ describe('окно «Плагины Cyborg»: действия над воркс
     assert.equal(await workspaceActionError('Открыть в новом окне', () => Promise.resolve({})), undefined);
     assert.equal(await workspaceActionError('Открыть в новом окне', () => Promise.resolve({ error: 'spawn ENOENT' })), 'Открыть в новом окне: spawn ENOENT');
     assert.equal(await workspaceActionError('Открыть воркспейс', () => Promise.reject(new Error('воркспейса нет в «Недавних»'))), 'Открыть воркспейс: воркспейса нет в «Недавних»');
+    // Не-Error в отказе (IPC отдаёт и строки) тоже становится текстом.
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- проверяется именно не-Error
     assert.equal(await workspaceActionError('Открыть воркспейс', () => Promise.reject('строка')), 'Открыть воркспейс: строка');
   });
 });

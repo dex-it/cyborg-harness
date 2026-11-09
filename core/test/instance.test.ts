@@ -7,7 +7,7 @@ import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { claimInstance, instanceAddress, instanceDir } from '../src/instance.ts';
+import { claimInstance, instanceAddress, instanceDir, type Claim } from '../src/instance.ts';
 
 // K-20: по экземпляру на воркспейс. Второй запуск того же воркспейса просит первого поднять окно и уходит; разные воркспейсы не мешают друг другу.
 
@@ -21,6 +21,11 @@ async function sandbox(base = tmpdir()) {
 }
 
 const key = 'a1b2c3d4e5f60718';
+
+/** Закрывает адрес владельца; у не-владельца закрывать нечего. Через параметр, а не по месту: `assert.equal(kind)` сужает тип, и проверка в тесте выглядит лишней. */
+const release = (claim: Claim) => {
+  if (claim.kind === 'owner') claim.close();
+};
 
 test('второй запуск того же воркспейса: владелец получает данные раньше, чем второй узнаёт об этом, второй уходит', async () => {
   await using box = await sandbox();
@@ -38,7 +43,7 @@ test('разные воркспейсы - независимые владель�
   const a = await claimInstance('aaaaaaaaaaaaaaaa', {}, () => undefined, { dir: box.dir });
   const b = await claimInstance('bbbbbbbbbbbbbbbb', {}, () => undefined, { dir: box.dir });
   assert.deepEqual([a.kind, b.kind], ['owner', 'owner']);
-  for (const c of [a, b]) if (c.kind === 'owner') c.close();
+  for (const c of [a, b]) release(c);
 });
 
 test('close отдаёт воркспейс: адрес свободен, следующий запуск - владелец', async () => {
@@ -57,7 +62,7 @@ test('сбой обработчика владельца не оставляет
   const first = await claimInstance(key, {}, () => { throw new Error('окна нет'); }, { dir: box.dir });
   const second = await claimInstance(key, {}, () => undefined, { dir: box.dir });
   assert.equal(second.kind, 'handed');
-  if (first.kind === 'owner') first.close();
+  release(first);
 });
 
 test('владелец жив, но молчит: второй не становится владельцем, а сообщает об этом в срок', async () => {
@@ -77,7 +82,7 @@ test('адрес не перепутан между воркспейсами и 
   const first = await claimInstance(key, {}, () => undefined, { dir: sub });
   assert.equal(statSync(sub).mode & 0o777, 0o700);
   assert.notEqual(instanceAddress(key, sub), instanceAddress('ffffffffffffffff', sub));
-  if (first.kind === 'owner') first.close();
+  release(first);
 });
 
 const start = (dir: string, label: string, holdMs?: number) => {
@@ -138,14 +143,14 @@ test('сокет остался от убитого процесса: из ше�
 async function withEnv<T>(vars: Record<string, string | undefined>, run: () => Promise<T> | T): Promise<T> {
   const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
   for (const [k, v] of Object.entries(vars)) {
-    if (v === undefined) delete process.env[k];
+    if (v === undefined) Reflect.deleteProperty(process.env, k);
     else process.env[k] = v;
   }
   try {
     return await run();
   } finally {
     for (const [k, v] of Object.entries(saved)) {
-      if (v === undefined) delete process.env[k];
+      if (v === undefined) Reflect.deleteProperty(process.env, k);
       else process.env[k] = v;
     }
   }
@@ -175,7 +180,7 @@ test('claimInstance с home: каталог адресов создаётся в
     assert.equal(claim.kind, 'owner');
     assert.equal(statSync(path.join(home, 'run')).mode & 0o777, 0o700);
     assert.ok(existsSync(path.join(home, 'run', `${key}.sock`)));
-    if (claim.kind === 'owner') claim.close();
+    release(claim);
   });
 });
 
@@ -188,7 +193,7 @@ test('ошибка сервера владельца после запуска (
   const claim = await claimInstance(key, {}, () => undefined, { dir: box.dir });
   assert.ok(captured);
   assert.doesNotThrow(() => captured?.emit('error', Object.assign(new Error('accept EMFILE'), { code: 'EMFILE' })));
-  if (claim.kind === 'owner') claim.close();
+  release(claim);
 });
 
 test('EEXIST при привязке - адрес занят, а не сбой: процесс идёт спрашивать владельца', { skip: !posix }, async (t) => {
@@ -210,7 +215,7 @@ test('EEXIST при привязке - адрес занят, а не сбой: 
   t.after(() => ((net as { createServer: typeof net.createServer }).createServer = real));
   const claim = await claimInstance(key, {}, () => undefined, { dir: box.dir });
   assert.equal(claim.kind, 'owner', 'EEXIST принят за сбой привязки');
-  if (claim.kind === 'owner') claim.close();
+  release(claim);
 });
 
 /** Файл сокета, оставшийся от убитого владельца: лежит, но никто не слушает. */
@@ -231,7 +236,7 @@ test('свежий файл сокета без слушателя - владе�
   const age = Date.now() - created;
   assert.equal(claim.kind, 'owner');
   assert.ok(age >= 480, `свежий сокет снят через ${String(age)} мс после создания, раньше срока запуска владельца (500 мс)`);
-  if (claim.kind === 'owner') claim.close();
+  release(claim);
 });
 
 test('снятие устаревшего сокета: между проверкой и удалением в окне не больше одного процесса (под замком)', { skip: !posix }, async (t) => {
