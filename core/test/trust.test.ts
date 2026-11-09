@@ -65,6 +65,7 @@ function forging(table: Record<string, PluginModule>) {
       });
     },
     notify: (hostId: string, m: string, p: unknown) => send(hostId, { t: 'note', m, p }),
+    cancel: (hostId: string, id: unknown) => send(hostId, { t: 'cancel', id }),
   };
 }
 
@@ -338,6 +339,56 @@ test('emit и release: чужой хост не стреляет в чужую �
   assert.deepEqual(seen, [1, 2]);
   assert.equal(await api.listeners(), 1);
   assert.equal(logs.filter((l) => l.startsWith('хост m: ядро отказало')).length, 3, logs.join('\n'));
+  await kernel.unload();
+});
+
+test('cancel: чужой хост не отменяет запрос другого плагина, подделанные номера ничего не рвут', async () => {
+  let victim!: PluginContext;
+  let providerSignal: AbortSignal | undefined;
+  let release: (() => void) | undefined;
+  const forger = forging({
+    provider: {
+      activate: (ctx) =>
+        ctx.commands.register('provider.slow', (...args) => {
+          providerSignal = args.at(-1) as AbortSignal;
+          return new Promise((resolve) => (release = () => resolve('готово')));
+        }),
+    },
+    victim: { activate: (ctx) => void (victim = ctx) },
+    mallory: { activate: () => undefined },
+  });
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['provider', 'victim', 'mallory'],
+    manifests: [manifest('provider', { commands: { 'provider.slow': { callers: 'plugins' } } }), manifest('victim'), manifest('mallory')],
+    spawnHost: forger.spawn,
+    hosts: { p: ['provider'], v: ['victim'], m: ['mallory'] },
+  });
+  const own = new AbortController();
+  const call = victim.commands.run('provider.slow', own.signal);
+  await settle();
+  await settle();
+  assert.equal(providerSignal!.aborted, false);
+
+  // номера запросов у каждого канала свои: cancel от чужого хоста попадает в его собственный канал
+  for (const host of ['m', 'p']) for (let id = -1; id < 30; id++) forger.cancel(host, id);
+  for (const id of ['1', null, {}, [1]]) forger.cancel('m', id);
+  await settle();
+  await settle();
+  assert.equal(providerSignal!.aborted, false, 'поставщик не отменён чужим cancel');
+  release?.();
+  assert.equal(await call, 'готово');
+
+  const second = new AbortController();
+  const again = victim.commands.run('provider.slow', second.signal);
+  again.catch(() => undefined);
+  await settle();
+  await settle();
+  second.abort();
+  await assert.rejects(again, { code: 'Cancelled' });
+  await settle();
+  await settle();
+  assert.equal(providerSignal!.aborted, true, 'свой cancel вызывающего доходит до поставщика');
   await kernel.unload();
 });
 
