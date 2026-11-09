@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { buildPlugin } from 'cyborg-plugin';
+import { transformSync } from 'esbuild';
 
 const repo = resolve(import.meta.dirname, '..', '..');
 const electronArgs = process.argv.slice(2);
@@ -64,9 +65,14 @@ for (const [name, text] of Object.entries(builtFiles)) {
 const builtReport = await buildPlugin(builtSource, { out: join(userData, 'plugins', 'built-dep') });
 assert.ok(builtReport.ok, `cyborg-plugin build: ${builtReport.problems.map((p) => p.message).join('; ')}`);
 // Плагин, которого не было при старте, ядро включает только после перезапуска, поэтому он входит в plugins.enabled заранее: настройки по умолчанию берутся из main.ts стенда.
-const defaults = /const DEFAULT_CONFIG = (\{[\s\S]*?\n\});/.exec(readFileSync(join(repo, 'playground', 'src', 'main', 'main.ts'), 'utf8'))?.[1];
-assert.ok(defaults, 'в main.ts не найден DEFAULT_CONFIG');
-const userConfig = new Function(`return ${defaults}`)();
+// Ветку первого запуска (main.ts записывает DEFAULT_CONFIG сам) проходит bareWindow: у него cyborg.json заранее нет, и он сверяет записанное с DEFAULT_CONFIG.
+/** DEFAULT_CONFIG из main.ts: текст объекта идёт через esbuild, который снимает типы (аннотация в объекте не ломает разбор). */
+function defaultConfig() {
+  const text = /const DEFAULT_CONFIG(?::[^=]+)? = (\{[\s\S]*?\n\});/.exec(readFileSync(join(repo, 'playground', 'src', 'main', 'main.ts'), 'utf8'))?.[1];
+  assert.ok(text, 'в main.ts не найден DEFAULT_CONFIG');
+  return new Function(`return ${transformSync(`(${text})`, { loader: 'ts' }).code}`)();
+}
+const userConfig = defaultConfig();
 userConfig.plugins.enabled.push('built-dep');
 writeFileSync(join(userData, 'cyborg.json'), JSON.stringify(userConfig, null, 2));
 
@@ -623,7 +629,8 @@ async function bareWindow() {
     assert.equal(await ev("document.getElementById('workspace-current').textContent"), 'Воркспейс не открыт');
     assert.deepEqual(await ev("[...document.querySelectorAll('#workspace-recent button')].map((b) => b.title)"), [other], 'пропавший файл в «Недавних»');
     assert.equal(await ev("document.querySelectorAll('#plugins-list [data-plugin]').length"), 0, 'плагины загрузились без воркспейса');
-    log('окно без воркспейса: плагины не грузятся, «Недавние» без пропавших файлов');
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, 'cyborg.json'), 'utf8')), defaultConfig(), 'первый запуск: main.ts не записал DEFAULT_CONFIG');
+    log('окно без воркспейса: плагины не грузятся, «Недавние» без пропавших файлов, первый запуск записал настройки по умолчанию');
   } finally {
     bare.kill('SIGTERM');
     await Promise.race([new Promise((r) => bare.once('exit', r)), sleep(8000)]);
