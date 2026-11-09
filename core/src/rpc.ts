@@ -37,6 +37,16 @@ export function cancelError(signal: AbortSignal): CoreError {
   return signal.reason instanceof CoreError ? signal.reason : new CoreError('Cancelled', 'запрос отменён');
 }
 
+/** Коды, которыми запрос отменяют законно: отмена, срок ядра, падение хоста вызывающего. */
+const CANCEL_CODES: readonly string[] = ['Cancelled', 'Timeout', 'HostGone'];
+
+/** Причина из чужого `cancel`: любой другой код (например `PermissionDenied`) собеседник выдал бы за отказ ядра, поэтому он приводится к `Cancelled`. */
+function readCancelReason(raw: WireError | undefined): CoreError {
+  if (raw === undefined) return new CoreError('Cancelled', 'запрос отменён');
+  const reason = fromWire(raw);
+  return CANCEL_CODES.includes(reason.code) ? reason : new CoreError('Cancelled', 'запрос отменён');
+}
+
 /** Чей код ждёт ответа: продолжение после ответа идёт от имени того, кто спросил. */
 export interface Owner {
   current(): string | undefined;
@@ -149,7 +159,7 @@ export class Endpoint {
       const controller = this.#serving.get(message.id);
       if (!controller) return;
       this.#serving.delete(message.id);
-      const reason = message.reason === undefined ? new CoreError('Cancelled', 'запрос отменён') : fromWire(message.reason);
+      const reason = readCancelReason(message.reason);
       controller.abort(reason);
       // Ответ сразу: ждущий отмены снимает запись, а то, что обработчик вернёт позже, уже никому не нужно.
       this.#reply({ t: 'res', id: message.id, ok: false, e: toWire(reason) }, 'cancel');

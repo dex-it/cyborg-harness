@@ -158,6 +158,34 @@ test('cancel с неизвестным номером или не числом �
   assert.equal(sent.length, 1);
 });
 
+test('cancel: причина вне Cancelled, Timeout и HostGone приводится к Cancelled', async () => {
+  const sent: unknown[] = [];
+  const listeners: ((m: unknown) => void)[] = [];
+  const server = new Endpoint({ post: (m) => void sent.push(m), onMessage: (l) => void listeners.push(l) });
+  const reasons: unknown[] = [];
+  server.handle('work', (_params, signal) => {
+    signal.addEventListener('abort', () => reasons.push(signal.reason));
+    return new Promise(() => undefined);
+  });
+  const codes = ['Timeout', 'HostGone', 'Cancelled', 'PermissionDenied', 'NotFound', 'Remote', 'нет такого кода'];
+  for (const [i, code] of codes.entries()) {
+    listeners[0]?.({ t: 'req', id: i + 1, m: 'work', p: null });
+    await later();
+    listeners[0]?.({ t: 'cancel', id: i + 1, reason: { code, message: 'подделка' } });
+    await later();
+  }
+  const expected = ['Timeout', 'HostGone', 'Cancelled', 'Cancelled', 'Cancelled', 'Cancelled', 'Cancelled'];
+  assert.deepEqual(
+    reasons.map((r) => (r as CoreError).code),
+    expected,
+  );
+  assert.deepEqual(
+    sent.map((m) => (m as { e: { code: string } }).e.code),
+    expected,
+    'собеседник получает отказ с тем же кодом, что видит обработчик',
+  );
+});
+
 test('close обрывает работу обработчиков: сигнал отменён с причиной закрытия', async () => {
   const [a, b] = pair();
   const s = slow();
