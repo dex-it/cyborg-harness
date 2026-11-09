@@ -48,13 +48,16 @@ test('fileSecrets: ключ ОС сменился - значение читае�
       decrypt: async (sealed) => ({ result: Buffer.from(sealed).reverse().toString().replace(/^sealed:/, ''), shouldReEncrypt: true }),
       encrypt: async (text) => {
         sealedAgain++;
-        return Buffer.from(`sealed:${text}`).reverse();
+        return Buffer.from(`new:${text}`);
       },
     }),
   );
   assert.equal(await store.get('a/k'), 'v');
   assert.equal(sealedAgain, 1);
-  assert.equal(await readFile(box.file, 'utf8'), before, 'то же значение, записанное заново');
+  // Новый шифр отличим от прежнего: иначе файл без перезаписи совпал бы с записанным заново.
+  assert.notEqual(await readFile(box.file, 'utf8'), before, 'перешифрованное значение не записано');
+  const stored = JSON.parse(await readFile(box.file, 'utf8')) as Record<string, string>;
+  assert.equal(Buffer.from(stored['a/k']!, 'base64').toString(), 'new:v');
 });
 
 test('fileSecrets: delete стирает один ключ', async () => {
