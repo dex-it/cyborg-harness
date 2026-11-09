@@ -103,6 +103,19 @@ describe('потребитель вне репозитория', { timeout: 180_
     assert.equal(run(process.execPath, ['readme-example.ts'], project).trim(), 'hello');
   });
 
+  it('cyborg-plugin check из node_modules/.bin: 0 на чистом плагине, 1 и файл:строка на запрещённом импорте (P-09)', () => {
+    const bin = path.join(project, 'node_modules', '.bin', 'cyborg-plugin');
+    const make = (name: string, code: string) => {
+      const dir = path.join(project, 'checked', name);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ id: 'acme.hello', version: '1.0.0', engines: { cyborg: '^1' } }));
+      fs.writeFileSync(path.join(dir, 'index.js'), code);
+      return dir;
+    };
+    assert.match(run(bin, ['check', make('good', "export default {};\n")], project), /Нарушений нет/);
+    assert.throws(() => run(bin, ['check', make('bad', "import fs from 'node:fs';\nexport default {};\n")], project), (e: Error) => e.message.includes('Command failed') && e.message.includes("index.js:1: 'node:fs'"));
+  });
+
   it('сценарий core/examples идёт на пакете: хосты в дочерних процессах из dist/host-entry.js', () => {
     const out = run(process.execPath, ['examples/run.ts', 'basic'], project, { NO_COLOR: '1' });
     assert.match(out, /Шаг 1\./);

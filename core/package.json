@@ -8,6 +8,7 @@
   "engines": { "node": ">=24" },
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
+  "bin": { "cyborg-plugin": "./dist/src/plugin-cli-bin.js" },
   "exports": {
     ".": { "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" },
     "./host": { "types": "./dist/src/index-host.d.ts", "default": "./dist/src/index-host.js" },
@@ -15,6 +16,7 @@
     "./keys": { "types": "./dist/src/index-keys.d.ts", "default": "./dist/src/index-keys.js" },
     "./ui-shell": { "types": "./dist/src/index-ui-shell.d.ts", "default": "./dist/src/index-ui-shell.js" },
     "./window": { "types": "./dist/src/index-window.d.ts", "default": "./dist/src/index-window.js" },
+    "./plugin-check": { "types": "./dist/src/index-plugin-check.d.ts", "default": "./dist/src/index-plugin-check.js" },
     "./elements": { "types": "./dist/elements/elements.d.ts", "default": "./dist/elements/elements.js" },
     "./package.json": "./package.json"
   },
