@@ -164,6 +164,8 @@ test('каталог адресов: XDG_RUNTIME_DIR (абсолютный) пе
     assert.equal(instanceDir('/home/a/.config/App'), '/home/a/.config/App/run', 'без XDG_RUNTIME_DIR адреса должны лежать у пользователя, а не в предсказуемом каталоге общего tmp');
     const far = `/home/a/${'очень-длинный-каталог/'.repeat(8)}App`;
     assert.equal(path.dirname(instanceDir(far)), tmpdir(), 'адрес не влезает в предел sun_path - запасной tmpdir');
+    const wide = `/home/a/${'к'.repeat(55)}`;
+    assert.equal(path.dirname(instanceDir(wide)), tmpdir(), 'предел sun_path - в байтах: кириллица в символах влезает, в UTF-8 нет');
     assert.equal(path.dirname(instanceDir()), tmpdir(), 'home не задан - tmpdir');
   });
   await withEnv({ XDG_RUNTIME_DIR: 'относительный/путь' }, () => {

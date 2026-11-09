@@ -50,7 +50,7 @@ export function instanceDir(home?: string): string {
   if (runtime !== undefined && path.isAbsolute(runtime)) return path.join(runtime, name);
   if (home !== undefined) {
     const own = path.join(path.resolve(home), 'run');
-    if (path.join(own, LONGEST_ADDRESS).length <= SOCKET_PATH_LIMIT) return own;
+    if (Buffer.byteLength(path.join(own, LONGEST_ADDRESS)) <= SOCKET_PATH_LIMIT) return own;
   }
   return path.join(os.tmpdir(), name);
 }

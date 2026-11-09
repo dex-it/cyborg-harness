@@ -9,8 +9,9 @@ import type { RestartFlags } from './restarts.ts';
 export const NO_WORKSPACE_KEY = 'no-workspace';
 
 /**
- * Ключ, по которому процессы узнают друг друга. Воркспейс - его `workspaceKey` (тот же `realpath`, что у замка и `state`), где бы ни лежал `userData`:
- * замок воркспейса общий для приложений. Окно без воркспейса - ключ своего `userData`: окна без воркспейса двух приложений друг друга не касаются.
+ * Ключ, по которому процессы узнают друг друга. Воркспейс - его `workspaceKey` (тот же `realpath`, что у замка и `state`), не зависящий от `userData`;
+ * но адрес лежит в каталоге адресов, а без `XDG_RUNTIME_DIR` это `<userData>/run`, и приложения с разными `userData` друг друга не находят - второе
+ * упирается в общий замок воркспейса. Окно без воркспейса - ключ своего `userData`: окна без воркспейса двух приложений друг друга не касаются.
  */
 export const instanceKey = (workspaceFile: string | undefined, userData: string): string =>
   workspaceFile === undefined ? `${NO_WORKSPACE_KEY}-${createHash('sha256').update(realOf(userData)).digest('hex').slice(0, 12)}` : workspaceKey(workspaceFile);
