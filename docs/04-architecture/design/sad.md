@@ -424,7 +424,7 @@ const view = await ctx.terminal.open(ticket);  // data / write / resize, мим�
 
 **Достаточность `ctx.os` для базовых плагинов - сделано** (K-12), таблица «сценарий Cyborg - вызовы - чего не хватало» - [ctx-os-coverage.md](../../05-verification/ctx-os-coverage.md). Закрыто по критерию [разд. 2](#2-что-есть-ядро) (плагин не решит сам, не нарушив гарантию ядра): декодирование вывода `process.run` по символам, а не кускам; предел и признак `truncated` вместо тихой обрезки; маска `ПРЕФИКС_*` в `env` правила; атомарная `fs.writeText`; `fs.realpath`; `NotFound`; `fs.readText` до 8 МиБ. Отклонено с причиной в таблице: двоичное чтение и запись, `rename`, `copy`, `append`, `exists`, `lstat`, `encoding` вывода, правки `net.fetch` (ветка K-25); остальное - плагин или этап 2. Тесты - `core/test/os.test.ts`, `core/test/os-lifetime.test.ts`, `core/test/security-gateway.test.ts`.
 
-**Длинные и меняющиеся файлы - сделано.** `fs.readSlice(path, offset, maxBytes)` читает кусок от 4 байт до 1 МиБ и не рвёт символ UTF-8: `bytes` в ответе - на сколько сдвинуть `offset`. `fs.watch(path, listener)` следит за файлом или каталогом по праву чтения; события ядро склеивает за 50 мс и шлёт хосту имена изменённых, id наблюдения даёт хост, чтобы событие, пришедшее раньше ответа, нашло слушателя; не больше 64 наблюдений на плагин - место занимается до первого `await`, так что параллельные вызовы лимит не обходят; право сверяется на каждой пачке событий, и сузившиеся корни воркспейса закрывают наблюдение; выгрузка плагина закрывает все. `paths.home` - домашний каталог, тот же, что `~` в правах; приложение может подменить его средой шлюза, поэтому тест не читает настоящий `~/.claude`.
+**Длинные и меняющиеся файлы - сделано.** `fs.readSlice(path, offset, maxBytes)` читает кусок от 4 байт до 1 МиБ и не рвёт символ UTF-8: `bytes` в ответе - на сколько сдвинуть `offset`. `fs.watch(path, listener)` следит за файлом или каталогом по праву чтения; события ядро склеивает за 50 мс и шлёт хосту имена изменённых, id наблюдения даёт хост, чтобы событие, пришедшее раньше ответа, нашло слушателя; не больше 64 наблюдений на плагин (слежение за каталогом не рекурсивное: что это значит для дерева файлов - [пилот PL-04](#5-пример-базовая-часть)) - место занимается до первого `await`, так что параллельные вызовы лимит не обходят; право сверяется на каждой пачке событий, и сузившиеся корни воркспейса закрывают наблюдение; выгрузка плагина закрывает все. `paths.home` - домашний каталог, тот же, что `~` в правах; приложение может подменить его средой шлюза, поэтому тест не читает настоящий `~/.claude`.
 
 **Маски, `granted`, `shell` - сделано**, тест - `core/test/os.test.ts`. Маска пути: `*` - один сегмент, `**` - любая глубина и только целым сегментом; первый сегмент без `*`, `.` и `..` нельзя, так что маска не начинается с корня ФС. Каталог, попавший под маску, - корень своей области: `fs.remove` его не удалит. `workspace.git` - только в `fs.write`: запись в `.git` корней воркспейса, остальным правам `.git` закрыт по-прежнему. `ctx.os.dialog.open({ title, directory, multiple })` есть у каждого плагина: выбранные человеком пути (после `realpath`) становятся областью `granted` этого плагина, а право `fs.read: ["granted"]` или `fs.write: ["granted"]` даёт к ним доступ; выбор одного плагина не право другого. Под замком окна диалог чужого плагина - `Unavailable`, чтобы системное окно не встало поверх экрана замка (`core/test/window.test.ts`). `shell: ["granted", "https:"]` даёт `ctx.os.shell.openPath` по путям областей из списка и `openExternal` по названным схемам; `file:`, `javascript:`, `data:`, `vbscript:` манифест не примет, а `openPath` отказывает исполняемому файлу - по расширению (`.sh`, `.exe`, `.app`, `.desktop` и подобные) и по биту `x`; там, где плагин сам пишет, - всему, кроме документа (ниже). Адаптер Electron - `shell.openPath`, `shell.openExternal`, `dialog.showOpenDialog` в `electron/src/os-env.ts`.
 
@@ -798,7 +798,7 @@ if (sessions) ctx.subscriptions.add(await sessions.onChange(e => { /* ... */ }))
 "commands": {
   "sessions.new":     { "args": ["string"] },                                    // только пользователь
   "sessions.list":    { "callers": "plugins" },                                   // и чужие главные части
-  "file.open":        { "args": ["record"], "callers": "plugins", "guard": { "fs.read": "0.path" } }
+  "viewer.open":      { "args": ["record"], "callers": "plugins", "guard": { "fs.read": "0.path" } }
 }
 ```
 
@@ -826,14 +826,14 @@ if (sessions) ctx.subscriptions.add(await sessions.onChange(e => { /* ... */ }))
 ```mermaid
 flowchart LR
   accTitle: Контракты базовой части
-  accDescr: sessions потребляет cyborg.agent от agent-claude-code и даёт cyborg.sessions. files требует cyborg.sessions, опционально cyborg.projects, потребляет cyborg.tree-decoration и вызывает команду file.open, которую исполняет viewer. projects потребляет cyborg.project-settings от trackers.
+  accDescr: sessions потребляет cyborg.agent от agent-claude-code и даёт cyborg.sessions. files требует cyborg.sessions, опционально cyborg.projects, потребляет cyborg.tree-decoration и вызывает команду viewer.open, которую исполняет viewer. projects потребляет cyborg.project-settings от trackers.
 
   agent["agent-claude-code"] -->|"cyborg.agent"| sessions["sessions"]
   sessions -->|"cyborg.sessions"| files["files"]
   projects["projects"] -->|"cyborg.projects"| files
   projects -->|"cyborg.projects"| sessions
   git["git"] -.->|"cyborg.tree-decoration"| files
-  files -.->|"команда file.open"| viewer["viewer"]
+  files -.->|"команда viewer.open"| viewer["viewer"]
   trackers["trackers"] -->|"cyborg.project-settings"| projects
 ```
 
@@ -841,9 +841,11 @@ flowchart LR
 |---|---|---|---|
 | `sessions` | `cyborg.sessions`: реестр сессий, документ-терминал, события, `create` / `send` / `paste` / `reveal`, приём броска пути; команда `sessions.new` | `cyborg.agent` (many), `cyborg.projects` (optional) | `pty` по списку агентов, `security.roots` (cwd живых сессий) |
 | `agent-claude-code` | `cyborg.agent`: запуск `claude` с хуками, адаптер событий `Stop` / `Notification`, `resume`; вид «Сессии» (история) | - | `process`: `$SHELL -lc 'claude --version'`, `fs.read: ["~/.claude/projects"]`; pty запускает `sessions` по описанию `launch` |
-| `files` | вид «Файлы»; бросок пути как MIME | `cyborg.sessions`, `cyborg.projects` (optional), `cyborg.tree-decoration` (many); команда `file.open` | `fs.read`, `fs.watch`: `workspace` |
-| `viewer` | документ «файл» (Monaco), исполнитель `file.open` (`callers: "plugins"`, `guard` `fs.read` на путь), `cyborg.editor` | - | `fs.read: workspace`, `shell.openPath: workspace` |
+| `files` | вид «Файлы»; бросок пути как MIME | `cyborg.sessions`, `cyborg.projects` (optional), `cyborg.tree-decoration` (many); команда `viewer.open` | `fs.read`, `fs.watch`: `workspace` |
+| `viewer` | документ «файл» (Monaco), исполнитель `viewer.open` (`callers: "plugins"`, `guard` `fs.read` на путь), `cyborg.editor` | - | `fs.read: workspace`, `shell.openPath: workspace` |
 | `projects` | `cyborg.projects`, диалог проекта, команды `projects.new` / `projects.edit` | `cyborg.project-settings` (many) | `security.roots` |
+
+**Дерево, git и просмотр - пилот PL-04 сделан** ([#23](https://github.com/dex-it/cyborg-harness/issues/23), числа и решения - [pilot-files-git.md](../../05-verification/pilot-files-git.md)). Плагины стенда `files`, `git`, `viewer` работают в трёх хостах над настоящим репозиторием, тесты - `playground/test/pilot-*.test.ts`. Закреплено: дерево строится по `fs.list` и обновляется по именам из `fs.watch` без опроса (в простое ни одного вызова, процессор 0,1-0,2% против 0,4-16,8% у опроса Cyborg); `git` - единственный с правом `process` на `git`, правило закрепляет аргументы вместе с `core.fsmonitor=false` и `core.hooksPath=/dev/null`; члены `cyborg.git` и `cyborg.tree-decoration` с путём объявляют `guard` `fs.read`; открытие файла - команда `viewer.open` (`callers: "plugins"`, `guard` `fs.read` на `path`). Команда названа `viewer.open`, а не `file.open`: она обязана лежать в пространстве имён исполнителя ([ADR-CH-0016](../adr/ADR-CH-0016-command-callers.md), п. 6). **Предел слежения:** слежение не рекурсивное и не больше 64 на плагин. Для узлов раскрытых каталогов этого хватает (`files` вытесняет давно раскрытые), для отметок git - нет: правка в нераскрытом каталоге событий не даёт, а каталогов в репозиториях стенда от 64 до 5 700. Нужна доработка шлюза (рекурсивное слежение за корнем одной записью, [#182](https://github.com/dex-it/cyborg-harness/issues/182)). События ОС при лавине теряются, поэтому после тишины в 300 мс узлы перечитываются целиком; без опроса не лечится только потеря всех событий сразу. Черновики контрактов объявлены в пакете (`contracts/git.ts`, `contracts/tree.ts`).
 
 **`cyborg.agent` - сделано.** Контракт - `contracts/agent.ts`: `facts` (найдена ли программа, версия, `capabilities`: `resume`, `history`, `events`), `launch` (готовый вход `ctx.os.pty.spawn`), `watch` (события `cwd`, `session` - id сессии самого агента для `resume`, `activity`, `prompt`, `turnEnd`, `waiting`), `ended` (уборка и причина выхода по коду: 127 - `notFound`), `history`. Поставщик процессов не создаёт ([ADR-CH-0004](../adr/ADR-CH-0004-agent-provider-contract.md)), pty запускает потребитель по своему праву. Программа правила `process` и `pty` может быть `$SHELL` - оболочка входа человека: ядро подставляет её путь, а правило обязано закрепить флаг и скрипт; так `agent-claude-code` запускает `$SHELL -lc 'exec claude --settings "$CYBORG_SETTINGS" "$@"'`, как сегодняшний Cyborg, и `claude` находится по PATH из профиля. В playground: `agent-claude-code` (хуки `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`, `Notification` пишут JSON в файл сессии в `plugin-data`, `watch` следит за каталогом сессий через `fs.watch` и дочитывает файл через `fs.readSlice` с конца; `history` - интерактивные сессии каталога и его worktree из `~/.claude/projects`, заголовок с краёв журнала, как в сегодняшнем Cyborg), второй поставщик `agent-shell` (агент без следов: только запуск и вывод) и потребитель `sessions` с видом - кнопка на поставщика и терминал сессии по билету. Общий набор тестов поставщика - `agentContractSuite` из `@cyborg-harness/testing`, вызванный в `playground/test/agents.test.ts` на обоих поставщиках; там же паритет аргументов и хуков и проверка потребителя `sessions`; дымовой тест открывает сессию `agent-shell` в окне. Восстановление сессий - [5.3](#53-восстановление-сессий). **«Ждёт», фрагменты промпта, confused deputy - сделано.** «Ждёт» после `Stop` объявляет `agent-claude-code` (`waitAfterStop`), как сегодняшний Cyborg: только если ход закончен без фоновой работы и сессия молчит 30 с - чужой Stop-хук может продолжить ход; любое следующее событие и `dispose` снимают таймер. Фрагменты промпта - контракт `cyborg.session-prompt` (кратность many): `sessions` собирает фрагменты всех поставщиков по порядку id и передаёт в `launch({ promptFragments })`; изоляцию даёт плагин `session-isolation`. ADR-CH-0004 (п. 6) называл для этого waterfall-событие `session.prompt`; шины событий в ядре нет, а контракт many даёт тот же сбор без нового механизма. Confused deputy закрыт в ядре: `pty.spawn({ describedBy })` сверяет описание и с `pty` потребителя, и с новым правом `launch` поставщика - права пересекаются, сторонний поставщик не получает права потребителя; `launch` члена в `ctx.os` не даёт. Дымовой тест с `CYBORG_SMOKE_CLAUDE=1` запускает живой `claude` по праву `launch` и доходит до вопроса о доверии к каталогу; стрелки из пустого поля вида уходят в сессию.
 
@@ -858,14 +860,14 @@ flowchart LR
 ```mermaid
 sequenceDiagram
   accTitle: Открытие файла из дерева
-  accDescr: files вызывает команду file.open через реестр ядра. Ядро проверяет право fs.read у files, находит исполнителя viewer и передаёт вызов. viewer читает файл через ctx.os.fs и открывает документ в группе документов.
+  accDescr: files вызывает команду viewer.open через реестр ядра. Ядро проверяет право fs.read у files, находит исполнителя viewer и передаёт вызов. viewer читает файл через ctx.os.fs и открывает документ в группе документов.
 
   participant F as files
   participant K as Ядро
   participant V as viewer
-  F->>K: commands.run('file.open', {path, line})
+  F->>K: commands.run('viewer.open', {path, line})
   K->>K: callers команды и guard: право fs.read:path у files
-  K->>V: file.open {path, line}
+  K->>V: viewer.open {path, line}
   V->>K: ctx.os.fs.readText(path)
   K->>K: realpath, область workspace у viewer
   K-->>V: текст

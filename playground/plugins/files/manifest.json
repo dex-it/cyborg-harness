@@ -1,0 +1,20 @@
+{
+  "id": "files",
+  "version": "1.0.0",
+  "engines": {
+    "cyborg": "^1"
+  },
+  "consumes": {
+    "cyborg.tree-decoration": "^1"
+  },
+  "commands": {
+    "files.root": { "args": ["string"] },
+    "files.expand": { "args": ["string"] },
+    "files.collapse": { "args": ["string"] },
+    "files.open": { "args": ["string"] },
+    "files.state": {}
+  },
+  "permissions": {
+    "fs.read": ["workspace"]
+  }
+}
