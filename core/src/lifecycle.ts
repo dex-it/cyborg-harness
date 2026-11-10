@@ -47,7 +47,7 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     enqueue(async () => {
       await activation.activating.get(id);
       if (!ctx.unloading && active.includes(id)) await unloadPlugin(id);
-    }).catch((error: unknown) => options.onLog?.(id, `снятие после выключения не удалось: ${errorMessage(error)}`, 'error'));
+    }).catch((error: unknown) => ctx.parts.logs.pluginLine(id, `снятие после выключения не удалось: ${errorMessage(error)}`, 'error'));
   }
 
   function switchOffFlood(id: string): void {
