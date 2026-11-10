@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { claimInstance, workspaceKey, type Claim } from '@cyborg-harness/core';
+import { claimInstance, neighborInstances, workspaceKey, type Claim, type LoadOptions } from '@cyborg-harness/core';
 import type { RestartFlags } from './restarts.ts';
 
 /** Каталог сессии окна без воркспейса (и префикс его ключа экземпляра): такое окно в `userData` одно. */
@@ -51,11 +51,21 @@ export async function claimWorkspace(
   data: Record<string, unknown>,
   onSecond: (data: unknown) => void,
   onUnavailable?: (error: Error) => void,
+  working?: () => readonly string[],
 ): Promise<Claim> {
   try {
-    return await claimInstance(instanceKey(workspaceFile, userData), data, onSecond, { home: userData });
+    return await claimInstance(instanceKey(workspaceFile, userData), data, onSecond, { home: userData, plugins: working });
   } catch (error) {
     onUnavailable?.(error instanceof Error ? error : new Error(String(error)));
     return { kind: 'owner', close: () => undefined };
   }
 }
+
+/**
+ * Проверка соседних окон для `StartOptions.neighbors`: другие экземпляры того же каталога адресов и плагины, которые могут работать у них (#154).
+ * Каталог адресов, где контроль экземпляров не заработал (`claimWorkspace` отдал владельца без адреса), соседей не видит: нечем.
+ */
+export const workspaceNeighbors =
+  (userData: string, workspaceFile: string | undefined): NonNullable<LoadOptions['neighbors']> =>
+  () =>
+    neighborInstances(instanceKey(workspaceFile, userData), { home: userData });

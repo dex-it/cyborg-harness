@@ -33,6 +33,7 @@ import {
   workspaceInfo,
   type AppMenuItem,
   workspaceInstance,
+  workspaceNeighbors,
 } from '@cyborg-harness/electron';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
 import { createErrorReporter, type ErrorNotice } from './main-errors.ts';
@@ -152,6 +153,8 @@ const claim = spiking
         // eslint-disable-next-line no-console -- до готовности приложения журнала плагинов ещё нет: причина уходит в stderr
         console.error(instanceProblem);
       },
+      // Соседние окна этого userData спрашивают, какие плагины здесь могут работать, прежде чем удалить плагин (#154); до создания службы запрос получит «не знаю».
+      () => plugins.working(),
     );
 
 /** Первый запуск: alice и bob делят хост c - видно, как падение одного процесса снимает обоих, а чат в хосте b живёт. */
@@ -258,6 +261,7 @@ const start = () => {
     migrate: migrateLegacyWorkspace,
     safeMode,
     userPlugins,
+    neighbors: workspaceNeighbors(userData, workspaceFile),
     builtinDir: path.join(__dirname, deliveryMode ? 'delivery' : 'plugins'),
     builtinMode: deliveryMode ? 'delivery' : 'stand',
     spawnHost: hosts.spawn,

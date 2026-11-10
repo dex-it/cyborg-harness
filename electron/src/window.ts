@@ -105,6 +105,7 @@ export function watchTheme(getWindow: () => BrowserWindow | undefined): void {
  * - `unresponsive` - владелец жив, но не ответил в срок: запрос не доставлен, текущему тоже пора выйти, но человеку об этом надо сказать.
  * Другой воркспейс с тем же `userData` не мешает. Окно без воркспейса (`workspaceFile` не задан) в `userData` одно. Вызывать до готовности
  * приложения; адрес отдаётся при выходе. Промис не отклоняется.
+ * `working` - плагины, которые могут работать в этом окне (`PluginsService.working`): их называет владелец соседним окнам, когда те готовятся удалить плагин (`workspaceNeighbors`, #154); читается при запросе, ядро может появиться позже.
  */
 export async function workspaceInstance(
   userData: string,
@@ -112,8 +113,9 @@ export async function workspaceInstance(
   data: Record<string, unknown>,
   onSecond: (data: unknown) => void,
   onUnavailable?: (error: Error) => void,
+  working?: () => readonly string[],
 ): Promise<'owner' | 'handed' | 'unresponsive'> {
-  const claim = await claimWorkspace(userData, workspaceFile, data, onSecond, onUnavailable);
+  const claim = await claimWorkspace(userData, workspaceFile, data, onSecond, onUnavailable, working);
   if (claim.kind !== 'owner') return claim.kind;
   app.once('will-quit', () => claim.close());
   return 'owner';
