@@ -189,6 +189,8 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
   // Приёмник как у приложения (K-30): запись идёт в кольцо в памяти и пакетом в файл в каталоге замера, содержимого в ней нет.
   const diagnostics = fileDiagnostics(path.join(base, 'app'), path.join(base, 'workspace.cyborg.json'));
   let traced = 0;
+  /** Процессы pty замера живут в главном процессе: выход приложения с недоставленным выходом роняет Electron SIGABRT (#185), поэтому их дожидаются до выхода. */
+  let drainPtys: () => Promise<void> = () => Promise.resolve();
   try {
     const files = path.join(base, 'files');
     const prepare = (dir: string) => {
@@ -208,6 +210,9 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
     const parsed = parseManifest(raw, PLUGIN_API_VERSION);
     if (!parsed.ok) throw new Error(`манифест замера: ${parsed.errors.join('; ')}`);
     const env: OsEnvironment = { ...electronOs({ userData: path.join(base, 'app'), roots: () => [], protectedPaths: [], raiseWindow: () => undefined }), limits: BENCH_LIMITS };
+    drainPtys = async () => {
+      await env.pty?.drain?.();
+    };
     const kernel = await load({
       apiVersion: PLUGIN_API_VERSION,
       enabled: [ID],
@@ -263,6 +268,7 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
     report.error = `${error instanceof Error ? (error.stack ?? error.message) : String(error)}\nжурнал: ${JSON.stringify(journal)}`;
     process.exitCode = 1;
   } finally {
+    await drainPtys();
     server.close();
     fs.rmSync(base, { recursive: true, force: true });
   }
