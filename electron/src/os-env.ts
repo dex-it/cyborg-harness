@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { BrowserWindow, clipboard, dialog, Notification, safeStorage, shell } from 'electron';
-import * as nodePty from 'node-pty';
-import { groupKilled, type NoticeEvents, type NoticeHandle, type OsEnvironment, type SpawnPtyHost } from '@cyborg-harness/core';
+import type { NoticeEvents, NoticeHandle, OsEnvironment, SpawnPtyHost } from '@cyborg-harness/core';
+import { nodePtyBackend } from './pty-backend.ts';
 import { fileSecrets, type SecretCipher } from './secrets-file.ts';
 
 const safeCipher: SecretCipher = {
@@ -43,7 +43,7 @@ export interface ElectronOsOptions {
   readonly raiseWindow: () => void;
   /** Отдельный процесс pty-хоста (`utilityPtyHost`, K-01): `node-pty` живёт в нём, ядро следит за ним сторожем. Сильнее `pty`. */
   readonly ptyHost?: SpawnPtyHost;
-  /** Без `ptyHost` pty берутся из этого бэкенда в главном процессе (по умолчанию `node-pty`): зависший нативный модуль заморозит окно. */
+  /** Без `ptyHost` pty берутся из этого бэкенда в главном процессе (по умолчанию `node-pty`, загружается при первом pty): зависший нативный модуль заморозит окно. */
   readonly pty?: OsEnvironment['pty'];
 }
 
@@ -76,6 +76,6 @@ export function electronOs(options: ElectronOsOptions): OsEnvironment {
       },
     },
     ...(options.ptyHost !== undefined && { ptyHost: options.ptyHost }),
-    pty: options.pty ?? { spawn: (file, args, o) => groupKilled(nodePty.spawn(file, args, o)) },
+    pty: options.pty ?? nodePtyBackend(),
   };
 }
