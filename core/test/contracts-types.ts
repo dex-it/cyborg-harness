@@ -42,6 +42,13 @@ export const consumer: PluginModule = {
     void sessions?.onChange(() => undefined).dispose();
     // @ts-expect-error мажорной версии 2 у cyborg.sessions нет
     ctx.contracts.get('cyborg.sessions', 2);
+    // reveal появился в 1.1: поставщик 1.0 его не даёт, поэтому член необязателен и потребитель проверяет, что он есть.
+    // @ts-expect-error член может отсутствовать
+    void sessions?.reveal('s1');
+    void sessions?.reveal?.('s1');
+    // ctx.window.focused и ctx.documents.reveal отвечают обещанием.
+    void ctx.window.focused().then((focused: boolean) => focused);
+    void ctx.documents.reveal('d1').then(() => undefined);
     void v1?.read('/a');
     void v2?.readText('/a');
     const tabs = ctx.contracts.all('demo.tab', 1);

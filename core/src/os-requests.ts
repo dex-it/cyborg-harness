@@ -50,12 +50,16 @@ export function createOsRequests(ctx: KernelContext): OsRequests {
   }
 
   function attach({ live, onRequest }: BridgeEnd): void {
-    onRequest('documents', { pluginId: 'string', method: ['list', 'open', 'save', 'close'], args: 'array' }, (p) => {
+    onRequest('documents', { pluginId: 'string', method: ['list', 'open', 'save', 'close', 'reveal'], args: 'array' }, (p) => {
       const id = live(p.pluginId).id;
       if (p.method === 'list') return documents.list(id);
       if (p.method === 'open') return documents.open(id, p.args[0], p.args[1]);
       if (p.method === 'save') return documents.save(id, p.args[0], p.args[1]);
-      return documents.close(id, p.args[0]);
+      if (p.method === 'close') return documents.close(id, p.args[0]);
+      // Под чужим замком вкладку выбирает не плагин: как системный диалог, окно ему не принадлежит.
+      if (!layer.allows(id)) throw new CoreError('Unavailable', `${id}: окно закрыто замком`);
+      ctx.options.onDocumentReveal?.(documents.reveal(id, p.args[0]));
+      return undefined;
     });
     onRequest('os', { pluginId: 'string', method: 'string', args: 'array' }, (p, signal, op) => {
       const m = live(p.pluginId);
@@ -67,6 +71,7 @@ export function createOsRequests(ctx: KernelContext): OsRequests {
         return undefined;
       }
       if (p.method === 'notify.show' || p.method === 'notify.close') return notifyCall(m, p.method, p.args);
+      if (p.method === 'window.focused') return ctx.parts.pool.focused();
       if (p.method === 'window.title') {
         layer.setTitle(m.id, p.args[0]);
         return undefined;

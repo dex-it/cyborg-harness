@@ -198,6 +198,10 @@ export interface StartOptions {
   readonly onDiscovered?: (found: Discovered) => void;
   readonly onWindow?: (snapshot: WindowSnapshot) => void;
   readonly onDocuments?: () => void;
+  /** Плагин просит активировать вкладку своего документа (`ctx.documents.reveal`); id проверен ядром. */
+  readonly onDocumentReveal?: (id: string) => void;
+  /** Окно в фокусе сейчас: ядро спрашивает, пока не пришло первое событие `focus` (окно могло потерять фокус, пока ядро запускалось). */
+  readonly windowFocused?: () => boolean;
   readonly onKeptPty?: () => void;
   /** Снимок меню ядра (`Kernel.menus`) поменялся: приложение пересобирает меню ОС. */
   readonly onMenus?: () => void;
@@ -266,6 +270,8 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     neighbors: options.neighbors,
     onWindow: (snapshot) => options.onWindow?.(snapshot),
     onDocuments: () => options.onDocuments?.(),
+    onDocumentReveal: (id) => options.onDocumentReveal?.(id),
+    windowFocused: options.windowFocused,
     onKeptPty: () => options.onKeptPty?.(),
     onMenus: () => options.onMenus?.(),
     onLog: (id, message, level) => {
@@ -341,11 +347,13 @@ export interface PluginsEvents {
   viewMessage?(pluginId: string, view: string, message: unknown, group: string | undefined): void;
   /** Заголовок окна от ядра: воркспейс, фрагменты плагинов, приложение. */
   title?(title: string): void;
+  /** Плагин просит сделать вкладку документа активной (`ctx.documents.reveal`): окно выбирает её и показывает. Каждая просьба доходит отдельно. */
+  revealDocument?(id: string): void;
   /** Команда окна (`WINDOW_COMMANDS`): исполняет окно, а не плагин. */
   windowCommand?(command: string): void;
 }
 
-export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProblem' | 'onLog' | 'onViewMessage' | 'onDiscovered' | 'onWindow' | 'onDocuments' | 'onKeptPty' | 'onMenus'> {
+export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProblem' | 'onLog' | 'onViewMessage' | 'onDiscovered' | 'onWindow' | 'onDocuments' | 'onDocumentReveal' | 'onKeptPty' | 'onMenus'> {
   /** Процесс хоста для «Уронить» и «Повесить»; у хостов в том же процессе его нет. */
   readonly pidOf?: (hostId: string) => number | undefined;
 }
@@ -462,6 +470,7 @@ export class PluginsService implements ViewGroups {
           this.changed();
         },
         onDocuments: () => this.changed(),
+        onDocumentReveal: (id) => this.events.revealDocument?.(id),
         onKeptPty: () => this.changed(),
         onMenus: () => this.changed(),
         onLog: (pluginId, text) => {

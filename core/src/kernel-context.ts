@@ -90,6 +90,8 @@ export interface HostPool {
   /** Сброс счёта сбоев хоста без виновника: «Включить снова». */
   forgetFailures(hostId: string): void;
   emit(event: SystemEvent): void;
+  /** Окно в фокусе: последнее событие `focus`, до него - `LoadOptions.windowFocused`, без источника - `true`. */
+  focused(): boolean;
   beforeQuit(budget: number): Promise<void>;
   stopAll(): void;
 }

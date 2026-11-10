@@ -1010,6 +1010,17 @@ async function main() {
     await sleep(300);
     assert.equal(await received(), 1, 'кнопка ответила на вопрос агента за человека');
     await waitFor('вкладка сессии подставного claude в панели «Документы»', async () => (await docRows()) === 'sessions · session:true');
+    // #194: просьба плагина активировать вкладку (ctx.documents.reveal) доходит до окна по каналу documents:reveal. Ядро и службу проверяют тесты;
+    // здесь последний шаг цепочки в настоящем окне: мост preload, панель «Документы» выходит вперёд, строка документа помечена активной.
+    await ev("document.getElementById('tab-plugins').click()");
+    const tabState = () => ev("document.getElementById('tab-documents').getAttribute('aria-selected') + ':' + String(document.querySelector('#documents-list .document-row').getAttribute('aria-current'))");
+    assert.equal(await tabState(), 'false:null', 'до просьбы панель «Документы» не выбрана и строка не помечена');
+    const docId = await ev("document.querySelector('#documents-list .document-row').dataset.document");
+    await main(`(() => { const { webContents } = process.mainModule.require('electron'); webContents.getAllWebContents().find((w) => w.getType() === 'window').send('documents:reveal', ${JSON.stringify(docId)}); })()`);
+    await waitFor('просьба reveal выбрала панель «Документы» и пометила вкладку сессии', async () => (await tabState()) === 'true:true');
+    await ev("document.getElementById('tab-plugins').click()");
+    await main(`(() => { const { webContents } = process.mainModule.require('electron'); webContents.getAllWebContents().find((w) => w.getType() === 'window').send('documents:reveal', ${JSON.stringify(docId)}); })()`);
+    await waitFor('повторная просьба снова возвращает человека на вкладку', async () => (await tabState()) === 'true:true');
     await ev("document.querySelector('#documents-list .document-row button').click()");
     await waitFor('сессия подставного claude закрыта', async () => (await docRows()) === '');
     log('кнопки агента: реплика на кнопке второй строкой; Enter за человека - только после конца хода, при вопросе агента реплика встаёт в строку ввода');
