@@ -45,6 +45,10 @@ export function buildKernel(ctx: KernelContext): Kernel {
       return layer.show(pluginId, view, spec);
     },
     answerDialog: (id, choice) => layer.answer(id, choice),
+    modalFor: (pluginId, view) => layer.modalData(pluginId, view),
+    closeModal: (pluginId, view, result) => viewChannels.closeModal(pluginId, view, result),
+    cancelModal: (id) => layer.cancelModal(id),
+    dismissModal: () => layer.dismissModal(),
     viewDenied(pluginId, url) {
       if (!known.some((m) => m.id === pluginId)) return;
       const shown = url.length > MAX_DENIED_URL ? `${url.slice(0, MAX_DENIED_URL)}…` : url;

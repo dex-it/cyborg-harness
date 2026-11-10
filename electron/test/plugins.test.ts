@@ -618,3 +618,52 @@ test('канал вида: сообщение главной части уход
   assert.match((await service.viewPostFrom('face', 'main', 1)).error ?? '', /не активен/);
   await service.unload();
 });
+
+test('модальное окно плагина: данные видит только его вид, результат вида доходит владельцу, Escape и закрытие окна дают undefined, отказ ядра - Reply с текстом', async () => {
+  const userData = tmp();
+  const dir = path.join(userData, 'plugins');
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['face'] } }));
+  plugin(dir, 'face', { commands: { 'face.form': {} }, ui: { views: { main: './ui/ui.js', form: { module: './ui/form.js', area: 'modal', title: 'Форма' } } } }, 'export default {}');
+  const modules: Record<string, PluginModule> = {
+    face: {
+      activate(ctx) {
+        ctx.commands.register('face.form', () => ctx.views.modal('form', { data: { имя: 'черновик' } }));
+      },
+    },
+  };
+  const service = new PluginsService({ changed: () => {}, alert: () => {} });
+  await service.start({
+    userData,
+    builtinDir: path.join(userData, 'нет'),
+    userPlugins: true,
+    spawnHost: inlineHosts(async (entry) => modules[/\/(\w+)\/index\.mjs$/.exec(entry)?.[1] ?? ''] ?? { activate() {} }),
+    log: () => {},
+  });
+  assert.deepEqual(service.modalFor('face', 'form'), {}, 'окна нет - данных нет');
+  assert.equal(service.dismissModal(), false, 'Escape без окна странице не отнимается');
+  const shown = () => service.snapshot().window.modal;
+
+  const result = service.runFor('face', 'face.form', []);
+  await waitFor('окно показано', () => shown() !== undefined);
+  assert.deepEqual(service.modalFor('face', 'form'), { value: { data: { имя: 'черновик' } } });
+  assert.deepEqual(service.modalFor('face', 'main'), {}, 'чужому виду того же плагина данные не отдаются');
+  assert.deepEqual(service.modalFor('other', 'form'), {}, 'чужому плагину тоже');
+  assert.match(service.closeModalFor('face', 'main', 1).error ?? '', /нет на экране/);
+  assert.match(service.closeModalFor('face', 7, 1).error ?? '', /имя вида/);
+  assert.deepEqual(service.closeModalFor('face', 'form', { имя: 'Проект' }), {});
+  assert.deepEqual(await result, { value: { имя: 'Проект' } });
+  assert.equal(shown(), undefined);
+
+  const escaped = service.runFor('face', 'face.form', []);
+  await waitFor('окно показано', () => shown() !== undefined);
+  assert.equal(service.dismissModal(), true);
+  assert.deepEqual(await escaped, {});
+
+  const closed = service.runFor('face', 'face.form', []);
+  await waitFor('окно показано', () => shown() !== undefined);
+  assert.match(service.cancelModal({ id: -1 }).error ?? '', /нет на экране/);
+  assert.match(service.cancelModal('x').error ?? '', /\{ id \}/);
+  assert.deepEqual(service.cancelModal({ id: shown()?.id }), {});
+  assert.deepEqual(await closed, {});
+  await service.unload();
+});

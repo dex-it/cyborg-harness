@@ -188,11 +188,13 @@ export interface ViewsState {
   forget(pluginId: string): Promise<number>;
 }
 
-/** Канал «главная часть - вид»: сообщения главной части идут в `LoadOptions.onViewMessage`, сообщения вида - слушателям в хосте. */
+/** Главная часть и вид: канал сообщений (в `LoadOptions.onViewMessage` и слушателям в хосте), модальные окна и диалоги главной части. */
 export interface ViewChannels {
   attach(end: BridgeEnd): void;
   /** Сообщение вида; плагин назвало приложение по origin фрейма. */
   fromView(pluginId: string, view: string, message: unknown): Promise<void>;
+  /** Вид закрывает своё модальное окно с результатом. */
+  closeModal(pluginId: string, view: string, result: unknown): void;
 }
 
 /** Строки плагинов и вывод хостов: уровень, предел длины и частоты, вычёркивание секретов, дальше - `LoadOptions.onLog`. */

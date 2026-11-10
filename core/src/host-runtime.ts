@@ -3,7 +3,7 @@ import { splitSignal, withSignal } from './cancel.ts';
 import { resolveSection, VERSION_KEY, type SectionResult } from './config.ts';
 import { DisposableStore, toDisposable, type Disposable } from './disposable.ts';
 import { compileSchema } from './json-schema.ts';
-import type { ContractName, ContractType, DocumentChange, DocumentInfo, DocumentInit, HttpServer, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue, ServeRequest, ServeResponse, ViewChannel } from '@cyborg-harness/contracts';
+import type { AskDialog, ContractName, ContractType, DocumentChange, DocumentInfo, DocumentInit, HttpServer, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue, ServeRequest, ServeResponse, ViewChannel, ModalInit } from '@cyborg-harness/contracts';
 import { CoreError, errorMessage } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';
@@ -762,6 +762,10 @@ function context(
           onMessage: (listener: (message: unknown) => void) => track(system.onView(pluginId, view, listener)),
         });
       },
+      modal: (view: string, init?: ModalInit) => endpoint.request('views', { pluginId, method: 'modal', args: [view, init] }),
+    }),
+    dialogs: Object.freeze({
+      show: (spec: AskDialog) => endpoint.request<string | undefined>('dialogs', { pluginId, method: 'show', args: [spec] }),
     }),
     system: Object.freeze({
       onSuspend: (listener: () => void) => track(system.on(pluginId, 'suspend', listener)),

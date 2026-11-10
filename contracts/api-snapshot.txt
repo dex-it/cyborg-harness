@@ -359,6 +359,7 @@ export interface PluginSecrets {
 // ---- plugin.d.ts
 import type { ContractName, ContractType, Major, MajorOf, Remote, VersionOf } from './index.js';
 import type { PluginOs, PluginSecrets } from './os.js';
+import type { AskDialog } from './view.js';
 export interface Disposable {
     dispose(): void;
 }
@@ -427,6 +428,7 @@ export interface PluginContext {
     readonly system: PluginSystem;
     readonly documents: PluginDocuments;
     readonly views: PluginViews;
+    readonly dialogs: PluginDialogs;
     log(message: string, level?: LogLevel): void;
 }
 export interface KeyWhen {
@@ -473,8 +475,16 @@ export interface ViewChannel {
     post(message: unknown): Promise<void>;
     onMessage(listener: (message: unknown) => void): Disposable;
 }
+export interface ModalInit {
+    readonly title?: string;
+    readonly data?: unknown;
+}
 export interface PluginViews {
     channel(view: string): ViewChannel;
+    modal(view: string, init?: ModalInit): Promise<unknown>;
+}
+export interface PluginDialogs {
+    show(spec: AskDialog): Promise<string | undefined>;
 }
 export interface PluginWindow {
     onFocusChange(listener: (focused: boolean) => void): Disposable;
@@ -526,12 +536,13 @@ export interface DialogChoice {
     readonly id: string;
     readonly label: string;
 }
-export type DialogSpec = {
+export interface AskDialog {
     readonly kind: 'ask';
     readonly title: string;
     readonly message?: string;
     readonly buttons: readonly DialogChoice[];
-} | {
+}
+export type DialogSpec = AskDialog | {
     readonly kind: 'menu';
     readonly items: readonly DialogChoice[];
     readonly at: {
@@ -539,6 +550,10 @@ export type DialogSpec = {
         readonly y: number;
     };
 };
+export interface ViewModal {
+    readonly data: unknown;
+    close(result?: unknown): Promise<void>;
+}
 export interface UiContext {
     readonly pluginId: string;
     readonly view: string;
@@ -566,6 +581,7 @@ export interface UiContext {
     readonly dialogs: {
         show(spec: DialogSpec): Promise<string | undefined>;
     };
+    readonly modal: ViewModal | undefined;
     readonly channel: ViewChannel;
     readonly keys: {
         of(command: string): string | undefined;

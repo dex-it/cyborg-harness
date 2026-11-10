@@ -466,6 +466,43 @@ export class PluginsService implements ViewGroups {
     }
   }
 
+  /** Данные модального окна, показанного виду; не в окне - `{}` без значения. Плагин - из origin фрейма, имя вида - из слов вида. */
+  modalFor(pluginId: string, view: unknown): Reply {
+    if (!this.kernel) return { error: 'ядро плагинов не запущено' };
+    if (typeof view !== 'string') return { error: 'модальное окно: ожидается имя вида' };
+    const modal = this.kernel.modalFor(pluginId, view);
+    return modal ? { value: modal } : {};
+  }
+
+  /** Вид закрывает своё модальное окно и отдаёт результат владельцу. */
+  closeModalFor(pluginId: string, view: unknown, result: unknown): Reply {
+    if (!this.kernel) return { error: 'ядро плагинов не запущено' };
+    if (typeof view !== 'string') return { error: 'модальное окно: ожидается имя вида' };
+    try {
+      this.kernel.closeModal(pluginId, view, result);
+      return {};
+    } catch (error) {
+      return { error: errorMessage(error) };
+    }
+  }
+
+  /** Человек закрыл модальное окно в самом окне (крестик, клик мимо): владелец получает undefined. */
+  cancelModal(arg: unknown): Reply {
+    if (!isRecord(arg) || typeof arg.id !== 'number') return { error: 'закрытие окна: { id }' };
+    if (!this.kernel) return { error: 'ядро плагинов не запущено' };
+    try {
+      this.kernel.cancelModal(arg.id);
+      return {};
+    } catch (error) {
+      return { error: errorMessage(error) };
+    }
+  }
+
+  /** Escape из `before-input-event`: `true` - нажатие принадлежит модальному окну, странице его отдавать не надо. */
+  dismissModal(): boolean {
+    return this.kernel?.dismissModal() ?? false;
+  }
+
   keysFor(pluginId: string): Readonly<Record<string, string>> {
     return this.kernel?.keysOf(pluginId) ?? {};
   }

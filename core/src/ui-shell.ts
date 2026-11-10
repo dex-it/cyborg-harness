@@ -33,6 +33,10 @@ export interface ViewBridge {
   channelPost(view: string, message: unknown): Promise<Reply>;
   /** Сообщения главной части этому виду; приложение отдаёт их фрейму вида с этим именем. */
   onChannel(listener: (message: unknown) => void): void;
+  /** `value` - `{ data }` модального окна, показанного этому виду, или undefined, если вид не в окне. */
+  modal(view: string): Promise<Reply>;
+  /** Вид закрывает своё модальное окно и отдаёт результат владельцу. */
+  modalClose(view: string, result: unknown): Promise<Reply>;
 }
 
 /** Ответ на `terminalOpen`: описание pty, хвост и номер терминала в этом документе. */
@@ -169,7 +173,9 @@ class Terminals {
 /** Тема ставится до возврата: модуль плагина монтируется уже на своих токенах, без вспышки чужих цветов. */
 export async function connectView(bridge: ViewBridge, target: ViewTarget): Promise<UiContext> {
   const keysAsked = bridge.keys();
-  let [tokens, memory] = await Promise.all([bridge.theme(), bridge.state(target.view).then(unwrap)]);
+  const [firstTokens, firstMemory, modalData] = await Promise.all([bridge.theme(), bridge.state(target.view).then(unwrap), bridge.modal(target.view).then(unwrap)]);
+  let tokens = firstTokens;
+  let memory = firstMemory;
   const keys = { ...(await keysAsked) };
   target.applyTheme(tokens);
   let visible = true;
@@ -220,6 +226,13 @@ export async function connectView(bridge: ViewBridge, target: ViewTarget): Promi
       },
     }),
     dialogs: Object.freeze({ show: async (spec: DialogSpec) => unwrap(await bridge.dialog(target.view, spec)) as string | undefined }),
+    modal:
+      modalData === undefined
+        ? undefined
+        : Object.freeze({
+            data: (modalData as { data?: unknown }).data,
+            close: async (result?: unknown) => void unwrap(await bridge.modalClose(target.view, result)),
+          }),
     channel: Object.freeze({
       post: async (message: unknown) => void unwrap(await bridge.channelPost(target.view, message)),
       onMessage: (listener: (message: unknown) => void) => messages.add(listener),

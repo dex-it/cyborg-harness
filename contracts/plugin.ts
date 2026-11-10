@@ -1,5 +1,6 @@
 import type { ContractName, ContractType, Major, MajorOf, Remote, VersionOf } from './index.ts';
 import type { PluginOs, PluginSecrets } from './os.ts';
+import type { AskDialog } from './view.ts';
 
 export interface Disposable {
   dispose(): void;
@@ -90,6 +91,7 @@ export interface PluginContext {
   readonly system: PluginSystem;
   readonly documents: PluginDocuments;
   readonly views: PluginViews;
+  readonly dialogs: PluginDialogs;
   /**
    * Строка в журнал плагина с его id и уровнем (по умолчанию `info`); уровень вне `LogLevel` - `Invalid`.
    * Ядро вычёркивает из строки значения из хранилища секретов, обрезает строку длиннее 8 КиБ, строки сверх 100 за секунду в журнал по одной не кладёт
@@ -184,10 +186,34 @@ export interface ViewChannel {
   onMessage(listener: (message: unknown) => void): Disposable;
 }
 
+/** Что главная часть передаёт модальному окну и как его назвать. */
+export interface ModalInit {
+  /** Название окна для читающих с экрана и для строки окна; до 200 символов. Умолчание: `title` вида в манифесте, затем id плагина. */
+  readonly title?: string;
+  /** Данные для вида (`ctx.modal.data`): те же правила и предел, что у сообщения канала. */
+  readonly data?: unknown;
+}
+
 /** Связь главной части с видами своего плагина. */
 export interface PluginViews {
   /** Вид должен быть в `ui.views` манифеста; чужого плагина и вида, которого нет, у плагина нет: `Invalid` при первом `post`. */
   channel(view: string): ViewChannel;
+  /**
+   * Модальное окно плагина: вид с `area: "modal"` в манифесте. Ядро показывает его слоем окна поверх всех фреймов, остальные виды под ним недоступны,
+   * фокус заперт в окне, Escape закрывает. Окна идут по одному в порядке просьб (у плагина в очереди не больше 8), под замком окна чужое ждёт.
+   * Ответ - то, что вид передал в `ctx.modal.close(result)`; Escape, закрытие окна человеком и выгрузка плагина дают `undefined`.
+   * Вид, не объявленный модальным, - `Invalid`.
+   */
+  modal(view: string, init?: ModalInit): Promise<unknown>;
+}
+
+/** Диалоги ядра для главной части: у безголового плагина (например, `git`) нет вида, из которого можно спросить. */
+export interface PluginDialogs {
+  /**
+   * Вопрос с кнопками в слое ядра поверх всех фреймов, в той же очереди окна, что диалоги видов; ответ - `id` кнопки, Escape и выгрузка плагина - `undefined`.
+   * Меню (`menu`) у главной части нет: оно привязано к точке в координатах вида, поэтому только `ask`.
+   */
+  show(spec: AskDialog): Promise<string | undefined>;
 }
 
 export interface PluginWindow {

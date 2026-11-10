@@ -136,7 +136,7 @@ const docErrors = (documents: unknown) => {
   const r = parseManifest({ ...base, documents });
   return r.ok ? [] : r.errors;
 };
-const AREAS = 'sidebar, main, toolbar или popup';
+const AREAS = 'sidebar, main, toolbar, popup или modal';
 
 test('вид: объект с module, area, order и title; строка остаётся краткой записью и не получает размещения', () => {
   const r = parseManifest({
@@ -200,6 +200,13 @@ test('документ: area и order типа; короткая запись п
   assert.deepEqual(docErrors({ note: { colour: 1 } }), ['documents.note.colour: незнакомое поле типа документа']);
   assert.deepEqual(docErrors({ note: { restorable: 'yes' } }), ['documents.note.restorable: ожидается true или false, получено "yes"']);
   assert.deepEqual(docErrors({ note: true }), ['documents.note: ожидается объект { "restorable": true, "area"?, "order"? }, получено true']);
+});
+
+test('вид: area modal - окно по просьбе главной части (K-13); у типа документа модального рода нет', () => {
+  const ok = parseManifest({ ...base, ui: { views: { form: { module: './form.js', area: 'modal', title: 'Новый проект' } } } });
+  assert.ok(ok.ok);
+  assert.deepEqual(ok.manifest.ui?.placement, { form: { area: 'modal', title: 'Новый проект' } });
+  assert.deepEqual(docErrors({ note: { area: 'modal' } }), ['documents.note.area: модальным бывает вид, а не документ: вкладки у модального окна нет']);
 });
 
 test('манифест: deprecated у provides - члены с пометкой @deprecated, ошибки называют поле', () => {

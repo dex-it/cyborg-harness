@@ -20,6 +20,7 @@ export function windowApi(): WindowApi {
     onWindowCommand: (listener: (command: string) => void): void => void ipcRenderer.on('window:command', (_event, command: string) => listener(command)),
     setViewVisible: (id: string, view: string, visible: boolean): Promise<void> => ipcRenderer.invoke('views:visibility', { id, view, visible }),
     answerDialog: (id: number, choice: string | undefined): Promise<Reply> => ipcRenderer.invoke('window:answer', { id, choice }),
+    cancelModal: (id: number): Promise<Reply> => ipcRenderer.invoke('window:modal-cancel', { id }),
     closeDocument: (id: string): Promise<Reply> => ipcRenderer.invoke('documents:close', id),
     openWorkspace: (file?: string): Promise<Reply> => ipcRenderer.invoke('workspace:open', file),
     setSafeMode: (on: boolean): Promise<Reply> => ipcRenderer.invoke('app:safe-mode', on),
@@ -63,6 +64,8 @@ export function viewBridge(): ViewBridge {
     setState: (viewName, value) => ipcRenderer.invoke('view:state:set', viewName, value),
     dialog: (viewName, spec) => ipcRenderer.invoke('view:dialog', viewName, spec),
     keys: () => ipcRenderer.invoke('view:keys'),
+    modal: (viewName) => ipcRenderer.invoke('view:modal', viewName),
+    modalClose: (viewName, result) => ipcRenderer.invoke('view:modal:close', viewName, result),
     channelPost: (viewName, message) => ipcRenderer.invoke('view:channel:post', viewName, message),
     onChannel: (listener) => void ipcRenderer.on('view:channel', (_event, message: unknown) => listener(message)),
     onTerminal: (listener) => {

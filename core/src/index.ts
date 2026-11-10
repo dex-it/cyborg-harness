@@ -41,5 +41,5 @@ export type { SpawnPtyHost } from './pty-link.ts';
 export type { ContractImpl, ContractRegistry, Provider } from './registry.ts';
 export type { PluginState, PluginStatus } from './status.ts';
 export type { HostHandle, SpawnHost } from './transports.ts';
-export type { ShownDialog, WindowLock, WindowSnapshot, WindowTitle } from './window-layer.ts';
+export type { ShownDialog, ShownModal, WindowLock, WindowSnapshot, WindowTitle } from './window-layer.ts';
 export type { MigrateWorkspace, Migrated, OpenResult, PluginsList, Workspace, WorkspaceOptions } from './workspace.ts';

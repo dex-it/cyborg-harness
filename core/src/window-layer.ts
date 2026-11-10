@@ -1,4 +1,4 @@
-// Слой окна (SAD §3.8): диалоги видов поверх всех фреймов и замок окна. Состояние держит ядро, рисует приложение.
+// Слой окна (SAD §3.8): диалоги видов и модальные окна плагинов поверх всех фреймов и замок окна. Состояние держит ядро, рисует приложение.
 
 import type { DialogChoice, DialogSpec } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
@@ -42,6 +42,14 @@ export interface ShownDialog {
   readonly spec: DialogSpec;
 }
 
+/** Модальное окно плагина на экране (K-13): вид `view` с `area: "modal"`; данные владельца в снимок не идут, их забирает сам вид (`Kernel.modalFor`). */
+export interface ShownModal {
+  readonly id: number;
+  readonly pluginId: string;
+  readonly view: string;
+  readonly title: string;
+}
+
 export interface WindowLock {
   readonly pluginId: string;
   readonly hideNotifications: boolean;
@@ -55,6 +63,8 @@ export interface WindowTitle {
 
 export interface WindowSnapshot {
   readonly dialog?: ShownDialog;
+  /** Модальное окно под диалогом: диалог из его вида встаёт поверх, а не ждёт закрытия окна. */
+  readonly modal?: ShownModal;
   /** Заголовок окна: воркспейс, фрагменты плагинов по их id, приложение - через « - ». */
   readonly title: string;
   /** Ждут своей очереди, включая отложенные замком. */
@@ -64,6 +74,11 @@ export interface WindowSnapshot {
 
 interface Pending extends ShownDialog {
   readonly resolve: (choice: string | undefined) => void;
+}
+
+interface PendingModal extends ShownModal {
+  readonly data: unknown;
+  readonly resolve: (result: unknown) => void;
 }
 
 function text(field: string, raw: unknown, max: number, optional = false): string | undefined {
@@ -106,10 +121,12 @@ export function parseDialog(raw: unknown): DialogSpec {
 export class WindowLayer {
   readonly #changed: (snapshot: WindowSnapshot) => void;
   readonly #queue: Pending[] = [];
+  readonly #modals: PendingModal[] = [];
   readonly #locks = new Map<string, WindowLock>();
   readonly #titles = new Map<string, string>();
   readonly #frame: WindowTitle;
   #shown: Pending | undefined;
+  #modal: PendingModal | undefined;
   #seq = 0;
 
   constructor(changed: (snapshot: WindowSnapshot) => void, frame: WindowTitle = { app: 'Cyborg' }) {
@@ -136,10 +153,12 @@ export class WindowLayer {
 
   get snapshot(): WindowSnapshot {
     const shown = this.#shown;
+    const modal = this.#modal;
     return {
       ...(shown && { dialog: { id: shown.id, pluginId: shown.pluginId, view: shown.view, spec: shown.spec } }),
+      ...(modal && { modal: { id: modal.id, pluginId: modal.pluginId, view: modal.view, title: modal.title } }),
       title: this.title,
-      queued: this.#queue.length,
+      queued: this.#queue.length + this.#modals.length,
       locks: [...this.#locks.values()],
     };
   }
@@ -182,7 +201,50 @@ export class WindowLayer {
     this.#next(true);
   }
 
-  /** Плагин выгружен: его диалоги закрываются с undefined. Замок остаётся - его снимает только владелец. */
+  /** Окна идут по одному в порядке просьб; `result` - то, что вид отдал в `closeModal`, а Escape, закрытие окна и выгрузка плагина дают undefined. */
+  showModal(pluginId: string, view: string, title: string, data: unknown): { readonly id: number; readonly result: Promise<unknown> } {
+    if ([this.#modal, ...this.#modals].filter((m) => m?.pluginId === pluginId).length >= MAX_PENDING) throw new CoreError('Invalid', `${pluginId}: больше ${String(MAX_PENDING)} модальных окон в очереди`);
+    const id = ++this.#seq;
+    const result = new Promise<unknown>((resolve) => {
+      this.#modals.push({ id, pluginId, view, title, data, resolve });
+    });
+    this.#next();
+    return { id, result };
+  }
+
+  /** Данные окна, показанного именно этому виду этого плагина: чужой вид их не получит. */
+  modalData(pluginId: string, view: string): { readonly data: unknown } | undefined {
+    const modal = this.#modal;
+    return modal?.pluginId === pluginId && modal.view === view ? { data: structuredClone(modal.data) } : undefined;
+  }
+
+  /** Окно закрывает вид, которому оно показано; чужой плагин, другой вид или окно, которого уже нет, - отказ. */
+  closeModal(pluginId: string, view: string, result: unknown): void {
+    const modal = this.#modal;
+    if (modal?.pluginId !== pluginId || modal.view !== view) throw new CoreError('NotFound', `${pluginId}: модального окна вида ${JSON.stringify(view)} нет на экране`);
+    this.#modal = undefined;
+    modal.resolve(result);
+    this.#next(true);
+  }
+
+  /** Человек закрыл окно в самом окне; id не того окна, что на экране, - отказ. */
+  cancelModal(id: number): void {
+    const modal = this.#modal;
+    if (modal?.id !== id) throw new CoreError('NotFound', `модального окна ${String(id)} нет на экране`);
+    this.#modal = undefined;
+    modal.resolve(undefined);
+    this.#next(true);
+  }
+
+  /** Escape: закрывает модальное окно, если поверх него нет диалога (Escape тогда принадлежит диалогу); `false` - закрывать нечего. */
+  dismissModal(): boolean {
+    const modal = this.#modal;
+    if (!modal || this.#shown) return false;
+    this.cancelModal(modal.id);
+    return true;
+  }
+
+  /** Плагин выгружен: его диалоги и окна закрываются с undefined. Замок остаётся - его снимает только владелец. */
   forget(pluginId: string): void {
     const titled = this.#titles.delete(pluginId);
     const gone = this.#queue.filter((d) => d.pluginId === pluginId);
@@ -190,7 +252,12 @@ export class WindowLayer {
     const shown = this.#shown?.pluginId === pluginId ? this.#shown : undefined;
     if (shown) this.#shown = undefined;
     for (const d of [...gone, ...(shown ? [shown] : [])]) d.resolve(undefined);
-    if (gone.length > 0 || shown || titled) this.#next(true);
+    const goneModals = this.#modals.filter((m) => m.pluginId === pluginId);
+    for (const m of goneModals) this.#modals.splice(this.#modals.indexOf(m), 1);
+    const modal = this.#modal?.pluginId === pluginId ? this.#modal : undefined;
+    if (modal) this.#modal = undefined;
+    for (const m of [...goneModals, ...(modal ? [modal] : [])]) m.resolve(undefined);
+    if (gone.length > 0 || shown || titled || goneModals.length > 0 || modal) this.#next(true);
   }
 
   lock(pluginId: string, hideNotifications: boolean): void {
@@ -200,6 +267,11 @@ export class WindowLayer {
     if (shown && !this.allows(shown.pluginId)) {
       this.#shown = undefined;
       this.#queue.unshift(shown);
+    }
+    const modal = this.#modal;
+    if (modal && !this.allows(modal.pluginId)) {
+      this.#modal = undefined;
+      this.#modals.unshift(modal);
     }
     this.#next(true);
   }
@@ -215,6 +287,9 @@ export class WindowLayer {
     const all = [...(this.#shown ? [this.#shown] : []), ...this.#queue.splice(0)];
     this.#shown = undefined;
     for (const d of all) d.resolve(undefined);
+    const modals = [...(this.#modal ? [this.#modal] : []), ...this.#modals.splice(0)];
+    this.#modal = undefined;
+    for (const m of modals) m.resolve(undefined);
     this.#changed(this.snapshot);
   }
 
@@ -226,6 +301,13 @@ export class WindowLayer {
         changed = true;
       }
     }
-    if (changed || this.#queue.length > 0) this.#changed(this.snapshot);
+    if (!this.#modal) {
+      const j = this.#modals.findIndex((m) => this.allows(m.pluginId));
+      if (j >= 0) {
+        this.#modal = this.#modals.splice(j, 1)[0];
+        changed = true;
+      }
+    }
+    if (changed || this.#queue.length > 0 || this.#modals.length > 0) this.#changed(this.snapshot);
   }
 }

@@ -36,6 +36,8 @@ function fakeBridge(tokens: ThemeTokens) {
     state: async (view) => (view === 'main' ? { value: { opened: 1 } } : {}),
     dialog: async (view, spec) => (calls.push(['dialog', view, spec.kind]), spec.kind === 'ask' ? { value: spec.buttons[0]?.id } : { error: 'диалог: меню вне вида' }),
     keys: async () => ({ 'own.go': 'Ctrl+G' }),
+    modal: async (view) => (view === 'form' ? { value: { data: { имя: 'черновик' } } } : {}),
+    modalClose: async (view, result) => (calls.push(['modal-close', view, result]), view === 'form' ? {} : { error: 'окна нет' }),
     channelPost: async (view, message) => (calls.push(['channel', view, message]), JSON.stringify(message).length > 20 ? { error: 'сообщение больше предела' } : {}),
     onChannel: (l) => (on.channel = l),
     setState: async (view, value) => (calls.push(['state', view, value]), (value === undefined ? 0 : JSON.stringify(value).length) > 20 ? { error: 'память вида больше 20 байт' } : {}),
@@ -210,4 +212,18 @@ test('connectView: канал с главной частью - сообщени�
   assert.deepEqual(seen, ['раз', { два: 2 }]);
   assert.equal(reported.length, 3, 'упавший слушатель сообщён оболочке на каждое сообщение, соседу он не мешает');
   assert.throws(() => Object.assign(ctx.channel, { post: () => undefined }), TypeError, 'плагин не подменит канал');
+});
+
+test('connectView: у вида модального окна есть ctx.modal с данными владельца, close отдаёт результат мостом; у обычного вида ctx.modal нет', async () => {
+  const { bridge, calls } = fakeBridge({});
+  const shell = { pluginId: 'own', applyTheme: () => undefined, report: () => undefined };
+  const plain = await connectView(bridge, { ...shell, view: 'main' });
+  assert.equal(plain.modal, undefined);
+  const form = await connectView(bridge, { ...shell, view: 'form' });
+  const modal = form.modal;
+  assert.ok(modal, 'у вида модального окна есть ctx.modal');
+  assert.deepEqual(modal.data, { имя: 'черновик' });
+  await modal.close({ имя: 'Проект' });
+  assert.deepEqual(calls.at(-1), ['modal-close', 'form', { имя: 'Проект' }]);
+  assert.throws(() => Object.assign(modal, { data: 1 }), TypeError, 'данные окна не подменить');
 });

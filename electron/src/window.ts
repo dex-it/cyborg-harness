@@ -67,6 +67,11 @@ export function windowEvents(getWindow: () => BrowserWindow | undefined): Plugin
 export function bindWindow(win: BrowserWindow, plugins: PluginsService): void {
   // Ядро видит нажатие раньше страницы: сочетание активного плагина до окна не доходит.
   win.webContents.on('before-input-event', (event, input) => {
+    // Escape закрывает модальное окно плагина, где бы ни стоял фокус (в том числе во фрейме его вида); диалог поверх окна забирает Escape себе.
+    if (input.type === 'keyDown' && input.key === 'Escape' && plugins.dismissModal()) {
+      event.preventDefault();
+      return;
+    }
     if (input.type === 'keyDown' && plugins.press(input, input.isAutoRepeat)) event.preventDefault();
   });
   win.on('focus', () => plugins.emit({ kind: 'focus', focused: true }));

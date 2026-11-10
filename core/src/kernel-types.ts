@@ -275,6 +275,14 @@ export interface Kernel {
   closeDocument(id: string): Promise<void>;
   /** Диалог вида; ответ - id пункта или undefined. Описание проверяется здесь, окно получает разобранную копию. */
   showDialog(pluginId: string, view: string, spec: unknown): Promise<string | undefined>;
+  /** Данные модального окна, показанного именно этому виду этого плагина (`ctx.modal.data`); чужому виду, другому плагину и когда окна нет - `undefined`. */
+  modalFor(pluginId: string, view: string): { readonly data: unknown } | undefined;
+  /** Вид закрывает своё модальное окно и отдаёт результат владельцу (`ctx.modal.close`); не его окно или окна нет - `NotFound`, результат больше `limits.viewMessage` - `Invalid`. */
+  closeModal(pluginId: string, view: string, result: unknown): void;
+  /** Человек закрыл окно в самом окне (крестик, клик мимо): владелец получает undefined; id не того окна, что на экране, - `NotFound`. */
+  cancelModal(id: number): void;
+  /** Escape в главном процессе: закрывает модальное окно, если поверх него нет диалога; `false` - нажатие окну не принадлежит. */
+  dismissModal(): boolean;
   /** Ответ человека на диалог `window.dialog`. */
   answerDialog(id: number, choice: string | undefined): void;
   /** Окно не пустило вид плагина на чужой адрес: запись `denied` в журнал плагина, повторы склеиваются. */
