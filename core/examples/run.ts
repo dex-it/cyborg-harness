@@ -145,6 +145,8 @@ function journalLine(e: JournalEntry): string {
       return `${yellow('⚠')} ${id} терминал ${e.id} (${e.program}) завершён: не подхвачен за ${String(e.graceMs / 1000)} с`;
     case 'key-conflict':
       return `${yellow('⌨')} ${id}: ${e.key} уже у ${e.winner}, ${e.command} не получит нажатие`;
+    case 'menu-source':
+      return `${yellow('⚠')} ${id} пункт меню ${e.item}: ${e.field} не прочитан: ${e.error}`;
     case 'key-ignored':
       return `${yellow('⌨')} plugins.keybindings: ${e.key} -> ${String(e.command)} не применено: ${e.reason}`;
     case 'host-isolated':

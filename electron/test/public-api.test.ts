@@ -25,6 +25,8 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'USER_PLUGINS_FLAG',
       'VIEW_CSP',
       'alertNotification',
+      'appMenuTemplate',
+      'bindAppMenu',
       'bindWindow',
       'discoverPlugins',
       'electronOs',
@@ -56,6 +58,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'workspaceInstance',
     ],
     types: [
+      'AppMenuItem',
       'Discovered',
       'ElectronOsOptions',
       'PluginUi',

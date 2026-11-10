@@ -43,6 +43,7 @@ const LIFECYCLE: Record<JournalEntry['kind'], boolean> = {
   'host-abandoned': true,
   'key-conflict': false,
   'key-ignored': false,
+  'menu-source': false,
   denied: false,
   'deprecated-call': false,
   'unhandled-rejection': false,
@@ -188,6 +189,8 @@ export function describeEntry(e: JournalEntry): string {
       return `сочетание ${e.key} (${e.command}) уже у ${e.winner}: нажатие получает ${e.winner}`;
     case 'key-ignored':
       return `plugins.keybindings: ${e.key} -> ${String(e.command)} не применено: ${e.reason}`;
+    case 'menu-source':
+      return `пункт меню ${e.item}: ${e.field} не прочитан, пункт недоступен: ${e.error}`;
     case 'host-isolated':
       return `сторонний плагин не делит хост: группа ${e.group} из plugins.hosts не действует, работает в своём хосте ${e.hostId}`;
     case 'group-isolated':
@@ -232,6 +235,7 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
       return e.error ? 'error' : 'info';
     case 'key-conflict':
     case 'key-ignored':
+    case 'menu-source':
     case 'denied':
     case 'deprecated-call':
     case 'pty-expired':
