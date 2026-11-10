@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { protocol, type IpcMainInvokeEvent, type WebContents, type WebFrameMain } from 'electron';
 import { groupOfOrigin, VIEW_SCHEME } from './view-protocol.ts';
-import { cspOf, type ViewCsp, type ViewRequest } from './view-files.ts';
+import { viewHeaders, type ViewCsp, type ViewRequest } from './view-files.ts';
 
 /** До `app.ready`: standard даёт схеме свой origin на хост, а с ним site isolation по группам рендера. */
 export function registerViewScheme(): void {
@@ -10,7 +10,7 @@ export function registerViewScheme(): void {
 }
 
 export interface ServeViewsOptions {
-  /** CSP ответов: по умолчанию `VIEW_CSP`. Функция получает плагина и группу из адреса запроса (строгая CSP по плагину или группе, K-05). */
+  /** CSP ответов вместо `viewCsp(флаг плагина)` (пилот PL-05 задаёт наборы). Функция получает плагина и группу из адреса запроса и флаг `inlineStyles`. */
   readonly csp?: ViewCsp;
 }
 
@@ -19,7 +19,7 @@ export function serveViews(resolve: (url: string) => ViewRequest | undefined, sh
   protocol.handle(VIEW_SCHEME, async (request) => {
     const found = resolve(request.url);
     if (!found) return new Response('нет такого файла вида', { status: 404 });
-    const headers = { 'content-type': found.kind === 'shell' ? 'text/html; charset=utf-8' : found.type, 'content-security-policy': cspOf(options.csp, request.url) };
+    const headers = viewHeaders(found, request.url, options.csp);
     if (found.kind === 'shell') return new Response(found.html, { headers });
     try {
       const file = found.kind === 'core' ? path.join(shellDir, found.name) : found.file;
