@@ -211,7 +211,7 @@ describe('main: код выхода', () => {
 
 describe('render', () => {
   it('порог null - «не задан» и «информационно»', () => {
-    const text = render('Хосты', [{ metric: 'память', value: 56, limit: null, unit: 'МБ', over: false, blocking: false }]);
+    const text = render('Хосты', [{ metric: 'память', value: 56, limit: null, unit: 'МБ', over: false, blocking: false, blockAbove: null }]);
     assert.match(text, /\| память \| 56 МБ \| не задан \| информационно \|/);
   });
 });
