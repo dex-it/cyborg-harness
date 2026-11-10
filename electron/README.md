@@ -1,6 +1,6 @@
 # @cyborg-harness/electron
 
-Адаптер Electron для ядра плагинов [`@cyborg-harness/core`](../core/README.md): всё, что связывает ядро с Electron, чтобы приложению (ai-cyborg, playground) не копировать это руками. Хосты плагинов в `utilityProcess`, среда `ctx.os` (`safeStorage`, `node-pty`, `shell`, `dialog`, `clipboard`, уведомления), схема `cyborg-plugin://` и мост видов, каналы IPC окна и видов, перехват клавиш, события окна и питания, одиночный экземпляр, слой окна. Решение о форме: пакет в этом репозитории, прокладку `window.cyborg` и свои каналы IPC поверх этого не вводим (D-00, строки 3 и 4; [SAD](../docs/03-architecture/design/sad.md), разд. 1).
+Адаптер Electron для ядра плагинов [`@cyborg-harness/core`](../core/README.md): всё, что связывает ядро с Electron, чтобы приложению (ai-cyborg, playground) не копировать это руками. Хосты плагинов в `utilityProcess`, среда `ctx.os` (`safeStorage`, `node-pty`, `shell`, `dialog`, `clipboard`, уведомления), схема `cyborg-plugin://` и мост видов, каналы IPC окна и видов, перехват клавиш, события окна и питания, одиночный экземпляр, слой окна. Решение о форме: пакет в этом репозитории, прокладку `window.cyborg` и свои каналы IPC поверх этого не вводим (D-00, строки 3 и 4; [SAD](../docs/04-architecture/design/sad.md), разд. 1).
 
 Пакет приватный (`private: true`) и в реестр не опубликован: публикация - задача P-10. Пока он ставится как workspace этого репозитория или из архива `npm pack`.
 
