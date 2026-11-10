@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import type { NeighborInstance } from './kernel-types.ts';
 import { lockWorkspace } from './workspace.ts';
 
 // Один экземпляр приложения на воркспейс (K-20, SAD 3.1). Разные воркспейсы - разные процессы с общим `userData`.
@@ -250,14 +251,6 @@ export async function claimInstance(key: string, data: Record<string, unknown>, 
     else await removeStale(address, timeoutMs, options.afterStaleCheck);
   }
   return { kind: 'unresponsive' };
-}
-
-/** Соседнее окно того же `userData`: его экземпляр держит адрес в каталоге адресов. */
-export interface NeighborInstance {
-  /** Ключ экземпляра (`workspaceKey` воркспейса). */
-  readonly key: string;
-  /** Плагины, которые могут работать в его окне; `null` - сосед жив, но не назвал их в срок или не умеет отвечать: решать нечем. */
-  readonly plugins: readonly string[] | null;
 }
 
 export interface NeighborOptions {

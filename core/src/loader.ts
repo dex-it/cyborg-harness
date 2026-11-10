@@ -17,7 +17,7 @@ import { createSections } from './sections.ts';
 import { createViewChannels } from './view-channels.ts';
 import { createViewsState } from './views-state.ts';
 
-export type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Kernel, Keybinding, KeyPress, LoadOptions, UninstallReport, UserKeybinding, WatchdogOptions } from './kernel-types.ts';
+export type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Kernel, Keybinding, KeyPress, LoadOptions, NeighborInstance, UninstallReport, UserKeybinding, WatchdogOptions } from './kernel-types.ts';
 
 /** Части ядра, у каждой своё состояние; зовут друг друга через `ctx.parts` в момент вызова. Раскладка по файлам - в SAD, раздел 3.2. */
 const createParts = (ctx: KernelContext): Parts => ({

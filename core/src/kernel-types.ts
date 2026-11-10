@@ -3,7 +3,6 @@ import type { SectionResult, SectionStore } from './config.ts';
 import type { DocumentRow } from './documents.ts';
 import type { ContractGraph, Rejection } from './graph.ts';
 import type { SystemEvent } from './host-runtime.ts';
-import type { NeighborInstance } from './instance.ts';
 import type { LayoutEntry } from './layout.ts';
 import type { MenuEntry } from './menu-entry.ts';
 import type { ResourceLimits } from './limits.ts';
@@ -198,6 +197,14 @@ export interface LoadOptions {
    * говорит `UninstallReport.left`. Бросок - отказ `uninstall` с `Unavailable`, ничего не стёрто.
    */
   readonly neighbors?: (() => Promise<readonly NeighborInstance[]>) | undefined;
+}
+
+/** Соседнее окно того же `userData`: его экземпляр держит адрес в каталоге адресов (`neighborInstances`, K-20, #154). */
+export interface NeighborInstance {
+  /** Ключ экземпляра (`workspaceKey` воркспейса). */
+  readonly key: string;
+  /** Плагины, которые могут работать в его окне; `null` - сосед жив, но не назвал их в срок или не умеет отвечать: решать нечем. */
+  readonly plugins: readonly string[] | null;
 }
 
 export interface DisableOptions {
