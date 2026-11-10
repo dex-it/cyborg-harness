@@ -1,0 +1,474 @@
+// plugin API 1.0.0
+// Снимок публичного API плагина (ctx, вид, манифест, элементы cy-*); правила - contracts/README.md, раздел «Снимок API плагина (T-06)». Обновление: npm run snapshot:api.
+alias Area :: = (typeof AREAS)[number]
+alias CommandCallers :: union
+alias CommandHandler :: = (..._: unknown[]) => unknown
+alias CoreErrorCode :: union
+alias DialogSpec :: union
+alias ElementTag :: union
+alias GuardRight :: = (typeof GUARD_RIGHTS)[number]
+alias Layer :: = string
+alias LogLevel :: union
+alias MemberGuards :: = Readonly<Record<string, readonly Guard[]>>
+alias ProgramRule :: union
+alias PtyTicket :: = string
+alias SectionResult :: union
+alias ThemeTokens :: = Readonly<Record<`--cy-${string}`, string>>
+alias UiRemote :: <T> = { readonly [P in keyof T as NonNullable<T[P]> extends (..._: never[]) => unknown ? P : never]: NonNullable<T[P]> extends (..._: infer A) => infer R ? (..._: A) => Promise<Awaited<R>> : never }
+interface ArgSpec
+interface CommandSpec
+interface DialogChoice
+interface DirEntry
+interface Disposable
+interface DisposableStore :: extends Disposable
+interface DocumentChange
+interface DocumentDecl
+interface DocumentInfo
+interface DocumentInit
+interface FeedLine
+interface FileSlice
+interface FileStat
+interface Guard
+interface HttpRequest
+interface HttpResponse
+interface HttpServer
+interface ItemEventDetail
+interface KeyBinding
+interface KeyRegistration :: extends Disposable
+interface KeyWhen
+interface KeybindingSpec
+interface ListItem
+interface NotifyClick
+interface NotifyOptions
+interface OpenDialogOptions
+interface OsDialog
+interface OsFs
+interface OsNotify
+interface OsPty
+interface OsSecrets
+interface OsUi
+interface Placement
+interface PluginContext
+interface PluginDocuments
+interface PluginKeys
+interface PluginManifest
+interface PluginModule
+interface PluginOs
+interface PluginPermissions
+interface PluginSecrets
+interface PluginSection
+interface PluginSystem
+interface PluginWindow
+interface ProcessOptions
+interface ProcessResult
+interface Provider :: <T>
+interface PtyExit
+interface PtyHandle :: extends PtyInfo
+interface PtyInfo
+interface PtySpawnOptions
+interface Reply
+interface SecretRef
+interface SecretValue
+interface SectionDecl
+interface SectionSpec
+interface ServeRequest
+interface ServeResponse
+interface TabItem
+interface ToggleEventDetail
+interface TreeItem
+interface UiContext
+interface UiLock
+interface UiModule :: <Root>
+interface UiTerminal :: extends PtyInfo
+interface ViewDrop
+map WINDOW_COMMANDS | cyborg.window.focus-next :: F6
+map WINDOW_COMMANDS | cyborg.window.focus-prev :: Shift+F6
+member ArgSpec.kind :: readonly prop WireKind
+member ArgSpec.optional :: readonly prop boolean
+member CommandSpec.args :: readonly prop readonly ArgSpec[]
+member CommandSpec.callers :: readonly optional prop CommandCallers
+member CommandSpec.guard :: readonly optional prop readonly Guard[]
+member CommandSpec.rest :: readonly optional prop WireKind
+member DialogChoice.id :: readonly prop string
+member DialogChoice.label :: readonly prop string
+member DirEntry.kind :: readonly union
+member DirEntry.name :: readonly prop string
+member Disposable.dispose :: method () => void
+member DisposableStore.add :: method (..._: Disposable[]) => void
+member DisposableStore.disposed :: readonly prop boolean
+member DocumentChange.data :: readonly optional prop unknown
+member DocumentChange.title :: readonly optional prop string
+member DocumentDecl.area :: readonly optional prop Area
+member DocumentDecl.order :: readonly optional prop number
+member DocumentDecl.restorable :: readonly prop boolean
+member DocumentInfo.data :: readonly optional prop unknown
+member DocumentInfo.id :: readonly prop string
+member DocumentInfo.title :: readonly prop string
+member DocumentInfo.type :: readonly prop string
+member DocumentInit.data :: readonly optional prop unknown
+member DocumentInit.title :: readonly prop string
+member FeedLine.at :: readonly prop number
+member FeedLine.kind :: readonly union
+member FeedLine.subject :: readonly prop string
+member FeedLine.text :: readonly prop string
+member FileSlice.bytes :: readonly prop number
+member FileSlice.size :: readonly prop number
+member FileSlice.text :: readonly prop string
+member FileStat.kind :: readonly union
+member FileStat.mtimeMs :: readonly prop number
+member FileStat.size :: readonly prop number
+member Guard.arg :: readonly prop number
+member Guard.field :: readonly optional prop string
+member Guard.right :: readonly prop GuardRight
+member HttpRequest.body :: readonly optional prop string
+member HttpRequest.headers :: readonly optional prop Readonly<Record<string, string>>
+member HttpRequest.method :: readonly optional prop string
+member HttpRequest.timeoutMs :: readonly optional prop number
+member HttpResponse.body :: readonly prop string
+member HttpResponse.headers :: readonly prop Readonly<Record<string, string>>
+member HttpResponse.status :: readonly prop number
+member HttpServer.dispose :: method () => void
+member HttpServer.url :: readonly prop string
+member ItemEventDetail.id :: readonly prop string
+member KeyBinding.args :: readonly optional prop readonly unknown[]
+member KeyBinding.command :: readonly prop string
+member KeyBinding.key :: readonly prop string
+member KeyBinding.when :: readonly optional prop KeyWhen
+member KeyRegistration.active :: readonly prop boolean
+member KeyRegistration.winner :: readonly optional prop string
+member KeyWhen.dialog :: readonly optional prop boolean
+member KeyWhen.input :: readonly optional union
+member KeyWhen.repeat :: readonly optional prop boolean
+member KeyWhen.visible :: readonly optional prop boolean
+member KeybindingSpec.command :: readonly prop string
+member KeybindingSpec.key :: readonly prop string
+member ListItem.detail :: readonly optional prop string
+member ListItem.id :: readonly prop string
+member ListItem.label :: readonly prop string
+member NotifyClick.args :: readonly optional prop readonly unknown[]
+member NotifyClick.command :: readonly prop string
+member NotifyOptions.onClick :: readonly optional prop NotifyClick
+member OpenDialogOptions.directory :: readonly optional prop boolean
+member OpenDialogOptions.multiple :: readonly optional prop boolean
+member OpenDialogOptions.title :: readonly optional prop string
+member OsDialog.open :: method (_?: OpenDialogOptions) => Promise<string[]>
+member OsFs.list :: method (_: string) => Promise<DirEntry[]>
+member OsFs.mkdir :: method (_: string) => Promise<void>
+member OsFs.readSlice :: method (_: string, _: number, _: number) => Promise<FileSlice>
+member OsFs.readText :: method (_: string) => Promise<string>
+member OsFs.realpath :: method (_: string) => Promise<string>
+member OsFs.remove :: method (_: string) => Promise<void>
+member OsFs.stat :: method (_: string) => Promise<FileStat>
+member OsFs.watch :: method (_: string, _: (_: readonly string[]) => void, _?: (_: string) => void) => Promise<Disposable>
+member OsFs.writeText :: method (_: string, _: string) => Promise<void>
+member OsNotify.close :: method (_: string) => Promise<void>
+member OsNotify.show :: method (_: string, _?: string, _?: NotifyOptions) => Promise<string>
+member OsPty.attach :: method (_: string) => Promise<PtyHandle>
+member OsPty.list :: method () => Promise<PtyInfo[]>
+member OsPty.spawn :: method (_: PtySpawnOptions) => Promise<PtyHandle>
+member OsSecrets.delete :: method (_: string) => Promise<void>
+member OsSecrets.get :: method (_: string) => Promise<string | undefined>
+member OsSecrets.set :: method (_: string, _: string) => Promise<void>
+member OsUi.lock :: method (_?: { readonly hideNotifications?: boolean }) => Promise<UiLock>
+member Placement.area :: readonly optional prop Area
+member Placement.order :: readonly optional prop number
+member Placement.title :: readonly optional prop string
+member PluginContext.commands :: readonly object
+member PluginContext.commands.register :: method (_: string, _: CommandHandler) => Disposable
+member PluginContext.commands.run :: method (_: string, ..._: unknown[]) => Promise<unknown>
+member PluginContext.config :: readonly optional prop PluginSection
+member PluginContext.contracts :: readonly object
+member PluginContext.contracts.all :: method <K extends ContractName, M extends Major<K>>(_: K, _: M) => Provider<Remote<ContractType<K, M>>>[]
+member PluginContext.contracts.get :: method <K extends ContractName, M extends Major<K>>(_: K, _: M) => Remote<ContractType<K, M>> | undefined
+member PluginContext.contracts.onChange :: method (_: ContractName, _: () => void) => Disposable
+member PluginContext.contracts.provide :: method <K extends ContractName, V extends VersionOf<K>>(_: K, _: V, _: ContractType<K, MajorOf<V> & Major<K>>) => Disposable
+member PluginContext.documents :: readonly prop PluginDocuments
+member PluginContext.keys :: readonly prop PluginKeys
+member PluginContext.log :: method (_: string, _?: LogLevel) => void
+member PluginContext.os :: readonly prop PluginOs
+member PluginContext.pluginId :: readonly prop string
+member PluginContext.secrets :: readonly prop PluginSecrets
+member PluginContext.state :: readonly optional prop PluginSection
+member PluginContext.subscriptions :: readonly prop DisposableStore
+member PluginContext.system :: readonly prop PluginSystem
+member PluginContext.window :: readonly prop PluginWindow
+member PluginDocuments.close :: method (_: string) => Promise<void>
+member PluginDocuments.list :: method () => Promise<DocumentInfo[]>
+member PluginDocuments.onClose :: method (_: (_: string) => void) => Disposable
+member PluginDocuments.open :: method (_: string, _: DocumentInit) => Promise<string>
+member PluginDocuments.save :: method (_: string, _: DocumentChange) => Promise<void>
+member PluginKeys.register :: method (_: KeyBinding) => Promise<KeyRegistration>
+member PluginManifest.activation :: readonly optional prop 'lazy'
+member PluginManifest.commands :: readonly prop Readonly<Record<string, CommandSpec>>
+member PluginManifest.config :: readonly optional prop SectionDecl
+member PluginManifest.consumes :: readonly prop Readonly<Record<string, string>>
+member PluginManifest.deprecated :: readonly optional prop Readonly<Record<string, readonly string[]>>
+member PluginManifest.documents :: readonly optional prop Readonly<Record<string, DocumentDecl>>
+member PluginManifest.engines :: readonly object
+member PluginManifest.engines.cyborg :: readonly prop string
+member PluginManifest.guards :: readonly optional prop Readonly<Record<string, MemberGuards>>
+member PluginManifest.host :: readonly optional prop 'own'
+member PluginManifest.id :: readonly prop string
+member PluginManifest.keybindings :: readonly prop readonly KeybindingSpec[]
+member PluginManifest.lock :: readonly optional object
+member PluginManifest.lock.onStart :: readonly prop true
+member PluginManifest.optional :: readonly prop Readonly<Record<string, string>>
+member PluginManifest.permissions :: readonly prop PluginPermissions
+member PluginManifest.provides :: readonly prop Readonly<Record<string, readonly string[]>>
+member PluginManifest.requires :: readonly prop Readonly<Record<string, string>>
+member PluginManifest.state :: readonly optional prop SectionDecl
+member PluginManifest.ui :: readonly optional object
+member PluginManifest.ui.group :: readonly optional prop string
+member PluginManifest.ui.overlay :: readonly optional prop string
+member PluginManifest.ui.placement :: readonly optional prop Readonly<Record<string, Placement>>
+member PluginManifest.ui.views :: readonly prop Readonly<Record<string, string>>
+member PluginManifest.version :: readonly prop string
+member PluginModule.activate :: method (_: PluginContext) => Disposable | undefined | Promise<Disposable | undefined>
+member PluginModule.config :: readonly optional prop Omit<SectionSpec, 'version'>
+member PluginModule.state :: readonly optional prop Omit<SectionSpec, 'version'>
+member PluginOs.clipboard :: readonly optional object
+member PluginOs.clipboard.readText :: optional method () => Promise<string>
+member PluginOs.clipboard.writeText :: optional method (_: string) => Promise<void>
+member PluginOs.dialog :: readonly prop OsDialog
+member PluginOs.env :: readonly optional object
+member PluginOs.env.get :: method (_: string) => Promise<string | undefined>
+member PluginOs.fs :: readonly prop OsFs
+member PluginOs.net :: readonly optional object
+member PluginOs.net.fetch :: method (_: string, _?: HttpRequest) => Promise<HttpResponse>
+member PluginOs.notify :: readonly optional prop OsNotify
+member PluginOs.paths :: readonly object
+member PluginOs.paths.data :: readonly prop string
+member PluginOs.paths.home :: readonly prop string
+member PluginOs.paths.temp :: readonly prop string
+member PluginOs.process :: readonly optional object
+member PluginOs.process.run :: method (_: string, _: readonly string[], _?: ProcessOptions) => Promise<ProcessResult>
+member PluginOs.pty :: readonly optional prop OsPty
+member PluginOs.secrets :: readonly prop OsSecrets
+member PluginOs.security :: readonly optional object
+member PluginOs.security.setRoots :: method (_: readonly string[]) => Promise<void>
+member PluginOs.serve :: readonly optional object
+member PluginOs.serve.http :: method (_: (_: ServeRequest) => ServeResponse | Promise<ServeResponse>) => Promise<HttpServer>
+member PluginOs.shell :: readonly optional object
+member PluginOs.shell.openExternal :: optional method (_: string) => Promise<void>
+member PluginOs.shell.openPath :: optional method (_: string) => Promise<void>
+member PluginOs.ui :: readonly optional prop OsUi
+member PluginPermissions.clipboard :: readonly optional prop readonly ('read' | 'write')[]
+member PluginPermissions.env :: readonly optional prop readonly string[]
+member PluginPermissions.fs.read :: readonly optional prop readonly string[]
+member PluginPermissions.fs.write :: readonly optional prop readonly string[]
+member PluginPermissions.launch :: readonly optional prop readonly ProgramRule[]
+member PluginPermissions.net :: readonly optional prop readonly string[]
+member PluginPermissions.notify :: readonly optional prop boolean
+member PluginPermissions.process :: readonly optional prop readonly ProgramRule[]
+member PluginPermissions.pty :: readonly optional prop readonly ProgramRule[]
+member PluginPermissions.secrets.ref :: readonly optional prop readonly string[]
+member PluginPermissions.security.roots :: readonly optional prop boolean
+member PluginPermissions.serve :: readonly optional prop boolean
+member PluginPermissions.shell :: readonly optional prop readonly string[]
+member PluginPermissions.ui.lock :: readonly optional prop boolean
+member PluginSecrets.resolve :: method (_: string | SecretRef) => Promise<SecretValue>
+member PluginSection.get :: method () => Record<string, unknown>
+member PluginSection.onChange :: method (_: (_: Record<string, unknown>) => void) => Disposable
+member PluginSection.result :: readonly prop SectionResult
+member PluginSection.set :: method (_: string, _: Record<string, unknown>) => Promise<Record<string, unknown>>
+member PluginSystem.onBeforeQuit :: method (_: () => void | Promise<void>) => Disposable
+member PluginSystem.onIdle :: method (_: number, _: () => void) => Disposable
+member PluginSystem.onResume :: method (_: () => void) => Disposable
+member PluginSystem.onScreenLock :: method (_: () => void) => Disposable
+member PluginSystem.onSuspend :: method (_: () => void) => Disposable
+member PluginWindow.onFocusChange :: method (_: (_: boolean) => void) => Disposable
+member PluginWindow.setTitle :: method (_: string | undefined) => Promise<void>
+member ProcessOptions.cwd :: readonly optional prop string
+member ProcessOptions.env :: readonly optional prop Readonly<Record<string, string>>
+member ProcessOptions.input :: readonly optional prop string
+member ProcessOptions.maxOutputBytes :: readonly optional prop number
+member ProcessOptions.signal :: readonly optional prop AbortSignal
+member ProcessOptions.timeoutMs :: readonly optional prop number
+member ProcessResult.code :: readonly union
+member ProcessResult.signal :: readonly union
+member ProcessResult.stderr :: readonly prop string
+member ProcessResult.stdout :: readonly prop string
+member ProcessResult.truncated :: readonly prop boolean
+member Provider.impl :: readonly prop T
+member Provider.pluginId :: readonly prop string
+member Provider.version :: readonly prop string
+member PtyExit.code :: readonly prop number
+member PtyExit.signal :: readonly optional prop number
+member PtyHandle.backlog :: readonly prop string
+member PtyHandle.kill :: method (_?: 'SIGTERM' | 'SIGKILL' | 'SIGINT' | 'SIGHUP') => Promise<void>
+member PtyHandle.onData :: method (_: (_: string) => void) => Disposable
+member PtyHandle.onExit :: method (_: (_: PtyExit) => void) => Disposable
+member PtyHandle.resize :: method (_: number, _: number) => Promise<void>
+member PtyHandle.share :: method () => Promise<PtyTicket>
+member PtyHandle.write :: method (_: string) => Promise<void>
+member PtyInfo.args :: readonly prop readonly string[]
+member PtyInfo.exit :: readonly optional prop PtyExit
+member PtyInfo.id :: readonly prop string
+member PtyInfo.persist :: readonly prop boolean
+member PtyInfo.pid :: readonly prop number
+member PtyInfo.program :: readonly prop string
+member PtySpawnOptions.args :: readonly optional prop readonly string[]
+member PtySpawnOptions.cols :: readonly optional prop number
+member PtySpawnOptions.cwd :: readonly optional prop string
+member PtySpawnOptions.describedBy :: readonly optional prop string
+member PtySpawnOptions.env :: readonly optional prop Readonly<Record<string, string>>
+member PtySpawnOptions.persist :: readonly optional prop boolean
+member PtySpawnOptions.program :: readonly prop string
+member PtySpawnOptions.rows :: readonly optional prop number
+member Reply.error :: readonly optional prop string
+member Reply.value :: readonly optional prop unknown
+member SecretRef.$secret :: readonly prop string
+member SecretValue.expiresAt :: readonly optional prop number
+member SecretValue.value :: readonly prop string
+member SectionDecl.schema :: readonly optional prop string
+member SectionDecl.version :: readonly prop number
+member SectionSpec.defaults :: readonly optional prop Readonly<Record<string, unknown>>
+member SectionSpec.migrate :: readonly optional fn (_: number, _: Record<string, unknown>) => Record<string, unknown>
+member SectionSpec.validate :: readonly optional fn (_: Readonly<Record<string, unknown>>) => readonly string[]
+member SectionSpec.version :: readonly prop number
+member ServeRequest.body :: readonly prop string
+member ServeRequest.headers :: readonly prop Readonly<Record<string, string>>
+member ServeRequest.method :: readonly prop string
+member ServeRequest.path :: readonly prop string
+member ServeResponse.body :: readonly optional prop string
+member ServeResponse.headers :: readonly optional prop Readonly<Record<string, string>>
+member ServeResponse.status :: readonly prop number
+member TabItem.id :: readonly prop string
+member TabItem.label :: readonly prop string
+member ToggleEventDetail.expanded :: readonly prop boolean
+member ToggleEventDetail.id :: readonly prop string
+member TreeItem.children :: readonly optional prop readonly TreeItem[]
+member TreeItem.id :: readonly prop string
+member TreeItem.label :: readonly prop string
+member UiContext.commands :: readonly object
+member UiContext.commands.run :: method (_: string, ..._: unknown[]) => Promise<unknown>
+member UiContext.contracts :: readonly object
+member UiContext.contracts.get :: method <K extends ContractName, M extends Major<K>>(_: K, _: M) => Promise<UiRemote<ContractType<K, M>> | undefined>
+member UiContext.dialogs :: readonly object
+member UiContext.dialogs.show :: method (_: DialogSpec) => Promise<string | undefined>
+member UiContext.drag :: readonly object
+member UiContext.drag.drop :: method () => Promise<ViewDrop | null>
+member UiContext.drag.start :: method (_: string) => void
+member UiContext.keys :: readonly object
+member UiContext.keys.of :: method (_: string) => string | undefined
+member UiContext.logs :: method () => Promise<readonly FeedLine[]>
+member UiContext.onLog :: method (_: (_: FeedLine) => void) => Disposable
+member UiContext.onVisibilityChange :: method (_: (_: boolean) => void) => Disposable
+member UiContext.pluginId :: readonly prop string
+member UiContext.state :: readonly object
+member UiContext.state.set :: method (_: unknown) => Promise<void>
+member UiContext.state.value :: readonly prop unknown
+member UiContext.terminal :: readonly object
+member UiContext.terminal.open :: method (_: PtyTicket) => Promise<UiTerminal>
+member UiContext.theme :: readonly object
+member UiContext.theme.onChange :: method (_: (_: ThemeTokens) => void) => Disposable
+member UiContext.theme.tokens :: readonly prop ThemeTokens
+member UiContext.view :: readonly prop string
+member UiContext.visible :: readonly prop boolean
+member UiLock.release :: method () => Promise<void>
+member UiModule.mount :: method (_: Root, _: UiContext) => Disposable | undefined
+member UiTerminal.backlog :: readonly prop string
+member UiTerminal.close :: method () => void
+member UiTerminal.onData :: method (_: (_: string) => void) => Disposable
+member UiTerminal.onExit :: method (_: (_: PtyExit) => void) => Disposable
+member UiTerminal.resize :: method (_: number, _: number) => Promise<void>
+member UiTerminal.write :: method (_: string) => Promise<void>
+member ViewDrop.from :: readonly prop string
+member ViewDrop.path :: readonly prop string
+set AREAS | main
+set AREAS | popup
+set AREAS | sidebar
+set AREAS | toolbar
+set GUARD_RIGHTS | fs.read
+set GUARD_RIGHTS | fs.write
+set GUARD_RIGHTS | secrets.ref
+set GUARD_RIGHTS | shell
+set TOP_LEVEL | $schema
+set TOP_LEVEL | activation
+set TOP_LEVEL | commands
+set TOP_LEVEL | config
+set TOP_LEVEL | consumes
+set TOP_LEVEL | documents
+set TOP_LEVEL | engines
+set TOP_LEVEL | host
+set TOP_LEVEL | id
+set TOP_LEVEL | keybindings
+set TOP_LEVEL | lock
+set TOP_LEVEL | optional
+set TOP_LEVEL | permissions
+set TOP_LEVEL | provides
+set TOP_LEVEL | requires
+set TOP_LEVEL | state
+set TOP_LEVEL | ui
+set TOP_LEVEL | version
+set attributes cy-button | disabled
+set attributes cy-empty | heading
+set attributes cy-field | disabled
+set attributes cy-field | label
+set attributes cy-field | placeholder
+set attributes cy-field | type
+set attributes cy-field | value
+set attributes cy-list | label
+set attributes cy-list | selected
+set attributes cy-spinner | label
+set attributes cy-tabs | label
+set attributes cy-tabs | selected
+set attributes cy-tree | label
+set attributes cy-tree | selected
+set element-tags | cy-button
+set element-tags | cy-empty
+set element-tags | cy-field
+set element-tags | cy-list
+set element-tags | cy-spinner
+set element-tags | cy-tabs
+set element-tags | cy-tree
+variant CommandCallers | 'plugins'
+variant CommandCallers | 'user'
+variant CoreErrorCode | 'AlreadyProvided'
+variant CoreErrorCode | 'Cancelled'
+variant CoreErrorCode | 'CommandConflict'
+variant CoreErrorCode | 'CommandNotFound'
+variant CoreErrorCode | 'HostGone'
+variant CoreErrorCode | 'Invalid'
+variant CoreErrorCode | 'NotCloneable'
+variant CoreErrorCode | 'NotDeclared'
+variant CoreErrorCode | 'NotFound'
+variant CoreErrorCode | 'PermissionDenied'
+variant CoreErrorCode | 'Remote'
+variant CoreErrorCode | 'Timeout'
+variant CoreErrorCode | 'Unavailable'
+variant DialogSpec | { readonly kind: 'ask'; readonly title: string; readonly message?: string; readonly buttons: readonly DialogChoice[] }
+variant DialogSpec | { readonly kind: 'menu'; readonly items: readonly DialogChoice[]; readonly at: { readonly x: number; readonly y: number } }
+variant DirEntry.kind | 'dir'
+variant DirEntry.kind | 'file'
+variant DirEntry.kind | 'link'
+variant DirEntry.kind | 'other'
+variant ElementTag | 'cy-button'
+variant ElementTag | 'cy-empty'
+variant ElementTag | 'cy-field'
+variant ElementTag | 'cy-list'
+variant ElementTag | 'cy-spinner'
+variant ElementTag | 'cy-tabs'
+variant ElementTag | 'cy-tree'
+variant FeedLine.kind | 'error'
+variant FeedLine.kind | 'key'
+variant FeedLine.kind | 'log'
+variant FeedLine.kind | 'window'
+variant FileStat.kind | 'dir'
+variant FileStat.kind | 'file'
+variant FileStat.kind | 'other'
+variant KeyWhen.input | 'any'
+variant KeyWhen.input | 'not-text'
+variant LogLevel | 'error'
+variant LogLevel | 'info'
+variant LogLevel | 'warn'
+variant ProcessResult.code | null
+variant ProcessResult.code | number
+variant ProcessResult.signal | null
+variant ProcessResult.signal | string
+variant ProgramRule | string
+variant ProgramRule | { readonly program: string; readonly args: readonly string[]; readonly env?: readonly string[] }
+variant SectionResult | { readonly status: 'invalid'; readonly errors: readonly string[] }
+variant SectionResult | { readonly status: 'migrate-error'; readonly layer: Layer; readonly from: number; readonly error: string }
+variant SectionResult | { readonly status: 'newer'; readonly layer: Layer; readonly found: number; readonly expected: number }
+variant SectionResult | { readonly status: 'ok'; readonly value: Record<string, unknown>; readonly migrated: readonly Layer[] }
