@@ -394,8 +394,8 @@ test('виды: адрес у плагина с ui в манифесте и у �
     log: () => {},
   });
 
-  assert.deepEqual(service.snapshot().layout, [{ pluginId: 'face', kind: 'view', name: 'main', area: 'sidebar', order: 1000, url: 'cyborg-plugin://face/face/?view=main' }]);
-  assert.deepEqual(service.uiOf('face'), { dir: path.join(dir, 'face'), group: 'face', views: { main: './ui/ui.js' } });
+  assert.deepEqual(service.snapshot().layout, [{ pluginId: 'face', kind: 'view', name: 'main', area: 'sidebar', order: 1000, url: 'cyborg-plugin://solo_face/face/?view=main' }]);
+  assert.deepEqual(service.uiOf('face'), { dir: path.join(dir, 'face'), group: 'solo_face', views: { main: './ui/ui.js' } });
   assert.equal(service.uiOf('voice'), undefined);
   assert.deepEqual(service.snapshot().plugins.find((p) => p.id === 'voice')?.permissions, ['другие плагины могут звать команды: voice.ping'], 'открытые чужим команды - в правах словами');
   assert.deepEqual(service.snapshot().plugins.find((p) => p.id === 'face')?.permissions, []);
@@ -416,7 +416,7 @@ test('виды: адрес у плагина с ui в манифесте и у �
   assert.deepEqual(await service.runFor('face', 42), { error: 'нет имени команды' });
   assert.deepEqual(service.logsOf('face'), [{ at: 7, kind: 'log', subject: 'face', text: 'привет' }]);
   assert.deepEqual(pushed, [
-    ['face', 'привет', 'face'],
+    ['face', 'привет', 'solo_face'],
     ['voice', 'pong', undefined],
   ], 'лог идёт с группой рендера плагина: у плагина без видов её нет');
 
@@ -426,7 +426,7 @@ test('виды: адрес у плагина с ui в манифесте и у �
   assert.deepEqual(await service.disable('face'), {});
   const face = service.snapshot().plugins.find((p) => p.id === 'face');
   assert.equal(face?.state, 'stopped');
-  assert.deepEqual(service.snapshot().layout, [{ pluginId: 'face', kind: 'view', name: 'main', area: 'sidebar', order: 1000, mark: 'disabled', url: 'cyborg-plugin://face/face/?view=main' }], 'снятому плагину окно рисует заглушку на месте вида');
+  assert.deepEqual(service.snapshot().layout, [{ pluginId: 'face', kind: 'view', name: 'main', area: 'sidebar', order: 1000, mark: 'disabled', url: 'cyborg-plugin://solo_face/face/?view=main' }], 'снятому плагину окно рисует заглушку на месте вида');
   await service.unload();
 });
 
@@ -451,11 +451,11 @@ test('группы рендера: виды плагинов поставки в
       ['alice', 'main', 'cyborg-plugin://duo/alice/?view=main'],
       ['bob', 'main', 'cyborg-plugin://duo/bob/?view=main'],
       ['echo', 'main', 'cyborg-plugin://echo/echo/?view=main'],
-      ['guest', 'main', 'cyborg-plugin://guest/guest/?view=main'],
-      ['guest', 'side', 'cyborg-plugin://guest/guest/?view=side'],
-      ['mine', 'main', 'cyborg-plugin://mine/mine/?view=main'],
+      ['guest', 'main', 'cyborg-plugin://solo_guest/guest/?view=main'],
+      ['guest', 'side', 'cyborg-plugin://solo_guest/guest/?view=side'],
+      ['mine', 'main', 'cyborg-plugin://solo_mine/mine/?view=main'],
     ]);
-    assert.deepEqual(snapshot.plugins.map((p) => [p.id, p.group]), [['alice', 'duo'], ['bob', 'duo'], ['echo', 'echo'], ['guest', 'guest'], ['mine', 'mine']]);
+    assert.deepEqual(snapshot.plugins.map((p) => [p.id, p.group]), [['alice', 'duo'], ['bob', 'duo'], ['echo', 'echo'], ['guest', 'solo_guest'], ['mine', 'solo_mine']]);
     // Предупреждение о группе - у стороннего, которому было с кем делить; у плагина поставки и у одиночки его нет.
     const warning = (id: string) => snapshot.plugins.find((p) => p.id === id)?.groupWarning;
     assert.match(warning('guest') ?? '', /сторонний плагин не делит группу рендера: группа duo не действует, работает в своей guest/);
@@ -465,9 +465,9 @@ test('группы рендера: виды плагинов поставки в
     assert.ok(snapshot.problems.some((p) => p.includes('plugins.uiGroups.bad name')), 'ошибка поля plugins.uiGroups - в «Не дошло до ядра»');
     assert.equal(snapshot.journal.filter((l) => l.plugins.includes('guest') && l.text.includes('группу рендера')).length, 1);
     // Протокол: плагин обслуживается только под хостом своей группы.
-    assert.deepEqual([service.groupOf('alice'), service.groupOf('bob'), service.groupOf('guest'), service.groupOf('nobody')], ['duo', 'duo', 'guest', undefined]);
+    assert.deepEqual([service.groupOf('alice'), service.groupOf('bob'), service.groupOf('guest'), service.groupOf('nobody')], ['duo', 'duo', 'solo_guest', undefined]);
     assert.equal(service.uiOf('alice')?.group, 'duo');
-    assert.equal(service.uiOf('mine')?.group, 'mine');
+    assert.equal(service.uiOf('mine')?.group, 'solo_mine');
   } finally {
     await service.unload();
   }
@@ -550,10 +550,10 @@ test('несколько видов: оба адреса в раскладке �
     const layout = service.snapshot().layout;
     const of = (id: string) => layout.filter((e) => e.pluginId === id).map((e) => [e.name, e.url, e.mark]);
     assert.deepEqual(of('duo'), [
-      ['main', 'cyborg-plugin://duo/duo/?view=main', undefined],
-      ['side-tree', 'cyborg-plugin://duo/duo/?view=side-tree', undefined],
+      ['main', 'cyborg-plugin://solo_duo/duo/?view=main', undefined],
+      ['side-tree', 'cyborg-plugin://solo_duo/duo/?view=side-tree', undefined],
     ]);
-    assert.deepEqual(of('solo'), [['main', 'cyborg-plugin://solo/solo/?view=main', undefined]]);
+    assert.deepEqual(of('solo'), [['main', 'cyborg-plugin://solo_solo/solo/?view=main', undefined]]);
     assert.deepEqual(of('bare'), []);
     assert.deepEqual(of('spare'), [['main', undefined, 'not-enabled']], 'невключённому окно вид не рисует');
     assert.deepEqual(await service.disable('duo'), {});

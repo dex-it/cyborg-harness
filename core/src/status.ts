@@ -160,9 +160,7 @@ export function describeEntry(e: JournalEntry): string {
     case 'host-isolated':
       return `сторонний плагин не делит хост: группа ${e.group} из plugins.hosts не действует, работает в своём хосте ${e.hostId}`;
     case 'group-isolated':
-      return e.reason === 'taken'
-        ? `группа ${e.group} занята сторонним плагином: плагин работает в своей ${e.renderGroup}`
-        : `сторонний плагин не делит группу рендера: группа ${e.group} не действует, работает в своей ${e.renderGroup}`;
+      return `сторонний плагин не делит группу рендера: группа ${e.group} не действует, работает в своей ${e.renderGroup}`;
     case 'third-party':
       return 'сторонний плагин: код не из поставки, не проверен; на этапе 1 хост - обычный процесс Node, и плагин может обойти шлюз ctx.os';
     case 'unhandled-rejection':

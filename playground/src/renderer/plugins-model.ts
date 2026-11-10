@@ -21,9 +21,9 @@ export function originNote(row: PluginRow): string | undefined {
   return 'сторонний плагин из каталога пользователя: код не проверен, на этапе 1 исполняется в обычном процессе Node и может обойти шлюз ctx.os; права ниже - то, что он заявил, а не то, что ему можно';
 }
 
-/** Метка группы рендера: нужна, только когда плагин делит origin и процесс рендера с другими, то есть группа не его id. */
+/** Метка группы рендера: нужна, только когда плагин делит origin и процесс рендера с другими, то есть группа не его id. Сторонний всегда один (его группа - `solo_<id>`), метки у него нет. */
 export function groupLabel(row: PluginRow): string | undefined {
-  return row.group === undefined || row.group === row.id ? undefined : `группа ${row.group}`;
+  return row.group === undefined || row.group === row.id || row.origin === 'user' ? undefined : `группа ${row.group}`;
 }
 
 /** Предупреждение о группе: сторонний плагин просил общую группу, ядро дало ему свою (запись `group-isolated` словами). */

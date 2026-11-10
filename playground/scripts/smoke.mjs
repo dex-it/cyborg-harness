@@ -262,7 +262,7 @@ async function main() {
 
   // K-04: группы рендера. alice и bob - один origin и один процесс рендера, echo - другая группа и другой процесс; сторонний built-dep группу не получил.
   const [aliceFrame, bobFrame, echoFrame, builtFrame] = await Promise.all([frameOf('alice'), frameOf('bob'), frameOf('echo'), frameOf('built-dep')]);
-  assert.deepEqual([aliceFrame?.origin, bobFrame?.origin, echoFrame?.origin, builtFrame?.origin], ['cyborg-plugin://duo', 'cyborg-plugin://duo', 'cyborg-plugin://echo', 'cyborg-plugin://built-dep']);
+  assert.deepEqual([aliceFrame?.origin, bobFrame?.origin, echoFrame?.origin, builtFrame?.origin], ['cyborg-plugin://duo', 'cyborg-plugin://duo', 'cyborg-plugin://echo', 'cyborg-plugin://solo_built-dep']);
   assert.match(aliceFrame.url, /^cyborg-plugin:\/\/duo\/alice\/\?view=main$/, 'адрес вида не несёт плагина в пути');
   assert.ok(aliceFrame.pid && aliceFrame.pid === bobFrame.pid, `виды одной группы в разных процессах рендера: ${String(aliceFrame.pid)} и ${String(bobFrame.pid)}`);
   assert.ok(echoFrame.pid !== aliceFrame.pid && builtFrame.pid !== aliceFrame.pid && echoFrame.pid !== builtFrame.pid, 'виды разных групп делят процесс рендера');

@@ -376,10 +376,10 @@ test('группы рендера: сторонний всегда один в �
     [
       ['files', 'panels'],
       ['tree', 'panels'],
-      ['x', 'x'],
-      ['y', 'y'],
-      ['z', 'z'],
-      ['w', 'w'],
+      ['x', 'solo_x'],
+      ['y', 'solo_y'],
+      ['z', 'solo_z'],
+      ['w', 'solo_w'],
     ],
   );
   assert.deepEqual(
@@ -397,22 +397,32 @@ test('группы рендера: сторонний всегда один в �
   await k.unload();
 
   const open = await kernel({ x: noop, y: noop }, { enabled: ['x', 'y'], manifests: [manifest('x', view('shared')), manifest('y', view('shared'))] });
-  assert.deepEqual([open.groupOf('x'), open.groupOf('y')], ['x', 'y'], 'без bundled все сторонние');
+  assert.deepEqual([open.groupOf('x'), open.groupOf('y')], ['solo_x', 'solo_y'], 'без bundled все сторонние');
   assert.equal(open.journal.filter((e) => e.kind === 'group-isolated').length, 2);
   await open.unload();
 });
 
-test('группы рендера: плагин поставки не садится в группу, чьё имя - id стороннего плагина', async () => {
+test('группы рендера: origin стороннего в своём пространстве имён - группа поставки с тем же именем его хранилище не делит, ни в одной загрузке, ни в следующей', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
-  const k = await kernel({ files: noop, guest: noop }, { enabled: ['files', 'guest'], manifests: [manifest('files', view('guest')), manifest('guest', view())], bundled: ['files'] });
-  assert.deepEqual([k.groupOf('files'), k.groupOf('guest')], ['files', 'guest'], 'origin стороннего плагина остаётся его одного');
+  // Загрузка 1: alice и bob (поставка) в группе tp2, имя пришло от человека или манифеста; загрузка 2: человек включил сторонний плагин с id tp2.
+  const first = await kernel({ alice: noop, bob: noop }, { enabled: ['alice', 'bob'], manifests: [manifest('alice', view('tp2')), manifest('bob', view('tp2'))], bundled: ['alice', 'bob'] });
+  const second = await kernel({ tp2: noop, alice: noop }, { enabled: ['tp2', 'alice'], manifests: [manifest('tp2', view()), manifest('alice', view('tp2'))], bundled: ['alice'] });
+  const before = new Set(['alice', 'bob'].map((id) => first.groupOf(id)));
+  assert.deepEqual([...before], ['tp2']);
+  assert.ok(!before.has(second.groupOf('tp2')), `сторонний tp2 получил группу ${String(second.groupOf('tp2'))}, где в прошлой загрузке жила поставка`);
+  assert.notEqual(second.groupOf('tp2'), second.groupOf('alice'), 'и в одной загрузке они не делят origin');
+  assert.equal(second.groupOf('alice'), 'tp2', 'плагин поставки садится в группу, как просил: отказывать ему незачем');
   assert.deepEqual(
-    k.journal.filter((e) => e.kind === 'group-isolated'),
-    [{ pluginId: 'files', kind: 'group-isolated', group: 'guest', renderGroup: 'files', reason: 'taken' }],
+    second.journal.filter((e) => e.kind === 'group-isolated'),
+    [],
   );
-  assert.match(describeEntry(k.journal.find((e) => e.kind === 'group-isolated')!), /группа guest занята сторонним плагином: плагин работает в своей files/);
-  await k.unload();
+  // В обратную сторону то же: что оставил сторонний tp2, не читают виды поставки в группе tp2.
+  const alone = await kernel({ tp2: noop }, { enabled: ['tp2'], manifests: [manifest('tp2', view())] });
+  assert.notEqual(alone.groupOf('tp2'), first.groupOf('alice'));
+  // Группа не может быть записана как id плагина: пространства имён не пересекаются по синтаксису.
+  assert.match(alone.groupOf('tp2') ?? '', /^[a-z]+_/, 'сторонний одиночка помечен знаком, которого нет в id плагина и имени группы');
+  for (const k of [first, second, alone]) await k.unload();
 });
 
 test('хосты: из поставки - по группам, сторонний всегда один в своём хосте', async () => {

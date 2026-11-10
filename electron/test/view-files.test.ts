@@ -30,6 +30,11 @@ test('вид: origin называет группу, адрес - плагин в
   assert.equal(groupOfOrigin('cyborg-plugin://cyborg.panels'), 'cyborg.panels');
   assert.equal(groupOfOrigin('file://'), undefined);
   assert.equal(groupOfOrigin('cyborg-plugin://Alice:80'), undefined);
+  assert.equal(groupOfOrigin('cyborg-plugin://solo_guest'), 'solo_guest', 'сторонний одиночка: своё пространство имён');
+  assert.equal(groupOfOrigin('cyborg-plugin://solo_'), undefined);
+  assert.equal(groupOfOrigin('cyborg-plugin://a_b'), undefined, 'подчёркивание только после solo');
+  assert.deepEqual(frameAddress('cyborg-plugin://solo_guest/guest/?view=side'), { group: 'solo_guest', plugin: 'guest', view: 'side' });
+  assert.equal(frameAddress('cyborg-plugin://solo_guest/solo_guest/'), undefined, 'плагин в пути - id, без подчёркивания');
   assert.equal(viewUrl('panels', 'alice', 'tree'), 'cyborg-plugin://panels/alice/?view=tree');
   assert.equal(viewUrl('panels', 'alice'), 'cyborg-plugin://panels/alice/');
   assert.deepEqual(frameAddress('cyborg-plugin://panels/alice/?view=tree'), { group: 'panels', plugin: 'alice', view: 'tree' });

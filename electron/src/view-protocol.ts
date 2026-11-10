@@ -11,6 +11,8 @@ export const VIEW_SCHEME = 'cyborg-plugin';
 export const PATH_MIME = 'application/x-cyborg-path';
 
 const ID = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/;
+// Хост группы: имя группы или `solo_<id>` стороннего (ядро, `Kernel.groupOf`); подчёркивание бывает только в нём, id плагина в пути его не содержит.
+const GROUP = /^(?:solo_)?[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/;
 
 /** Origin группы рендера: все виды плагинов группы живут под ним, в одном процессе рендера. */
 export function viewOrigin(group: string): string {
@@ -22,7 +24,7 @@ export function groupOfOrigin(origin: string): string | undefined {
   const prefix = `${VIEW_SCHEME}://`;
   if (!origin.startsWith(prefix)) return undefined;
   const group = origin.slice(prefix.length);
-  return ID.test(group) ? group : undefined;
+  return GROUP.test(group) ? group : undefined;
 }
 
 /** Адрес вида для `<iframe>`: группа - хост, плагин - первый сегмент пути, `?view=` - вид. */

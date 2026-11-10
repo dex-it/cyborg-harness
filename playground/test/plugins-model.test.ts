@@ -74,9 +74,10 @@ describe('окно «Плагины Cyborg»: модель', () => {
   it('группа рендера: метка только у плагина в чужой группе, предупреждение - слова записи ядра', () => {
     assert.equal(groupLabel(row('alice', 'active', { group: 'duo' })), 'группа duo');
     assert.equal(groupLabel(row('echo', 'active', { group: 'echo' })), undefined, 'своя группа - не метка');
+    assert.equal(groupLabel(row('guest', 'active', { origin: 'user', group: 'solo_guest' })), undefined, 'сторонний один в своей группе - не метка');
     assert.equal(groupLabel(row('logic', 'active')), undefined, 'у плагина без видов группы нет');
     const warning = 'сторонний плагин не делит группу рендера: группа duo не действует, работает в своей guest';
-    assert.equal(groupNote(row('guest', 'active', { origin: 'user', group: 'guest', groupWarning: warning })), warning);
+    assert.equal(groupNote(row('guest', 'active', { origin: 'user', group: 'solo_guest', groupWarning: warning })), warning);
     assert.equal(groupNote(row('alice', 'active', { group: 'duo' })), undefined);
   });
 
