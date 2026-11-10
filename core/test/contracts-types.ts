@@ -29,6 +29,19 @@ export const consumer: PluginModule = {
     ctx.contracts.get('demo.files');
     // @ts-expect-error в пакете нет контракта cyborg.tab
     ctx.contracts.get('cyborg.tab', 1);
+    // cyborg.sessions (PL-02): подписка идёт через границу хоста, поэтому ответ - Promise<Subscription>; вариантов изменения четыре.
+    const sessions = ctx.contracts.get('cyborg.sessions', 1);
+    void sessions?.onChange((e) => {
+      if (e.change.type === 'waiting') ctx.log(`${e.title}: ${e.change.reason}`);
+      // @ts-expect-error у варианта cwd нет reason
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- проверка компилятора: тип обращения к несуществующему полю - error
+      if (e.change.type === 'cwd') ctx.log(e.change.reason);
+    });
+    // @ts-expect-error подписка возвращает Subscription асинхронно, у Promise нет dispose
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call -- проверка компилятора: dispose у Promise не существует
+    void sessions?.onChange(() => undefined).dispose();
+    // @ts-expect-error мажорной версии 2 у cyborg.sessions нет
+    ctx.contracts.get('cyborg.sessions', 2);
     void v1?.read('/a');
     void v2?.readText('/a');
     const tabs = ctx.contracts.all('demo.tab', 1);

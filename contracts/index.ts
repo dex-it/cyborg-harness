@@ -1,6 +1,7 @@
 import type { Agent, AgentTool } from './agent.ts';
 import type { Git } from './git.ts';
 import type { TreeDecoration } from './tree.ts';
+import type { Sessions } from './sessions.ts';
 
 /** Карта контрактов: имя -> мажорная версия -> тип; правила дополнения - README.md рядом. */
 export interface Contracts {
@@ -11,6 +12,8 @@ export interface Contracts {
   'cyborg.git': { 1: Git };
   /** Черновик PL-04. */
   'cyborg.tree-decoration': { 1: TreeDecoration };
+  /** Черновик пилота PL-02: только события сессий (`contracts/sessions.ts`). */
+  'cyborg.sessions': { 1: Sessions };
 }
 
 export type * from './plugin.ts';
@@ -19,6 +22,7 @@ export type * from './os.ts';
 export type * from './agent.ts';
 export type * from './git.ts';
 export type * from './tree.ts';
+export type * from './sessions.ts';
 export type * from './elements.ts';
 
 /** Ответ метода-подписки: снятие идёт поставщику через ядро, а при выгрузке любой из сторон ядро снимает подписку само. */

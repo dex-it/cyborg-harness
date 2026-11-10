@@ -138,6 +138,7 @@ export interface Git {
 import type { Agent, AgentTool } from './agent.js';
 import type { Git } from './git.js';
 import type { TreeDecoration } from './tree.js';
+import type { Sessions } from './sessions.js';
 export interface Contracts {
     'cyborg.agent': {
         1: Agent;
@@ -154,6 +155,9 @@ export interface Contracts {
     'cyborg.tree-decoration': {
         1: TreeDecoration;
     };
+    'cyborg.sessions': {
+        1: Sessions;
+    };
 }
 export type * from './plugin.js';
 export type * from './view.js';
@@ -161,6 +165,7 @@ export type * from './os.js';
 export type * from './agent.js';
 export type * from './git.js';
 export type * from './tree.js';
+export type * from './sessions.js';
 export type * from './elements.js';
 export interface Subscription {
     dispose(): void;
@@ -535,6 +540,29 @@ export interface PluginModule {
     readonly state?: Omit<SectionSpec, 'version'>;
     activate(ctx: PluginContext): Disposable | undefined | Promise<Disposable | undefined>;
 }
+// ---- sessions.d.ts
+import type { Subscription } from './index.js';
+export interface Sessions {
+    onChange(listener: (event: SessionEvent) => void): Subscription;
+}
+export interface SessionEvent {
+    readonly sessionId: string;
+    readonly title: string;
+    readonly change: SessionChange;
+}
+export type SessionChange = {
+    readonly type: 'cwd';
+    readonly cwd: string;
+} | {
+    readonly type: 'activity';
+    readonly tool?: string;
+} | {
+    readonly type: 'waiting';
+    readonly reason: string;
+} | {
+    readonly type: 'exit';
+    readonly code: number;
+};
 // ---- tree.d.ts
 import type { Subscription } from './index.js';
 export type TreeMarkKind = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'conflict';
