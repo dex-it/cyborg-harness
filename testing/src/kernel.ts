@@ -35,6 +35,8 @@ export interface ResolvedPlugin {
   /** Что хост передаст импортёру: file URL точки входа или метка плагина из кода. */
   readonly entry: string;
   readonly module?: PluginModule;
+  /** Каталог плагина; у плагина из кода теста его нет. */
+  readonly dir?: string;
 }
 
 function idOf(manifest: unknown, where: string): string {
@@ -54,7 +56,7 @@ export function resolvePlugin(plugin: TestPlugin): ResolvedPlugin {
   const manifest: unknown = JSON.parse(readFileSync(file, 'utf8'));
   const main = ENTRY_FILES.map((f) => path.join(plugin, f)).find((f) => existsSync(f));
   if (main === undefined) throw new Error(`${plugin}: нет точки входа (${ENTRY_FILES.join(', ')})`);
-  return { id: idOf(manifest, file), manifest, entry: pathToFileURL(main).href };
+  return { id: idOf(manifest, file), manifest, entry: pathToFileURL(main).href, dir: plugin };
 }
 
 export type JournalKind = JournalEntry['kind'];
@@ -77,7 +79,10 @@ export interface StartKernelOptions {
   readonly config?: LayerStore;
   /** Слой `state` (`workspace`). */
   readonly state?: LayerStore;
-  /** Остальные параметры `load()`: `hosts`, `limits`, `activationTimeout` и т.д. Поля, которые собирает тест-кит, здесь не принимаются. */
+  /**
+   * Остальные параметры `load()`: `hosts`, `limits`, `activationTimeout` и т.д. Поля, которые собирает тест-кит, здесь не принимаются.
+   * `schema` по умолчанию читает `config.schema` и `state.schema` из каталога плагина; своё значение заменяет чтение целиком.
+   */
   readonly load?: Omit<Partial<LoadOptions>, 'apiVersion' | 'enabled' | 'manifests' | 'entry' | 'spawnHost' | 'os' | 'config' | 'state'>;
 }
 
@@ -95,6 +100,17 @@ export interface TestKernel extends Kernel {
   waitForJournal(match: (entry: JournalEntry) => boolean, options?: WaitOptions): Promise<JournalEntry>;
   /** Снимает плагины и хосты и удаляет песочницу; повторный вызов ничего не делает. */
   [Symbol.asyncDispose](): Promise<void>;
+}
+
+/** Схема раздела из каталога плагина: ядро просит её у приложения, в тесте приложение - каталог плагина. */
+function schemaFromDirs(plugins: readonly ResolvedPlugin[]): NonNullable<LoadOptions['schema']> {
+  const dirs = new Map(plugins.flatMap((p) => (p.dir === undefined ? [] : [[p.id, path.resolve(p.dir)] as const])));
+  return (manifest, file) => {
+    const dir = dirs.get(manifest.id);
+    if (dir === undefined) throw new Error('плагин из кода теста: файлов схем у него нет, передайте load.schema');
+    // Путь `./<файл>.json` внутри каталога ядро проверило при разборе манифеста.
+    return JSON.parse(readFileSync(path.join(dir, file), 'utf8')) as unknown;
+  };
 }
 
 const describeEntry = (e: JournalEntry): string => `${e.pluginId ?? '-'}:${e.kind}`;
@@ -128,6 +144,7 @@ export async function startKernel(options: StartKernelOptions): Promise<TestKern
   let kernel: Kernel;
   try {
     kernel = await load({
+      schema: schemaFromDirs(plugins),
       ...options.load,
       apiVersion: PLUGIN_API_VERSION,
       enabled: options.enabled ?? ids,

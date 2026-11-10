@@ -7,6 +7,7 @@ import type { PluginContext } from '@cyborg-harness/contracts';
 import { fakePty, memorySecrets, memoryStore, sandbox, startKernel, type InlinePlugin } from '../src/index.ts';
 
 const ECHO = path.join(import.meta.dirname, 'fixtures', 'echo');
+const SCHEMED = path.join(import.meta.dirname, 'fixtures', 'schemed');
 const manifest = (id: string, extra: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...extra });
 
 /** Плагин из кода теста, отдающий свой ctx наружу. */
@@ -44,6 +45,42 @@ describe('startKernel', () => {
     const files = (consumer.ctx().contracts as unknown as { get(name: string, major: number): { read(p: string): Promise<string> } | undefined }).get('test.files', 1);
     assert.ok(files);
     assert.equal(await files.read('a'), 'data:a');
+  });
+
+  it('плагин-каталог со схемами config и state: схемы читаются из каталога без ручного load.schema (#140)', async () => {
+    const config = memoryStore({ user: { schemed: { $version: 1, greeting: 'здравствуйте' } } });
+    const state = memoryStore({ workspace: { schemed: { $version: 1, counter: 7 } } });
+    await using k = await startKernel({ plugins: [SCHEMED], config: config.store, state: state.store });
+    await k.waitForJournal({ kind: 'activated', pluginId: 'schemed' });
+    assert.equal(await k.run('schemed.greeting'), 'здравствуйте');
+    assert.equal(await k.run('schemed.counter'), 7);
+  });
+
+  it('плагин-каталог: значение config не по схеме из каталога - плагин не активируется, причина в журнале', async () => {
+    const { store } = memoryStore({ user: { schemed: { $version: 1, greeting: 5 } } });
+    await using k = await startKernel({ plugins: [SCHEMED], config: store });
+    assert.deepEqual(k.journal, [{ pluginId: 'schemed', kind: 'config', result: { status: 'invalid', errors: ['/greeting: ожидается string, получено integer'] } }]);
+    assert.deepEqual(k.active, []);
+    const bad = memoryStore({ workspace: { schemed: { $version: 1, counter: 'много' } } });
+    await using s = await startKernel({ plugins: [SCHEMED], state: bad.store });
+    assert.deepEqual(s.journal.map((e) => [e.kind, e.pluginId]), [['state', 'schemed']]);
+  });
+
+  it('load.schema теста заменяет чтение из каталога; у плагина из кода теста файлов схем нет - причина в журнале', async () => {
+    const seen: string[] = [];
+    await using own = await startKernel({
+      plugins: [SCHEMED],
+      load: { schema: (_m, file) => (seen.push(file), { type: 'object', properties: { greeting: { type: 'integer' } } }) },
+      config: memoryStore({ user: { schemed: { $version: 1, greeting: 'строка' } } }).store,
+    });
+    assert.deepEqual(seen, ['./config.schema.json']);
+    assert.deepEqual(own.active, [], 'схема теста главнее');
+
+    const inline: InlinePlugin = { manifest: manifest('inline', { config: { version: 1, schema: './config.schema.json' } }), module: { activate() {} } };
+    await using lone = await startKernel({ plugins: [inline], config: memoryStore({ user: { inline: { $version: 1 } } }).store });
+    const entry = lone.journal.find((e) => e.kind === 'config');
+    assert.ok(entry?.kind === 'config' && entry.result.status === 'invalid');
+    assert.match(JSON.stringify(entry.result), /плагин из кода теста/);
   });
 
   it('enabled сужает набор: невключённый плагин в журнале как disabled', async () => {
