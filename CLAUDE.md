@@ -1,6 +1,6 @@
 ## Цель
 
-Cyborg Harness - микроядро для настольных приложений на плагинах: ядро не знает предметной области, агент, сессии, файлы, проекты и трекеры - равные плагины на одном API, а поставка приложения - список встроенных плагинов. Первый потребитель - Cyborg, рабочее место с несколькими сессиями агентов (docs/00-strategy/one-pager.md). Продукт репозитория - ядро `core/` и контракты `contracts/`.
+Cyborg Harness - микроядро для настольных приложений на плагинах: ядро не знает предметной области, агент, сессии, файлы, проекты и трекеры - равные плагины на одном API, а поставка приложения - список встроенных плагинов. Первый потребитель - Cyborg, рабочее место с несколькими сессиями агентов (docs/00-strategy/IDEA-01-cyborg-harness.md). Продукт репозитория - ядро `core/` и контракты `contracts/`.
 
 Плагины в `playground/plugins`, базовые тоже, - исключительно для проверки, пилота и демонстрации ядра: ими проверяют API и контракты, замеряют и показывают ядро вживую. Продуктом они не являются. Что должен соблюдать любой плагин, закрепляется в ядре и контрактах, а не только в плагине стенда.
 
@@ -8,7 +8,7 @@ Cyborg Harness - микроядро для настольных приложен
 
 - Сборка - `npm run build` (playground в `playground/dist`); перед ним, `typecheck`, `lint` и `test` сама идёт `npm run build:packages` (`build:core` - пакет ядра в `core/dist`, `build:testing` - тест-кит в `testing/dist`, `build:electron` - адаптер Electron в `electron/dist`, `build:tools` - `cyborg-plugin` в `tools/cyborg-plugin/dist`)
 - Проверка типов - `npm run typecheck` (строгий tsconfig; TS 7 из алиаса `typescript7`, а `typescript` - TS 6 под API typescript-eslint, поэтому `npx tsc` - не тот компилятор)
-- Линтер - `npm run lint` (ESLint с strictTypeChecked, ноль предупреждений; отключение правила - только директивой с `-- причина`)
+- Линтер - `npm run lint` (ESLint с strictTypeChecked по процессу на пакет, `scripts/lint.mjs`; ноль предупреждений; отключение правила - только директивой с `-- причина`)
 - Тесты - `npm test` (node --test, Node 24 снимает типы сам); подделки сообщений хоста - `core/test/trust.test.ts`; снимок API плагина - `core/test/api-snapshot.test.ts`, эталон `core/test/api-snapshot/<версия>.txt`, обновление `npm run snapshot:api` (правила - `contracts/README.md`)
 - Дымовой тест окна - `npm run smoke` (нужен дисплей; на Linux `xvfb-run`)
 - CI - `.github/workflows/ci.yml`: сборка, типы, линтер, тесты и smoke на macOS и Linux

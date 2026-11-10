@@ -381,7 +381,7 @@ async function main() {
 
   // K-05: закрытая CSP вида и флаг ui.inlineStyles. echo, alice и bob флага не объявили, sessions и editor объявили (xterm и Monaco).
   const viewCspHeader = (id) => inView(id, 'fetch(location.href).then((r) => r.headers.get("content-security-policy"))');
-  const STRICT = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'";
+  const STRICT = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'";
   const WITH_INLINE = STRICT.replace("style-src 'self'", "style-src 'self' 'unsafe-inline'");
   for (const id of ['echo', 'alice', 'bob']) assert.equal(await viewCspHeader(id), STRICT, `${id}: CSP вида без флага не строгая`);
   for (const id of ['sessions', 'editor']) assert.equal(await viewCspHeader(id), WITH_INLINE, `${id}: с флагом CSP не несёт инлайн-стилей`);
@@ -408,6 +408,16 @@ async function main() {
   assert.deepEqual(JSON.parse(await inlineStyle('echo')), { byElement: '0px', byAttribute: '0px', byCssom: '11px' }, 'вид без флага применил инлайн-стиль');
   assert.deepEqual(JSON.parse(await inlineStyle('alice')), { byElement: '0px', byAttribute: '0px', byCssom: '11px' }, 'вид без флага применил инлайн-стиль');
   assert.deepEqual(JSON.parse(await inlineStyle('sessions')), { byElement: '7px', byAttribute: '9px', byCssom: '11px' }, 'вид с флагом не применил инлайн-стиль');
+  // #160: отказ CSP не молчит - строка с подсказкой про ui.inlineStyles в журнале плагина-владельца (echo и alice без флага, sessions с флагом не отказан).
+  // Цикл вставок не раздувает журнал: одинаковые отказы склеиваются в одну запись с repeats.
+  await waitFor(
+    'в журнале echo отказ CSP с подсказкой про ui.inlineStyles',
+    () => lines().some((l) => l.includes('"pluginId":"echo","kind":"denied","method":"csp"') && l.includes('"reason":"csp"') && l.includes('inlineStyles')),
+  );
+  await inView('echo', `(() => { for (let i = 0; i < 200; i++) { const sheet = document.createElement('style'); sheet.textContent = 'div { margin: 1px; }'; document.head.append(sheet); sheet.remove(); } return 1; })()`);
+  await sleep(500);
+  assert.ok(lines().filter((l) => l.includes('"pluginId":"echo","kind":"denied","method":"csp"')).length <= 3, 'поток отказов CSP раздул журнал echo');
+  assert.ok(!lines().some((l) => l.includes('"pluginId":"sessions","kind":"denied","method":"csp"') && l.includes('inlineStyles')), 'sessions с флагом получил отказ на инлайн-стиль');
   // Встроенный скрипт не выполняется ни с флагом, ни без.
   for (const id of ['echo', 'sessions'])
     assert.equal(await inView(id, "(() => { const s = document.createElement('script'); s.textContent = 'window.k05Inline = 1'; document.head.append(s); s.remove(); return typeof window.k05Inline; })()"), 'undefined', `${id}: встроенный скрипт выполнился`);
@@ -438,6 +448,30 @@ async function main() {
       'картинка из сети загрузилась',
     );
     assert.equal(await inView('echo', 'fetch(location.href).then((r) => r.status)'), 200, 'свой origin вид читает');
+    // #161: default-src не покрывает base-uri и form-action, они закрыты явно. <base href> не меняет адрес относительных запросов вида,
+    // отправка формы отклонена CSP (form-action), и сервер снаружи запроса не получает (счёт outside проверяется ниже).
+    assert.deepEqual(
+      JSON.parse(
+        await inView('echo', `new Promise((resolve) => {
+          const seen = [];
+          document.addEventListener('securitypolicyviolation', (e) => seen.push(e.effectiveDirective));
+          const before = document.baseURI;
+          const base = document.createElement('base');
+          base.href = 'http://127.0.0.1:1/k161/';
+          document.head.append(base);
+          const baseChanged = document.baseURI !== before || new URL('x.js', document.baseURI).origin !== location.origin;
+          base.remove();
+          const form = document.createElement('form');
+          form.method = 'get';
+          form.action = ${JSON.stringify(outsideUrl)};
+          document.body.append(form);
+          form.submit();
+          setTimeout(() => { form.remove(); resolve(JSON.stringify({ baseChanged, seen: [...new Set(seen)].sort() })); }, 300);
+        })`),
+      ),
+      { baseChanged: false, seen: ['base-uri', 'form-action'] },
+      '<base href> сменил адреса вида или форма ушла наружу',
+    );
     await sleep(300);
     assert.equal(outside, 0, 'запрос вида дошёл до сервера снаружи');
   } finally {
@@ -1062,6 +1096,7 @@ async function main() {
   await bareWindow();
   await safeWindow();
   await userPluginsWindow();
+  await diagnosticsWindow();
 }
 
 const alive = (pid) => {
@@ -1261,6 +1296,74 @@ async function userPluginsWindow() {
     plain.kill('SIGTERM');
     await Promise.race([new Promise((r) => plain.once('exit', r)), sleep(8000)]);
     if (plain.exitCode === null) plain.kill('SIGKILL');
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * K-30: хранение диагностики между запусками. Первый процесс роняет хост плагина и убивается без закрытия (SIGKILL); второй на том же userData показывает причину
+ * сбоя прошлого запуска у плагина, не меняя его состояния, и выгружает диагностику одним файлом по кнопке окна (диалог «Сохранить как» подменён).
+ */
+async function diagnosticsWindow() {
+  const dir = mkdtempSync(join(tmpdir(), 'cyborg-playground-diag-'));
+  writeFileSync(join(dir, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['echo'], hosts: { a: ['echo'] } } }));
+  const file = join(dir, 'workspace.cyborg.json');
+  const launch = () => {
+    // Своя группа процессов: убитое без закрытия приложение уносит и хосты плагинов, иначе они держат адрес экземпляра, и второй запуск считал бы воркспейс занятым.
+    const child = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${dir}`, '--remote-debugging-port=0', ...electronArgs], { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
+    child.out = '';
+    child.stderr.on('data', (d) => (child.out += d));
+    return child;
+  };
+  const pageOf = async (child) => {
+    const port = await waitFor('порт DevTools окна диагностики', () => /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//.exec(child.out)?.[1]);
+    const page = await waitFor('окно диагностики', async () => (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page'));
+    return connect(page.webSocketDebuggerUrl);
+  };
+  const stateOf = (ev) => ev("document.querySelector('#plugins-list [data-plugin=\"echo\"]')?.dataset.state ?? ''");
+  const first = launch();
+  let second;
+  try {
+    const ev1 = await pageOf(first);
+    await waitFor('echo работает в первом запуске', async () => (await stateOf(ev1)) === 'active');
+    assert.equal(await ev1("document.querySelector('#plugins-list [data-plugin=\"echo\"] .plugin-previous')"), null, 'в первом запуске прошлого сбоя нет');
+    await ev1("(window.playground.crashHost('echo'), 0)");
+    await waitFor('падение хоста в журнале', () => /"kind":"host-down"/.test(first.out));
+    const stored = join(dir, 'diagnostics', workspaceKey(file), 'diagnostics.log');
+    await waitFor('запись о падении хоста уже в файле (срочная запись)', () => existsSync(stored) && readFileSync(stored, 'utf8').includes('"kind":"host-down"'));
+    process.kill(-first.pid, 'SIGKILL');
+    await new Promise((r) => first.once('exit', r));
+
+    second = launch();
+    const ev2 = await pageOf(second);
+    const main2 = await connect(await waitFor('инспектор главного процесса второго запуска', () => /Debugger listening on (ws:\/\/\S+)/.exec(second.out)?.[1]));
+    await waitFor('echo работает во втором запуске', async () => (await stateOf(ev2)) === 'active');
+    const previous = await waitFor('причина сбоя прошлого запуска', () => ev2("document.querySelector('#plugins-list [data-plugin=\"echo\"] .plugin-previous')?.textContent"));
+    assert.match(previous, /^В прошлом запуске, .*: хост a упал/);
+    assert.equal(await ev2("document.querySelector('#plugins-list [data-plugin=\"echo\"] .plugin-reason')"), null, 'прошлый сбой стал причиной текущего состояния');
+    assert.equal(await ev2("document.getElementById('diagnostics').hidden"), false);
+    assert.match(await ev2("document.getElementById('diagnostics-status').textContent"), /^Диагностика: файлов \d+, \d+ КиБ; записи с .*; прошлый запуск с /);
+
+    const out = join(dir, 'выгрузка.txt');
+    await main2(`(() => { const { dialog } = process.mainModule.require('electron'); dialog.showSaveDialog = async () => ({ canceled: false, filePath: ${JSON.stringify(out)} }); })()`);
+    await ev2("document.getElementById('diagnostics-export').click()");
+    const done = await waitFor('итог выгрузки в окне', () => ev2("document.getElementById('diagnostics-result').textContent"));
+    assert.match(done, /^Выгрузка сохранена: .*выгрузка\.txt/);
+    const text = readFileSync(out, 'utf8');
+    assert.ok(text.startsWith('Диагностика Cyborg Harness\n'), 'выгрузка не текстовая');
+    assert.ok(text.includes('Приложение: Cyborg Playground'), 'нет приложения');
+    assert.match(text, /\n {2}echo \S+ - работает, хост a\n/, 'нет версии и состояния плагина');
+    assert.match(text, /журнал warn хост a: хост a упал/, 'нет записи о падении хоста прошлого запуска');
+    assert.match(text, /Запуски: з1 с .*; з2 с .* \(этот\)/, 'нет двух запусков');
+    log('диагностика: падение хоста записано сразу и пережило убитый процесс, второй запуск показывает причину у плагина без смены состояния, выгрузка из окна - один текстовый файл');
+  } finally {
+    for (const child of [first, second]) {
+      try {
+        if (child) process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // группа уже ушла
+      }
+    }
     rmSync(dir, { recursive: true, force: true });
   }
 }

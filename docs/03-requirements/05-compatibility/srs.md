@@ -3,7 +3,6 @@ feature: 05-compatibility
 status: review
 date: 2026-11-10
 origin: derived
-quality-checks: входных записей нет
 ---
 
 # SRS фичи 05 - совместимость, версии и данные

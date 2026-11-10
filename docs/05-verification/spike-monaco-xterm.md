@@ -4,7 +4,6 @@ feature: cyborg-harness
 status: review
 date: 2026-11-10
 origin: derived
-quality-checks: входных записей нет
 ---
 
 # Пилот PL-05: Monaco и xterm во фреймах на cyborg-plugin://

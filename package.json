@@ -42,7 +42,7 @@
     "check:contracts": "node contracts/scripts/check-api.ts",
     "snapshot:contracts": "node contracts/scripts/check-api.ts --update",
     "snapshot:api": "node core/scripts/api-surface.ts --update",
-    "lint": "eslint --max-warnings 0 .",
+    "lint": "node scripts/lint.mjs",
     "check:docs-links": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-docs-links.ts docs README.md",
     "check:budgets": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-budgets.ts",
     "release": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/release.ts",
