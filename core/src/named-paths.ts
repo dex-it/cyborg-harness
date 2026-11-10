@@ -14,7 +14,7 @@ export function namedPaths(value: unknown): string[] {
     } else if (Array.isArray(item)) {
       stack.push(...(item as unknown[]));
     } else if (typeof item === 'object' && item !== null) {
-      stack.push(...Object.values(item));
+      stack.push(...Object.values(item as Record<string, unknown>));
     }
   }
   return out;

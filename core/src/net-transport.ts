@@ -178,7 +178,10 @@ function inflateAuto(): Transform {
       inner?.resume();
     },
     flush(done) {
-      if (!inner) return done();
+      if (!inner) {
+        done();
+        return;
+      }
       inner.once('end', () => done());
       inner.end();
     },

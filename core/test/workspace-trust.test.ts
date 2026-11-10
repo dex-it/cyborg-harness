@@ -255,7 +255,7 @@ async function projectsOnDisk(box: { root: string }, layers: { user?: readonly s
   const contexts = new Map<string, PluginContext>();
   const k = await load({
     apiVersion: PLUGIN_API_VERSION,
-    spawnHost: inlineHosts(async (entry) => ({ config: { version: 1 }, activate: (c: PluginContext) => void contexts.set(entry, c) })),
+    spawnHost: inlineHosts(async (entry) => ({ activate: (c: PluginContext) => void contexts.set(entry, c) })),
     enabled: ws.plugins.enabled,
     manifests: [manifest('projects', { permissions: { 'security.roots': true }, config: { version: 1 } }), manifest('tool', { permissions: { 'fs.read': ['workspace'] } })],
     os: { dataDir: path.join(box.root, 'data'), tempDir: path.join(box.root, 'temp'), ...(over.dialog && { dialog: { open: async () => over.dialog ?? [] } }) },

@@ -79,7 +79,7 @@ describe('startKernel', () => {
     const inline: InlinePlugin = { manifest: manifest('inline', { config: { version: 1, schema: './config.schema.json' } }), module: { activate() {} } };
     await using lone = await startKernel({ plugins: [inline], config: memoryStore({ user: { inline: { $version: 1 } } }).store });
     const entry = lone.journal.find((e) => e.kind === 'config');
-    assert.ok(entry && entry.kind === 'config' && entry.result.status === 'invalid');
+    assert.ok(entry?.kind === 'config' && entry.result.status === 'invalid');
     assert.match(JSON.stringify(entry.result), /плагин из кода теста/);
   });
 
