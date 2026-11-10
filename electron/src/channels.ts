@@ -46,6 +46,7 @@ export function registerWindowChannels({ plugins, window }: WindowChannelsOption
   windowChannel('plugins:hang', (id) => plugins.hang(id));
   windowChannel('plugins:run', (command) => plugins.run(command));
   windowChannel('window:answer', (arg) => plugins.answerDialog(arg));
+  windowChannel('window:modal-cancel', (arg) => plugins.cancelModal(arg));
   windowChannel('documents:close', (id) => plugins.closeDocument(id));
   windowChannel('views:visibility', (arg) => {
     const win = window();
@@ -79,6 +80,9 @@ export interface ViewChannelsOptions {
 /** Каналы видов: плагин всегда берётся из адреса фрейма-отправителя внутри его группы, а не из аргументов. */
 export function registerViewChannels({ plugins, dragRoot }: ViewChannelsOptions): void {
   viewChannel(plugins, 'view:dialog', (pluginId, view, spec) => plugins.dialogFor(pluginId, view, spec));
+  viewChannel(plugins, 'view:channel:post', (pluginId, view, message) => plugins.viewPostFrom(pluginId, view, message));
+  viewChannel(plugins, 'view:modal', (pluginId, view) => plugins.modalFor(pluginId, view), {});
+  viewChannel(plugins, 'view:modal:close', (pluginId, view, result) => plugins.closeModalFor(pluginId, view, result));
   viewChannel(plugins, 'view:keys', (pluginId) => plugins.keysFor(pluginId), {});
   viewChannel(plugins, 'view:logs', (pluginId) => plugins.logsOf(pluginId), []);
   viewChannel(plugins, 'view:run', (pluginId, command, args) => plugins.runFor(pluginId, command, args));

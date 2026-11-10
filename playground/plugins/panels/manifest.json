@@ -2,10 +2,12 @@
   "id": "panels",
   "version": "1.0.0",
   "engines": { "cyborg": "^1" },
+  "commands": { "panels.ping": {}, "panels.form": {}, "panels.confirm": {} },
   "ui": {
     "views": {
       "panel": { "module": "./ui/panel.js", "area": "sidebar", "order": 900, "title": "Панель" },
-      "bar": { "module": "./ui/bar.js", "area": "toolbar", "order": 100 }
+      "bar": { "module": "./ui/bar.js", "area": "toolbar", "order": 100 },
+      "form": { "module": "./ui/form.js", "area": "modal", "title": "Новый проект" }
     }
   }
 }

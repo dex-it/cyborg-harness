@@ -20,6 +20,8 @@ const shownId = (layer: WindowLayer): number => {
   assert.ok(dialog, 'диалога на экране нет');
   return dialog.id;
 };
+/** Снимок читается заново: после assert на undefined компилятор считал бы поле навсегда пустым. */
+const modalOf = (w: { readonly snapshot: WindowSnapshot }) => w.snapshot.modal;
 const ask = (...ids: string[]) => ({ kind: 'ask', title: 'Вопрос', buttons: ids.map((id) => ({ id, label: id })) });
 
 test('parseDialog: описание вида проверяется, в окно уходит разобранная копия', () => {
@@ -368,5 +370,155 @@ test('заголовок окна: воркспейс, фрагменты по i
   assert.equal(k.window.title, 'team.cyborg.json - Проект X - Cyborg');
   await k.disable('zeta');
   assert.equal(k.window.title, 'team.cyborg.json - Cyborg');
+  await k.unload();
+});
+
+// K-13: модальное окно плагина (вид с area "modal"). Слой хранит очередь и результат, окно рисует показанное.
+test('модальное окно в слое: по одному и по порядку, закрывает владелец своего вида, отмена окна даёт undefined, выгрузка закрывает свои', async () => {
+  const snaps: WindowSnapshot[] = [];
+  const layer = new WindowLayer((s) => snaps.push(s));
+  const first = layer.showModal('a', 'form', 'Форма a', { n: 1 });
+  const second = layer.showModal('b', 'form', 'Форма b', undefined);
+  const third = layer.showModal('a', 'form', 'Ещё', undefined);
+  assert.deepEqual(layer.snapshot.modal, { id: first.id, pluginId: 'a', view: 'form', title: 'Форма a' });
+  assert.equal(layer.snapshot.queued, 2);
+  assert.deepEqual(layer.modalData('a', 'form'), { data: { n: 1 } });
+  assert.equal(layer.modalData('b', 'form'), undefined, 'чужому виду данные чужого окна не отдаются');
+  assert.equal(layer.modalData('a', 'other'), undefined);
+
+  assert.throws(() => layer.closeModal('b', 'form', 'чужой результат'), { code: 'NotFound' }, 'закрыть окно может только вид, которому оно показано');
+  assert.throws(() => layer.closeModal('a', 'other', 1), { code: 'NotFound' });
+  layer.closeModal('a', 'form', { имя: 'Проект' });
+  assert.deepEqual(await first.result, { имя: 'Проект' });
+  assert.equal(modalOf(layer)?.id, second.id, 'следом встало окно из очереди');
+  assert.throws(() => layer.cancelModal(second.id + 99), { code: 'NotFound' });
+  layer.cancelModal(second.id);
+  assert.equal(await second.result, undefined, 'Escape или закрытие окна - undefined');
+  assert.equal(modalOf(layer)?.id, third.id);
+  layer.forget('a');
+  assert.equal(await third.result, undefined, 'выгрузка плагина закрывает его окно');
+  assert.equal(layer.snapshot.modal, undefined);
+  assert.ok(snaps.length >= 4);
+
+  for (let i = 0; i < 8; i++) layer.showModal('c', 'form', 'x', undefined);
+  assert.throws(() => layer.showModal('c', 'form', 'x', undefined), { code: 'Invalid' }, 'очередь окон одного плагина ограничена');
+  layer.clear();
+  assert.equal(layer.snapshot.modal, undefined);
+});
+
+test('модальное окно в слое: диалог из его вида встаёт поверх и не ждёт окна, Escape окна отдаёт диалогу первенство, замок откладывает чужое окно', async () => {
+  const layer = new WindowLayer(() => undefined);
+  const modal = layer.showModal('a', 'form', 'Форма', undefined);
+  const ask_ = layer.show('a', 'form', ask('yes', 'no'));
+  assert.equal(layer.snapshot.dialog?.pluginId, 'a', 'диалог вида не ждёт закрытия окна, иначе оба ждали бы друг друга');
+  assert.equal(layer.dismissModal(), false, 'диалог сверху - Escape принадлежит ему');
+  layer.answer(shownId(layer), 'no');
+  assert.equal(await ask_, 'no');
+  assert.equal(layer.dismissModal(), true);
+  assert.equal(await modal.result, undefined);
+  assert.equal(layer.dismissModal(), false, 'окна нет - нечего закрывать');
+
+  const other = layer.showModal('chat', 'form', 'Чужое', undefined);
+  layer.lock('pin', false);
+  assert.equal(layer.snapshot.modal, undefined, 'под замком чужое окно ждёт');
+  assert.equal(layer.snapshot.queued, 1);
+  const own = layer.showModal('pin', 'overlay', 'Свой', undefined);
+  assert.equal(modalOf(layer)?.pluginId, 'pin');
+  layer.closeModal('pin', 'overlay', 'ок');
+  assert.equal(await own.result, 'ок');
+  layer.release('pin');
+  assert.equal(modalOf(layer)?.pluginId, 'chat', 'после снятия замка отложенное окно вернулось');
+  layer.cancelModal(modalOf(layer)?.id ?? -1);
+  assert.equal(await other.result, undefined);
+});
+
+const formManifest = (id: string, fields: Record<string, unknown> = {}) =>
+  manifest(id, { commands: { [`${id}.form`]: {}, [`${id}.sure`]: {} }, ui: { views: { form: { module: './form.js', area: 'modal', title: 'Форма' }, main: './ui.js' } }, ...fields });
+const formPlugin: PluginModule = {
+  activate(ctx) {
+    ctx.commands.register('chat.form', () => ctx.views.modal('form', { title: 'Новый проект', data: { имя: 'черновик' } }));
+    ctx.commands.register('chat.badview', () => ctx.views.modal('main'));
+    ctx.commands.register('chat.raw', (view: unknown, init: unknown) => ctx.views.modal(view as string, init as never));
+    ctx.commands.register('chat.sure', () => ctx.dialogs.show({ kind: 'ask', title: 'Удалить?', message: 'Без возврата', buttons: [{ id: 'yes', label: 'Да' }, { id: 'no', label: 'Нет' }] }));
+    ctx.commands.register('chat.menu', () => ctx.dialogs.show({ kind: 'menu', items: [{ id: 'a', label: 'A' }], at: { x: 0, y: 0 } } as never));
+    return undefined;
+  },
+};
+/** Команда идёт в хост и обратно, окно появляется не сразу: ждём состояния слоя, а не числа тиков. */
+const until = async (condition: () => boolean): Promise<void> => {
+  for (let i = 0; i < 200 && !condition(); i++) await new Promise((r) => setTimeout(r, 5));
+  assert.ok(condition(), 'слой окна не пришёл в ожидаемое состояние');
+};
+const formKernel = () =>
+  kernel({ chat: formPlugin }, { enabled: ['chat'], manifests: [formManifest('chat', { commands: { 'chat.form': {}, 'chat.badview': {}, 'chat.raw': { rest: 'any' }, 'chat.sure': {}, 'chat.menu': {} } })] });
+
+test('ctx.views.modal: вид с area modal показан слоем окна, данные видят только он, результат доходит владельцу, Escape и выгрузка дают undefined', async () => {
+  const { start, snaps } = formKernel();
+  const k = await start();
+  const result = k.run('chat.form');
+  await until(() => k.window.modal !== undefined);
+  assert.deepEqual(k.window.modal && { pluginId: k.window.modal.pluginId, view: k.window.modal.view, title: k.window.modal.title }, { pluginId: 'chat', view: 'form', title: 'Новый проект' });
+  assert.equal(snaps.at(-1)?.modal?.title, 'Новый проект', 'окно узнало о модальном окне');
+  assert.deepEqual(k.modalFor('chat', 'form'), { data: { имя: 'черновик' } });
+  assert.equal(k.modalFor('chat', 'main'), undefined);
+  assert.throws(() => k.closeModal('chat', 'main', 1), { code: 'NotFound' }, 'другой вид плагина не закроет чужое окно');
+  assert.throws(() => k.closeModal('chat', 'form', 'я'.repeat(70_000)), { code: 'Invalid' }, 'результат ограничен тем же пределом, что сообщение канала');
+  k.closeModal('chat', 'form', { имя: 'Проект' });
+  assert.deepEqual(await result, { имя: 'Проект' });
+  assert.equal(k.window.modal, undefined);
+
+  const escaped = k.run('chat.form');
+  await until(() => k.window.modal !== undefined);
+  assert.equal(k.dismissModal(), true);
+  assert.equal(await escaped, undefined);
+  const dropped = k.run('chat.form');
+  await until(() => k.window.modal !== undefined);
+  const gone = assert.rejects(dropped, { code: 'HostGone' }, 'хост без плагинов погашен, команда, ждавшая окно, не повисает');
+  await k.disable('chat');
+  await gone;
+  assert.equal(k.window.modal, undefined, 'выгрузка плагина закрыла его окно');
+  await k.unload();
+});
+
+test('ctx.views.modal: только вид, объявленный area modal, и только свой плагина; недоверенные данные не проходят', async () => {
+  const { start } = formKernel();
+  const k = await start();
+  await assert.rejects(k.run('chat.badview'), { code: 'Invalid' }, 'вид main - боковая колонка, окном он не станет');
+  await assert.rejects(k.run('chat.raw', 'нет-такого'), { code: 'Invalid' }, 'вида нет в ui.views');
+  await assert.rejects(k.run('chat.raw', 7), { code: 'Invalid' }, 'имя вида - строка');
+  await assert.rejects(k.run('chat.raw', 'form', 'строка'), { code: 'Invalid' }, 'init - объект');
+  await assert.rejects(k.run('chat.raw', 'form', { title: '' }), { code: 'Invalid' }, 'название окна не пустое');
+  await assert.rejects(k.run('chat.raw', 'form', { title: 'я'.repeat(201) }), { code: 'Invalid' }, 'название окна до 200 символов');
+  await assert.rejects(k.run('chat.raw', 'form', { data: 'я'.repeat(70_000) }), { code: 'Invalid' }, 'данные окна ограничены тем же пределом, что сообщение канала');
+  assert.equal(k.window.modal, undefined, 'отвергнутое окно на экран не попало');
+  const first = k.run('chat.form');
+  await until(() => k.window.modal !== undefined);
+  assert.equal(modalOf({ snapshot: k.window })?.title, 'Новый проект');
+  const waiting = Array.from({ length: 7 }, () => k.run('chat.raw', 'form'));
+  await until(() => k.window.queued === 7);
+  await assert.rejects(k.run('chat.raw', 'form'), { code: 'Invalid' }, 'очередь окон одного плагина ограничена');
+  k.closeModal('chat', 'form', 1);
+  assert.equal(await first, 1);
+  while (k.dismissModal()) await new Promise((r) => setTimeout(r, 1));
+  assert.deepEqual(await Promise.all(waiting), Array(7).fill(undefined), 'Escape отдаёт ждавшим undefined');
+  await k.unload();
+});
+
+test('ctx.dialogs.show: безголовый плагин спрашивает человека через очередь окна; меню без вида - Invalid; выгрузка закрывает вопрос', async () => {
+  const { start } = formKernel();
+  const k = await start();
+  const answer = k.run('chat.sure');
+  await until(() => k.window.dialog !== undefined);
+  const shown = k.window.dialog;
+  assert.deepEqual(shown && { pluginId: shown.pluginId, view: shown.view, kind: shown.spec.kind }, { pluginId: 'chat', view: '', kind: 'ask' }, 'у диалога главной части вида нет');
+  k.answerDialog(shown?.id ?? -1, 'yes');
+  assert.equal(await answer, 'yes');
+  await assert.rejects(k.run('chat.menu'), { code: 'Invalid' }, 'меню привязано к точке вида, у главной части её нет');
+  const dropped = k.run('chat.sure');
+  await until(() => k.window.dialog !== undefined);
+  const gone = assert.rejects(dropped, { code: 'HostGone' }, 'команда, ждавшая ответа, не повисает');
+  await k.disable('chat');
+  await gone;
+  assert.equal(k.window.dialog, undefined, 'выгрузка плагина закрыла его вопрос');
   await k.unload();
 });

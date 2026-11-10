@@ -1,6 +1,6 @@
 import type { ContractName, ContractType, Major } from './index.ts';
 import type { PtyExit, PtyInfo, PtyTicket } from './os.ts';
-import type { Disposable } from './plugin.ts';
+import type { Disposable, ViewChannel } from './plugin.ts';
 
 /** Строка ленты, которую ядро показывает виду его плагина. */
 export interface FeedLine {
@@ -48,10 +48,26 @@ export interface DialogChoice {
   readonly label: string;
 }
 
+/** Вопрос с кнопками: то, что видам и главной части одинаково доступно (`ctx.dialogs.show`). */
+export interface AskDialog {
+  readonly kind: 'ask';
+  readonly title: string;
+  readonly message?: string;
+  readonly buttons: readonly DialogChoice[];
+}
+
 /** Диалог в слое ядра поверх всех фреймов: `ask` - вопрос с кнопками, `menu` - меню у точки `at` в координатах вида. */
 export type DialogSpec =
-  | { readonly kind: 'ask'; readonly title: string; readonly message?: string; readonly buttons: readonly DialogChoice[] }
+  | AskDialog
   | { readonly kind: 'menu'; readonly items: readonly DialogChoice[]; readonly at: { readonly x: number; readonly y: number } };
+
+/** Модальное окно глазами его вида: данные от владельца и способ вернуть ему результат. */
+export interface ViewModal {
+  /** Данные, с которыми главная часть открыла окно (`ctx.views.modal(view, { data })`); не передала - `undefined`. */
+  readonly data: unknown;
+  /** Закрывает окно и отдаёт результат владельцу: данные до 64 КиБ. Окно, уже закрытое человеком или выгрузкой плагина, - исключение. */
+  close(result?: unknown): Promise<void>;
+}
 
 /** Урезанный `ctx` для UI плагина (SAD §3.8): права - те же, что у главной части, но `ctx.os` нет. */
 export interface UiContext {
@@ -90,6 +106,10 @@ export interface UiContext {
     /** Окно показывает диалоги по одному, под замком чужие ждут; ответ - id выбранного пункта, отмена или выгрузка плагина - undefined. */
     show(spec: DialogSpec): Promise<string | undefined>;
   };
+  /** Есть, только пока вид показан как модальное окно (`area: "modal"`, `ctx.views.modal` главной части); у остальных видов - `undefined`. */
+  readonly modal: ViewModal | undefined;
+  /** Канал с главной частью плагина по имени этого вида: сообщения, которые она шлёт виду, и ответы ей. Правила и лимит - у `ViewChannel`. */
+  readonly channel: ViewChannel;
   readonly keys: {
     /** Сочетание своей команды, как оно сейчас привязано (с правками человека, под платформу): `Ctrl+Shift+F`; не привязана - undefined. Нажатие ловит ядро, вид его не видит. */
     of(command: string): string | undefined;

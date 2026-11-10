@@ -21,6 +21,7 @@ export interface PluginsPort {
   onPluginsChanged(listener: () => void): void;
   setViewVisible(id: string, view: string, visible: boolean): Promise<void>;
   answerDialog(id: number, choice: string | undefined): Promise<Reply>;
+  cancelModal(id: number): Promise<Reply>;
   closeDocument(id: string): Promise<Reply>;
   /** Без файла - системный диалог выбора; смена воркспейса перезапускает приложение. */
   openWorkspace(file?: string): Promise<Reply>;
@@ -134,7 +135,7 @@ export class PluginsPanel {
     this.renderFeed();
     this.renderJournal();
     this.views.sync(viewSlots(snapshot.plugins, snapshot.layout));
-    this.layer.sync(snapshot.window, snapshot.plugins);
+    this.layer.sync(snapshot.window, snapshot.plugins, snapshot.layout);
   }
 
   private row(row: PluginRow, canHang: boolean): HTMLElement {

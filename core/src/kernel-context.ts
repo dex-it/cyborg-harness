@@ -203,6 +203,15 @@ export interface ViewsState {
   forget(pluginId: string): Promise<number>;
 }
 
+/** Главная часть и вид: канал сообщений (в `LoadOptions.onViewMessage` и слушателям в хосте), модальные окна и диалоги главной части. */
+export interface ViewChannels {
+  attach(end: BridgeEnd): void;
+  /** Сообщение вида; плагин назвало приложение по origin фрейма. */
+  fromView(pluginId: string, view: string, message: unknown): Promise<void>;
+  /** Вид закрывает своё модальное окно с результатом. */
+  closeModal(pluginId: string, view: string, result: unknown): void;
+}
+
 /** Строки плагинов и вывод хостов: уровень, предел длины и частоты, вычёркивание секретов, дальше - `LoadOptions.onLog`. */
 export interface PluginLog {
   attach(end: BridgeEnd): void;
@@ -233,6 +242,7 @@ export interface Parts {
   readonly sections: Sections;
   readonly osRequests: OsRequests;
   readonly views: ViewsState;
+  readonly viewChannels: ViewChannels;
   readonly logs: PluginLog;
   readonly bridge: Bridge;
 }
