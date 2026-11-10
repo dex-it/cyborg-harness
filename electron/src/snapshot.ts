@@ -35,6 +35,8 @@ export interface PluginRow {
   readonly overlay?: string;
   /** Процессы, оставленные человеком при выключении: без строки в окне их не видно до выхода. */
   readonly kept?: readonly KeptPtyRow[];
+  /** Причина последнего сбоя плагина в прошлом запуске (FR-CH-4013): отдельно от `reason`, который говорит о текущем запуске, и состояния не меняет (FR-CH-4014). */
+  readonly previousFailure?: { readonly at: number; readonly text: string };
 }
 
 export interface KeptPtyRow {
@@ -74,6 +76,24 @@ export interface PluginJournalLine {
   readonly level: 'info' | 'warn' | 'error';
 }
 
+/** Хранение диагностики (K-30): сколько на диске, с какого времени, не сломана ли запись. Нет у окна без хранилища. */
+export interface DiagnosticsStatus {
+  readonly files: number;
+  readonly bytes: number;
+  /** Время самой ранней хранимой записи, мс от эпохи. */
+  readonly since?: number;
+  /** Начало прошлого запуска, если он есть в файлах. */
+  readonly previousRunAt?: number;
+  /** Код отказа, по которому файл сейчас не пишется. */
+  readonly problem?: string;
+}
+
+/** Итог выгрузки диагностики: куда записан файл и сколько он весит. */
+export interface DiagnosticsExport {
+  readonly file: string;
+  readonly bytes: number;
+}
+
 export interface WorkspaceInfo {
   /** null - окно без воркспейса: плагины не загружены. */
   readonly current: string | null;
@@ -96,6 +116,8 @@ export interface PluginsSnapshot {
   readonly keys: readonly KeyRow[];
   readonly feed: readonly FeedLine[];
   readonly journal: readonly PluginJournalLine[];
+  /** Хранение диагностики; нет, если приложение его не включило. */
+  readonly diagnostics?: DiagnosticsStatus;
   /** «Повесить хост» - SIGSTOP, на Windows его нет. */
   readonly canHang: boolean;
   /** Диалог на экране и замки окна. */
@@ -126,4 +148,6 @@ export interface WindowApi {
   /** Воркспейс из «Недавних» в отдельном процессе с тем же `userData`; текущее окно остаётся (K-20). */
   openWorkspaceInNewWindow(file: string): Promise<Reply>;
   setSafeMode(on: boolean): Promise<Reply>;
+  /** Выгрузка диагностики одним файлом: окно спрашивает, куда его положить; ответ - `DiagnosticsExport` или отмена (`{}`). */
+  exportDiagnostics(): Promise<Reply>;
 }

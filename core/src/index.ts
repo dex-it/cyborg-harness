@@ -2,6 +2,7 @@
 // Перечень сверяет core/test/public-api.test.ts; описание - README ядра и SAD, раздел 1.
 export { PLUGIN_API_VERSION } from './api-version.ts';
 export { SectionStore } from './config.ts';
+export { Diagnostics } from './diagnostics.ts';
 export { CoreError } from './errors.ts';
 export { appendBounded } from './journal.ts';
 export { claimInstance } from './instance.ts';
@@ -20,6 +21,9 @@ export { MENU_OWNER, WINDOW_OWNER } from './window-layer.ts';
 export { openWorkspace, withFileLock, workspaceKey } from './workspace.ts';
 
 export type { Layer, LayerStore, SectionHandle, SectionResult, SectionSpec } from './config.ts';
+export type { DiagnosticRecord } from './diagnostics-record.ts';
+export type { DiagnosticsFs, DiagnosticsInfo, DiagnosticsOptions, PreviousFailure } from './diagnostics.ts';
+export type { ExportContext } from './diagnostics-export.ts';
 export type { Disposable } from './disposable.ts';
 export type { Claim, InstanceOptions } from './instance.ts';
 export type { DocumentRow } from './documents.ts';
