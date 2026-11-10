@@ -5,6 +5,17 @@ import { checkArgs, type PluginManifest } from './manifest.ts';
 import { parseNotice } from './notices.ts';
 import { isRecord } from './wire.ts';
 
+/** Право манифеста, по которому шлюз допускает вызов `ctx.os` (для записи трассы); у вызовов без права - undefined. */
+const OS_RIGHTS: Readonly<Record<string, string>> = {
+  'fs.readText': 'fs.read', 'fs.readSlice': 'fs.read', 'fs.list': 'fs.read', 'fs.stat': 'fs.read', 'fs.watch': 'fs.read', 'fs.unwatch': 'fs.read', 'fs.realpath': 'fs.read',
+  'fs.writeText': 'fs.write', 'fs.mkdir': 'fs.write', 'fs.remove': 'fs.write',
+  'process.run': 'process', 'net.fetch': 'net', 'serve.http': 'serve', 'serve.close': 'serve', 'env.get': 'env',
+  'clipboard.readText': 'clipboard', 'clipboard.writeText': 'clipboard', 'secrets.resolve': 'secrets.ref',
+  'shell.openPath': 'shell', 'shell.openExternal': 'shell', 'notify.show': 'notify', 'notify.close': 'notify',
+  'ui.lock': 'ui.lock', 'ui.unlock': 'ui.lock', 'security.setRoots': 'security.roots',
+};
+const rightOf = (method: string): string | undefined => (method.startsWith('pty.') ? 'pty' : OS_RIGHTS[method]);
+
 /** Запросы плагина к ядру из хоста: документы, `ctx.os` (в том числе уведомления и замок окна). */
 export function createOsRequests(ctx: KernelContext): OsRequests {
   const { documents, gateway, layer, notices, osEnv } = ctx;
@@ -46,8 +57,11 @@ export function createOsRequests(ctx: KernelContext): OsRequests {
       if (p.method === 'save') return documents.save(id, p.args[0], p.args[1]);
       return documents.close(id, p.args[0]);
     });
-    onRequest('os', { pluginId: 'string', method: 'string', args: 'array' }, (p, signal) => {
+    onRequest('os', { pluginId: 'string', method: 'string', args: 'array' }, (p, signal, op) => {
       const m = live(p.pluginId);
+      // Сеть - Г5, остальное шлюз - Г4; отказ права тоже конец операции на этой границе.
+      op.enter(p.method === 'net.fetch' ? 'net' : 'os');
+      op.target(`os:${p.method}`, undefined, rightOf(p.method));
       if (p.method === 'ui.lock' || p.method === 'ui.unlock') {
         lockCall(m, p.method, p.args);
         return undefined;
@@ -68,7 +82,7 @@ export function createOsRequests(ctx: KernelContext): OsRequests {
     osEnv.raiseWindow?.();
     // Под чужим замком окно поднимается, а команда не идёт: как и сочетание этого плагина.
     if (!layer.allows(pluginId)) return;
-    const go = () => commands.runOwn(pluginId, click.command, [...(click.args ?? [])]);
+    const go = () => commands.runOwn(pluginId, click.command, [...(click.args ?? [])], 'user');
     // Хост перезапускается: команда появится, когда плагин снова поднимется.
     (commands.owners.has(click.command) ? go() : lifecycle.idle().then(go)).catch((error: unknown) => logs.pluginLine(pluginId, `клик по уведомлению: ${errorMessage(error)}`, 'warn'));
   }

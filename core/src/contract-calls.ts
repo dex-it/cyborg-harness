@@ -5,6 +5,10 @@ import { CoreError } from './errors.ts';
 import { cancelError } from './rpc.ts';
 import { CALLBACK, handleKey, marker, SUBSCRIPTION, type ContractDescriptor } from './host-runtime.ts';
 import type { BridgeEnd, ContractCalls, Host, KernelContext, Subscription } from './kernel-context.ts';
+import type { OpHandle } from './trace.ts';
+
+/** Участник записи трассы: вызов члена контракта по мажорной версии (так его называет и `ctx.contracts.get`). */
+const memberOf = (contract: string, version: string, member: string): string => `${contract}@${version.split('.')[0] ?? version}#${member}`;
 
 /** Контракты между хостами: что предоставил каждый плагин, подписки через границу и сам вызов члена. */
 export function createContractCalls(ctx: KernelContext): ContractCalls {
@@ -40,10 +44,14 @@ export function createContractCalls(ctx: KernelContext): ContractCalls {
   async function invoke(
     host: Host,
     p: { readonly caller: string; readonly pluginId: string; readonly contract: string; readonly version: string; readonly member: string; readonly args: readonly unknown[] },
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    op: OpHandle,
   ): Promise<unknown> {
+    // Член контракта - Г3; к хосту поставщика операция выходит (Г1 ещё раз) в `invokeChecked`, когда проверки пройдены.
+    op.enter('contract');
+    op.target(`contract:${memberOf(p.contract, p.version, p.member)}`, `plugin:${p.pluginId}`);
     try {
-      return await invokeChecked(host, p, signal);
+      return await invokeChecked(host, p, signal, op);
     } finally {
       // Вызов мог изменить состояние поставщика, которое читает пункт меню.
       ctx.parts.menus.touch(p.pluginId);
@@ -53,7 +61,8 @@ export function createContractCalls(ctx: KernelContext): ContractCalls {
   async function invokeChecked(
     host: Host,
     p: { readonly caller: string; readonly pluginId: string; readonly contract: string; readonly version: string; readonly member: string; readonly args: readonly unknown[] },
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    op: OpHandle,
   ): Promise<unknown> {
     const { pool } = ctx.parts;
     const d = descriptors.get(p.contract)?.find((x) => x.pluginId === p.pluginId && x.version === p.version);
@@ -65,13 +74,17 @@ export function createContractCalls(ctx: KernelContext): ContractCalls {
     await checkCall(ctx, p.caller, pluginId, contract, member, p.args);
     const target = pool.live(pluginId);
     const callbacks = p.args.map((arg) => marker(arg, CALLBACK));
-    if (!callbacks.some((id) => id !== undefined)) return pool.call(target, pluginId, 'call', { pluginId, contract, version, member, args: p.args }, callTimeout, signal);
+    if (!callbacks.some((id) => id !== undefined)) {
+      op.enter('host');
+      return pool.call(target, pluginId, 'call', { pluginId, contract, version, member, args: p.args }, callTimeout, signal);
+    }
     if (callbacks.some((id) => id !== undefined && typeof id !== 'string')) throw new CoreError('Invalid', 'invoke: номер колбэка не строка');
 
     const held = [...subscriptions.values()].filter((s) => s.consumer === p.caller).length;
     if (held >= limits.subscriptions) throw new CoreError('Invalid', `${p.caller}: подписок через контракты больше ${String(limits.subscriptions)} - снимите прежние`);
     const subscription = ++subscriptionSeq;
-    subscriptions.set(subscription, { consumer: p.caller, consumerHost: host, provider: pluginId, providerHost: target, callbacks: callbacks as (string | undefined)[] });
+    subscriptions.set(subscription, { consumer: p.caller, consumerHost: host, provider: pluginId, providerHost: target, callbacks: callbacks as (string | undefined)[], of: memberOf(contract, version, member) });
+    op.enter('host');
     const args = p.args.map((arg, i) => (callbacks[i] === undefined ? arg : { [CALLBACK]: i }));
     // Ответ поставщика, обогнавший отмену, подписку уже открыл: снимаем её, вызывающему она не достанется.
     const drop = (result: unknown) => {
@@ -116,16 +129,25 @@ export function createContractCalls(ctx: KernelContext): ContractCalls {
       mine(p.pluginId);
       dropProvided(p.pluginId, p.contract, p.version);
     });
-    onRequest('invoke', { ...KEY, caller: 'string', member: 'string', args: 'array' }, async (p, signal) => {
+    onRequest('invoke', { ...KEY, caller: 'string', member: 'string', args: 'array' }, async (p, signal, op) => {
       mine(p.caller);
-      return invoke(host, p, signal);
+      return invoke(host, p, signal, op);
     });
     onNote('emit', { subscription: 'number', index: 'number', args: 'array' }, (p) => {
       const s = subscriptions.get(p.subscription);
       if (!s) return;
-      if (s.providerHost !== host) throw new CoreError('Unavailable', `подписка ${p.subscription} не из этого хоста`);
-      const id = s.callbacks[p.index];
-      if (id !== undefined) s.consumerHost.endpoint.notify('callback', { id, args: p.args });
+      // Событие контракта - операция Г3: поставщик -> ядро -> потребитель; доставленный колбэк и всё, что он вызовет, идёт в цепочке события.
+      const start = { caller: `plugin:${s.provider}`, hostId: host.id, target: `event:${s.of}`, boundaries: ['host'] } as const;
+      ctx.trace.run(start, (op) => {
+        op.target(`event:${s.of}`, `plugin:${s.consumer}`);
+        op.args(p.args);
+        op.enter('contract');
+        if (s.providerHost !== host) throw new CoreError('Unavailable', `подписка ${p.subscription} не из этого хоста`);
+        const id = s.callbacks[p.index];
+        if (id === undefined) return;
+        s.consumerHost.endpoint.notify('callback', { id, args: p.args });
+        op.enter('host');
+      });
     });
     onNote('release', { caller: 'string', subscription: 'number' }, (p) => {
       mine(p.caller);
@@ -146,14 +168,17 @@ export function createContractCalls(ctx: KernelContext): ContractCalls {
       const given = [...descriptors.values()].flat().filter((d) => d.pluginId === pluginId);
       for (const d of given) dropProvided(d.pluginId, d.contract, d.version);
     },
-    async callAs(caller, contract, major, member, args) {
+    async callAs(caller, contract, major, member, args, op) {
+      op?.enter('contract');
       const impl = registry.get(caller, contract, major);
       if (impl === undefined) throw new CoreError('Unavailable', `${contract}: поставщика сейчас нет`);
       const fn = Object.hasOwn(impl, member) ? impl[member] : undefined;
       if (typeof fn !== 'function') throw new CoreError('Invalid', `${contract}.${member}: не метод контракта`);
       const provider = ctx.graph.bindings.get(caller)?.get(contract);
       if (provider === undefined) throw new CoreError('Unavailable', `${contract}: поставщика сейчас нет`);
+      op?.target(`contract:${memberOf(contract, String(major), member)}`, `plugin:${provider}`);
       await checkCall(ctx, caller, provider, contract, member, args);
+      op?.enter('host');
       return (fn as (...xs: unknown[]) => unknown).apply(impl, [...args]);
     },
   };

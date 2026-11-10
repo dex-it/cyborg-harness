@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { inlineHosts } from '@cyborg-harness/core';
-import type { PluginModule } from '@cyborg-harness/core';
+import type { PluginModule, TraceRecord } from '@cyborg-harness/core';
 import { WINDOW_OWNER } from '@cyborg-harness/core';
 import { DELIVERY_FILE, writeDelivery } from '@cyborg-harness/core/delivery';
 import { ENTRY_FILES as CHECKED_ENTRY_FILES } from '@cyborg-harness/core/plugin-check';
@@ -262,6 +262,27 @@ test('старт: включённый плагин активен, миграц
   assert.deepEqual(levels, ['greeter [info] привет, мир', 'greeter [warn] осторожно']);
   assert.ok(lines.some((l) => l.includes('"pluginId":"idle","kind":"disabled"')));
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { plugins, settings: { greeter: { $version: 2, who: 'мир' } } });
+  await kernel.unload();
+});
+
+test('старт: onTrace доходит до ядра - запись трассы команды приходит приложению (K-28)', async () => {
+  const userData = tmp();
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['greeter'] } }));
+  plugin(path.join(userData, 'plugins'), 'greeter', { commands: ['greeter.hi'] }, 'export default {}');
+  const records: TraceRecord[] = [];
+  const kernel = await startPlugins({
+    userData,
+    builtinDir: path.join(userData, 'нет'),
+    userPlugins: true,
+    spawnHost: inlineHosts(async () => ({ activate: (ctx) => void ctx.commands.register('greeter.hi', () => 'привет') })),
+    log: () => undefined,
+    onTrace: (record) => void records.push(record),
+  });
+  assert.equal(await kernel.run('greeter.hi'), 'привет');
+  assert.deepEqual(
+    records.map((r) => (r.kind === 'operation' ? [r.caller, r.target, r.callee, r.outcome] : r.kind)),
+    [['user', 'command:greeter.hi', 'plugin:greeter', 'ok']],
+  );
   await kernel.unload();
 });
 

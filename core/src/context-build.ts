@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { TRUSTED_LAYER } from './config.ts';
-import { CoreError } from './errors.ts';
+import { CoreError, errorMessage } from './errors.ts';
 import { resolveGraph } from './graph.ts';
 import { DocumentTable } from './documents.ts';
 import { assignHosts } from './host-pool.ts';
@@ -16,6 +16,7 @@ import { menuAccelerators } from './menus.ts';
 import { parseManifest, type PluginManifest } from './manifest.ts';
 import { Notices } from './notices.ts';
 import { OsGateway, type OsEnvironment } from './os-gateway.ts';
+import { Trace } from './trace.ts';
 import { ContractRegistry } from './registry.ts';
 import { isRecord } from './wire.ts';
 import { WindowLayer } from './window-layer.ts';
@@ -28,6 +29,17 @@ const GRANTED_STATE = '$granted';
 function defaultOs(): OsEnvironment {
   const root = mkdtempSync(path.join(tmpdir(), 'cyborg-plugins-'));
   return { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp') };
+}
+
+/** Сообщения шлюза плагину: вывод pty и события `fs.watch` считаются счётчиком за интервал (FR-CH-4005), выход pty пишется записью (FR-CH-4007). */
+function traceStream(trace: Trace, pluginId: string, method: string, params: unknown): void {
+  if (!trace.enabled || !isRecord(params)) return;
+  if (method === 'pty.data' && typeof params.data === 'string') trace.count('pty-output', pluginId, Buffer.byteLength(params.data));
+  else if (method === 'fs.change' && Array.isArray(params.names) && params.names.length > 0) {
+    trace.count('fs-watch', pluginId, params.names.reduce((n: number, name: unknown) => n + (typeof name === 'string' ? Buffer.byteLength(name) : 0), 0));
+  } else if (method === 'pty.exit' && isRecord(params.exit) && typeof params.exit.code === 'number') {
+    trace.ptyExit(pluginId, { code: params.exit.code, ...(typeof params.exit.signal === 'number' && { signal: params.exit.signal }) });
+  }
 }
 
 /**
@@ -61,6 +73,12 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
   const layer = new WindowLayer((snapshot) => options.onWindow?.(snapshot), options.windowTitle);
   const limits = limitsOf(options.os?.limits, options.limits);
   const osEnv: OsEnvironment = { ...(options.os ?? defaultOs()), limits };
+  const trace = new Trace(options.onTrace, {
+    streamMs: limits.traceStreamMs,
+    hostOf: (pluginId) => ctx.hostOf(pluginId),
+    // Через PluginLog, как все строки ядра: текст исключения приёмника идёт под пределами длины и частоты.
+    failed: (error) => ctx.parts.logs.hostLine('трасса', `onTrace бросил, записи трассы могут теряться: ${errorMessage(error)}`, 'error'),
+  });
   const notices = new Notices(
     () => {
       const show = osEnv.notify;
@@ -82,6 +100,7 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
       return { trusted: merged(true), untrusted: merged(false) };
     },
     (id, method, params) => {
+      traceStream(trace, id, method, params);
       const host = ctx.parts.pool.hosts.get(ctx.hostOf(id) ?? id);
       if (host && !host.down) host.endpoint.notify(method, params);
     },
@@ -164,6 +183,7 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
     options,
     journal,
     record,
+    trace,
     flushRepeats,
     enabled,
     watchdog,

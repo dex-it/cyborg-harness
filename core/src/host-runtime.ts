@@ -371,6 +371,8 @@ class Running implements Owner {
   #sent = 0;
   // Последний вошедший не годится в виновники ошибки: продолжение чужой цепочки идёт после него, а хранилище несёт имя вдоль цепочки.
   readonly #chain = new AsyncLocalStorage<string>();
+  // Цепочка операций трассы (FR-CH-4002) идёт вдоль того же кода, что и имя плагина: её номер прислало ядро вместе с запросом, и он уходит с каждым запросом плагина.
+  readonly #trace = new AsyncLocalStorage<number | undefined>();
   // Обработчик исключения видит хранилище уже снятым, а после queueMicrotask в Electron - пустым: имя остаётся на самой ошибке.
   readonly #thrown = new WeakMap<object, string>();
 
@@ -382,10 +384,24 @@ class Running implements Owner {
     return this.#chain.getStore() ?? this.#current;
   }
 
+  chain(): number | undefined {
+    return this.#trace.getStore();
+  }
+
+  within<R>(chain: number | undefined, run: () => R): R {
+    // Сообщение без цепочки в коде вне цепочки (обычный случай) хранилища не заводит.
+    if (chain === undefined && this.#trace.getStore() === undefined) return run();
+    return this.#trace.run(chain, run);
+  }
+
   /** Колбэк, заведённый сейчас, пойдёт в той же цепочке; заведённый вне цепочки лишь отметится для сторожа зависаний, вины не неся. */
   schedule<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
     const chain = this.#chain.getStore();
-    if (chain !== undefined) return this.as(chain, fn);
+    const trace = this.#trace.getStore();
+    if (chain !== undefined) {
+      const inChain = this.as(chain, fn);
+      return trace === undefined ? inChain : (...args) => this.within(trace, () => inChain(...args));
+    }
     const last = this.#current;
     if (last === undefined) return fn;
     return (...args) => {
