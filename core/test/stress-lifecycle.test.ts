@@ -177,7 +177,9 @@ test('stress-lifecycle: поставщики consumes приходят и ухо
   });
   const k = await r.start();
   const names = () => ctxC.contracts.all('test.src', 1).map((p) => p.pluginId).sort();
-  await sleep(20);
+  // Поставщики приходят по каналам разных хостов: ждём, пока `all()` увидит ровно ожидаемых, а не срока, за который они «должны» дойти.
+  const settled = (expected: readonly string[], what: string) => waitFor(what, () => JSON.stringify(names()) === JSON.stringify([...expected].sort()));
+  await settled(providers, 'все восемь поставщиков в all()');
   assert.deepEqual(names(), [...providers].sort());
   const live = new Set(providers);
   for (let i = 0; i < 160; i++) {
@@ -189,11 +191,10 @@ test('stress-lifecycle: поставщики consumes приходят и ухо
       await k.enable(id);
       live.add(id);
     }
-    await sleep(5);
+    await settled([...live], `all() сошёлся с живыми, шаг ${String(i)}`);
     assert.deepEqual(names(), [...live].sort(), `шаг ${String(i)}`);
   }
-  await sleep(20);
-  assert.ok(changes >= 160, `onChange дошёл на каждую смену: ${String(changes)}`);
+  await waitFor('onChange дошёл на каждую смену', () => changes >= 160);
   await k.unload();
 });
 
