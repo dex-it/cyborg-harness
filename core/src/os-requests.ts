@@ -18,7 +18,7 @@ const rightOf = (method: string): string | undefined => (method.startsWith('pty.
 
 /** Запросы плагина к ядру из хоста: документы, `ctx.os` (в том числе уведомления и замок окна). */
 export function createOsRequests(ctx: KernelContext): OsRequests {
-  const { documents, gateway, layer, notices, osEnv, options } = ctx;
+  const { documents, gateway, layer, notices, osEnv } = ctx;
 
   async function notifyCall(m: PluginManifest, method: string, args: readonly unknown[]): Promise<string | undefined> {
     if (m.permissions.notify !== true) {
@@ -84,7 +84,7 @@ export function createOsRequests(ctx: KernelContext): OsRequests {
     if (!layer.allows(pluginId)) return;
     const go = () => commands.runOwn(pluginId, click.command, [...(click.args ?? [])], 'user');
     // Хост перезапускается: команда появится, когда плагин снова поднимется.
-    (commands.owners.has(click.command) ? go() : lifecycle.idle().then(go)).catch((error: unknown) => options.onLog?.(pluginId, `клик по уведомлению: ${errorMessage(error)}`, 'warn'));
+    (commands.owners.has(click.command) ? go() : lifecycle.idle().then(go)).catch((error: unknown) => ctx.parts.logs.pluginLine(pluginId, `клик по уведомлению: ${errorMessage(error)}`, 'warn'));
   }
 
   return { attach, clickNotice };
