@@ -90,6 +90,58 @@ test('слой окна: размер от автора ложится на ди
   }
 });
 
+test('слой окна: высота области вида, о которой просит вид, меняет фрейм того же окна, а не пересоздаёт его; окно не выше 80vh и не выше экрана', () => {
+  const { document, view, restore } = setup();
+  try {
+    view.sync(snapshot({ modal: modal({ size: { width: 700, height: 300 } }) }), [], layout);
+    const dialog = only(document, 'layer-modal');
+    const frame = dialog.all('iframe')[0];
+    assert.ok(frame, 'во фрейме окна нет вида');
+    assert.equal(frame.style.height, undefined, 'пока вид не просил, высота фрейма у стиля приложения');
+
+    view.sync(snapshot({ modal: modal({ size: { width: 700, height: 300 }, contentHeight: 420 }) }), [], layout);
+    assert.equal(only(document, 'layer-modal'), dialog, 'то же окно: вид остался смонтированным, а не перезагружен');
+    assert.equal(dialog.showModalCalls, 1);
+    assert.equal(dialog.all('iframe')[0], frame);
+    assert.equal(frame.style.height, '420px', 'высота области вида - высота фрейма');
+    assert.equal(dialog.style.height, 'auto', 'окно по содержимому: шапка + область вида, а не размер автора');
+    assert.equal(dialog.style.maxHeight, '80vh', 'выше 80% высоты экрана окно не растёт');
+    assert.equal(frame.style.flex, '0 1 auto', 'фрейм уступает, когда окно упёрлось в потолок');
+    assert.equal(frame.style.minHeight, '0');
+    assert.equal(dialog.style.width, 'min(700px, 90vw)', 'ширина автора на месте');
+
+    view.sync(snapshot({ modal: modal({ size: { width: 700, height: 300 }, contentHeight: 150 }) }), [], layout);
+    assert.equal(frame.style.height, '150px', 'вторая просьба заменяет первую');
+
+    view.sync(snapshot({ modal: modal({ id: 2 }) }), [], layout);
+    const next = only(document, 'layer-modal');
+    assert.notEqual(next, dialog);
+    assert.equal(next.all('iframe')[0]?.style.height, undefined, 'следующему окну высота прошлого не достаётся');
+    assert.equal(next.style.height, undefined);
+  } finally {
+    restore();
+  }
+});
+
+test('слой окна: окно уже с высотой вида показывается с ней сразу (отложенное замком окно вернулось); заглушка без фрейма просьбу переносит без ошибки', () => {
+  const { document, view, restore } = setup();
+  try {
+    view.sync(snapshot({ modal: modal({ contentHeight: 260 }) }), [], layout);
+    const dialog = only(document, 'layer-modal');
+    assert.equal(dialog.all('iframe')[0]?.style.height, '260px');
+    assert.equal(dialog.style.height, 'auto');
+    view.sync(snapshot(), [], layout);
+
+    view.sync(snapshot({ modal: modal({ id: 5 }) }), [], []);
+    view.sync(snapshot({ modal: modal({ id: 5, contentHeight: 300 }) }), [], []);
+    const stub = only(document, 'layer-modal');
+    assert.equal(stub.all('iframe').length, 0);
+    assert.ok(stub.withClass('layer-modal-missing').length > 0);
+  } finally {
+    restore();
+  }
+});
+
 test('слой окна: Escape вида - диалог не закрывается сам по cancel, по умолчанию закрывается как обычно', () => {
   const { document, view, calls, restore } = setup();
   try {
