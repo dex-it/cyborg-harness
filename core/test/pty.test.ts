@@ -356,6 +356,23 @@ test('пределы pty: ввод больше предела - Invalid, pty ж
   await s.pty('term').spawn({ program: '/bin/bash' });
 });
 
+test('pty.write из хоста плагина: pty молчит - сверх ptyQueue Invalid сразу в вызове, вывод процесса снимает отказ (#167)', async () => {
+  await using s = await setup({ term: shell }, true, { ptyInput: 1024, ptyInputBurst: 1 << 30, ptyInputRate: 1 << 30, ptyQueue: 2500 });
+  const pty = await s.pty('term').spawn({ program: '/bin/bash' });
+  const seen: string[] = [];
+  pty.onData((d) => void seen.push(d));
+  // Подделка выводит приглашение после запуска: оно тоже вывод и обнуляет счёт, поэтому ввод начинается после него.
+  await waitFor('приглашение дошло до плагина', () => seen.length > 0);
+  const chunk = 'x'.repeat(1000);
+  await pty.write(chunk);
+  await pty.write(chunk);
+  await assert.rejects(pty.write(chunk), { code: 'Invalid', message: /не читает ввод/ });
+  s.backend.procs[0]!.emit('вывод');
+  await waitFor('вывод дошёл до таблицы', () => pty.write(chunk).then(() => true, () => false));
+  await pty.write(chunk);
+  await waitFor('очередь процесса получила принятое', () => s.backend.procs[0]!.writes.join('').length === 4000);
+});
+
 test('pty.write из хоста плагина: сверх запаса ввода Invalid сразу в вызове, pty жив и принимает ввод по мере пополнения; у соседнего pty свой запас (#134)', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
   await using s = await setup({ term: shell }, true, { ptyInput: 1024, ptyInputBurst: 2048, ptyInputRate: 1000 });
