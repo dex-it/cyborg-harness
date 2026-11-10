@@ -350,7 +350,7 @@ test('выгрузка: один текстовый файл с записью �
   const lines = text.split('\n');
   assert.equal(lines[0], 'Диагностика Cyborg Harness');
   assert.ok(text.includes('Приложение: Тест 1.2.3'));
-  assert.ok(text.includes(`Ядро: 0.1.0, API плагинов ${PLUGIN_API_VERSION}`));
+  assert.ok(text.includes(`Ядро: пакет 0.1.0, API плагинов ${PLUGIN_API_VERSION}`));
   assert.match(text, /\n {2}base 2\.3\.4 - работает, хост a\n/);
   assert.match(text, /\n {2}top 0\.9\.1 - работает, хост b\n/);
   assert.match(text, /\n {2}broken 1\.4\.0 - выключен, хост \w+: не поднялся в хосте \w+: нет ключа\n/);

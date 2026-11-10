@@ -106,7 +106,7 @@ export function formatExport(input: ExportInput): string {
     'Диагностика Cyborg Harness',
     `Выгружена: ${iso(input.now)}`,
     ...(context.app === undefined ? [] : [`Приложение: ${context.app}`]),
-    `Ядро: ${context.core ?? 'версия пакета не названа'}, API плагинов ${PLUGIN_API_VERSION}`,
+    `Ядро: ${context.core === undefined ? '' : `пакет ${context.core}, `}API плагинов ${PLUGIN_API_VERSION}`,
     `Записей: ${String(records.length)}; самая ранняя: ${earliest === undefined ? 'нет' : iso(earliest)}; файлов: ${String(input.files.length)} (${kib(input.files.reduce((n, f) => n + f.bytes, 0))}).`,
     `Хранится не больше ${String(input.limits.files)} файлов по ${kib(input.limits.fileBytes)}: что старше самой ранней записи, ушло при ротации, цепочка без начала оборвана с этой стороны.`,
     `Запуски: ${runs.map((run) => `${tag(run)} с ${iso(run)}${run === input.run ? ' (этот)' : ''}`).join('; ')}`,

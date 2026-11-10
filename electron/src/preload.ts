@@ -25,6 +25,7 @@ export function windowApi(): WindowApi {
     openWorkspace: (file?: string): Promise<Reply> => ipcRenderer.invoke('workspace:open', file),
     openWorkspaceInNewWindow: (file: string): Promise<Reply> => ipcRenderer.invoke('workspace:open-new', file),
     setSafeMode: (on: boolean): Promise<Reply> => ipcRenderer.invoke('app:safe-mode', on),
+    exportDiagnostics: (): Promise<Reply> => ipcRenderer.invoke('diagnostics:export'),
   };
 }
 
