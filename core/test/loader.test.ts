@@ -10,6 +10,7 @@ import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { describeEntry, entryLevel, pluginStatuses } from '../src/status.ts';
 import { startCancel } from './fixtures/cancel.ts';
+import { waitFor } from './wait-for.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 
@@ -555,21 +556,22 @@ test('схема раздела из манифеста: значение не �
 });
 
 // Отмена запросов между плагинами (K-09): стенд - core/test/fixtures/cancel.ts.
+// Пауза - только для проверки «ничего не произошло»; то, что должно произойти, ждётся по условию (`waitFor`), а не срокам в 60 мс.
 const pause = (ms = 60) => new Promise((r) => setTimeout(r, ms));
 
 test('отмена вызова контракта: поставщик получает сигнал, вызывающий - Cancelled, вызовы без сигнала целы', async () => {
   const { kernel, api, log } = await startCancel();
   const abort = new AbortController();
   const call = api.slow('a', abort.signal);
-  await pause();
+  await waitFor('поставщик начал вызов a', () => log.length >= 1);
   assert.deepEqual(log, ['a:start']);
   abort.abort();
   await assert.rejects(call, { code: 'Cancelled' });
-  await pause();
+  await waitFor('поставщик получил отмену вызова a', () => log.length >= 2);
   assert.deepEqual(log, ['a:start', 'a:abort:Cancelled']);
   const plain = api.slow('b');
   plain.catch(() => undefined);
-  await pause();
+  await waitFor('поставщик начал вызов b', () => log.length >= 3);
   assert.deepEqual(log.slice(2), ['b:start']);
   await kernel.unload();
 });
@@ -583,6 +585,7 @@ test('отмена: уже отменённый сигнал - вызов до �
   held.slowMs = 10;
   const abort = new AbortController();
   assert.equal(await api.slow('fast', abort.signal), 'fast');
+  await waitFor('поставщик записал завершение fast', () => log.length >= 2);
   abort.abort();
   abort.abort();
   await pause();
@@ -595,7 +598,7 @@ test('callTimeout отменяет вызов у поставщика, а не �
   const { kernel, api, log } = await startCancel({ callTimeout: 80 });
   const never = new AbortController();
   await assert.rejects(api.slow('t', never.signal), { code: 'Timeout' });
-  await pause();
+  await waitFor('поставщик получил отмену по сроку', () => log.length >= 2);
   assert.deepEqual(log, ['t:start', 't:abort:Timeout']);
   await kernel.unload();
 });
@@ -604,15 +607,15 @@ test('отмена команды: commands.run с сигналом доводи
   const { kernel, ctx, log } = await startCancel();
   const abort = new AbortController();
   const run = ctx.commands.run('provider.slow', 'one', abort.signal);
-  await pause();
+  await waitFor('обработчик получил команду one с сигналом', () => log.length >= 1);
   assert.deepEqual(log, ['cmd:one:signal']);
   abort.abort();
   await assert.rejects(run, { code: 'Cancelled' });
-  await pause();
+  await waitFor('обработчик получил отмену команды one', () => log.length >= 2);
   assert.deepEqual(log, ['cmd:one:signal', 'cmd:abort:Cancelled']);
   const app = new AbortController();
   const fromApp = kernel.run('provider.slow', 'two', app.signal);
-  await pause();
+  await waitFor('обработчик получил команду two', () => log.length >= 3);
   app.abort();
   await assert.rejects(fromApp, { code: 'Cancelled' });
   await assert.rejects(ctx.commands.run('provider.slow', 'one', 'extra'), { code: 'Invalid' });

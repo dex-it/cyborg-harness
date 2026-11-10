@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { readSnapshot, renderSnapshot, SNAPSHOT_FILE } from '../scripts/api.ts';
 import { main } from '../scripts/check-api.ts';
+import { runCommand } from '../../core/test/run-command.ts';
 
 // Команда, которую зовёт CI: `check:contracts [--base <ref>]`. Ветка назначения здесь - временный репозиторий с нужным снимком.
 describe('check-api', () => {
@@ -13,7 +13,7 @@ describe('check-api', () => {
   const snapshotFile = path.join(work, 'snapshot.txt');
   const repo = path.join(work, 'repo');
   const real = readSnapshot();
-  const git = (...args: string[]): string => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const git = (...args: string[]): string => runCommand('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { cwd: repo });
 
   /** Коммит во временном репозитории со снимком `snapshot` (или без файла) и его хэш. */
   function commit(snapshot: string | undefined): string {

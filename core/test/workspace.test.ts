@@ -10,6 +10,7 @@ import { RecentWorkspaces } from '../src/recent.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { lockWorkspace, openWorkspace, workspaceKey, type MigrateWorkspace, type Workspace } from '../src/workspace.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
+import { waitFor } from './wait-for.ts';
 
 async function sandbox() {
   // На macOS tmpdir - симлинк /var -> /private/var, а «Недавние» хранят путь после realpath.
@@ -30,14 +31,6 @@ async function open(box: Awaited<ReturnType<typeof sandbox>>, pid?: number): Pro
   assert.ok(r.ok, 'воркспейс занят');
   return r.workspace;
 }
-
-const until = async (what: string, probe: () => boolean, ms = 3000) => {
-  const end = Date.now() + ms;
-  while (!probe()) {
-    if (Date.now() > end) throw new Error(`не дождались: ${what}`);
-    await new Promise((r) => setTimeout(r, 20));
-  }
-};
 
 test('замок: второй открывающий получает pid владельца, замок умершего процесса забирается, close снимает', async () => {
   await using box = await sandbox();
@@ -193,14 +186,14 @@ test('правка файла извне доходит до ctx.config.onChange
   assert.equal(config.get().minutes, 5);
 
   await writeFile(box.file, JSON.stringify({ cyborg: 2, plugins: { enabled: ['lock'] }, settings: { lock: { $version: 1, minutes: 7 } } }));
-  await until('onChange с 7', () => seen.includes(7));
+  await waitFor('onChange с 7', () => seen.includes(7));
 
   await writeFile(box.file, JSON.stringify({ cyborg: 2, settings: { lock: { $version: 1, minutes: -1 } } }));
-  await until('отказ в журнале', () => k.journal.some((e) => e.kind === 'config' && e.result.status === 'invalid'));
+  await waitFor('отказ в журнале', () => k.journal.some((e) => e.kind === 'config' && e.result.status === 'invalid'));
   assert.equal(config.get().minutes, 7);
 
   await writeFile(box.file, '{ "cyborg": 2, "settings": {');
-  await until('битый файл замечен', () => problems.length > 0);
+  await waitFor('битый файл замечен', () => problems.length > 0);
   await assert.rejects(config.set('workspace', { minutes: 3 }), /запись отменена|JSON/);
   await writeFile(box.file, JSON.stringify({ cyborg: 2, plugins: { enabled: ['lock'] }, settings: { lock: { $version: 1, minutes: 7 } } }));
   await new Promise((r) => setTimeout(r, 200));
@@ -240,7 +233,7 @@ test('слежение: правка между открытием ворксп�
   await new Promise((r) => setTimeout(r, 300));
   const watching = ws.watch((ids) => void k.reloadSections('config', ids));
   t.after(() => watching.dispose());
-  await until('onChange с 7', () => seen.includes(7));
+  await waitFor('onChange с 7', () => seen.includes(7));
 });
 
 test('битый файл пользователя не роняет открытие: причина в problems, файл не перезаписан', async () => {
