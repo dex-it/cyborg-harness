@@ -7,7 +7,7 @@ export { utilityHosts, utilityPtyHost } from './plugin-hosts.ts';
 export type { UtilityHosts, UtilityPtyHost } from './plugin-hosts.ts';
 export { electronOs } from './os-env.ts';
 export { framesOf, registerViewScheme, serveViews } from './views.ts';
-export { resolveStaticFile, resolveViewRequest, VIEW_CSP } from './view-files.ts';
+export { resolveStaticFile, resolveViewRequest, VIEW_CSP, viewCsp } from './view-files.ts';
 export type { PluginUi, ViewCsp, ViewRequest } from './view-files.ts';
 export { guardNavigation } from './navigation.ts';
 export type { ViewGroups } from './view-frames.ts';
