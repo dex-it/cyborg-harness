@@ -67,7 +67,7 @@ quality-checks: входных записей нет
 | [K-05 #40](https://github.com/dex-it/cyborg-harness/issues/40) | У-20, У-21 | закрытая CSP вида `default-src 'none'` с явными источниками вместо `default-src 'self'` в `VIEW_CSP`, инлайн-стили по `ui.inlineStyles` | сделано в PR #162: `viewCsp(inlineStyles)`, заголовок на ответ, флаг у `sessions` и `editor` |
 | [K-04 #36](https://github.com/dex-it/cyborg-harness/issues/36) | У-19 | группы рендера `ui.group`, `plugins.uiGroups`, origin кадра по группе, а не по id плагина; задевает память видов ([5](#5-производительность-и-ресурсы)) | в ревью, PR #142 |
 | [PL-05 #25](https://github.com/dex-it/cyborg-harness/issues/25) | У-20 | что нужно Monaco и xterm в iframe от CSP до K-05 | влита, PR #125: набор CSP для Monaco и xterm снят, [итоги](../05-verification/spike-monaco-xterm.md) |
-| [#136](https://github.com/dex-it/cyborg-harness/issues/136) | У-40 | корни области `workspace` из присланного воркспейса через `setRoots`: цепочка не замыкается, пока нет плагина `projects`, закрыть до его появления (остаток ревью K-27) | итерация 3, в ревью: `setRoots` отвергает корень, названный только в слое воркспейса |
+| [#136](https://github.com/dex-it/cyborg-harness/issues/136) | У-40 | корни области `workspace` из присланного воркспейса через `setRoots`: цепочка не замыкается, пока нет плагина `projects`, закрыть до его появления (остаток ревью K-27) | итерация 3, в ревью, PR #170: `setRoots` отвергает корень, названный только в слое воркспейса |
 
 Списки опасных флагов `git`, `gh`, `glab`, `claude` у права `process` (вопрос 5 SAD) нужно решить до заморозки API. У-42 (вредный код в npm-зависимостях) частично закрывает P-06 ([10](#10-опыт-автора-плагина)).
 
