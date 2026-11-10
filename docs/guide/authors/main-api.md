@@ -42,7 +42,7 @@ export default plugin;
 | `os` | Доступ к ОС по правам манифеста |
 | `secrets` | `resolve(ref)` - значение секрета по ссылке |
 | `documents` | Вкладки плагина в окне |
-| `views` | `channel(view)` - канал с видом по имени и `modal(view, { title?, data? })` - модальное окно плагина, ответ - результат вида или `undefined` |
+| `views` | `channel(view)` - канал с видом по имени и `modal(view, { title?, data?, size?, escape? })` - модальное окно плагина, ответ - результат вида или `undefined` |
 | `dialogs` | `show({ kind: 'ask', title, buttons })` - вопрос человеку без вида; ответ - `id` кнопки или `undefined` |
 | `window`, `system` | События фокуса окна, питания и блокировки экрана |
 | `log(message, level?)` | Строка в журнале плагина с уровнем `info` (по умолчанию), `warn` или `error`; её видит вид плагина и вкладка «Сообщения». Пределы и правила - [ниже](#строки-плагина-ctxlog) |
