@@ -89,6 +89,37 @@ async function setup(options: { backend?: PtyBackend; watchdog?: LoadOptions['wa
   };
 }
 
+test('выгрузка: pty-хост ждёт drain бэкенда до убийства хоста, и unload() возвращается после доставки выходов (#185: недоставленный выход роняет Electron в очистке окружения)', async () => {
+  const fake = fakePty();
+  const order: string[] = [];
+  let hostKilled = () => false;
+  const backend: PtyBackend = {
+    spawn: (...args) => fake.spawn(...args),
+    async drain() {
+      order.push('drain-start');
+      await sleep(40);
+      // Выходы приходят позже сигнала, как у настоящего процесса: дождаться их - дело бэкенда.
+      for (const p of fake.procs) p.exit(0);
+      order.push(hostKilled() ? 'drain-end-after-kill' : 'drain-end');
+    },
+  };
+  await using s = await setup({ backend });
+  hostKilled = () => s.hosts[0]?.killedByCore === true;
+  await s.pty().spawn({ program: '/bin/bash' });
+  await s.k.unload();
+  order.push(hostKilled() ? 'host-killed' : 'host-alive');
+  assert.deepEqual(order, ['drain-start', 'drain-end', 'host-killed'], 'pty-хост убит, не дождавшись drain бэкенда');
+});
+
+test('выгрузка: drain бэкенда упал или завис - unload() всё равно возвращается и убивает хост', async () => {
+  const fake = fakePty();
+  const backend: PtyBackend = { spawn: (...args) => fake.spawn(...args), drain: () => Promise.reject(new Error('drain упал')) };
+  await using s = await setup({ backend });
+  await s.pty().spawn({ program: '/bin/bash' });
+  await s.k.unload();
+  assert.equal(s.hosts[0]?.killedByCore, true, 'упавший drain оставил хост жить');
+});
+
 test('pty-хост запускается при первом pty, а не при старте ядра; выгрузка ядра завершает процессы и убивает хост', async () => {
   await using s = await setup();
   assert.equal(s.hosts.length, 0, 'pty-хост поднят без единого pty');
