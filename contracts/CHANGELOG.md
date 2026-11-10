@@ -19,6 +19,8 @@
 - `ProcessResult.truncated`, `ProcessOptions.maxOutputBytes` [minor]: вывод `process.run` до предела с признаком обрезки вместо тихой потери; предел задаёт плагин (K-12).
 - `OsFs.realpath` [minor]: настоящий путь с проверкой области; ссылка наружу - `PermissionDenied`, нет пути - `NotFound` (K-12).
 - `PluginContext.log`, `LogLevel` [minor]: второй необязательный параметр `level` (`info`, `warn`, `error`; по умолчанию `info`), существующие плагины с одним аргументом работают как прежде; ядро обрезает строку длиннее предела и не кладёт в журнал по одной строки сверх предела частоты (K-29).
+- `Contracts['cyborg.git']`, `Git`, `GitStatus`, `GitChange`, `GitCode` [minor]: черновик контракта `cyborg.git` v1 - `status(repo)` и `onChange(repo, listener)`; остальные члены SAD (`headContent`, `branches`, `switch`, `remotes`, `files`) придут необязательными (PL-04).
+- `Contracts['cyborg.tree-decoration']`, `TreeDecoration`, `TreeMark`, `TreeMarkKind` [minor]: черновик контракта `cyborg.tree-decoration` v1, кратность many - `marks(root)` и `onChange(listener)` (PL-04).
 
 ## 1.0.0-dev - не выпущена
 

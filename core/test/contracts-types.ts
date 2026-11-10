@@ -27,7 +27,7 @@ export const consumer: PluginModule = {
     const v2: Remote<FilesV2> | undefined = ctx.contracts.get('demo.files', 2);
     // @ts-expect-error мажор обязателен
     ctx.contracts.get('demo.files');
-    // @ts-expect-error в пакете только cyborg.agent, cyborg.agent-tool и cyborg.session-prompt
+    // @ts-expect-error в пакете нет контракта cyborg.tab
     ctx.contracts.get('cyborg.tab', 1);
     void v1?.read('/a');
     void v2?.readText('/a');
@@ -75,5 +75,29 @@ export const keyed: PluginModule = {
     const sync: { active: boolean } = ctx.keys.register({ key: 'F1', command: 'x.run' });
     ctx.log(String(sync.active));
     return undefined;
+  },
+};
+
+// Черновики PL-04: git отдаёт состояние и отметки дерева, дерево потребляет отметки с кратностью many.
+export const treeAndGit: PluginModule = {
+  async activate(ctx) {
+    const git = ctx.contracts.get('cyborg.git', 1);
+    const status = await git?.status('/repo');
+    const branch: string | null | undefined = status?.branch;
+    const first: string | undefined = status?.changes[0]?.path;
+    ctx.log(`${branch ?? '-'} ${first ?? '-'}`);
+    // @ts-expect-error репозиторий называется путём, а не объектом
+    await git?.status({ path: '/repo' });
+    for (const { impl } of ctx.contracts.all('cyborg.tree-decoration', 1)) {
+      const marks = await impl.marks('/repo');
+      const kind: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'conflict' | undefined = marks[0]?.kind;
+      ctx.log(kind ?? '-');
+      // @ts-expect-error вида отметки «ignored» в черновике нет
+      const bad: typeof kind = 'ignored';
+      ctx.log(String(bad));
+    }
+    ctx.contracts.provide('cyborg.tree-decoration', '1.0', { marks: async () => [], onChange: () => ({ dispose() {} }) });
+    // @ts-expect-error мажорной версии 2 у черновика нет
+    ctx.contracts.get('cyborg.git', 2);
   },
 };
