@@ -61,6 +61,7 @@ test('слой окна: модальное окно - диалог с назв�
     assert.deepEqual({ ...dialog.dataset }, { plugin: 'panels', view: 'form', modal: '1' });
     assert.ok(dialog.withClass('layer-from').some((e) => e.textContent === 'panels'), 'окно не подписано плагином-владельцем');
     const frame = dialog.all('iframe')[0];
+    assert.ok(frame, 'во фрейме окна нет вида');
     assert.equal(frame.src, 'cyborg-plugin://panels/ui/form.html?view=form');
     assert.equal(frame.title, 'panels/form');
     assert.equal(document.activeElement, frame, 'фокус не во фрейме вида');
