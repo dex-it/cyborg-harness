@@ -145,7 +145,7 @@ void app.whenReady().then(() => {
     void runSpike({ out: spikeOut, preload: path.join(__dirname, 'preload.js'), rendererDir: path.join(__dirname, 'renderer') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
     return;
   }
-  serveViews((url) => resolveViewRequest(url, (id) => plugins.uiOf(id, true)), path.join(__dirname, 'renderer', 'shell'), viewCsp === undefined ? {} : { csp: viewCsp });
+  serveViews((url) => resolveViewRequest(url, (id) => plugins.uiOf(id), (id) => plugins.wake(id)), path.join(__dirname, 'renderer', 'shell'), viewCsp === undefined ? {} : { csp: viewCsp });
   watchTheme(() => win);
   const userData = app.getPath('userData');
   const config = path.join(userData, 'cyborg.json');

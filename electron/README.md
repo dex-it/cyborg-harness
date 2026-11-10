@@ -85,7 +85,7 @@ quitAfterPlugins(plugins);
 
 void app.whenReady().then(async () => {
   const userData = app.getPath('userData');
-  serveViews((url) => resolveViewRequest(url, (id) => plugins.uiOf(id, true)), path.join(__dirname, 'shell'));
+  serveViews((url) => resolveViewRequest(url, (id) => plugins.uiOf(id), (id) => plugins.wake(id)), path.join(__dirname, 'shell'));
   win = new BrowserWindow({
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegrationInSubFrames: true },
   });

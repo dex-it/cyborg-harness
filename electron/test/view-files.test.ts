@@ -80,6 +80,18 @@ test('вид: адрес обслуживается, только если пл�
   assert.equal(resolveViewRequest('cyborg-plugin://panels/Alice/', uiOf), undefined);
 });
 
+test('вид: ленивый плагин просыпается от запроса своей группы, а не от адреса чужого вида', () => {
+  const woken: string[] = [];
+  const wake = (id: string) => woken.push(id);
+  // Вид carol просит адрес соседней группы: ответа нет, и плагин panels, который человек держит ленивым, не активируется.
+  assert.equal(resolveViewRequest('cyborg-plugin://carol/alice/', uiOf, wake), undefined);
+  assert.equal(resolveViewRequest('cyborg-plugin://carol/bob/ui/ui.js', uiOf, wake), undefined);
+  assert.equal(resolveViewRequest('cyborg-plugin://panels/nobody/', uiOf, wake), undefined);
+  assert.deepEqual(woken, []);
+  assert.ok(resolveViewRequest('cyborg-plugin://panels/bob/', uiOf, wake));
+  assert.deepEqual(woken, ['bob'], 'будится плагин из адреса, группа которого сошлась с хостом');
+});
+
 test('вид: шрифт значков Monaco (.ttf) отдаётся своим типом, другие расширения шрифтов и карты - нет', () => {
   assert.deepEqual(resolveViewRequest('cyborg-plugin://panels/alice/ui/codicon.ttf', uiOf), { kind: 'file', file: path.join(root, 'ui', 'codicon.ttf'), type: 'font/ttf' });
   for (const name of ['codicon.woff2', 'ui.js.map', 'ui.wasm']) assert.equal(resolveViewRequest(`cyborg-plugin://panels/alice/ui/${name}`, uiOf), undefined, name);

@@ -104,12 +104,18 @@ export function resolveStaticFile(url: string, dirOf: (id: string) => string | u
 /**
  * Запрос `cyborg-plugin://<группа>/<плагин>/<путь>`: `/<плагин>/` и `?view=<вид>` - оболочка, `/<плагин>/.cyborg/*` - файлы ядра, прочее - файл из каталога плагина.
  * Плагин берётся из пути, а группа из хоста обязана быть его группой: адрес плагина под чужим origin, как и адрес без плагина, не вид.
+ * `wake` вызывается только после этой сверки: показ вида - вызов ленивого плагина, но вид чужой группы разбудить его не должен.
  */
-export function resolveViewRequest(url: string, uiOf: (pluginId: string) => PluginUi | undefined): ViewRequest | undefined {
+export function resolveViewRequest(
+  url: string,
+  uiOf: (pluginId: string) => PluginUi | undefined,
+  wake?: (pluginId: string) => void,
+): ViewRequest | undefined {
   const address = frameAddress(url);
   if (!address) return undefined;
   const ui = uiOf(address.plugin);
   if (ui?.group !== address.group) return undefined;
+  wake?.(address.plugin);
   const parsed = new URL(url);
   const rest = parsed.pathname.slice(address.plugin.length + 1);
   if (rest === '/' || rest === '') {

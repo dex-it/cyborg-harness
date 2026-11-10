@@ -368,15 +368,18 @@ export class PluginsService implements ViewGroups {
     return this.kernel?.groupOf(pluginId);
   }
 
-  /** Виды плагина: по ним протокол cyborg-plugin отдаёт оболочку и файлы; `wake` - запрос пришёл от показа вида. */
-  uiOf(pluginId: string, wake = false): PluginUi | undefined {
+  /** Виды плагина: по ним протокол cyborg-plugin отдаёт оболочку и файлы. Ленивый плагин не будит: см. `wake`. */
+  uiOf(pluginId: string): PluginUi | undefined {
     const dir = this.views.get(pluginId);
     const ui = this.kernel?.manifests.find((m) => m.id === pluginId)?.ui;
     const group = this.groupOf(pluginId);
     if (dir === undefined || ui === undefined || group === undefined) return undefined;
-    // Показ вида - вызов ленивого плагина: мосту вида нужна его главная часть.
-    if (wake) void this.kernel?.wake(pluginId).catch(() => undefined);
     return { dir, group, views: ui.views, ...(ui.overlay !== undefined && { overlay: ui.overlay }) };
+  }
+
+  /** Показ вида - вызов ленивого плагина: мосту вида нужна его главная часть. Зовут после сверки группы адреса (`resolveViewRequest`). */
+  wake(pluginId: string): void {
+    void this.kernel?.wake(pluginId).catch(() => undefined);
   }
 
   emit(event: SystemEvent): void {
