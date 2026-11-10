@@ -74,6 +74,8 @@ const plugin: PluginModule = {
     let next = 0;
     // Вкладка документа - сессия этого запуска; документы без живой сессии остались от прошлого и ждут restore.
     const live = new Map<string, PtyHandle>();
+    // Вкладка сессии по id сессии: живёт, пока вкладку не закрыл человек, и после выхода процесса (вкладка ждёт restore).
+    const tabs = new Map<string, string>();
     const agents = () => ctx.contracts.all('cyborg.agent', 1);
     // Порядок по id поставщика: тот же набор плагинов - тот же промпт; сломанный вклад не мешает запуску.
     const fragments = async (): Promise<string[]> => {
@@ -127,10 +129,15 @@ const plugin: PluginModule = {
         }
       }
     };
-    ctx.contracts.provide('cyborg.sessions', '1.0', {
+    ctx.contracts.provide('cyborg.sessions', '1.1', {
       onChange(listener) {
         listeners.add(listener);
         return { dispose: () => void listeners.delete(listener) };
+      },
+      async reveal(sessionId) {
+        const doc = tabs.get(sessionId);
+        if (doc === undefined) throw new Error(`нет сессии ${sessionId}: вкладки нет`);
+        await ctx.documents.reveal(doc);
       },
     });
     const toolSources = () => ctx.contracts.all('cyborg.agent-tool', 1);
@@ -186,6 +193,7 @@ const plugin: PluginModule = {
       const doc = documentId ?? (await ctx.documents.open('session', { title, data: { agent } }));
       if (documentId !== undefined) await ctx.documents.save(doc, { title, data: { agent, ...(resume !== undefined && { resumeId: resume }) } });
       live.set(doc, handle);
+      tabs.set(sessionId, doc);
       const watch = facts.capabilities.events
         ? provider.impl.watch(sessionId, (e) => {
             ctx.log(`${facts.id} ${sessionId}: ${describe(e)}`);
@@ -231,6 +239,7 @@ const plugin: PluginModule = {
     ctx.documents.onClose((id) => {
       const handle = live.get(id);
       live.delete(id);
+      for (const [sessionId, doc] of tabs) if (doc === id) tabs.delete(sessionId);
       void handle?.kill().catch(() => undefined);
     });
     const kept = await ctx.documents.list();

@@ -63,6 +63,8 @@ export function createHostPool(ctx: KernelContext): HostPool {
   const { options, watchdog, active } = ctx;
   const hosts = new Map<string, Host>();
   const hostFailures = new Map<string, Counter>();
+  // Фокус помнит ядро, а не хост: плагин, поднятый позже или после перезапуска хоста, спрашивает текущее, а не пропущенное им событие.
+  let focus: boolean | undefined;
 
   async function call<T>(host: Host, pluginId: string, method: string, params: unknown, timeout?: number, signal?: AbortSignal, discard?: (value: unknown) => void): Promise<T> {
     const token = ++host.seq;
@@ -185,8 +187,10 @@ export function createHostPool(ctx: KernelContext): HostPool {
     forgetFailures: (hostId) => hostFailures.delete(hostId),
     emit(event: SystemEvent) {
       if (!['focus', 'suspend', 'resume', 'screen-lock'].includes(event.kind)) throw new CoreError('Invalid', `событие ${event.kind as string} ядру не известно`);
+      if (event.kind === 'focus') focus = event.focused;
       for (const host of hosts.values()) if (!host.down) host.endpoint.notify('system', event);
     },
+    focused: () => focus ?? options.windowFocused?.() ?? true,
     async beforeQuit(budget) {
       await ctx.parts.lifecycle.idle();
       const late = new Promise<void>((resolve) => setTimeout(resolve, budget).unref());

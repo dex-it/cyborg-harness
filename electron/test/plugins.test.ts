@@ -791,6 +791,45 @@ test('канал вида: сообщение главной части уход
   await service.unload();
 });
 
+test('окно и документы: начальный фокус задаёт приложение, просьба reveal доходит до окна с id документа, чужой документ - отказ ядра', async () => {
+  const userData = tmp();
+  const dir = path.join(userData, 'plugins');
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['face'] } }));
+  plugin(dir, 'face', { commands: { 'face.focused': {}, 'face.reveal': { args: ['string'] }, 'face.open': {} }, documents: { note: {} } }, 'export default {}');
+  const answers: unknown[] = [];
+  const modules: Record<string, PluginModule> = {
+    face: {
+      activate(ctx) {
+        ctx.commands.register('face.focused', async () => void answers.push(await ctx.window.focused()));
+        ctx.commands.register('face.open', () => ctx.documents.open('note', { title: 'Заметка' }));
+        ctx.commands.register('face.reveal', (id) => ctx.documents.reveal(String(id)));
+      },
+    },
+  };
+  const revealed: string[] = [];
+  const service = new PluginsService({ changed: () => {}, alert: () => {}, revealDocument: (id) => void revealed.push(id) });
+  await service.start({
+    userData,
+    builtinDir: path.join(userData, 'нет'),
+    userPlugins: true,
+    spawnHost: inlineHosts(async (entry) => modules[/\/(\w+)\/index\.mjs$/.exec(entry)?.[1] ?? ''] ?? { activate() {} }),
+    log: () => {},
+    windowFocused: () => false,
+  });
+  assert.deepEqual(await service.runFor('face', 'face.focused', []), {});
+  assert.deepEqual(answers, [false], 'окно без фокуса к запуску ядра: плагин узнаёт это до первого события');
+  service.emit({ kind: 'focus', focused: true });
+  await service.runFor('face', 'face.focused', []);
+  assert.deepEqual(answers, [false, true]);
+  const opened = (await service.runFor('face', 'face.open', [])) as { value?: string };
+  assert.equal(typeof opened.value, 'string');
+  assert.deepEqual(await service.runFor('face', 'face.reveal', [opened.value]), {});
+  assert.deepEqual(revealed, [opened.value]);
+  assert.match((await service.runFor('face', 'face.reveal', ['чужой'])).error ?? '', /документа чужой нет/);
+  assert.deepEqual(revealed, [opened.value], 'отказ ядра до окна не доходит');
+  await service.unload();
+});
+
 test('модальное окно плагина: данные видит только его вид, результат вида доходит владельцу, Escape и закрытие окна дают undefined, отказ ядра - Reply с текстом', async () => {
   const userData = tmp();
   const dir = path.join(userData, 'plugins');

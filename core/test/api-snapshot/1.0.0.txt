@@ -217,6 +217,7 @@ member PluginDocuments.close :: method (_: string) => Promise<void>
 member PluginDocuments.list :: method () => Promise<DocumentInfo[]>
 member PluginDocuments.onClose :: method (_: (_: string) => void) => Disposable
 member PluginDocuments.open :: method (_: string, _: DocumentInit) => Promise<string>
+member PluginDocuments.reveal :: method (_: string) => Promise<void>
 member PluginDocuments.save :: method (_: string, _: DocumentChange) => Promise<void>
 member PluginKeys.register :: method (_: KeyBinding) => Promise<KeyRegistration>
 member PluginManifest.activation :: readonly optional prop 'lazy'
@@ -301,6 +302,7 @@ member PluginSystem.onScreenLock :: method (_: () => void) => Disposable
 member PluginSystem.onSuspend :: method (_: () => void) => Disposable
 member PluginViews.channel :: method (_: string) => ViewChannel
 member PluginViews.modal :: method (_: string, _?: ModalInit) => Promise<unknown>
+member PluginWindow.focused :: method () => Promise<boolean>
 member PluginWindow.onFocusChange :: method (_: (_: boolean) => void) => Disposable
 member PluginWindow.setTitle :: method (_: string | undefined) => Promise<void>
 member ProcessOptions.cwd :: readonly optional prop string
