@@ -369,6 +369,8 @@ class Running implements Owner {
   }
 
   within<R>(chain: number | undefined, run: () => R): R {
+    // Сообщение без цепочки в коде вне цепочки (обычный случай) хранилища не заводит.
+    if (chain === undefined && this.#trace.getStore() === undefined) return run();
     return this.#trace.run(chain, run);
   }
 

@@ -159,7 +159,11 @@ export class Trace {
         const scope = this.#scope.getStore();
         return scope === undefined || scope.op?.done === true ? undefined : scope.chain;
       },
-      within: (chain, run) => (this.#sink === undefined ? run() : this.#scope.run(chain === undefined ? undefined : { chain, op: undefined }, run)),
+      within: (chain, run) => {
+        // Сообщение без цепочки в коде вне цепочки (обычный случай) хранилища не заводит.
+        if (this.#sink === undefined || (chain === undefined && this.#scope.getStore() === undefined)) return run();
+        return this.#scope.run(chain === undefined ? undefined : { chain, op: undefined }, run);
+      },
     };
   }
 

@@ -167,7 +167,7 @@ quietPipes();
 
 const start = () => {
   if (gatewaySpikeOut !== undefined) {
-    void runGatewaySpike({ out: gatewaySpikeOut, hostEntry: path.join(__dirname, 'plugin-host.mjs'), benchDir: path.join(__dirname, 'bench') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
+    void runGatewaySpike({ out: gatewaySpikeOut, hostEntry: path.join(__dirname, 'plugin-host.mjs'), benchDir: path.join(__dirname, 'bench'), trace: !process.argv.includes('--gateway-trace=off') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
     return;
   }
   if (hostsSpikeOut !== undefined) {
