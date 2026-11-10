@@ -293,6 +293,36 @@ test('содержимое: маркер в аргументе и в резул�
   for (const leak of [marker, secret, box.root, 'work']) assert.ok(!text.includes(leak), `в трассе есть ${leak.slice(0, 12)}…`);
 });
 
+test('содержимое: значение секрета, полученное через secrets.resolve, и ссылка на внешний источник в трассу не попадают, запись операции есть (NFR-CH-4002, #168)', async () => {
+  const secret = `s3cr3t-${randomUUID()}`;
+  const ref = `vault://x/${randomUUID()}`;
+  const secrets = memorySecrets();
+  const r = await rig({ app: { activate() {} } }, [manifest('app', { permissions: { 'secrets.ref': ['vault://x/*'] } })], { os: { dataDir: '/nonexistent/d', tempDir: '/nonexistent/t', secrets } });
+  const app = r.ctx.app!;
+  await app.os.secrets.set('token', secret);
+  r.take();
+
+  assert.deepEqual(await app.secrets.resolve({ $secret: 'token' }), { value: secret });
+  assert.deepEqual(await app.secrets.resolve('token'), { value: secret });
+  await assert.rejects(app.secrets.resolve(ref), { code: 'Unavailable' });
+  await assert.rejects(app.secrets.resolve('vault://elsewhere/y'), { code: 'PermissionDenied' });
+
+  const ops = r.take().filter((op) => op.target.startsWith('os:secrets.resolve'));
+  assert.deepEqual(
+    ops.map((op) => [op.caller, op.target, op.boundaries, op.right, op.outcome, op.code]),
+    [
+      ['plugin:app', 'os:secrets.resolve', ['host', 'os'], 'secrets.ref', 'ok', undefined],
+      ['plugin:app', 'os:secrets.resolve', ['host', 'os'], 'secrets.ref', 'ok', undefined],
+      ['plugin:app', 'os:secrets.resolve', ['host', 'os'], 'secrets.ref', 'error', 'Unavailable'],
+      ['plugin:app', 'os:secrets.resolve', ['host', 'os'], 'secrets.ref', 'error', 'PermissionDenied'],
+    ],
+    'каждый вызов resolve - запись операции с границами хоста и ОС и правом secrets.ref',
+  );
+  assert.deepEqual(ops.map((op) => op.resultBytes > 0), [true, true, false, false], 'размер результата есть, содержимого нет');
+  const text = JSON.stringify(r.records);
+  for (const leak of [secret, ref, 'elsewhere']) assert.ok(!text.includes(leak), `в трассе есть ${leak.slice(0, 12)}…`);
+});
+
 test('поток: 5000 сообщений pty за интервал дают одну запись-счётчик с числом сообщений и байт, а не запись на сообщение (FR-CH-4005)', async () => {
   const pty = fakePty();
   const r = await rig(
