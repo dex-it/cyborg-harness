@@ -88,7 +88,7 @@ ctx.subscriptions.add(ctx.contracts.onChange('cyborg.agent-tool', refresh));
 "commands": {
   "sessions.new":     { "args": ["string"] },
   "sessions.actions": { "args": ["string", "number"], "callers": "plugins" },
-  "file.open":        { "args": ["record"], "callers": "plugins", "guard": { "fs.read": "0.path" } }
+  "viewer.open":      { "args": ["record"], "callers": "plugins", "guard": { "fs.read": "0.path" } }
 }
 ```
 
