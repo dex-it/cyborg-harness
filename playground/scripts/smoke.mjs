@@ -147,7 +147,7 @@ async function main() {
     })()`);
   // Ввод как с клавиатуры через протокол DevTools страницы: он идёт во фрейм с фокусом и не зависит от фокуса окна в оконной системе.
   const typeText = (text) => ev.send('Input.insertText', { text });
-  const KEY_CODES = { Enter: 13, ArrowDown: 40 };
+  const KEY_CODES = { Enter: 13, ArrowDown: 40, Tab: 9 };
   const tap = async (key) => {
     const base = { key, code: key, windowsVirtualKeyCode: KEY_CODES[key], ...(key === 'Enter' && { text: '\r' }) };
     await ev.send('Input.dispatchKeyEvent', { type: 'keyDown', ...base });
@@ -861,6 +861,39 @@ async function main() {
   assert.deepEqual(await ping(), {});
   await waitFor('после перезагрузки окна вид panel снова получает толчки главной части', async () => (await pushes('panel')) === 'толчков: 2');
   log('канал «главная часть - вид»: толчок доходит только до вида с этим именем, ответ вида - до главной части, после перезагрузки окна канал связан заново');
+
+  // K-13: модальное окно плагина. Вид form с area "modal" встаёт слоем поверх окна, остальное inert, фокус заперт, результат уходит владельцу, Escape закрывает.
+  const modalOpen = () => ev("!!document.querySelector('dialog.layer-modal[open]')");
+  const inForm = (expression) => inViewNamed('panels', 'form', expression);
+  await ev("(window.__form = window.playground.runCommand('panels.form'), 0)");
+  await waitFor('модальное окно показано слоем окна', modalOpen);
+  assert.equal(await ev("document.querySelector('dialog.layer-modal').matches(':modal')"), true, 'окно не в верхнем слое');
+  assert.equal(await ev("document.querySelector('dialog.layer-modal').getAttribute('aria-label')"), 'Новый проект', 'название окна не от главной части');
+  assert.equal(await ev("document.getElementById('playground').inert"), true, 'виды под окном не inert');
+  assert.equal(await ev("document.activeElement?.closest('dialog.layer-modal') !== null"), true, 'фокус не в модальном окне');
+  await waitFor('вид окна получил данные главной части', async () => (await inForm("document.getElementById('name')?.value ?? null")) === 'черновик');
+  // Tab не уходит из окна: фокус остаётся внутри диалога и после нескольких нажатий.
+  for (let i = 0; i < 6; i++) await tap('Tab');
+  assert.equal(await ev("document.activeElement?.closest('dialog.layer-modal') !== null"), true, 'Tab вывел фокус из модального окна');
+  await inForm("(document.getElementById('name').value = 'Проект', document.getElementById('create').click())");
+  assert.deepEqual(await ev('window.__form'), { value: { name: 'Проект' } }, 'результат вида не дошёл до владельца');
+  await waitFor('окно снято после результата', async () => !(await modalOpen()));
+  assert.equal(await ev("document.getElementById('playground').inert"), false, 'виды остались inert после закрытия окна');
+  assert.ok(lines().some((l) => l.includes('panels: форма вернула: {"name":"Проект"}')), 'главная часть не записала результат');
+
+  await ev("(window.__form = window.playground.runCommand('panels.form'), 0)");
+  await waitFor('окно показано снова', modalOpen);
+  await press('Escape');
+  assert.deepEqual(await ev('window.__form'), {}, 'Escape не вернул владельцу undefined');
+  await waitFor('Escape закрыл окно', async () => !(await modalOpen()));
+  assert.ok(lines().some((l) => l.includes('panels: форма вернула: ничего')), 'владелец не узнал об отмене');
+
+  // Диалог из главной части без вида (ctx.dialogs.show): очередь окна та же, что у диалогов видов.
+  await ev("(window.__confirm = window.playground.runCommand('panels.confirm'), 0)");
+  await waitFor('вопрос главной части показан', () => ev("!!document.querySelector('dialog.layer-ask[data-plugin=\"panels\"] [data-choice=\"yes\"]')"));
+  await ev("document.querySelector('dialog.layer-ask[data-plugin=\"panels\"] [data-choice=\"yes\"]').click()");
+  assert.deepEqual(await ev('window.__confirm'), { value: 'yes' }, 'ответ человека не дошёл до главной части');
+  log('модальное окно плагина: поверх окна, остальное inert, фокус заперт, результат и Escape доходят владельцу; диалог главной части отвечает');
 
   const lock = JSON.parse(readFileSync(join(userData, 'workspace.cyborg.json.lock'), 'utf8'));
   assert.equal(typeof lock.pid, 'number', 'замок воркспейса без pid');
