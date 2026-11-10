@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { chmodSync, existsSync, statSync } from 'node:fs';
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { claimInstance, instanceAddress, instanceDir, type Claim } from '../src/instance.ts';
+import { claimInstance, instanceAddress, instanceDir, neighborInstances, type Claim } from '../src/instance.ts';
 
 // K-20: по экземпляру на воркспейс. Второй запуск того же воркспейса просит первого поднять окно и уходит; разные воркспейсы не мешают друг другу.
 
@@ -257,4 +257,52 @@ test('снятие устаревшего сокета: между провер�
   assert.deepEqual(procs.map(decided).sort(), ['handed', 'handed', 'owner']);
   procs.find((p) => decided(p) === 'owner')?.child.stdin.end();
   await Promise.all(procs.map((p) => p.exited));
+});
+
+test('neighborInstances: соседи называют свои плагины; запрос не поднимает окно; свой адрес, мёртвый адрес и пустой каталог - не соседи', { skip: !posix }, async () => {
+  await using box = await sandbox();
+  assert.deepEqual(await neighborInstances(key, { dir: path.join(box.dir, 'нет') }), [], 'каталога адресов нет - соседей нет');
+  const asked: unknown[] = [];
+  const own = await claimInstance(key, {}, (data) => asked.push(data), { dir: box.dir, plugins: () => ['own'] });
+  const a = await claimInstance('aaaaaaaaaaaaaaaa', {}, (data) => asked.push(data), { dir: box.dir, plugins: () => ['jira', 'chat'] });
+  const b = await claimInstance('bbbbbbbbbbbbbbbb', {}, (data) => asked.push(data), { dir: box.dir, plugins: () => [] });
+  await writeFile(instanceAddress('cccccccccccccccc', box.dir), '');
+  try {
+    const found = (await neighborInstances(key, { dir: box.dir })).sort((x, y) => x.key.localeCompare(y.key));
+    assert.deepEqual(found, [
+      { key: 'aaaaaaaaaaaaaaaa', plugins: ['jira', 'chat'] },
+      { key: 'bbbbbbbbbbbbbbbb', plugins: [] },
+    ]);
+    assert.deepEqual(asked, [], 'запрос соседа не вызывает onAsked: окно не поднимается');
+  } finally {
+    for (const c of [own, a, b]) release(c);
+  }
+});
+
+test('neighborInstances: сосед не умеет назвать плагины, бросил, ответил не списком или не ответил - plugins: null', { skip: !posix }, async () => {
+  await using box = await sandbox();
+  const owners = [
+    await claimInstance('aaaaaaaaaaaaaaaa', {}, () => undefined, { dir: box.dir }),
+    await claimInstance('bbbbbbbbbbbbbbbb', {}, () => undefined, { dir: box.dir, plugins: () => { throw new Error('ядра ещё нет'); } }),
+    await claimInstance('cccccccccccccccc', {}, () => undefined, { dir: box.dir, plugins: () => [1] as unknown as string[] }),
+  ];
+  // Окно прежнего образца: отвечает на любой запрос `{"ok":true}` без списка.
+  const old = net.createServer((conn) => conn.on('data', () => conn.end('{"ok":true}\n')));
+  await new Promise<void>((resolve) => old.listen(instanceAddress('dddddddddddddddd', box.dir), resolve));
+  // Живой, но молчащий.
+  const mute = net.createServer(() => undefined);
+  await new Promise<void>((resolve) => mute.listen(instanceAddress('eeeeeeeeeeeeeeee', box.dir), resolve));
+  // Адрес без права подключиться: не мёртвый, но и не отвечает.
+  const shut = net.createServer(() => undefined);
+  await new Promise<void>((resolve) => shut.listen(instanceAddress('ffffffffffffffff', box.dir), resolve));
+  chmodSync(instanceAddress('ffffffffffffffff', box.dir), 0o000);
+  try {
+    const found = (await neighborInstances(key, { dir: box.dir, timeoutMs: 200 })).sort((x, y) => x.key.localeCompare(y.key));
+    // Под root право на сокет не проверяется, и адрес отвечает как молчащий сосед: исход тот же.
+    assert.deepEqual(found.map((n) => n.key), ['aaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbb', 'cccccccccccccccc', 'dddddddddddddddd', 'eeeeeeeeeeeeeeee', 'ffffffffffffffff']);
+    assert.ok(found.every((n) => n.plugins === null), JSON.stringify(found));
+  } finally {
+    for (const c of owners) release(c);
+    for (const s of [old, mute, shut]) s.close();
+  }
 });

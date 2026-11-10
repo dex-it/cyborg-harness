@@ -117,6 +117,8 @@ export interface Lifecycle {
   setEnabled(next: readonly string[]): Promise<EnabledChange>;
   disablePreview(pluginId: string): DisablePreview;
   uninstall(pluginId: string): Promise<UninstallReport>;
+  /** Плагины, которые могут работать здесь (`Kernel.working`). */
+  working(): string[];
   shutdown(): Promise<void>;
 }
 

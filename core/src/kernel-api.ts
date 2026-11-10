@@ -22,6 +22,9 @@ export function buildKernel(ctx: KernelContext): Kernel {
   return {
     journal: ctx.journal,
     active,
+    get working() {
+      return lifecycle.working();
+    },
     contracts: ctx.registry,
     callAs: (caller, contract, major, member, args) => bridge(caller, `contract:${contract}@${String(major)}#${member}`, args, (op) => contracts.callAs(caller, contract, major, member, args, op)),
     manifests: known,

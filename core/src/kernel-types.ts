@@ -3,6 +3,7 @@ import type { SectionResult, SectionStore } from './config.ts';
 import type { DocumentRow } from './documents.ts';
 import type { ContractGraph, Rejection } from './graph.ts';
 import type { SystemEvent } from './host-runtime.ts';
+import type { NeighborInstance } from './instance.ts';
 import type { LayoutEntry } from './layout.ts';
 import type { MenuEntry } from './menu-entry.ts';
 import type { ResourceLimits } from './limits.ts';
@@ -190,6 +191,13 @@ export interface LoadOptions {
   readonly onMenus?: (() => void) | undefined;
   /** Оставленные процессы выключенных плагинов поменялись: приложение перечитывает `kernel.keptPty()`. */
   readonly onKeptPty?: (() => void) | undefined;
+  /**
+   * Соседние окна того же `userData` (K-20): другие экземпляры приложения с другими воркспейсами и плагины, которые могут работать у них
+   * (`neighborInstances`, #154). `Kernel.uninstall` отказывает, пока плагин может работать у соседа или сосед не ответил: `plugin-data`,
+   * `plugin-temp` и секреты общие, и стирание из одного окна ушло бы из-под живого плагина другого. Без него ядро соседей не видит, и об этом
+   * говорит `UninstallReport.left`. Бросок - отказ `uninstall` с `Unavailable`, ничего не стёрто.
+   */
+  readonly neighbors?: (() => Promise<readonly NeighborInstance[]>) | undefined;
 }
 
 export interface DisableOptions {
@@ -215,6 +223,11 @@ export interface Kernel {
   readonly journal: readonly JournalEntry[];
   /** Активные сейчас, в порядке активации. */
   readonly active: readonly string[];
+  /**
+   * Плагины, которые могут работать в этом окне: активные, ждущие первого обращения и включённые, не выключенные ни человеком, ни сторожем; в безопасном режиме
+   * никакие. Тот же перечень `uninstall` считает «работает». Приложение отдаёт его соседним окнам (`InstanceOptions.plugins`).
+   */
+  readonly working: readonly string[];
   /** Вид реестра из главного процесса: методы контрактов идут в хост поставщика. Звать метод от имени плагина - через `callAs`, иначе ядро не проверит права вызывающего. */
   readonly contracts: ContractRegistry;
   /** Метод контракта от имени плагина (его вида): те же проверки, что у вызова из главной части, включая `via-contract`. */

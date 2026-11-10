@@ -3,6 +3,7 @@ import { providesMatching } from './graph.ts';
 import { bump } from './host-pool.ts';
 import type { Counter, KernelContext, Lifecycle, PtyDrop } from './kernel-context.ts';
 import type { DisableOptions, UninstallReport } from './kernel-types.ts';
+import type { NeighborInstance } from './instance.ts';
 import { isValidId } from './manifest-fields.ts';
 import type { PluginManifest } from './manifest.ts';
 import { isLifecycleEntry } from './status.ts';
@@ -181,10 +182,38 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     return [
       ...(hasConfig ? ['настройки (config) в файлах пользователя и воркспейса: их правит человек'] : []),
       'state, память видов, документы и выбранные пути в других воркспейсах: ядро знает только текущий',
-      'плагин в соседнем окне этого userData (другой воркспейс, K-20): ядро соседние процессы не видит, а данные, временные файлы и секреты плагина общие, поэтому они стёрты и из-под него; закройте плагин в соседних окнах до удаления',
+      ...(options.neighbors === undefined
+        ? ['плагин в соседнем окне этого userData (другой воркспейс, K-20): приложение не передало neighbors, ядро соседние процессы не видит, а данные, временные файлы и секреты плагина общие, поэтому они стёрты и из-под него; закройте плагин в соседних окнах до удаления']
+        : []),
       'код плагина на диске: его убирает приложение',
       'веб-хранилище видов плагина (localStorage, IndexedDB его origin): его стирает приложение',
     ];
+  }
+
+  /** Плагин работает, ждёт запуска или вернётся сам: хост может поднять его (сторож, первый вызов), и он пересоздал бы стёртое. */
+  function mayRun(pluginId: string): boolean {
+    const { activation } = ctx.parts;
+    const running = active.includes(pluginId) || activation.waiting.has(pluginId) || activation.waking.has(pluginId) || activation.activating.has(pluginId);
+    return running || (!options.safeMode && graph.order.includes(pluginId) && !userOff.has(pluginId) && !switchedOff.has(pluginId));
+  }
+
+  function working(): string[] {
+    return [...new Set([...active, ...graph.order.filter(mayRun)])];
+  }
+
+  /** Общие данные `userData` стирать нельзя, пока плагин может работать в окне другого воркспейса: `neighbors` назвал бы его, а не ответивший сосед - тоже отказ. */
+  async function assertNoNeighbor(pluginId: string): Promise<void> {
+    if (options.neighbors === undefined) return;
+    let neighbors: readonly NeighborInstance[];
+    try {
+      neighbors = await options.neighbors();
+    } catch (error) {
+      throw new CoreError('Unavailable', `${pluginId}: соседние окна этого userData проверить не удалось, ничего не стёрто: ${errorMessage(error)}`);
+    }
+    const holding = neighbors.filter((n) => n.plugins?.includes(pluginId) === true).map((n) => n.key);
+    if (holding.length > 0) throw new CoreError('Invalid', `${pluginId} может работать в соседнем окне этого userData (экземпляр ${holding.join(', ')}): выключите его там, ничего не стёрто`);
+    const unknown = neighbors.filter((n) => n.plugins === null).map((n) => n.key);
+    if (unknown.length > 0) throw new CoreError('Unavailable', `${pluginId}: соседнее окно этого userData не назвало свои плагины (экземпляр ${unknown.join(', ')}), ничего не стёрто: повторите, когда оно ответит`);
   }
 
   async function uninstall(pluginId: string): Promise<UninstallReport> {
@@ -194,14 +223,12 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     // В очереди вместе с enable и disable: пока идёт стирание, плагин не поднимется.
     return enqueue(async (): Promise<UninstallReport> => {
       if (ctx.unloading) throw new CoreError('Unavailable', 'ядро выгружается');
-      const { activation, views } = ctx.parts;
-      const running = active.includes(pluginId) || activation.waiting.has(pluginId) || activation.waking.has(pluginId) || activation.activating.has(pluginId);
+      const { views } = ctx.parts;
       // Плагин в графе, но не выключен ни человеком, ни сторожем: хост может вернуть его, и он пересоздал бы стёртое.
       // Снятый плагин общего хоста, который жив ради соседей, пересоздать не может: шлюз (`live` в host-bridge) отказывает в os, documents и section.write всем, кто не active.
       // В безопасном режиме хостов нет и enable/disable недоступны: ждать нечего, а удалить сломанный плагин нужно именно здесь (BR-CH-005).
-      if (running || (!options.safeMode && graph.order.includes(pluginId) && !userOff.has(pluginId) && !switchedOff.has(pluginId))) {
-        throw new CoreError('Invalid', `${pluginId} работает или ждёт запуска: сначала disablePreview и disable`);
-      }
+      if (mayRun(pluginId)) throw new CoreError('Invalid', `${pluginId} работает или ждёт запуска: сначала disablePreview и disable`);
+      await assertNoNeighbor(pluginId);
       const erased: string[] = [];
       const failed: string[] = [];
       const step = async (what: string, run: () => Promise<string | string[] | undefined> | string | undefined): Promise<void> => {
@@ -271,6 +298,7 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     enable,
     disable,
     uninstall,
+    working,
     shutdown,
     async setEnabled(next) {
       const want = new Set(next);

@@ -26,10 +26,22 @@ export interface InstanceOptions {
   readonly home?: string;
   /** Сколько ждать ответа владельца, мс; по умолчанию 3 с. */
   readonly askTimeoutMs?: number;
+  /**
+   * Плагины, которые могут работать в окне этого экземпляра (`Kernel.working`): их называет владелец соседнему окну того же `userData`, когда
+   * то готовится удалить плагин (`neighborInstances`, `Kernel.uninstall`; #154). Читается при каждом запросе, поэтому ядро может появиться
+   * позже claim; бросок или `undefined` - «не знаю», сосед в этом случае считает плагины неизвестными и удаление не разрешает.
+   */
+  readonly plugins?: (() => readonly string[]) | undefined;
   /** Шов для тестов: вызывается в `removeStale` после «сокет мёртв», до удаления файла; в нём должен быть не больше одного процесса. */
   readonly afterStaleCheck?: () => void | Promise<void>;
 }
 
+/**
+ * Служебный запрос соседа: вместо `data` второго запуска (окно не поднимается) владелец отвечает строкой `{"ok":true,"plugins":[...]}`.
+ * Ключ с `$`: данные приложения (`claimInstance(key, data)`) его не называют.
+ */
+const QUERY_KEY = '$query';
+const QUERY_PLUGINS = 'plugins';
 const MAX_MESSAGE = 64 * 1024;
 const STARTUP_GRACE_MS = 500;
 
@@ -76,7 +88,7 @@ function privateDir(dir: string): void {
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /** Слушатель владельца: одна строка JSON на соединение, ответ - строка `{"ok":true}`. */
-function listen(address: string, onAsked: (data: unknown) => void, conns: Set<net.Socket>): Promise<net.Server | 'busy'> {
+function listen(address: string, onAsked: (data: unknown) => void, conns: Set<net.Socket>, plugins: InstanceOptions['plugins']): Promise<net.Server | 'busy'> {
   return new Promise((resolve, reject) => {
     const server = net.createServer((conn) => {
       conns.add(conn);
@@ -90,8 +102,18 @@ function listen(address: string, onAsked: (data: unknown) => void, conns: Set<ne
         if (text.length > MAX_MESSAGE) return void conn.destroy();
         const end = text.indexOf('\n');
         if (end < 0) return;
+        let message: unknown;
         try {
-          onAsked(JSON.parse(text.slice(0, end)));
+          message = JSON.parse(text.slice(0, end));
+        } catch {
+          // Не JSON: запрос не разобран, но второй процесс висеть не должен.
+        }
+        if (isQuery(message)) {
+          conn.end(`${JSON.stringify({ ok: true, plugins: pluginsOf(plugins) })}\n`);
+          return;
+        }
+        try {
+          onAsked(message);
         } catch {
           // Сбой обработчика окна не должен оставлять второй процесс висеть: владелец жив, запрос получил.
         }
@@ -112,10 +134,22 @@ function listen(address: string, onAsked: (data: unknown) => void, conns: Set<ne
   });
 }
 
+const isQuery = (message: unknown): boolean => typeof message === 'object' && message !== null && (message as Record<string, unknown>)[QUERY_KEY] === QUERY_PLUGINS;
+
+/** Ответ на запрос соседа: список плагинов или `null` («не знаю»: источника нет, он бросил или вернул не список строк). */
+function pluginsOf(source: InstanceOptions['plugins']): string[] | null {
+  try {
+    const list = source?.();
+    return Array.isArray(list) && list.every((id): id is string => typeof id === 'string') ? [...list] : null;
+  } catch {
+    return null;
+  }
+}
+
 type Answer = 'acked' | 'stale' | 'timeout';
 
 /** Спрашивает владельца по адресу: `stale` - там никто не слушает (файл остался от убитого процесса или исчез). */
-function ask(address: string, data: Record<string, unknown> | undefined, timeoutMs: number): Promise<Answer> {
+function ask(address: string, data: Record<string, unknown> | undefined, timeoutMs: number, onReply?: (line: string) => void): Promise<Answer> {
   return new Promise((resolve, reject) => {
     const conn = net.createConnection(address);
     let done = false;
@@ -136,11 +170,16 @@ function ask(address: string, data: Record<string, unknown> | undefined, timeout
       conn.write(`${JSON.stringify(data)}\n`);
     });
     let reply = '';
+    const answered = () => {
+      if (done) return;
+      onReply?.(reply.slice(0, reply.indexOf('\n')));
+      finish('acked');
+    };
     conn.on('data', (chunk: string) => {
       reply += chunk;
-      if (reply.includes('\n')) finish('acked');
+      if (reply.includes('\n')) answered();
     });
-    conn.once('close', () => finish(reply.includes('\n') ? 'acked' : 'timeout'));
+    conn.once('close', () => (reply.includes('\n') ? answered() : finish('timeout')));
     conn.once('error', (error: NodeJS.ErrnoException) => {
       if (error.code === 'ECONNREFUSED' || error.code === 'ENOENT' || error.code === 'ENOTSOCK') {
         finish('stale');
@@ -193,7 +232,7 @@ export async function claimInstance(key: string, data: Record<string, unknown>, 
   const address = instanceAddress(key, dir);
   for (let attempt = 0; attempt < 200; attempt++) {
     const conns = new Set<net.Socket>();
-    const server = await listen(address, onAsked, conns);
+    const server = await listen(address, onAsked, conns, options.plugins);
     if (server !== 'busy') {
       return {
         kind: 'owner',
@@ -211,4 +250,65 @@ export async function claimInstance(key: string, data: Record<string, unknown>, 
     else await removeStale(address, timeoutMs, options.afterStaleCheck);
   }
   return { kind: 'unresponsive' };
+}
+
+/** Соседнее окно того же `userData`: его экземпляр держит адрес в каталоге адресов. */
+export interface NeighborInstance {
+  /** Ключ экземпляра (`workspaceKey` воркспейса). */
+  readonly key: string;
+  /** Плагины, которые могут работать в его окне; `null` - сосед жив, но не назвал их в срок или не умеет отвечать: решать нечем. */
+  readonly plugins: readonly string[] | null;
+}
+
+export interface NeighborOptions {
+  /** Каталог адресов; по умолчанию личный (см. `instanceDir`). */
+  readonly dir?: string;
+  readonly home?: string;
+  /** Сколько ждать ответа каждого соседа, мс; по умолчанию 3 с. */
+  readonly timeoutMs?: number;
+}
+
+/**
+ * Живые экземпляры других воркспейсов того же каталога адресов и плагины, которые могут работать в их окнах (#154). Каталог пуст или его нет -
+ * соседей нет. Адрес, где никто не слушает (файл от убитого процесса), не сосед и пропускается: снимает его claimInstance. Сосед жив, но ответ
+ * не получен - `plugins: null`. Windows вне v1 (D-00, строка 7): каналов не перечислить, соседей нет.
+ * Окно может открыть плагин сразу после ответа; закрыть это без замка на весь `userData` нельзя (SAD 3.7).
+ */
+export async function neighborInstances(ownKey: string, options: NeighborOptions = {}): Promise<NeighborInstance[]> {
+  if (process.platform === 'win32') return [];
+  const dir = options.dir ?? instanceDir(options.home);
+  let names: string[];
+  try {
+    names = await fs.promises.readdir(dir);
+  } catch {
+    return [];
+  }
+  const timeoutMs = options.timeoutMs ?? 3000;
+  const asked = await Promise.all(
+    names
+      .filter((name) => name.endsWith('.sock') && name !== `${ownKey}.sock`)
+      .map(async (name): Promise<NeighborInstance | undefined> => {
+        const key = name.slice(0, -'.sock'.length);
+        let line = '';
+        let answer: Answer;
+        try {
+          answer = await ask(path.join(dir, name), { [QUERY_KEY]: QUERY_PLUGINS }, timeoutMs, (text) => (line = text));
+        } catch {
+          return { key, plugins: null };
+        }
+        if (answer === 'stale') return undefined;
+        return { key, plugins: answer === 'acked' ? pluginsIn(line) : null };
+      }),
+  );
+  return asked.filter((n): n is NeighborInstance => n !== undefined);
+}
+
+/** `plugins` из строки ответа; ответ прежнего образца (`{"ok":true}`) списка не несёт. */
+function pluginsIn(line: string): string[] | null {
+  try {
+    const reply = JSON.parse(line) as { plugins?: unknown };
+    return Array.isArray(reply.plugins) && reply.plugins.every((id): id is string => typeof id === 'string') ? reply.plugins : null;
+  } catch {
+    return null;
+  }
 }
