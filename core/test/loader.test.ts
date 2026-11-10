@@ -734,7 +734,7 @@ const brief = (k: { menus: readonly { pluginId: string; id: string; enabled: boo
 test('меню: смена состояния владельца меняет enabled и checked пункта, приложение получает уведомление', async () => {
   const flags = { open: false, project: true };
   let changed = 0;
-  const k = await kernel({ owner: stateOwner(flags), menu: menuPlugin }, { enabled: ['owner', 'menu'], manifests: [ownerManifest, menuManifest()], onMenus: () => void changed++ });
+  const k = await kernel({ owner: stateOwner(flags), menu: menuPlugin }, { enabled: ['owner', 'menu'], manifests: [ownerManifest, menuManifest()], onMenus: () => changed++ });
   assert.deepEqual(brief(k), ['menu/open:on-']);
   assert.equal(changed, 0, 'первый снимок приложение читает само');
 

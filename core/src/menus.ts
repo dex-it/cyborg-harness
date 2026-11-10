@@ -73,6 +73,8 @@ export function createMenus(ctx: KernelContext): Menus {
   const failures = new Map<string, string>();
   let current: Promise<void> | undefined;
   let again = false;
+  /** Просили перечитать, пока шло чтение: через функцию, чтобы анализатор не считал флаг неизменным внутри цикла. */
+  const asked = (): boolean => again;
   /** Приложение получило ядро и читает снимок само: с этого момента его перемены сообщаются `onMenus`. */
   let started = false;
   let announced = '';
@@ -133,7 +135,7 @@ export function createMenus(ctx: KernelContext): Menus {
   async function read(m: PluginManifest, item: MenuItemDecl, field: 'enabled' | 'checked', source: StateSource, into: Evaluated): Promise<void> {
     try {
       const value = await withTimeout(Promise.resolve(call(m, source)), SOURCE_TIMEOUT_MS);
-      if (typeof value !== 'boolean') throw new CoreError('Invalid', `${source.contract}.${source.member} вернул ${JSON.stringify(value) ?? 'ничего'}, ожидается boolean`);
+      if (typeof value !== 'boolean') throw new CoreError('Invalid', `${source.contract}.${source.member} вернул ${value === undefined ? 'ничего' : JSON.stringify(value)}, ожидается boolean`);
       into[field] = value;
       fail(m.id, item.id, field, undefined);
     } catch (error) {
@@ -180,7 +182,7 @@ export function createMenus(ctx: KernelContext): Menus {
           again = false;
           await evaluate();
           announce();
-        } while (again);
+        } while (asked());
       } finally {
         current = undefined;
       }
