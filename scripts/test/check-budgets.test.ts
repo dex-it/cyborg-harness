@@ -138,6 +138,12 @@ describe('parseMeasurement', () => {
     assert.deepEqual(parseMeasurement('[1234:ERROR] что-то\nещё строка\n{\n  "a": 2\n}\n'), { a: 2 });
   });
 
+  it('после JSON строки Electron и xvfb (CI Linux: «Unexpected non-whitespace character after JSON»)', () => {
+    const json = JSON.stringify({ a: 3, nested: { b: [1, 2] } }, null, 2);
+    assert.deepEqual(parseMeasurement(`${json}\n[1234:0101/000000.000:ERROR:bus.cc(407)] Failed to connect\n`), { a: 3, nested: { b: [1, 2] } });
+    assert.deepEqual(parseMeasurement(`Downloading Electron binary...\n${json}\nfontconfig: trailing\n{ не json }\n`), { a: 3, nested: { b: [1, 2] } });
+  });
+
   it('без JSON - ошибка', () => {
     assert.throws(() => parseMeasurement('пусто'), /нет JSON/);
   });

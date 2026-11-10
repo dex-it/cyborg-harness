@@ -52,14 +52,25 @@ function finding(metric: string, value: number, limit: number | null, unit: stri
   return { metric, value, limit, unit, over: limit !== null && !(value <= limit), blocking: blocking && limit !== null };
 }
 
-/** Читает JSON замера. Electron печатает в stdout и свои строки, поэтому при неудаче берётся хвост от последней строки `{`. */
+/**
+ * Читает JSON замера. `spike-*.mjs --json` печатает объект через `JSON.stringify(r, null, 2)`: `{` и `}` в первой колонке, но Electron и xvfb
+ * пишут в тот же stdout свои строки и до объекта («Downloading Electron binary...»), и после него. Берётся первая пара «строка `{` ... строка `}`», которая разбирается.
+ */
 export function parseMeasurement(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch (first) {
-    const start = text.lastIndexOf('\n{\n');
-    if (start === -1) throw new Error('в выводе замера нет JSON', { cause: first });
-    return JSON.parse(text.slice(start + 1));
+    const lines = text.split('\n');
+    for (let start = lines.indexOf('{'); start !== -1; start = lines.indexOf('{', start + 1)) {
+      for (let end = lines.indexOf('}', start); end !== -1; end = lines.indexOf('}', end + 1)) {
+        try {
+          return JSON.parse(lines.slice(start, end + 1).join('\n'));
+        } catch {
+          // не тот закрывающий `}`: ищем следующий
+        }
+      }
+    }
+    throw new Error('в выводе замера нет JSON', { cause: first });
   }
 }
 
