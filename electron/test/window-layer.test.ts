@@ -104,7 +104,7 @@ test('слой окна: высота области вида, о которой
     assert.equal(dialog.showModalCalls, 1);
     assert.equal(dialog.all('iframe')[0], frame);
     assert.equal(frame.style.height, '420px', 'высота области вида - высота фрейма');
-    assert.equal(dialog.style.height, 'auto', 'окно по содержимому: шапка + область вида, а не размер автора');
+    assert.equal(dialog.style.height, 'fit-content', 'окно по содержимому: шапка + область вида, а не размер автора');
     assert.equal(dialog.style.maxHeight, '80vh', 'выше 80% высоты экрана окно не растёт');
     assert.equal(frame.style.flex, '0 1 auto', 'фрейм уступает, когда окно упёрлось в потолок');
     assert.equal(frame.style.minHeight, '0');
@@ -129,7 +129,7 @@ test('слой окна: окно уже с высотой вида показы
     view.sync(snapshot({ modal: modal({ contentHeight: 260 }) }), [], layout);
     const dialog = only(document, 'layer-modal');
     assert.equal(dialog.all('iframe')[0]?.style.height, '260px');
-    assert.equal(dialog.style.height, 'auto');
+    assert.equal(dialog.style.height, 'fit-content');
     view.sync(snapshot(), [], layout);
 
     view.sync(snapshot({ modal: modal({ id: 5 }) }), [], []);

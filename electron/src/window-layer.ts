@@ -79,7 +79,8 @@ export class WindowLayerView {
     if (open.contentHeight === height) return;
     open.contentHeight = height;
     if (!open.frame || height === undefined) return;
-    open.dialog.style.height = 'auto';
+    // `fit-content`, не `auto`: у модального <dialog> заданы обе вертикальные привязки (inset: 0), и `auto` растянул бы его на весь экран.
+    open.dialog.style.height = 'fit-content';
     open.dialog.style.maxHeight = '80vh';
     open.frame.style.flex = '0 1 auto';
     open.frame.style.minHeight = '0';
