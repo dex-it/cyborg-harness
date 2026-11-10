@@ -23,11 +23,8 @@ jobs:
         os: [macos-latest, ubuntu-24.04]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
+      # Node 24, `npm ci --ignore-scripts` и нативная сборка node-pty с кэшем по lock-файлу (.github/actions/install/action.yml).
+      - uses: ./.github/actions/install
       # Бинарник Electron скачивается лениво, при первом `require('electron')` в тесте (core/test/package.test.ts, playground/test/host-electron.test.ts),
       # и сбой сети (504 с GitHub Releases) красил тест, а не шаг. Кэш по lock-файлу (в нём версия Electron) и скачивание с повтором - до тестов.
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
@@ -100,3 +97,88 @@ jobs:
         continue-on-error: true
         timeout-minutes: 6
         run: xvfb-run --auto-servernum node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON playground/scripts/spike-monaco.mjs memory sandbox --no-sandbox
+
+  # Бюджеты NFR-CH-1001 (P-10): замеры шлюза ctx.os и хостов против порогов из playground/budgets.json. Отдельное задание рядом с `check`,
+  # чтобы три прогона замера не съедали его 15 минут. Блокирует только платформа из `gateway.blocking` файла порогов (сейчас Linux);
+  # на macOS числа идут в сводку запуска. Шумный раннер: при превышении замер повторяется один раз, красным считается второе превышение подряд.
+  budgets:
+    name: бюджеты (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/install
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Electron (бинарник, кэш и повтор скачивания)
+        timeout-minutes: 6
+        run: |
+          for attempt in 1 2 3 4; do
+            node node_modules/electron/install.js && exit 0
+            echo "::warning::скачивание Electron не удалось (попытка $attempt из 4)"
+            sleep $((attempt * 15))
+          done
+          exit 1
+      - run: npm run build
+      - name: замеры и сверка с порогами (spike:gateway, spike:hosts)
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then prefix="xvfb-run --auto-servernum"; extra="--no-sandbox"; else prefix=""; extra=""; fi
+          for attempt in 1 2; do
+            # Код выхода замеров не берётся: сверка читает JSON и сама красит ошибку прогона (нет файла - ошибка сверки).
+            $prefix node playground/scripts/spike-gateway.mjs --json $extra > "$RUNNER_TEMP/gateway.json" || true
+            $prefix node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON playground/scripts/spike-hosts.mjs --json $extra > "$RUNNER_TEMP/hosts.json" || true
+            if npm run --silent check:budgets -- --gateway "$RUNNER_TEMP/gateway.json" --hosts "$RUNNER_TEMP/hosts.json" --summary "$GITHUB_STEP_SUMMARY"; then
+              [ "$attempt" = 1 ] || echo "::warning::бюджет выдержан только со второй попытки: раннер шумит, смотри сводку запуска"
+              exit 0
+            fi
+            echo "::warning::бюджет превышен (попытка $attempt из 2)"
+          done
+          exit 1
+
+  # Ссылки и якоря в docs/ и README (P-10): путь с точным регистром и заголовок-цель. Без установки зависимостей и без сети.
+  docs-links:
+    name: ссылки в docs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-docs-links.ts docs README.md
+
+  # Уязвимости в продакшен-зависимостях (P-10). Дерево берётся из lock-файла, установка не нужна.
+  # Пакеты, которые получает потребитель (контракты, ядро, адаптер, тест-кит, cyborg-plugin), блокируют при high и выше;
+  # стенд playground (monaco-editor, xterm, node-pty в корне) не поставляется и только предупреждает: сейчас monaco-editor 0.57 тянет dompurify
+  # с критической уязвимостью, а `npm audit fix` предлагает лишь откат на 0.56.0. Когда у monaco-editor выйдет исправление - перевести шаг в блокирующий.
+  audit:
+    name: npm audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: пакеты для потребителя (блокирует)
+        run: |
+          failed=0
+          for workspace in contracts core electron testing tools/cyborg-plugin; do
+            echo "::group::npm audit -w $workspace"
+            npm audit --omit=dev --audit-level=high --workspace "$workspace" || failed=1
+            echo "::endgroup::"
+          done
+          exit $failed
+      - name: стенд playground (предупреждение)
+        run: |
+          npm audit --omit=dev --audit-level=high || echo "::warning::npm audit стенда нашёл уязвимости в продакшен-зависимостях корня; пакеты для потребителя чисты"

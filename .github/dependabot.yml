@@ -1,0 +1,33 @@
+# Обновление зависимостей (P-10): npm (корень с workspaces и сайт документации) и действия GitHub Actions.
+# Раз в неделю, не больше пяти открытых PR на каталог; обновления одной группы идут одним PR, чтобы не плодить шум.
+# В группу входят только минорные и патч-обновления; мажорные приходят отдельными PR (Electron, TypeScript и typescript-eslint связаны
+# между собой и со сборкой, их принимает ревью, а не авто-слияние).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: npm
+    directory: /site
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    groups:
+      actions:
+        patterns: ['*']

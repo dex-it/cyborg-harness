@@ -6,6 +6,7 @@ import { compileSchema } from './json-schema.ts';
 import type { BridgeEnd, KernelContext, Sections } from './kernel-context.ts';
 import type { JournalEntry } from './kernel-types.ts';
 import type { PluginManifest } from './manifest.ts';
+import { namedPaths } from './named-paths.ts';
 import { isRecord } from './wire.ts';
 
 /** Разделы `config` и `state` плагина: что уходит хосту при активации, запись из хоста и правка извне. */
@@ -21,6 +22,20 @@ export function createSections(ctx: KernelContext): Sections {
     const touched = fields.filter((f) => data[f] !== undefined && !layers.some((d) => isDeepStrictEqual(d[f], data[f])));
     if (touched.length === 0) return;
     const detail = `поля ${touched.join(', ')} задают хосты net - их меняет только человек`;
+    ctx.record({ pluginId: m.id, kind: 'denied', method: 'config.set', detail });
+    throw new CoreError('PermissionDenied', `${m.id}: ${detail}`);
+  }
+
+  // Корни областей (`security.setRoots`) подтверждает человек: плагин с таким правом не переписывает в слой пользователя пути, названные только в файле воркспейса (У-40).
+  function guardRootPaths(m: PluginManifest, target: string, data: Record<string, unknown>): void {
+    if (!m.permissions['security.roots'] || target !== TRUSTED_LAYER) return;
+    const layers = options.config?.raw(m.id) ?? [];
+    const named = (trusted: boolean) => new Set(layers.filter(([layer]) => (layer === TRUSTED_LAYER) === trusted).flatMap(([, d]) => namedPaths(d)));
+    const own = named(true);
+    const sent = named(false);
+    const touched = [...new Set(namedPaths(data))].filter((p) => sent.has(p) && !own.has(p));
+    if (touched.length === 0) return;
+    const detail = `пути ${touched.join(', ')} названы только в файле воркспейса - корни областей подтверждает человек`;
     ctx.record({ pluginId: m.id, kind: 'denied', method: 'config.set', detail });
     throw new CoreError('PermissionDenied', `${m.id}: ${detail}`);
   }
@@ -50,7 +65,10 @@ export function createSections(ctx: KernelContext): Sections {
       if (p.version !== declared.version) {
         throw new CoreError('Invalid', `${p.pluginId}: раздел ${p.kind} версии ${p.version}, а в манифесте ${declared.version}`);
       }
-      if (p.kind === 'config') guardNetFields(live(p.pluginId), p.layer, p.data);
+      if (p.kind === 'config') {
+        guardNetFields(live(p.pluginId), p.layer, p.data);
+        guardRootPaths(live(p.pluginId), p.layer, p.data);
+      }
       await options[p.kind]?.write(p.layer, p.pluginId, p.version, p.data);
     });
   }

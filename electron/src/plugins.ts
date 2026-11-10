@@ -786,10 +786,10 @@ export class PluginsService implements ViewGroups {
     if (kind === 'text' || kind === 'terminal' || kind === 'other') this.#focus = kind;
   }
 
-  /** Окно сообщает, виден ли вид плагина (`when.visible` у динамических сочетаний); плагина нет или ядро не запущено - молча. */
-  setViewVisible(pluginId: string, visible: boolean): void {
+  /** Окно сообщает, виден ли вид плагина (`when.visible` у динамических сочетаний: плагин виден, пока виден хоть один вид); плагина или вида нет или ядро не запущено - молча. */
+  setViewVisible(pluginId: string, visible: boolean, view?: string): void {
     try {
-      this.kernel?.setViewVisible(pluginId, visible);
+      this.kernel?.setViewVisible(pluginId, visible, view);
     } catch {
       // Вид, которого ядро не знает, сочетаниям не нужен.
     }

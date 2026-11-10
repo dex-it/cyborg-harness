@@ -61,6 +61,12 @@ function row(probe: ProbePath, variant: Variant, sizeBytes: number, s: Sampled):
   return { path: probe, variant, sizeBytes, first: round(s.first), p50: at(0.5), p95: at(0.95), p99: at(0.99) };
 }
 
+/**
+ * Замер мерит цену вызова, а не бюджет ввода: цикл `pty.write` шлёт сотни записей по 64 КиБ подряд и упирается в запас ввода одного pty (#134: 4 МиБ, затем 256 КиБ/с),
+ * ядро отвечает `Invalid`, и замер шлюза не выходит ни одной цены. Предел ввода на время замера снят; в бюджет по разметке пути он не входит.
+ */
+const BENCH_LIMITS = { ptyInputBurst: 2 ** 30, ptyInputRate: 2 ** 30 };
+
 function bareOs(env: OsEnvironment): ProbeOs {
   const { pty, secrets } = env;
   if (!pty || !secrets) throw new Error('в среде нет pty или секретов');
@@ -201,7 +207,7 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
     };
     const parsed = parseManifest(raw, PLUGIN_API_VERSION);
     if (!parsed.ok) throw new Error(`манифест замера: ${parsed.errors.join('; ')}`);
-    const env = electronOs({ userData: path.join(base, 'app'), roots: () => [], protectedPaths: [], raiseWindow: () => undefined });
+    const env: OsEnvironment = { ...electronOs({ userData: path.join(base, 'app'), roots: () => [], protectedPaths: [], raiseWindow: () => undefined }), limits: BENCH_LIMITS };
     const kernel = await load({
       apiVersion: PLUGIN_API_VERSION,
       enabled: [ID],
@@ -211,6 +217,7 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
       bundled: [ID],
       hosts: { bench: [ID] },
       os: env,
+      limits: BENCH_LIMITS,
       onJournal: (entry) => journal.push(entry),
       ...(options.trace !== false && {
         onTrace: (record: TraceRecord) => {

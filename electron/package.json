@@ -1,7 +1,6 @@
 {
   "name": "@cyborg-harness/electron",
   "version": "0.1.0",
-  "private": true,
   "description": "Адаптер Electron для ядра плагинов Cyborg Harness: хосты в utilityProcess, схема cyborg-plugin, мост видов, среда ctx.os, слой окна",
   "type": "module",
   "license": "UNLICENSED",
@@ -18,7 +17,9 @@
     "./shell/shell.css": "./dist/shell/shell.css",
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md"],
+  "files": ["dist", "README.md", "CHANGELOG.md"],
+  "repository": { "type": "git", "url": "git+https://github.com/dex-it/cyborg-harness.git", "directory": "electron" },
+  "publishConfig": { "registry": "https://registry.npmjs.org/", "access": "restricted" },
   "peerDependencies": {
     "@cyborg-harness/contracts": ">=1.0.0-0 <2.0.0",
     "@cyborg-harness/core": "^0.1.0",

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext } from '@cyborg-harness/contracts';
 import { SectionStore } from '../src/config.ts';
@@ -229,4 +229,154 @@ test('config:<поле> в слое воркспейса: миграция и п
   await config.set('workspace', { ...config.get(), theme: 'dark' });
   await assert.rejects(ctx.os.net!.fetch(`${EVIL}/`), { code: 'PermissionDenied' });
   await k.unload();
+});
+
+// У-40, корни (#136): присланный воркспейс задаёт `settings.projects.items[].repos`, плагин `projects` отдаёт их ядру через `security.setRoots`.
+
+interface Item { readonly id: string; readonly repos: readonly string[] }
+const repos = (config: Record<string, unknown> | undefined): string[] => ((config?.items ?? []) as Item[]).flatMap((i) => [...i.repos]);
+
+/** Настоящие файлы пользователя и воркспейса; `projects` (право `security.roots`, раздел `config`) и `tool` (чтение области `workspace`). */
+async function projectsOnDisk(box: { root: string }, layers: { user?: readonly string[]; workspace?: readonly string[] }, over: { dialog?: string[] } = {}) {
+  const userDir = path.join(box.root, 'user-repo');
+  const sneaky = path.join(box.root, 'sneaky');
+  for (const d of [userDir, sneaky]) {
+    await mkdir(d, { recursive: true });
+    await writeFile(path.join(d, 'key.txt'), `секрет ${path.basename(d)}`);
+  }
+  const section = (list: readonly string[] | undefined) => ({ projects: { $version: 1, items: [{ id: 'p', repos: list ?? [] }] } });
+  const wsFile = path.join(box.root, 'ws', 'workspace.cyborg.json');
+  const userFile = path.join(box.root, 'user', 'cyborg.json');
+  await writeFile(userFile, JSON.stringify({ settings: layers.user ? section(layers.user) : {} }));
+  await writeFile(wsFile, JSON.stringify({ cyborg: 2, plugins: { enabled: ['projects', 'tool'] }, settings: layers.workspace ? section(layers.workspace) : {} }));
+  const opened = await openWorkspace({ file: wsFile, userFile, stateDir: path.join(box.root, 'state') });
+  assert.ok(opened.ok);
+  const ws = opened.workspace;
+  const contexts = new Map<string, PluginContext>();
+  const k = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    spawnHost: inlineHosts(async (entry) => ({ activate: (c: PluginContext) => void contexts.set(entry, c) })),
+    enabled: ws.plugins.enabled,
+    manifests: [manifest('projects', { permissions: { 'security.roots': true }, config: { version: 1 } }), manifest('tool', { permissions: { 'fs.read': ['workspace'] } })],
+    os: { dataDir: path.join(box.root, 'data'), tempDir: path.join(box.root, 'temp'), ...(over.dialog && { dialog: { open: async () => over.dialog ?? [] } }) },
+    config: ws.config,
+    state: ws.state,
+  });
+  const ctx = (id: string) => {
+    const c = contexts.get(id);
+    assert.ok(c, `${id} не активирован`);
+    return c;
+  };
+  /** Как `projects` по SAD: репозитории берёт из слитого `ctx.config.get()` и отдаёт ядру. */
+  const publish = () => ctx('projects').os.security!.setRoots(repos(ctx('projects').config?.get()));
+  const reads = (dir: string) => ctx('tool').os.fs.readText(path.join(dir, 'key.txt'));
+  return { k, ws, userDir, sneaky, ctx, publish, reads, denials: () => k.journal.filter((e) => e.kind === 'denied') };
+}
+
+test('setRoots: корень из settings.projects воркспейса не попадает в область workspace, а запись denied называет корень, слой и причину', async () => {
+  await using box = await sandbox();
+  const p = await projectsOnDisk(box, { workspace: [path.join(box.root, 'sneaky')] });
+  try {
+    await assert.rejects(p.publish(), { code: 'PermissionDenied' });
+    await assert.rejects(p.reads(p.sneaky), { code: 'PermissionDenied' }, 'чужой корень открыл чтение области workspace');
+    const [denied] = p.denials().filter((e) => e.method === 'security.setRoots');
+    assert.ok(denied, 'отказ не записан в журнал');
+    assert.equal(denied.pluginId, 'projects');
+    assert.ok(denied.detail.includes(p.sneaky), denied.detail);
+    assert.match(denied.detail, /воркспейс/);
+    assert.match(denied.detail, /пользовател/);
+  } finally {
+    await p.k.unload();
+    p.ws.close();
+  }
+});
+
+test('setRoots: корень из слоя пользователя принимается, смешанный список с чужим корнем отвергается целиком', async () => {
+  await using box = await sandbox();
+  const p = await projectsOnDisk(box, { user: [path.join(box.root, 'user-repo')], workspace: [path.join(box.root, 'sneaky')] });
+  try {
+    await assert.rejects(p.ctx('projects').os.security!.setRoots([p.userDir, p.sneaky]), { code: 'PermissionDenied' });
+    await assert.rejects(p.reads(p.userDir), { code: 'PermissionDenied' }, 'отказ принял часть списка');
+    await p.ctx('projects').os.security!.setRoots([p.userDir]);
+    assert.equal(await p.reads(p.userDir), 'секрет user-repo');
+    await assert.rejects(p.reads(p.sneaky), { code: 'PermissionDenied' });
+  } finally {
+    await p.k.unload();
+    p.ws.close();
+  }
+});
+
+test('setRoots: слой воркспейса перекрывает значение плагина, но корень, названный и в слое пользователя, принимается', async () => {
+  await using box = await sandbox();
+  const same = path.join(box.root, 'user-repo');
+  const p = await projectsOnDisk(box, { user: [same], workspace: [same] });
+  try {
+    await p.publish();
+    assert.equal(await p.reads(p.userDir), 'секрет user-repo');
+  } finally {
+    await p.k.unload();
+    p.ws.close();
+  }
+});
+
+test('setRoots: корень из воркспейса, который человек выбрал в диалоге (granted), принимается; родитель и потомок названного корня - нет', async () => {
+  await using box = await sandbox();
+  const sneaky = path.join(box.root, 'sneaky');
+  const inner = path.join(sneaky, 'inner');
+  await mkdir(inner, { recursive: true });
+  await writeFile(path.join(inner, 'key.txt'), 'внутри');
+  const p = await projectsOnDisk(box, { workspace: [sneaky] }, { dialog: [sneaky] });
+  try {
+    await assert.rejects(p.ctx('projects').os.security!.setRoots([inner]), { code: 'PermissionDenied' }, 'потомок названного корня');
+    await assert.rejects(p.ctx('projects').os.security!.setRoots([box.root]), { code: 'PermissionDenied' }, 'родитель названного корня');
+    await assert.rejects(p.publish(), { code: 'PermissionDenied' }, 'без выбора человека');
+    assert.deepEqual(await p.ctx('projects').os.dialog.open({}), [sneaky]);
+    await p.publish();
+    assert.equal(await p.reads(sneaky), 'секрет sneaky');
+  } finally {
+    await p.k.unload();
+    p.ws.close();
+  }
+});
+
+test('setRoots: корень, которого в config нет ни в одном слое (плагин нашёл его сам), принимается как раньше', async () => {
+  await using box = await sandbox();
+  const p = await projectsOnDisk(box, {});
+  try {
+    await p.ctx('projects').os.security!.setRoots([p.sneaky]);
+    assert.equal(await p.reads(p.sneaky), 'секрет sneaky');
+  } finally {
+    await p.k.unload();
+    p.ws.close();
+  }
+});
+
+test('setRoots: корень, названный в воркспейсе через ~ тоже отвергается', async () => {
+  await using box = await sandbox();
+  const rel = path.relative(homedir(), path.join(box.root, 'sneaky'));
+  const p = await projectsOnDisk(box, { workspace: [`~/${rel}`] });
+  try {
+    await assert.rejects(p.ctx('projects').os.security!.setRoots([p.sneaky]), { code: 'PermissionDenied' });
+  } finally {
+    await p.k.unload();
+    p.ws.close();
+  }
+});
+
+test('config.set: плагин не переносит корни из слоя воркспейса в слой пользователя, свои корни пишет', async () => {
+  await using box = await sandbox();
+  const p = await projectsOnDisk(box, { user: [path.join(box.root, 'user-repo')], workspace: [path.join(box.root, 'sneaky')] });
+  try {
+    const config = p.ctx('projects').config!;
+    const merged = config.get();
+    // get() отдаёт слитое значение: запись его целиком в слой пользователя сделала бы чужой корень названным человеком.
+    await assert.rejects(config.set('user', merged), { code: 'PermissionDenied' });
+    assert.ok(p.denials().some((e) => e.method === 'config.set' && e.detail.includes(p.sneaky)));
+    await config.set('user', { items: [{ id: 'p', repos: [p.userDir] }] });
+    await config.set('workspace', { items: [{ id: 'p', repos: [p.sneaky] }] });
+    await assert.rejects(p.publish(), { code: 'PermissionDenied' });
+  } finally {
+    await p.k.unload();
+    p.ws.close();
+  }
 });
