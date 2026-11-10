@@ -61,6 +61,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
     types: [
       'AppMenuItem',
       'Discovered',
+      'DiscoverOptions',
       'ElectronOsOptions',
       'PluginUi',
       'PluginsEvents',
