@@ -23,6 +23,8 @@
 - `PluginContext.dialogs`, `PluginDialogs`, `AskDialog` [minor]: `ctx.dialogs.show(ask)` - вопрос человеку из главной части без вида, в той же очереди окна, что диалоги видов; `menu` у главной части нет (K-13).
 - `PluginContext.log`, `LogLevel` [minor]: второй необязательный параметр `level` (`info`, `warn`, `error`; по умолчанию `info`), существующие плагины с одним аргументом работают как прежде; ядро обрезает строку длиннее предела и не кладёт в журнал по одной строки сверх предела частоты (K-29).
 - `OsFs.watch` четвёртый параметр `options`, `WatchOptions` [minor]: `{ recursive: true }` следит за всем деревом под каталогом одной записью лимита, имя в `listener` - путь от каталога через `/`; удаление или замена наблюдаемого каталога (в том числе без `recursive`) закрывает наблюдение с причиной в `onClose`; отказ ОС по числу слежений - `Unavailable` с названием предела (#182). Существующие вызовы `watch` работают как прежде.
+- `Contracts['cyborg.git']`, `Git`, `GitStatus`, `GitChange`, `GitCode` [minor]: черновик контракта `cyborg.git` v1 - `status(repo)` и `onChange(repo, listener)`; остальные члены SAD (`headContent`, `branches`, `switch`, `remotes`, `files`) придут необязательными (PL-04).
+- `Contracts['cyborg.tree-decoration']`, `TreeDecoration`, `TreeMark`, `TreeMarkKind` [minor]: черновик контракта `cyborg.tree-decoration` v1, кратность many - `marks(root)` и `onChange(listener)` (PL-04).
 
 ## 1.0.0-dev - не выпущена
 

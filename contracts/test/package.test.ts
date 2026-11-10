@@ -11,7 +11,7 @@ import { runCommand } from '../../core/test/run-command.ts';
 const contracts = path.resolve(import.meta.dirname, '..');
 const repo = path.resolve(contracts, '..');
 const tsc = path.join(repo, 'node_modules', 'typescript7', 'bin', 'tsc');
-const SOURCES = ['agent', 'elements', 'index', 'os', 'plugin', 'view'];
+const SOURCES = ['agent', 'elements', 'git', 'index', 'os', 'plugin', 'tree', 'view'];
 
 interface PackageJson {
   name: string;
@@ -123,7 +123,7 @@ describe('npm pack и пустой потребитель', () => {
 
   it('в tarball: package.json, README, CHANGELOG и декларации; исходных .ts нет', () => {
     const names = report[0]!.files.map((f) => f.path).sort();
-    assert.deepEqual(names, ['CHANGELOG.md', 'README.md', 'dist/agent.d.ts', 'dist/elements.d.ts', 'dist/index.d.ts', 'dist/os.d.ts', 'dist/plugin.d.ts', 'dist/view.d.ts', 'package.json']);
+    assert.deepEqual(names, ['CHANGELOG.md', 'README.md', 'dist/agent.d.ts', 'dist/elements.d.ts', 'dist/git.d.ts', 'dist/index.d.ts', 'dist/os.d.ts', 'dist/plugin.d.ts', 'dist/tree.d.ts', 'dist/view.d.ts', 'package.json']);
     assert.deepEqual(names.filter((n) => n.endsWith('.ts') && !n.endsWith('.d.ts')), []);
   });
 

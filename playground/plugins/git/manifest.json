@@ -1,0 +1,31 @@
+{
+  "id": "git",
+  "version": "1.0.0",
+  "engines": {
+    "cyborg": "^1"
+  },
+  "provides": {
+    "cyborg.git": {
+      "version": "1.0",
+      "guard": {
+        "status": { "fs.read": 0 },
+        "onChange": { "fs.read": 0 }
+      }
+    },
+    "cyborg.tree-decoration": {
+      "version": "1.0",
+      "guard": {
+        "marks": { "fs.read": 0 }
+      }
+    }
+  },
+  "permissions": {
+    "fs.read": ["workspace"],
+    "process": [
+      {
+        "program": "git",
+        "args": ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "status", "--porcelain=v1", "-z", "--branch"]
+      }
+    ]
+  }
+}
