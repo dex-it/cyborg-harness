@@ -1,16 +1,20 @@
 import type { Agent, AgentTool } from './agent.ts';
+import type { Sessions } from './sessions.ts';
 
 /** Карта контрактов: имя -> мажорная версия -> тип; правила дополнения - README.md рядом. */
 export interface Contracts {
   'cyborg.agent': { 1: Agent };
   'cyborg.agent-tool': { 1: AgentTool };
   'cyborg.session-prompt': { 1: SessionPrompt };
+  /** Черновик пилота PL-02: только события сессий (`contracts/sessions.ts`). */
+  'cyborg.sessions': { 1: Sessions };
 }
 
 export type * from './plugin.ts';
 export type * from './view.ts';
 export type * from './os.ts';
 export type * from './agent.ts';
+export type * from './sessions.ts';
 export type * from './elements.ts';
 
 /** Ответ метода-подписки: снятие идёт поставщику через ядро, а при выгрузке любой из сторон ядро снимает подписку само. */

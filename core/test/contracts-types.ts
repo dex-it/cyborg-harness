@@ -27,8 +27,19 @@ export const consumer: PluginModule = {
     const v2: Remote<FilesV2> | undefined = ctx.contracts.get('demo.files', 2);
     // @ts-expect-error мажор обязателен
     ctx.contracts.get('demo.files');
-    // @ts-expect-error в пакете только cyborg.agent, cyborg.agent-tool и cyborg.session-prompt
+    // @ts-expect-error cyborg.tab в пакете нет (в карте: cyborg.agent, cyborg.agent-tool, cyborg.session-prompt, cyborg.sessions)
     ctx.contracts.get('cyborg.tab', 1);
+    // cyborg.sessions (PL-02): подписка идёт через границу хоста, поэтому ответ - Promise<Subscription>; вариантов изменения четыре.
+    const sessions = ctx.contracts.get('cyborg.sessions', 1);
+    void sessions?.onChange((e) => {
+      if (e.change.type === 'waiting') ctx.log(`${e.title}: ${e.change.reason}`);
+      // @ts-expect-error у варианта cwd нет reason
+      if (e.change.type === 'cwd') ctx.log(e.change.reason);
+    });
+    // @ts-expect-error подписка возвращает Subscription асинхронно, у Promise нет dispose
+    void sessions?.onChange(() => undefined).dispose();
+    // @ts-expect-error мажорной версии 2 у cyborg.sessions нет
+    ctx.contracts.get('cyborg.sessions', 2);
     void v1?.read('/a');
     void v2?.readText('/a');
     const tabs = ctx.contracts.all('demo.tab', 1);
