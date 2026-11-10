@@ -735,6 +735,11 @@ body[data-locked='true'] main {
   padding: 0;
 }
 
+.workspace-recent li {
+  display: inline-flex;
+  gap: 2px;
+}
+
 .layer-modal {
   width: min(520px, 90vw);
   height: min(360px, 80vh);

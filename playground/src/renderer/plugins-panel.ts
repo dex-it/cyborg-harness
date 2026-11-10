@@ -7,7 +7,7 @@ import { byId, el } from './dom.ts';
 import { ViewsPanel } from './views-panel.ts';
 import { moveFocus } from './focus.ts';
 import { SideTabs } from './side-tabs.ts';
-import { actionsFor, clock, conflictText, groupLabel, groupNote, journalFor, keyStatus, mergeFeed, originNote, sortedPlugins, STATE_LABEL, summary, userPluginsNotice, viewSlots, type ActionButton } from './plugins-model.ts';
+import { actionsFor, clock, conflictText, groupLabel, groupNote, journalFor, keyStatus, mergeFeed, originNote, sortedPlugins, STATE_LABEL, summary, userPluginsNotice, viewSlots, workspaceActionError, type ActionButton } from './plugins-model.ts';
 
 export interface PluginsPort {
   pluginsSnapshot(): Promise<PluginsSnapshot>;
@@ -25,6 +25,8 @@ export interface PluginsPort {
   closeDocument(id: string): Promise<Reply>;
   /** Без файла - системный диалог выбора; смена воркспейса перезапускает приложение. */
   openWorkspace(file?: string): Promise<Reply>;
+  /** Воркспейс в отдельном процессе с тем же `userData`; это окно остаётся. */
+  openWorkspaceInNewWindow(file: string): Promise<Reply>;
   /** Перезапуск приложения с флагом `--safe-mode` или без него. */
   setSafeMode(on: boolean): Promise<Reply>;
   onWindowCommand(listener: (command: string) => void): void;
@@ -40,6 +42,7 @@ export class PluginsPanel {
   private readonly documentsEl = byId('documents-list', HTMLElement);
   private readonly workspaceEl = byId('workspace-current', HTMLElement);
   private readonly recentEl = byId('workspace-recent', HTMLElement);
+  private readonly workspaceErrorEl = byId('workspace-error', HTMLElement);
   private readonly safeModeEl = byId('safe-mode', HTMLElement);
   private readonly userPluginsEl = byId('user-plugins', HTMLElement);
   private readonly safeModeEnter = byId('safe-mode-enter', HTMLButtonElement);
@@ -72,7 +75,7 @@ export class PluginsPanel {
       },
     );
     this.journalAll.addEventListener('click', () => this.showJournal(null));
-    byId('workspace-open', HTMLButtonElement).addEventListener('click', () => void port.openWorkspace());
+    byId('workspace-open', HTMLButtonElement).addEventListener('click', () => void this.workspaceAction('Открыть воркспейс', () => port.openWorkspace()));
     this.safeModeEnter.addEventListener('click', () => void port.setSafeMode(true));
     byId('safe-mode-exit', HTMLButtonElement).addEventListener('click', () => void port.setSafeMode(false));
     port.onPluginsChanged(() => void this.refresh());
@@ -255,14 +258,25 @@ export class PluginsPanel {
     return choice === 'cancel' ? {} : this.port.disablePlugin(id, choice === 'keep');
   }
 
+  /** Отказ главного процесса (процесс не запустился, воркспейса нет в «Недавних») виден рядом с кнопкой, а не теряется. */
+  private async workspaceAction(label: string, call: () => Promise<Reply>): Promise<void> {
+    const text = await workspaceActionError(label, call);
+    this.workspaceErrorEl.textContent = text ?? '';
+    this.workspaceErrorEl.hidden = text === undefined;
+  }
+
   private recentRow(file: string): HTMLElement {
     const item = el('li');
     const open = el('button', 'workspace-recent-item', file.split(/[\\/]/).at(-1) ?? file) as HTMLButtonElement;
     open.type = 'button';
     open.title = file;
     open.setAttribute('aria-label', `Открыть воркспейс ${file}`);
-    open.addEventListener('click', () => void this.port.openWorkspace(file));
-    item.append(open);
+    open.addEventListener('click', () => void this.workspaceAction('Открыть воркспейс', () => this.port.openWorkspace(file)));
+    const beside = el('button', 'workspace-recent-new', 'в новом окне') as HTMLButtonElement;
+    beside.type = 'button';
+    beside.setAttribute('aria-label', `Открыть воркспейс ${file} в новом окне`);
+    beside.addEventListener('click', () => void this.workspaceAction('Открыть в новом окне', () => this.port.openWorkspaceInNewWindow(file)));
+    item.append(open, beside);
     return item;
   }
 

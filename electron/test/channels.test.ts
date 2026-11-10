@@ -12,7 +12,7 @@ const names = (text: string, pattern: RegExp) => [...text.matchAll(pattern)].map
 const unique = (list: string[]) => [...new Set(list)].sort();
 
 /** Каналы, которые адаптер сам не обслуживает: их регистрирует приложение (смена воркспейса и безопасного режима - перезапуск, `restarts`). */
-const APP_CHANNELS = ['app:safe-mode', 'workspace:open'];
+const APP_CHANNELS = ['app:safe-mode', 'workspace:open', 'workspace:open-new'];
 
 describe('каналы IPC: preload и главный процесс', () => {
   const preload = read('preload.ts');

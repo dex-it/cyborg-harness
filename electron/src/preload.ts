@@ -23,6 +23,7 @@ export function windowApi(): WindowApi {
     cancelModal: (id: number): Promise<Reply> => ipcRenderer.invoke('window:modal-cancel', { id }),
     closeDocument: (id: string): Promise<Reply> => ipcRenderer.invoke('documents:close', id),
     openWorkspace: (file?: string): Promise<Reply> => ipcRenderer.invoke('workspace:open', file),
+    openWorkspaceInNewWindow: (file: string): Promise<Reply> => ipcRenderer.invoke('workspace:open-new', file),
     setSafeMode: (on: boolean): Promise<Reply> => ipcRenderer.invoke('app:safe-mode', on),
   };
 }

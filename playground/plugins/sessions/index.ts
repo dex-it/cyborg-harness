@@ -125,7 +125,8 @@ const plugin: PluginModule = {
       if (!provider) throw new Error(`агента ${String(pluginId)} нет`);
       const facts = await provider.impl.facts();
       if (!facts.found) throw new Error(`${facts.title}: программа не найдена`);
-      const sessionId = `s${Date.now().toString(36)}-${String(next++)}`;
+      // Файлы событий агента лежат в общем `plugin-data` (K-20): счётчик и время двух окон могут совпасть, поэтому в id есть случайная часть.
+      const sessionId = `s${Date.now().toString(36)}-${String(next++)}-${crypto.randomUUID().slice(0, 8)}`;
       const resume = facts.capabilities.resume ? resumeId : undefined;
       const promptFragments = await fragments();
       const tools = await endpoint(sessionId);

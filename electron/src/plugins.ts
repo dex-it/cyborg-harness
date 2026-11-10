@@ -155,7 +155,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
   };
   const file = options.workspace ?? path.join(options.userData, 'workspace.cyborg.json');
   const opened = await openWorkspace({ file, userFile: path.join(options.userData, 'cyborg.json'), stateDir: path.join(options.userData, 'state'), ...(options.migrate !== undefined && { migrate: options.migrate }) });
-  if (!opened.ok) throw new Error(`воркспейс ${file} уже открыт процессом ${opened.owner}`);
+  if (!opened.ok) throw new Error(`воркспейс ${file} уже открыт ${opened.owner > 0 ? `процессом ${String(opened.owner)}` : 'другим процессом'}`);
   const ws = opened.workspace;
   for (const p of ws.problems) report(p);
   for (const m of ws.migrated) options.log(`[plugins] ${m}`);
