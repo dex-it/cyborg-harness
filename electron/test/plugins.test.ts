@@ -7,8 +7,9 @@ import { inlineHosts } from '@cyborg-harness/core';
 import type { PluginModule } from '@cyborg-harness/core';
 import { WINDOW_OWNER } from '@cyborg-harness/core';
 import { DELIVERY_FILE, writeDelivery } from '@cyborg-harness/core/delivery';
+import { ENTRY_FILES as CHECKED_ENTRY_FILES } from '@cyborg-harness/core/plugin-check';
 import type { KeyRow } from '../src/snapshot.ts';
-import { discoverPlugins, PluginsService, readSchemaFile, startPlugins } from '../src/plugins.ts';
+import { discoverPlugins, ENTRY_FILES, PluginsService, readSchemaFile, startPlugins } from '../src/plugins.ts';
 import { waitFor } from './wait-for.ts';
 
 // Контракт для плагинов-подделок теста: карту контрактов приложения (playground/plugins/contracts.ts) пакет не знает.
@@ -46,14 +47,74 @@ test('поиск: встроенные раньше пользовательск
   assert.deepEqual([...found.origins], [['files', builtin], ['notes', user]]);
 });
 
+test('поиск: набор имён точки входа тот же, что у проверки плагина (check и сборка): иначе check одобрит плагин, который стенд не найдёт', () => {
+  assert.deepEqual(ENTRY_FILES, CHECKED_ENTRY_FILES);
+});
+
+test('поиск: порядок index.mjs, index.js, index.ts; каталог с таким именем точкой входа не считается', () => {
+  const dir = tmp();
+  plugin(dir, 'first', {}, 'export default {}', 'index.js');
+  fs.writeFileSync(path.join(dir, 'first', 'index.ts'), 'export default {}');
+  fs.mkdirSync(path.join(dir, 'first', 'index.mjs'));
+  plugin(dir, 'second', {}, 'export default {}', 'index.ts');
+  const found = discoverPlugins([dir]);
+  assert.match(found.entries.get('first') ?? '', /first\/index\.js$/, 'каталог index.mjs пропущен, index.js раньше index.ts');
+  assert.match(found.entries.get('second') ?? '', /second\/index\.ts$/);
+});
+
+test('поиск: несколько точек входа в каталоге - загружается первая, и в problems сказано, какая и из каких', () => {
+  const dir = tmp();
+  plugin(dir, 'both', {}, 'export default {}', 'index.js');
+  fs.writeFileSync(path.join(dir, 'both', 'index.ts'), 'export default {}');
+  plugin(dir, 'single', {}, 'export default {}', 'index.js');
+  const found = discoverPlugins([dir]);
+  assert.deepEqual(found.problems, [`${path.join(dir, 'both')}: точек входа несколько (index.js, index.ts), загружается index.js`]);
+});
+
+test('поиск: точки входа нет - в problems причина с именами, которые ищутся, а загрузка называет ожидаемый путь', async (t) => {
+  const userData = tmp();
+  const builtinDir = tmp();
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['empty'] } }));
+  plugin(builtinDir, 'empty', {});
+  const found = discoverPlugins([builtinDir]);
+  const home = path.join(builtinDir, 'empty');
+  assert.deepEqual(found.problems, [`${home}: нет точки входа (ищутся index.mjs, index.js, index.ts), плагин empty не запустится`]);
+  assert.match(found.entries.get('empty') ?? '', /empty\/index\.mjs$/, 'ядро получает путь первого кандидата, а не id');
+  // Режим стенда: угадывание и путь первого кандидата, как у каталога пользователя (поставка не угадывает, её причина - в тесте «точка входа поставки»).
+  const kernel = await startPlugins({ userData, builtinDir, builtinMode: 'stand', spawnHost: inlineHosts((entry) => import(entry).then((m: { default: PluginModule }) => m.default)), log: () => {} });
+  t.after(() => kernel.unload());
+  const failed = kernel.journal.find((e) => e.kind === 'failed' && e.pluginId === 'empty');
+  assert.ok(failed?.kind === 'failed' && failed.error.includes(`${home}${path.sep}index.mjs`), 'в журнале путь файла, которого нет');
+});
+
+test('каталог пользователя при поставке в builtinDir: угадывание и поведение T-10 прежние - несколько точек входа и пустой каталог в problems, отказ загрузки называет путь первого кандидата', async (t) => {
+  const userData = tmp();
+  const builtinDir = tmp();
+  plugin(builtinDir, 'built', {}, 'export default {}');
+  plugin(path.join(userData, 'plugins'), 'both', {}, 'export default {}', 'index.js');
+  fs.writeFileSync(path.join(userData, 'plugins', 'both', 'index.ts'), 'export default {}');
+  plugin(path.join(userData, 'plugins'), 'empty', {});
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['built', 'both', 'empty'] } }));
+  const found = discoverPlugins([builtinDir, path.join(userData, 'plugins')], { strictEntry: [builtinDir] });
+  assert.match(found.entries.get('both') ?? '', /both\/index\.js$/);
+  assert.match(found.entries.get('empty') ?? '', /empty\/index\.mjs$/, 'путь первого кандидата, а не id');
+  assert.equal(found.missing.size, 0, 'причина «нет index.mjs» только у каталога поставки');
+  assert.ok(found.problems.some((p) => p.includes('точек входа несколько (index.js, index.ts)')));
+  assert.ok(found.problems.some((p) => p.includes('нет точки входа (ищутся index.mjs, index.js, index.ts), плагин empty не запустится')));
+  const kernel = await startPlugins({ userData, builtinDir, userPlugins: true, spawnHost: inlineHosts((entry) => import(entry).then((m: { default: PluginModule }) => ({ activate() {}, ...m.default }))), log: () => {} });
+  t.after(() => kernel.unload());
+  assert.deepEqual([...kernel.active].sort(), ['both', 'built']);
+  const failed = kernel.journal.find((e) => e.kind === 'failed' && e.pluginId === 'empty');
+  assert.ok(failed?.kind === 'failed' && failed.error.includes(path.join(userData, 'plugins', 'empty', 'index.mjs')), 'в журнале путь файла, которого нет');
+});
+
 test('поиск: повтор id внутри одного каталога называет оба каталога плагина, действует первый по имени', () => {
   const user = tmp();
-  fs.mkdirSync(path.join(user, 'b'));
-  fs.writeFileSync(path.join(user, 'b', 'manifest.json'), JSON.stringify({ id: 'z' }));
-  fs.writeFileSync(path.join(user, 'b', 'index.mjs'), 'export default {}');
-  fs.mkdirSync(path.join(user, 'a'));
-  fs.writeFileSync(path.join(user, 'a', 'manifest.json'), JSON.stringify({ id: 'z' }));
-  fs.writeFileSync(path.join(user, 'a', 'index.mjs'), 'export default {}');
+  for (const home of ['b', 'a']) {
+    fs.mkdirSync(path.join(user, home));
+    fs.writeFileSync(path.join(user, home, 'manifest.json'), JSON.stringify({ id: 'z' }));
+    fs.writeFileSync(path.join(user, home, 'index.mjs'), 'export default {}');
+  }
   const found = discoverPlugins([user]);
   assert.deepEqual(found.problems, [`повтор id z в ${path.join(user, 'b')}: действует ${path.join(user, 'a')}`]);
 });
@@ -613,8 +674,10 @@ test('точка входа поставки: index.mjs; index.ts и index.js в
   assert.ok(found.problems.some((p) => p.includes(path.join(builtin, 'source')) && p.includes('index.mjs')), 'причина и в problems');
   // Без списка строгих каталогов поведение прежнее: угадывание по трём именам.
   const loose = discoverPlugins([builtin]);
-  assert.deepEqual([...loose.entries.keys()].sort(), ['built', 'source']);
-  assert.deepEqual([...loose.missing.keys()], ['bare']);
+  assert.deepEqual([...loose.entries.keys()].sort(), ['bare', 'built', 'source']);
+  assert.match(loose.entries.get('bare') ?? '', /bare\/index\.mjs$/, 'без файла - путь первого кандидата (T-10), отказ загрузки назовёт его');
+  assert.equal(loose.missing.size, 0);
+  assert.ok(loose.problems.some((p) => p.includes(path.join(builtin, 'bare')) && p.includes('нет точки входа (ищутся')));
 });
 
 test('старт: встроенный плагин без index.mjs не активируется, в журнале ядра запись failed с понятной причиной, остальные активны', async (t) => {

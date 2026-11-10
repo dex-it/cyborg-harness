@@ -95,6 +95,7 @@ export const CHECKED_KEYS: Readonly<Record<string, (manifest: PluginManifest) =>
   host: none,
   activation: none,
   lock: none,
+  contributes: none,
 };
 
 const toPosix = (p: string) => p.split(path.sep).join('/');

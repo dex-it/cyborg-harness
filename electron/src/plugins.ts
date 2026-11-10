@@ -18,6 +18,7 @@ import {
   type Kernel,
   type KeyInput,
   type KeyPress,
+  type MenuEntry,
   type MigrateWorkspace,
   type OsEnvironment,
   type SpawnHost,
@@ -36,8 +37,8 @@ import { viewUrl } from './view-protocol.ts';
 import type { ViewGroups } from './view-frames.ts';
 import type { PluginUi } from './view-files.ts';
 
-/** Угадывание точки входа: плагины каталога пользователя и режим стенда (SAD 3.2). */
-const ENTRY_FILES = ['index.mjs', 'index.js', 'index.ts'];
+/** Имена точки входа главной части по порядку; тот же набор у `check` и `build` (`ENTRY_FILES` в `@cyborg-harness/core/plugin-check`, их равенство держит electron/test/plugins.test.ts). Угадывание по ним - плагины каталога пользователя и режим стенда (SAD 3.2). */
+export const ENTRY_FILES: readonly string[] = ['index.mjs', 'index.js', 'index.ts'];
 /** Точка входа плагина поставки: собранный `cyborg-plugin build` плагин всегда несёт `index.mjs`, и только его грузит поставка (SAD 3.2, «Точка входа»). */
 const DELIVERY_ENTRY = 'index.mjs';
 
@@ -54,7 +55,7 @@ function countDirs(dir: string): number {
 
 export interface Discovered {
   readonly manifests: unknown[];
-  /** id -> file URL точки входа; при повторе id остаётся первый, второй манифест пропущен с записью в `problems`. */
+  /** id -> file URL точки входа (первая найденная по порядку `ENTRY_FILES`; файла нет - путь первого кандидата, причина в `problems`); при повторе id остаётся первый, второй манифест пропущен с записью в `problems`. */
   readonly entries: Map<string, string>;
   /** id -> каталог, где найден первым. */
   readonly origins: Map<string, string>;
@@ -99,18 +100,22 @@ export function discoverPlugins(dirs: readonly string[], options: DiscoverOption
         continue;
       }
       found.manifests.push(raw);
-      const strict = options.strictEntry?.includes(dir) === true;
-      const names = strict ? [DELIVERY_ENTRY] : ENTRY_FILES;
-      const entry = names.map((f) => path.join(home, f)).find((f) => fs.existsSync(f));
-      if (id && entry) found.entries.set(id, pathToFileURL(entry).href);
-      else if (id) {
+      const isFile = (f: string): boolean => fs.statSync(path.join(home, f), { throwIfNoEntry: false })?.isFile() === true;
+      if (options.strictEntry?.includes(dir) === true) {
         // Поставка не угадывает: рядом мог оказаться чужой index.js, и встроенный плагин не должен зависеть от того, что положили в его каталог.
-        const other = strict ? ENTRY_FILES.find((f) => f !== DELIVERY_ENTRY && fs.existsSync(path.join(home, f))) : undefined;
-        const why = strict
-          ? `нет точки входа ${DELIVERY_ENTRY}${other === undefined ? '' : ` (найден ${other}: поставка грузит только ${DELIVERY_ENTRY}, соберите плагин командой cyborg-plugin build)`}`
-          : `нет точки входа (${ENTRY_FILES.join(', ')})`;
-        found.missing.set(id, why);
-        found.problems.push(`плагин ${id} (${home}): ${why}`);
+        if (id && isFile(DELIVERY_ENTRY)) found.entries.set(id, pathToFileURL(path.join(home, DELIVERY_ENTRY)).href);
+        else if (id) {
+          const other = ENTRY_FILES.find((f) => f !== DELIVERY_ENTRY && isFile(f));
+          const why = `нет точки входа ${DELIVERY_ENTRY}${other === undefined ? '' : ` (найден ${other}: поставка грузит только ${DELIVERY_ENTRY}, соберите плагин командой cyborg-plugin build)`}`;
+          found.missing.set(id, why);
+          found.problems.push(`плагин ${id} (${home}): ${why}`);
+        }
+      } else {
+        const present = ENTRY_FILES.filter(isFile);
+        if (present.length > 1) found.problems.push(`${home}: точек входа несколько (${present.join(', ')}), загружается ${present[0] ?? ''}`);
+        if (present.length === 0) found.problems.push(`${home}: нет точки входа (ищутся ${ENTRY_FILES.join(', ')})${id === undefined ? '' : `, плагин ${id} не запустится`}`);
+        // Без файла ядро получает путь первого кандидата, а не id: отказ загрузки в журнале назовёт файл, которого нет.
+        if (id) found.entries.set(id, pathToFileURL(path.join(home, present[0] ?? ENTRY_FILES[0] ?? '')).href);
       }
       if (id) {
         found.origins.set(id, dir);
@@ -179,6 +184,8 @@ export interface StartOptions {
   readonly onWindow?: (snapshot: WindowSnapshot) => void;
   readonly onDocuments?: () => void;
   readonly onKeptPty?: () => void;
+  /** Снимок меню ядра (`Kernel.menus`) поменялся: приложение пересобирает меню ОС. */
+  readonly onMenus?: () => void;
   /** `plugins.enabled` из файла применён. */
   readonly onEnabled?: () => void;
   /** Безопасный режим: манифесты разобраны, хосты не запускаются, «Включить» отвечает `Unavailable`. */
@@ -192,7 +199,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
   };
   const file = options.workspace ?? path.join(options.userData, 'workspace.cyborg.json');
   const opened = await openWorkspace({ file, userFile: path.join(options.userData, 'cyborg.json'), stateDir: path.join(options.userData, 'state'), ...(options.migrate !== undefined && { migrate: options.migrate }) });
-  if (!opened.ok) throw new Error(`воркспейс ${file} уже открыт процессом ${opened.owner}`);
+  if (!opened.ok) throw new Error(`воркспейс ${file} уже открыт ${opened.owner > 0 ? `процессом ${String(opened.owner)}` : 'другим процессом'}`);
   const ws = opened.workspace;
   for (const p of ws.problems) report(p);
   for (const m of ws.migrated) options.log(`[plugins] ${m}`);
@@ -241,6 +248,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     onWindow: (snapshot) => options.onWindow?.(snapshot),
     onDocuments: () => options.onDocuments?.(),
     onKeptPty: () => options.onKeptPty?.(),
+    onMenus: () => options.onMenus?.(),
     onLog: (id, message, level) => {
       options.log(`[plugins] ${id}${level === 'info' ? '' : ` [${level}]`}: ${message}`);
       options.onLog?.(id, message, level);
@@ -274,6 +282,9 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     get layout() {
       return kernel.layout;
     },
+    get menus() {
+      return kernel.menus;
+    },
     workspace: ws.file,
     async unload() {
       watching.dispose();
@@ -299,7 +310,7 @@ export interface PluginsEvents {
   windowCommand?(command: string): void;
 }
 
-export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProblem' | 'onLog' | 'onDiscovered' | 'onWindow' | 'onDocuments' | 'onKeptPty'> {
+export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProblem' | 'onLog' | 'onDiscovered' | 'onWindow' | 'onDocuments' | 'onKeptPty' | 'onMenus'> {
   /** Процесс хоста для «Уронить» и «Повесить»; у хостов в том же процессе его нет. */
   readonly pidOf?: (hostId: string) => number | undefined;
 }
@@ -323,6 +334,7 @@ export class PluginsService implements ViewGroups {
   private readonly feed: FeedLine[] = [];
   private views = new Map<string, string>();
   private quitting: Promise<void> | undefined;
+  private readonly watchers = new Set<() => void>();
 
   private readonly events: PluginsEvents;
   private readonly now: () => number;
@@ -330,6 +342,35 @@ export class PluginsService implements ViewGroups {
   constructor(events: PluginsEvents, now: () => number = Date.now) {
     this.events = events;
     this.now = now;
+  }
+
+  /** Снимок поменялся: окно перечитывает его, а наблюдатели (меню приложения) пересобирают своё. */
+  private changed(): void {
+    this.events.changed();
+    for (const watcher of [...this.watchers]) watcher();
+  }
+
+  /** Наблюдатель за изменением снимка, например `bindAppMenu`; возвращает снятие. */
+  watch(watcher: () => void): () => void {
+    this.watchers.add(watcher);
+    return () => void this.watchers.delete(watcher);
+  }
+
+  /** Меню окна по вкладам плагинов (`Kernel.menus`); ядро не запущено - пусто. */
+  menus(): readonly MenuEntry[] {
+    return this.kernel?.menus ?? [];
+  }
+
+  /** Нажатие пункта меню ОС: команду исполняет ядро от имени вкладчика; отказ идёт в ленту и журнал приложения, а не в меню. */
+  async runMenuItem(pluginId: string, id: string): Promise<Reply> {
+    return this.act(id, 'нет id пункта', async (kernel) => {
+      try {
+        return await kernel.runMenuItem(pluginId, id);
+      } catch (error) {
+        this.say({ kind: 'error', subject: `${pluginId}/${id}`, text: errorMessage(error) });
+        throw error;
+      }
+    });
   }
 
   private showTitle(title: string): void {
@@ -340,13 +381,13 @@ export class PluginsService implements ViewGroups {
 
   setWorkspace(info: WorkspaceInfo): void {
     this.workspace = info;
-    this.events.changed();
+    this.changed();
   }
 
   /** Окно без воркспейса: ядро не запускается, в окне - только выбор воркспейса. */
   withoutWorkspace(): void {
     this.phase = 'no-workspace';
-    this.events.changed();
+    this.changed();
   }
 
   /** Живые pty плагинов: их завершит смена воркспейса, о них окно спрашивает человека. */
@@ -366,7 +407,7 @@ export class PluginsService implements ViewGroups {
         onJournal: (entry) => this.record(entry),
         onProblem: (problem) => {
           this.problems.push(problem);
-          this.events.changed();
+          this.changed();
         },
         onDiscovered: (found) => {
           this.views = found.views;
@@ -374,10 +415,11 @@ export class PluginsService implements ViewGroups {
         },
         onWindow: (snapshot) => {
           this.showTitle(snapshot.title);
-          this.events.changed();
+          this.changed();
         },
-        onDocuments: () => this.events.changed(),
-        onKeptPty: () => this.events.changed(),
+        onDocuments: () => this.changed(),
+        onKeptPty: () => this.changed(),
+        onMenus: () => this.changed(),
         onLog: (pluginId, text) => {
           const line = this.say({ kind: 'log', subject: pluginId, text });
           this.events.log?.(pluginId, line, this.groupOf(pluginId));
@@ -390,7 +432,7 @@ export class PluginsService implements ViewGroups {
       this.error = errorMessage(error);
       options.log(`[plugins] ядро не запустилось: ${(error as Error).stack ?? this.error}`);
     }
-    this.events.changed();
+    this.changed();
   }
 
   private record(entry: JournalEntry): void {
@@ -399,14 +441,14 @@ export class PluginsService implements ViewGroups {
     const alert = (title: string, body: string) => (this.kernel?.window.locks.some((l) => l.hideNotifications) ? this.events.alert('Cyborg', 'новое событие') : this.events.alert(title, body));
     if (this.phase === 'ready' && entry.kind === 'switched-off') alert(`Плагин ${entry.pluginId} выключен`, describeEntry(entry));
     if (this.phase === 'ready' && entry.kind === 'host-abandoned') alert(`Плагины выключены: ${entry.plugins.join(', ')}`, describeEntry(entry));
-    this.events.changed();
+    this.changed();
   }
 
   private say(line: Omit<FeedLine, 'at'>): FeedLine {
     const stamped = { at: this.now(), ...line };
     this.feed.push(stamped);
     if (this.feed.length > FEED_LIMIT) this.feed.splice(0, this.feed.length - FEED_LIMIT);
-    this.events.changed();
+    this.changed();
     return stamped;
   }
 
@@ -709,7 +751,7 @@ export class PluginsService implements ViewGroups {
     } catch (error) {
       return { error: errorMessage(error) };
     } finally {
-      this.events.changed();
+      this.changed();
     }
   }
 

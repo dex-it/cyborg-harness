@@ -734,3 +734,8 @@ body[data-locked='true'] main {
   margin: 0;
   padding: 0;
 }
+
+.workspace-recent li {
+  display: inline-flex;
+  gap: 2px;
+}

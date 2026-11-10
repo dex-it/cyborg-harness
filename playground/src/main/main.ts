@@ -4,13 +4,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, Notification, powerMonitor } from 'electron';
-import { RecentWorkspaces } from '@cyborg-harness/core';
+import { app, BrowserWindow, dialog, Notification, powerMonitor } from 'electron';
+import { RecentWorkspaces, withFileLock } from '@cyborg-harness/core';
 import {
   alertNotification,
+  bindAppMenu,
   bindWindow,
   electronOs,
   guardNavigation,
+  isolateSession,
   PluginsService,
   quitAfterPlugins,
   registerViewChannels,
@@ -20,7 +22,6 @@ import {
   restarts,
   serveViews,
   showWindow,
-  singleInstance,
   USER_PLUGINS_FLAG,
   utilityHosts,
   utilityPtyHost,
@@ -29,6 +30,8 @@ import {
   windowChannel,
   windowEvents,
   workspaceInfo,
+  type AppMenuItem,
+  workspaceInstance,
 } from '@cyborg-harness/electron';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
 import { quietPipes } from './quiet-pipes.ts';
@@ -66,21 +69,54 @@ const deliveryMode = process.argv.includes('--delivery');
 
 let win: BrowserWindow | undefined;
 
-// Один экземпляр - один воркспейс - одно окно: второй запуск с любым воркспейсом поднимает открытое окно, а не второе ядро.
-const sole =
-  spiking ||
-  singleInstance({ workspace: workspaceFile ?? null, safeMode, userPlugins }, (data) => {
-    const asked = data as { workspace?: unknown; safeMode?: unknown; userPlugins?: unknown } | null;
-    showWindow(win);
-    if (!Notification.isSupported()) return;
-    const say = (body: string) => alertNotification(APP_NAME, body, () => showWindow(win));
-    if (asked?.workspace !== workspaceFile) say(`Открыт воркспейс ${workspaceFile ?? 'нет'}; другой открывается из окна - «Недавние» или «Открыть…».`);
-    // Запрошенный режим вторым запуском не применяется: ядро решает про него один раз, до первого хоста.
-    if ((asked?.safeMode === true) !== safeMode) say(safeMode ? 'Безопасный режим уже включён; выйти из него можно пунктом окна «Выйти из безопасного режима».' : 'Безопасный режим не включён: закройте приложение или выберите в окне «Перезапустить в безопасном режиме».');
-    // Каталог пользователя, как и безопасный режим, решается один раз при старте ядра.
-    if ((asked?.userPlugins === true) !== userPlugins) say(userPlugins ? `Каталог плагинов пользователя уже включён (${USER_PLUGINS_FLAG}); снять его можно, закрыв приложение и запустив без флага.` : `Каталог плагинов пользователя не включён: чтобы загрузить сторонние плагины, закройте приложение и запустите его с ${USER_PLUGINS_FLAG}.`);
-  });
-if (!sole) app.exit(0);
+/**
+ * Меню приложения (K-08): свои меню и пункты здесь, пункты плагинов (`contributes.menus`) встают в меню с `menu` и в меню ядра, которых тут нет («Инструменты»).
+ * Правка нужна и для буфера обмена: role copy и paste меню Edit действуют на сфокусированный кадр, вложенный тоже (issue #2).
+ */
+const menuBase: AppMenuItem[] = [
+  ...(process.platform === 'darwin' ? [{ role: 'appMenu' } as const] : []),
+  { label: 'Воркспейс', menu: 'workspace', submenu: [{ role: process.platform === 'darwin' ? 'close' : 'quit' }] },
+  { role: 'editMenu' },
+  { label: 'Вид', menu: 'view', submenu: [{ role: 'toggleDevTools' }] },
+  { label: 'Окно', menu: 'window', submenu: [{ role: 'minimize' }] },
+];
+
+// Сессия Chromium этого воркспейса лежит в своём каталоге внутри userData: два процесса не делят localStorage и кэш.
+isolateSession(app.getPath('userData'), workspaceFile);
+
+/** Контроль экземпляров не заработал (см. `workspaceInstance`): окно откроется, но повторный запуск этого воркспейса его не поднимет. */
+let instanceProblem: string | undefined;
+/** Сколько раз второй запуск этого воркспейса просил поднять окно; читает smoke (K-20, #61 к.3): код выхода второго процесса этого не доказывает. */
+(globalThis as { playgroundSecondLaunches?: number }).playgroundSecondLaunches = 0;
+
+/**
+ * Экземпляров несколько, воркспейс у каждого свой (K-20, SAD 3.1): второй запуск того же воркспейса поднимает его окно и уходит,
+ * другой воркспейс с тем же userData открывается своим процессом. Вернуть прежнюю модель «один процесс на весь userData» -
+ * заменить вызов на `singleInstance(...)` адаптера; общие файлы userData остаются под замками.
+ */
+const claim = spiking
+  ? Promise.resolve('owner' as const)
+  : workspaceInstance(
+      app.getPath('userData'),
+      workspaceFile,
+      { safeMode, userPlugins },
+      (data) => {
+        const asked = data as { safeMode?: unknown; userPlugins?: unknown } | null;
+        (globalThis as unknown as { playgroundSecondLaunches: number }).playgroundSecondLaunches++;
+        showWindow(win);
+        if (!Notification.isSupported()) return;
+        const say = (body: string) => alertNotification(APP_NAME, body, () => showWindow(win));
+        // Запрошенный режим вторым запуском не применяется: ядро решает про него один раз, до первого хоста.
+        if ((asked?.safeMode === true) !== safeMode) say(safeMode ? 'Безопасный режим уже включён; выйти из него можно пунктом окна «Выйти из безопасного режима».' : 'Безопасный режим не включён: закройте приложение или выберите в окне «Перезапустить в безопасном режиме».');
+        // Каталог пользователя, как и безопасный режим, решается один раз при старте ядра.
+        if ((asked?.userPlugins === true) !== userPlugins) say(userPlugins ? `Каталог плагинов пользователя уже включён (${USER_PLUGINS_FLAG}); снять его можно, закрыв приложение и запустив без флага.` : `Каталог плагинов пользователя не включён: чтобы загрузить сторонние плагины, закройте приложение и запустите его с ${USER_PLUGINS_FLAG}.`);
+      },
+      (error) => {
+        instanceProblem = `Контроль экземпляров недоступен (${error.message}). Окно откроется, но повторный запуск этого воркспейса его не поднимет: он сообщит, что воркспейс занят.`;
+        // eslint-disable-next-line no-console -- до готовности приложения журнала плагинов ещё нет: причина уходит в stderr
+        console.error(instanceProblem);
+      },
+    );
 
 /** Первый запуск: alice и bob делят хост c - видно, как падение одного процесса снимает обоих, а чат в хосте b живёт. */
 const DEFAULT_CONFIG = {
@@ -102,6 +138,7 @@ registerViewChannels({ plugins, dragRoot: () => workspace });
 // Смена воркспейса и безопасного режима - перезапуск приложения; каналы окна для них - дело приложения (меню, кнопки).
 const control = restarts({ plugins, window: () => win, recent, workspaceFile, safeMode });
 windowChannel('workspace:open', (file) => control.openWorkspace(file));
+windowChannel('workspace:open-new', (file) => control.openWorkspaceInNewWindow(file));
 windowChannel('app:safe-mode', (on) => control.switchSafeMode(on));
 
 const showWorkspace = () => plugins.setWorkspace(workspaceInfo(workspaceFile, recent));
@@ -130,7 +167,7 @@ app.on('window-all-closed', () => {
 
 quietPipes();
 
-void app.whenReady().then(() => {
+const start = () => {
   if (gatewaySpikeOut !== undefined) {
     void runGatewaySpike({ out: gatewaySpikeOut, hostEntry: path.join(__dirname, 'plugin-host.mjs'), benchDir: path.join(__dirname, 'bench') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
     return;
@@ -151,11 +188,17 @@ void app.whenReady().then(() => {
   watchTheme(() => win);
   const userData = app.getPath('userData');
   const config = path.join(userData, 'cyborg.json');
-  if (!fs.existsSync(config)) {
-    fs.mkdirSync(userData, { recursive: true });
-    fs.writeFileSync(config, JSON.stringify(DEFAULT_CONFIG, null, 2));
-  }
+  // Два процесса на пустом userData: файл появляется целиком (rename) и один раз (под замком), иначе второй прочтёт полфайла.
+  withFileLock(config, () => {
+    if (fs.existsSync(config)) return;
+    const tmp = `${config}.${String(process.pid)}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(DEFAULT_CONFIG, null, 2));
+    fs.renameSync(tmp, config);
+  });
   createWindow();
+  bindAppMenu(plugins, menuBase);
+  // Причина видна человеку в окне, а не только в stderr: без неё «повторный запуск не поднимает окно» выглядит поломкой.
+  if (instanceProblem !== undefined && win !== undefined) void dialog.showMessageBox(win, { type: 'warning', message: APP_NAME, detail: instanceProblem });
   watchPower(plugins);
   showWorkspace();
   if (workspaceFile === undefined) {
@@ -187,5 +230,26 @@ void app.whenReady().then(() => {
     if (plugins.snapshot().phase !== 'ready') return;
     recent.add(workspaceFile);
     showWorkspace();
+  });
+};
+
+void claim.then((kind) => {
+  if (kind === 'owner') {
+    void app.whenReady().then(start);
+    return;
+  }
+  // Воркспейс уже открыт другим процессом, этому пора выйти. `handed` - владелец получил запрос (код 0); `unresponsive` - владелец жив,
+  // но молчит: человеку нужно об этом сказать, код выхода отдельный (3), чтобы такой исход не принимали за успех.
+  if (kind === 'handed') {
+    app.exit(0);
+    return;
+  }
+  const message = 'Воркспейс уже открыт другим процессом, но тот не отвечает. Закройте его или завершите вручную и запустите приложение снова.';
+  // eslint-disable-next-line no-console -- до окна сообщить больше некуда
+  console.error(message);
+  // До `ready` на Linux showErrorBox пишет только в stderr, а у процесса «в новом окне» stdio закрыт - диалог только после готовности.
+  void app.whenReady().then(() => {
+    dialog.showErrorBox(APP_NAME, message);
+    app.exit(3);
   });
 });

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { readJson, writeJsonAtomic } from './workspace.ts';
+import { readJson, withFileLock, writeJsonAtomic } from './workspace.ts';
 
 /** «Недавние» (SAD §3.1) - в ядре: воркспейс выбирается до загрузки любого плагина. */
 export class RecentWorkspaces {
@@ -17,14 +17,15 @@ export class RecentWorkspaces {
     return this.#read().filter((f) => fs.existsSync(f));
   }
 
+  // Файл в `userData` общий для всех экземпляров приложения (K-20): чтение и запись идут под замком, иначе запись соседа теряется.
   add(workspace: string): void {
     const file = real(workspace);
-    this.#write([file, ...this.#read().filter((f) => f !== file)]);
+    withFileLock(this.#file, () => this.#write([file, ...this.#read().filter((f) => f !== file)]));
   }
 
   remove(workspace: string): void {
     const file = real(workspace);
-    this.#write(this.#read().filter((f) => f !== file));
+    withFileLock(this.#file, () => this.#write(this.#read().filter((f) => f !== file)));
   }
 
   #read(): string[] {

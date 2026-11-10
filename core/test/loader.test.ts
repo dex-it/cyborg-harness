@@ -1,4 +1,5 @@
 import { test, type TestContext } from 'node:test';
+import { setImmediate as tick } from 'node:timers/promises';
 import assert from 'node:assert/strict';
 import type { PluginContext } from '@cyborg-harness/contracts';
 import { memoryStore as memory } from '../../testing/src/memory.ts';
@@ -10,6 +11,8 @@ import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { describeEntry, entryLevel, pluginStatuses } from '../src/status.ts';
 import { startCancel } from './fixtures/cancel.ts';
+import './fixtures/contracts.ts';
+import { MENU_OWNER } from '../src/window-layer.ts';
 import { waitFor } from './wait-for.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
@@ -688,6 +691,220 @@ test('раскладка: невключённые, выключенные и п
 test('раскладка: плагин без видов и документов в снимок не попадает, манифест с ошибкой - тоже', async () => {
   const k = await kernel({ bare: quiet, bad: quiet }, { enabled: ['bare', 'bad'], manifests: [manifest('bare'), manifest('bad', { ui: { views: { x: view('./x.js', 'cellar') } } })] });
   assert.deepEqual(k.layout, []);
+  await k.unload();
+});
+
+// K-08: вклады плагинов в меню окна. Снимок `kernel.menus` собирает ядро, приложение рисует меню ОС по нему.
+const settle = async () => {
+  for (let i = 0; i < 20; i++) await tick();
+};
+
+/** Владелец состояния: контракт `test.state` с булевыми членами и команда, которая его меняет. */
+function stateOwner(flags: { open: boolean; project: boolean; broken?: 'text' | 'throw' | 'hang' }): PluginModule {
+  return {
+    activate(ctx) {
+      const read = (name: 'open' | 'project') => async () => {
+        if (flags.broken === 'throw') throw new Error('состояние недоступно');
+        if (flags.broken === 'hang') return new Promise<boolean>(() => undefined);
+        return flags.broken === 'text' ? ('да' as unknown as boolean) : flags[name];
+      };
+      ctx.contracts.provide('test.state', '1.0', { isOpen: read('open'), hasProject: read('project') });
+      ctx.commands.register('owner.toggle', () => void (flags.open = !flags.open));
+      ctx.commands.register('owner.project', () => void (flags.project = !flags.project));
+      return undefined;
+    },
+  };
+}
+
+const ownerManifest = manifest('owner', { provides: { 'test.state': '1.0' }, commands: ['owner.toggle', 'owner.project'] });
+const open = { id: 'open', menu: 'view', title: 'Открыть', command: 'menu.open', order: 200, enabled: { contract: 'test.state', major: 1, member: 'hasProject' }, checked: { contract: 'test.state', major: 1, member: 'isOpen' } };
+const menuManifest = (items: unknown[] = [open], extra: Record<string, unknown> = {}) =>
+  manifest('menu', { optional: { 'test.state': '^1' }, commands: ['menu.open', 'menu.more'], contributes: { menus: items }, ...extra });
+const opened: string[] = [];
+const menuPlugin: PluginModule = {
+  activate(ctx) {
+    ctx.commands.register('menu.open', () => void opened.push('open'));
+    ctx.commands.register('menu.more', () => void opened.push('more'));
+    return undefined;
+  },
+};
+const brief = (k: { menus: readonly { pluginId: string; id: string; enabled: boolean; checked?: boolean; mark?: string }[] }) =>
+  k.menus.map((e) => `${e.pluginId}/${e.id}:${e.enabled ? 'on' : 'off'}${e.checked === undefined ? '' : e.checked ? '+' : '-'}${e.mark ? `[${e.mark}]` : ''}`);
+
+test('меню: смена состояния владельца меняет enabled и checked пункта, приложение получает уведомление', async () => {
+  const flags = { open: false, project: true };
+  let changed = 0;
+  const k = await kernel({ owner: stateOwner(flags), menu: menuPlugin }, { enabled: ['owner', 'menu'], manifests: [ownerManifest, menuManifest()], onMenus: () => changed++ });
+  assert.deepEqual(brief(k), ['menu/open:on-']);
+  assert.equal(changed, 0, 'первый снимок приложение читает само');
+
+  await k.run('owner.toggle');
+  await settle();
+  assert.deepEqual(brief(k), ['menu/open:on+'], 'галочка следует состоянию владельца');
+  assert.equal(changed, 1);
+
+  await k.run('owner.project');
+  await settle();
+  assert.deepEqual(brief(k), ['menu/open:off+'], 'нет проекта - пункт недоступен');
+  assert.equal(changed, 2);
+
+  await k.refreshMenus();
+  await k.refreshMenus();
+  assert.equal(changed, 2, 'снимок не изменился - уведомления нет');
+  await k.unload();
+});
+
+test('меню: снимок упорядочен по меню, order, id плагина и пункта и не зависит от порядка манифестов', async () => {
+  const item = (id: string, menu: string, order?: number) => ({ id, menu, title: id, command: 'z.run', ...(order !== undefined && { order }) });
+  const make = (id: string, items: unknown[]) => manifest(id, { commands: ['z.run'].map((c) => c.replace('z', id)), contributes: { menus: items.map((i) => ({ ...(i as object), command: `${id}.run` })) } });
+  const manifests = [
+    make('b', [item('x', 'view', 100), item('a', 'workspace')]),
+    make('a', [item('y', 'view', 100), item('w', 'window', 5), item('late', 'tools')]),
+  ];
+  const first = await kernel({ a: quiet, b: quiet }, { enabled: ['a', 'b'], manifests });
+  const second = await kernel({ a: quiet, b: quiet }, { enabled: ['a', 'b'], manifests: [...manifests].reverse() });
+  const names = (k: typeof first) => k.menus.map((e) => `${e.menu}:${String(e.order)}:${e.pluginId}/${e.id}`);
+  assert.deepEqual(names(first), ['workspace:1000:b/a', 'view:100:a/y', 'view:100:b/x', 'tools:1000:a/late', 'window:5:a/w']);
+  assert.deepEqual(names(second), names(first));
+  await first.unload();
+  await second.unload();
+});
+
+test('меню: выключение плагина делает его пункты недоступными, а не убирает; включение возвращает', async () => {
+  const flags = { open: true, project: true };
+  const k = await kernel({ owner: stateOwner(flags), menu: menuPlugin }, { enabled: ['owner', 'menu'], manifests: [ownerManifest, menuManifest()] });
+  assert.deepEqual(brief(k), ['menu/open:on+']);
+  await k.disable('menu');
+  assert.deepEqual(brief(k), ['menu/open:off-[disabled]'], 'пункт на месте, доступа нет');
+  await k.enable('menu');
+  await settle();
+  assert.deepEqual(brief(k), ['menu/open:on+']);
+
+  await k.disable('owner');
+  await settle();
+  assert.deepEqual(brief(k), ['menu/open:off-'], 'владелец состояния выгружен - пункт недоступен без записи об ошибке в журнале');
+  assert.equal(k.journal.some((e) => e.kind === 'menu-source'), false);
+  await k.unload();
+});
+
+test('меню: плагин, не включённый в настройках или отвергнутый графом, остаётся в снимке с меткой', async () => {
+  const k = await kernel({ menu: menuPlugin }, { enabled: ['menu'], manifests: [menuManifest([open], { requires: { 'test.nobody': '^1' } }), manifest('idle', { commands: ['idle.run'], contributes: { menus: [{ id: 'run', menu: 'tools', title: 'Run', command: 'idle.run' }] } })] });
+  assert.deepEqual(brief(k), ['menu/open:off-[out-of-graph]', 'idle/run:off[not-enabled]']);
+  await k.unload();
+});
+
+test('меню: ленивый плагин виден и доступен до активации, нажатие будит его', async () => {
+  opened.length = 0;
+  const k = await kernel(
+    { menu: menuPlugin },
+    { enabled: ['menu'], manifests: [manifest('menu', { activation: 'lazy', commands: ['menu.open', 'menu.more'], contributes: { menus: [{ id: 'more', menu: 'tools', title: 'Ещё', command: 'menu.more' }] } })] },
+  );
+  assert.deepEqual(k.active, []);
+  assert.deepEqual(brief(k), ['menu/more:on']);
+  await k.runMenuItem('menu', 'more');
+  assert.deepEqual(opened, ['more']);
+  assert.deepEqual(k.active, ['menu']);
+  await k.unload();
+});
+
+test('меню: нажатие недоступного или неизвестного пункта - отказ, чужую команду пункт не запускает', async () => {
+  opened.length = 0;
+  const flags = { open: false, project: false };
+  const k = await kernel({ owner: stateOwner(flags), menu: menuPlugin }, { enabled: ['owner', 'menu'], manifests: [ownerManifest, menuManifest()] });
+  await assert.rejects(k.runMenuItem('menu', 'open'), { code: 'Unavailable' });
+  await assert.rejects(k.runMenuItem('menu', 'nope'), { code: 'NotFound' });
+  await assert.rejects(k.runMenuItem('ghost', 'open'), { code: 'NotFound' });
+  assert.deepEqual(opened, []);
+  await k.run('owner.project');
+  await settle();
+  await k.runMenuItem('menu', 'open');
+  assert.deepEqual(opened, ['open']);
+  await k.unload();
+});
+
+test('меню: источник, который отвечает не boolean, падает или висит, даёт недоступный пункт и одну запись в журнале', { timeout: 30_000 }, async () => {
+  for (const broken of ['text', 'throw', 'hang'] as const) {
+    const flags = { open: true, project: true, broken };
+    const k = await kernel({ owner: stateOwner(flags), menu: menuPlugin }, { enabled: ['owner', 'menu'], manifests: [ownerManifest, menuManifest()], });
+    assert.deepEqual(brief(k), ['menu/open:off-'], broken);
+    await k.refreshMenus();
+    const recorded = k.journal.filter((e) => e.kind === 'menu-source');
+    assert.equal(recorded.length, 2, `${broken}: enabled и checked - по записи, повтор того же не пишется`);
+    assert.ok(recorded.every((e) => e.pluginId === 'menu'));
+    await k.unload();
+  }
+});
+
+test('меню: источник - член собственного контракта плагина', async () => {
+  const flags = { open: true, project: true };
+  const own = manifest('owner', {
+    provides: { 'test.state': '1.0' },
+    commands: ['owner.toggle', 'owner.project', 'owner.show'],
+    contributes: { menus: [{ id: 'show', menu: 'view', title: 'Показать', command: 'owner.show', checked: { contract: 'test.state', major: 1, member: 'isOpen' } }] },
+  });
+  const k = await kernel({ owner: stateOwner(flags) }, { enabled: ['owner'], manifests: [own] });
+  assert.deepEqual(brief(k), ['owner/show:on+']);
+  await k.run('owner.toggle');
+  await settle();
+  assert.deepEqual(brief(k), ['owner/show:on-']);
+  await k.unload();
+});
+
+test('меню: сочетание пункта занято в едином реестре клавиш - манифест проигрывает, динамическое отказано, оба видны в журнале', async () => {
+  const flags = { open: false, project: true };
+  const item = { ...open, accelerator: 'CmdOrCtrl+Shift+O' };
+  const rival = manifest('rival', { commands: ['rival.run'], keybindings: [{ key: 'CmdOrCtrl+Shift+O', command: 'rival.run' }] });
+  let register: ((key: string) => Promise<unknown>) | undefined;
+  const dynamic: PluginModule = {
+    activate(ctx) {
+      register = (key) => ctx.keys.register({ key, command: 'dyn.run' });
+      ctx.commands.register('dyn.run', () => undefined);
+      return undefined;
+    },
+  };
+  const k = await kernel(
+    { owner: stateOwner(flags), menu: menuPlugin, rival: quiet, dyn: dynamic },
+    { enabled: ['owner', 'menu', 'rival', 'dyn'], manifests: [ownerManifest, menuManifest([item]), rival, manifest('dyn', { commands: ['dyn.run'] })], platform: 'linux' },
+  );
+  const bound = k.keybinding('Ctrl+Shift+O');
+  assert.deepEqual([bound?.pluginId, bound?.command], [MENU_OWNER, 'menu/open'], 'сочетание пункта в таблице: владелец - меню, команда - пункт');
+  assert.deepEqual(bound?.shadowed, [{ pluginId: 'rival', command: 'rival.run' }]);
+  assert.deepEqual(
+    k.journal.filter((e) => e.kind === 'key-conflict').map((e) => `${e.pluginId}->${e.winner}`),
+    ['rival->cyborg.menu'],
+    'манифест, проигравший акселератору пункта, назван в журнале',
+  );
+  await assert.rejects(register?.('Ctrl+Shift+O') ?? Promise.reject(new Error('нет register')), { code: 'CommandConflict' });
+  assert.deepEqual(
+    k.journal.filter((e) => e.kind === 'key-conflict').map((e) => `${e.pluginId}->${e.winner}`),
+    ['rival->cyborg.menu', 'dyn->cyborg.menu'],
+    'отказанная динамическая регистрация тоже записана',
+  );
+  assert.equal(k.menus[0]?.accelerator, 'CmdOrCtrl+Shift+O', 'пункт держит сочетание: в снимке оно записью манифеста, которую понимает меню ОС');
+  await k.unload();
+});
+
+test('меню: сочетание, которое человек отдал другой команде или освободил, из снимка уходит - меню ОС его не покажет', async () => {
+  const item = { ...open, accelerator: 'CmdOrCtrl+Shift+O' };
+  const run = async (keybindings: { key: string; command: string | null }[]) => {
+    const k = await kernel({ owner: stateOwner({ open: false, project: true }), menu: menuPlugin }, { enabled: ['owner', 'menu'], manifests: [ownerManifest, menuManifest([item])], platform: 'linux', keybindings });
+    const accelerator = k.menus[0]?.accelerator;
+    const bound = k.keybinding('Ctrl+Shift+O');
+    await k.unload();
+    return { accelerator, bound: bound ? `${bound.pluginId}:${bound.command}` : undefined };
+  };
+  assert.deepEqual(await run([]), { accelerator: 'CmdOrCtrl+Shift+O', bound: 'cyborg.menu:menu/open' });
+  assert.deepEqual(await run([{ key: 'Ctrl+Shift+O', command: null }]), { accelerator: undefined, bound: undefined }, 'null освобождает сочетание, пункт остаётся без него');
+  assert.deepEqual(await run([{ key: 'Ctrl+Shift+O', command: 'menu.more' }]), { accelerator: undefined, bound: 'menu:menu.more' }, 'сочетание у человека - у пункта его нет');
+});
+
+test('меню: два пункта на одно сочетание - первый по id плагина и пункта, второй в журнале без сочетания', async () => {
+  const mk = (id: string) => manifest(id, { commands: [`${id}.run`], contributes: { menus: [{ id: 'run', menu: 'tools', title: id, command: `${id}.run`, accelerator: 'F7' }] } });
+  const k = await kernel({ a: quiet, b: quiet }, { enabled: ['a', 'b'], manifests: [mk('b'), mk('a')], platform: 'linux' });
+  assert.deepEqual(k.menus.map((e) => `${e.pluginId}:${e.accelerator ?? '-'}`), ['a:F7', 'b:-']);
+  const ignored = k.journal.filter((e) => e.kind === 'key-ignored');
+  assert.equal(ignored.length, 1);
+  assert.match(describeEntry(ignored[0]!), /сочетание меню занято пунктом меню a\/run/);
   await k.unload();
 });
 

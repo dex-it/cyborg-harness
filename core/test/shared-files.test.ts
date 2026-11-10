@@ -1,0 +1,192 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn, spawnSync } from 'node:child_process';
+import fs, { statSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { openWorkspace, withFileLock, writeJsonAtomic } from '../src/workspace.ts';
+
+// K-20: несколько процессов приложения делят `userData`. Файлы, которые они пишут вместе, не теряют записей.
+
+const writer = fileURLToPath(new URL('./fixtures/shared-writer.ts', import.meta.url));
+
+async function sandbox() {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-shared-')));
+  return { root, [Symbol.asyncDispose]: () => rm(root, { recursive: true, force: true }) };
+}
+
+/** Запускает писателей одновременно, каждый в своём процессе, и ждёт всех. */
+async function race(mode: string, dir: string, writers: number, count: number): Promise<void> {
+  const codes = await Promise.all(
+    Array.from({ length: writers }, (_, i) => {
+      const child = spawn(process.execPath, [writer, mode, dir, String(i), String(count)], { stdio: ['ignore', 'ignore', 'inherit'] });
+      return new Promise<number | null>((resolve) => child.once('exit', resolve));
+    }),
+  );
+  assert.deepEqual(codes, Array<number>(writers).fill(0), 'писатель упал');
+}
+
+const json = async (file: string): Promise<Record<string, unknown>> => JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
+
+test('«Недавние» из четырёх процессов: ни одна запись не потеряна', async () => {
+  await using box = await sandbox();
+  await race('recent', box.root, 4, 25);
+  const list = (await json(path.join(box.root, 'recent.json'))).recent as string[];
+  assert.equal(list.length, 100);
+  assert.equal(new Set(list).size, 100);
+});
+
+test('слой пользователя из трёх процессов: разделы разных процессов все на месте', async () => {
+  await using box = await sandbox();
+  await race('user', box.root, 3, 20);
+  const settings = (await json(path.join(box.root, 'user', 'cyborg.json'))).settings as Record<string, unknown>;
+  assert.equal(Object.keys(settings).length, 60);
+});
+
+test('withFileLock: чтение-изменение-запись из процессов не теряет приращений', async () => {
+  await using box = await sandbox();
+  await race('counter', box.root, 4, 15);
+  assert.equal(await readFile(path.join(box.root, 'counter.txt'), 'utf8'), '60');
+});
+
+test('withFileLock: замки умерших процессов то и дело появляются - каждый снимает один процесс, замок живого соседа не крадётся', async () => {
+  await using box = await sandbox();
+  const dead = spawnSync(process.execPath, ['-e', '']).pid;
+  const lock = path.join(box.root, 'counter.txt.write.lock');
+  // Подбрасывает замок «упавшего» процесса, как только место свободно: у участников постоянно идёт гонка за снятие.
+  const saboteur = setInterval(() => {
+    try {
+      writeFileSync(lock, JSON.stringify({ pid: dead }), { flag: 'wx' });
+    } catch {
+      // Замок есть: чей-то живой или ещё не снятый мёртвый.
+    }
+  }, 1);
+  try {
+    await race('counter', box.root, 8, 60);
+  } finally {
+    clearInterval(saboteur);
+  }
+  assert.equal(await readFile(path.join(box.root, 'counter.txt'), 'utf8'), '480');
+});
+
+test('withFileLock: замок снят после ошибки, замок умершего процесса забирается, живой не отдаётся', async () => {
+  await using box = await sandbox();
+  const file = path.join(box.root, 'dir', 'shared.json');
+  assert.throws(
+    () =>
+      withFileLock(file, () => {
+        throw new Error('сбой');
+      }),
+    /сбой/,
+  );
+  assert.equal(
+    withFileLock(file, () => 'взят'),
+    'взят',
+    'после ошибки замок остался',
+  );
+  const dead = spawnSync(process.execPath, ['-e', '']).pid;
+  await writeFile(`${file}.write.lock`, JSON.stringify({ pid: dead }));
+  assert.equal(
+    withFileLock(file, () => 'забран'),
+    'забран',
+  );
+  // Процесс умер, держа охранный файл снятия: охрану снимает следующий, иначе замок умершего не забрать никогда.
+  await writeFile(`${file}.write.lock`, JSON.stringify({ pid: dead }));
+  await writeFile(`${file}.write.lock.reclaim`, JSON.stringify({ pid: dead }));
+  assert.equal(
+    withFileLock(file, () => 'охрана снята', { timeoutMs: 2000 }),
+    'охрана снята',
+  );
+  await writeFile(`${file}.write.lock`, JSON.stringify({ pid: process.ppid }));
+  assert.throws(() => withFileLock(file, () => 'не должно', { timeoutMs: 100, staleMs: 60_000 }), new RegExp(`pid ${String(process.ppid)}`));
+});
+
+test('withFileLock: замок записи старше срока забирается и при чужом живом pid (после перезагрузки pid занят чужим процессом)', async () => {
+  await using box = await sandbox();
+  const file = path.join(box.root, 'shared.json');
+  await writeFile(`${file}.write.lock`, JSON.stringify({ pid: process.ppid }));
+  // Свежий замок живого соседа не крадётся.
+  assert.throws(() => withFileLock(file, () => 'не должно', { timeoutMs: 300, staleMs: 60_000 }), new RegExp(`pid ${String(process.ppid)}`));
+  // Тот же замок, но оставленный давно: тело `run` по контракту короткое, значит держатель не мог его держать столько.
+  const old = new Date(Date.now() - 60_000);
+  utimesSync(`${file}.write.lock`, old, old);
+  assert.equal(withFileLock(file, () => 'забран', { timeoutMs: 300, staleMs: 30_000 }), 'забран');
+  assert.equal(statSync(`${file}.write.lock`, { throwIfNoEntry: false }), undefined, 'замок после забора снят');
+});
+
+test('withFileLock: забор по сроку не снимает замок, который успел взять сосед (замок сменился, пока мы решали)', async () => {
+  await using box = await sandbox();
+  const file = path.join(box.root, 'shared.json');
+  // Устаревший замок живого pid и охрана снятия, занятая живым соседом: забирать нельзя, пока он в охране.
+  await writeFile(`${file}.write.lock`, JSON.stringify({ pid: process.ppid }));
+  const old = new Date(Date.now() - 60_000);
+  utimesSync(`${file}.write.lock`, old, old);
+  await writeFile(`${file}.write.lock.reclaim`, JSON.stringify({ pid: process.ppid }));
+  assert.throws(() => withFileLock(file, () => 'не должно', { timeoutMs: 200, staleMs: 30_000 }), /не дождались/);
+});
+
+test('withFileLock: замок, обновлённый держателем за время захвата охраны, не снимается (повторная проверка срока в reclaim)', async (t) => {
+  await using box = await sandbox();
+  const file = path.join(box.root, 'shared.json');
+  const lock = `${file}.write.lock`;
+  // Замок живого pid, просроченный: сосед видит его старым и идёт снимать.
+  await writeFile(lock, JSON.stringify({ pid: process.ppid }));
+  const old = new Date(Date.now() - 60_000);
+  utimesSync(lock, old, old);
+  // Между первым чтением и охраной держатель тем же pid снял старый замок и взял свежий: подменяем его сразу после захвата охраны.
+  const link = fs.linkSync.bind(fs);
+  let refreshed = 0;
+  t.mock.method(fs, 'linkSync', (existing: string, target: string) => {
+    link(existing, target);
+    if (target === `${lock}.reclaim`) {
+      refreshed++;
+      const now = new Date();
+      utimesSync(lock, now, now);
+    }
+  });
+  assert.throws(() => withFileLock(file, () => 'не должно', { timeoutMs: 300, staleMs: 30_000 }), new RegExp(`pid ${String(process.ppid)}`));
+  assert.ok(refreshed > 0, 'охрана снятия брала замок: проверка не пустая');
+  assert.equal((JSON.parse(await readFile(lock, 'utf8')) as { pid: number }).pid, process.ppid, 'свежий замок держателя цел');
+});
+
+test('слой пользователя: remove раздела читает и пишет под замком, раздел соседа, записанный между чтением и записью, не теряется', async (t) => {
+  await using box = await sandbox();
+  const userFile = path.join(box.root, 'user', 'cyborg.json');
+  const opened = await openWorkspace({ file: path.join(box.root, 'w.cyborg.json'), userFile, stateDir: path.join(box.root, 'state') });
+  assert.ok(opened.ok, 'воркспейс занят');
+  const { config } = opened.workspace;
+  await config.write('user', 'victim', 1, { value: 1 });
+  await config.write('user', 'kept', 1, { value: 2 });
+  // Сосед (другое окно того же userData) дописывает свой раздел сразу после первого чтения файла слоя. Пока замок записи занят, он писать
+  // не может и ждёт: пишет после снятия замка. Без замка у remove (`load`, затем `save`) чтение и запись разведены, и запись соседа между ними стирается.
+  const read = fs.readFileSync.bind(fs) as (file: string, encoding: 'utf8') => string;
+  const neighbourWrites = () => {
+    const document = JSON.parse(read(userFile, 'utf8')) as { settings: Record<string, unknown> };
+    writeFileSync(userFile, JSON.stringify({ ...document, settings: { ...document.settings, neighbour: { value: 3 } } }));
+  };
+  const neighbour = { wrote: false };
+  t.mock.method(fs, 'readFileSync', (file: string, encoding: 'utf8') => {
+    const text = read(file, encoding);
+    if (file === userFile && !neighbour.wrote && statSync(`${userFile}.write.lock`, { throwIfNoEntry: false }) === undefined) {
+      neighbour.wrote = true;
+      neighbourWrites();
+    }
+    return text;
+  });
+  assert.equal(await config.remove('user', 'victim'), true);
+  t.mock.restoreAll();
+  if (!neighbour.wrote) neighbourWrites();
+  const settings = (JSON.parse(await readFile(userFile, 'utf8')) as { settings: Record<string, unknown> }).settings;
+  assert.deepEqual(Object.keys(settings).sort(), ['kept', 'neighbour'], 'victim стёрт, соседние разделы целы');
+  assert.equal(await config.remove('user', 'victim'), false, 'второй remove ничего не стирает');
+  opened.workspace.close();
+});
+
+test('writeJsonAtomic: права файла задаются при создании, а не после', async () => {
+  await using box = await sandbox();
+  const file = path.join(box.root, 'secrets.json');
+  writeJsonAtomic(file, { a: 1 }, 0o600);
+  assert.equal(statSync(file).mode & 0o777, 0o600);
+});
