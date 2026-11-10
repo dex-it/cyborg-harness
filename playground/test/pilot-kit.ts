@@ -127,7 +127,9 @@ export async function startPilot(options: PilotOptions): Promise<Pilot> {
 
   const watches = { opened: [] as string[], recursive: [] as string[], rawBy: {} as Record<string, number>, closed: 0, raw: 0, peak: 0, live: () => watches.opened.length - watches.closed };
   type Listener = (event: string, name: string | null) => void;
-  type WatchOptions = { readonly recursive?: boolean };
+  interface WatchOptions {
+    readonly recursive?: boolean;
+  }
   type Watch = (target: string, ...rest: [Listener] | [WatchOptions, Listener]) => FSWatcher;
   const inner = (options.watch ?? watchFs) as unknown as Watch;
   // Шлюз зовёт `watch(путь, слушатель)` или, с рекурсией, `watch(путь, { recursive: true }, слушатель)`.
