@@ -73,6 +73,11 @@ export interface LayerStore {
    * (слой пользователя в общем `userData`), так не теряет чужие разделы. Без метода - `load` и `save`.
    */
   update?(layer: Layer, id: string, section: Record<string, unknown>): Promise<void>;
+  /**
+   * Стирает один раздел так же, как `update` пишет: читает файл в момент записи и не трогает остальные. `false` - раздела там не было,
+   * и файл не тронут. Без метода - `load` и `save`.
+   */
+  remove?(layer: Layer, id: string): Promise<boolean>;
 }
 
 export interface SectionHandle {
@@ -179,6 +184,12 @@ export class SectionStore {
   async remove(layer: Layer, id: string): Promise<boolean> {
     if (!this.#layers.includes(layer)) throw new Error(`слоя ${layer} нет`);
     return this.#serial(async () => {
+      if (this.#store.remove) {
+        // Чтение и запись под замком хранилища: раздел, который сосед записал за это время, не теряется.
+        const removed = await this.#store.remove(layer, id);
+        if (removed) this.#documents.set(layer, Object.fromEntries(Object.entries(this.#documents.get(layer) ?? {}).filter(([key]) => key !== id)));
+        return removed;
+      }
       const fresh = await this.#store.load(layer);
       const { [id]: gone, ...rest } = isRecord(fresh) ? fresh : (this.#documents.get(layer) ?? {});
       if (gone === undefined) return false;

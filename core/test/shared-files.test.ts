@@ -6,7 +6,7 @@ import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { withFileLock, writeJsonAtomic } from '../src/workspace.ts';
+import { openWorkspace, withFileLock, writeJsonAtomic } from '../src/workspace.ts';
 
 // K-20: несколько процессов приложения делят `userData`. Файлы, которые они пишут вместе, не теряют записей.
 
@@ -149,6 +149,39 @@ test('withFileLock: замок, обновлённый держателем за
   assert.throws(() => withFileLock(file, () => 'не должно', { timeoutMs: 300, staleMs: 30_000 }), new RegExp(`pid ${String(process.ppid)}`));
   assert.ok(refreshed > 0, 'охрана снятия брала замок: проверка не пустая');
   assert.equal(JSON.parse(await readFile(lock, 'utf8')).pid, process.ppid, 'свежий замок держателя цел');
+});
+
+test('слой пользователя: remove раздела читает и пишет под замком, раздел соседа, записанный между чтением и записью, не теряется', async (t) => {
+  await using box = await sandbox();
+  const userFile = path.join(box.root, 'user', 'cyborg.json');
+  const opened = await openWorkspace({ file: path.join(box.root, 'w.cyborg.json'), userFile, stateDir: path.join(box.root, 'state') });
+  assert.ok(opened.ok, 'воркспейс занят');
+  const { config } = opened.workspace;
+  await config.write('user', 'victim', 1, { value: 1 });
+  await config.write('user', 'kept', 1, { value: 2 });
+  // Сосед (другое окно того же userData) дописывает свой раздел сразу после первого чтения файла слоя. Пока замок записи занят, он писать
+  // не может и ждёт: пишет после снятия замка. Без замка у remove (`load`, затем `save`) чтение и запись разведены, и запись соседа между ними стирается.
+  const read = fs.readFileSync.bind(fs) as (file: string, encoding: 'utf8') => string;
+  const neighbourWrites = () => {
+    const document = JSON.parse(read(userFile, 'utf8')) as { settings: Record<string, unknown> };
+    writeFileSync(userFile, JSON.stringify({ ...document, settings: { ...document.settings, neighbour: { value: 3 } } }));
+  };
+  let neighbour = false;
+  t.mock.method(fs, 'readFileSync', (file: string, encoding: 'utf8') => {
+    const text = read(file, encoding);
+    if (file === userFile && !neighbour && statSync(`${userFile}.write.lock`, { throwIfNoEntry: false }) === undefined) {
+      neighbour = true;
+      neighbourWrites();
+    }
+    return text;
+  });
+  assert.equal(await config.remove('user', 'victim'), true);
+  t.mock.restoreAll();
+  if (!neighbour) neighbourWrites();
+  const settings = (JSON.parse(await readFile(userFile, 'utf8')) as { settings: Record<string, unknown> }).settings;
+  assert.deepEqual(Object.keys(settings).sort(), ['kept', 'neighbour'], 'victim стёрт, соседние разделы целы');
+  assert.equal(await config.remove('user', 'victim'), false, 'второй remove ничего не стирает');
+  opened.workspace.close();
 });
 
 test('writeJsonAtomic: права файла задаются при создании, а не после', async () => {

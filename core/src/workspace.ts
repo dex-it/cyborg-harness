@@ -355,24 +355,27 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
       }
     };
     let opening = true;
-    const persist = async (layer: Layer, next: (current: Record<string, unknown>) => Record<string, unknown>) => {
+    /** `next` получает слой, прочитанный в момент записи (под замком для общего слоя пользователя); `undefined` - писать нечего. */
+    const persist = async <T = void>(layer: Layer, next: (current: Record<string, unknown>) => { document: Record<string, unknown> | undefined; result: T }): Promise<T> => {
       const target = layers[layer];
       if (!target) throw new Error(`слоя ${layer} нет`);
       const f = layer === 'user' ? options.userFile : file;
-      const write = () => {
+      const write = (): T => {
         let before: string | undefined;
         try {
           before = fs.readFileSync(f, 'utf8');
         } catch {
           before = undefined;
         }
-        target.save(next(target.load() ?? {}));
+        const { document, result } = next(target.load() ?? {});
+        if (document === undefined) return result;
+        target.save(document);
         // Неподхваченная правка извне вошла в запись: файл не помечается своим, и слежение сообщит о ней разделам.
         if (before === written.get(f)) remember(f);
+        return result;
       };
       // Слой воркспейса держит один процесс (замок воркспейса); пользовательский файл общий.
-      if (layer === 'user') withFileLock(f, write);
-      else write();
+      return layer === 'user' ? withFileLock(f, write) : write();
     };
     const configStore: LayerStore = {
       load: async (layer) => {
@@ -384,9 +387,15 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
           throw error;
         }
       },
-      save: (layer, settings) => persist(layer, () => settings),
+      save: (layer, settings) => persist(layer, () => ({ document: settings, result: undefined })),
       // Слой пользователя общий для всех окон `userData`: раздел кладётся в файл, прочитанный под замком в момент записи.
-      update: (layer, id, section) => persist(layer, (current) => ({ ...current, [id]: section })),
+      update: (layer, id, section) => persist(layer, (current) => ({ document: { ...current, [id]: section }, result: undefined })),
+      // Тем же путём стирается раздел: без этого `load` без замка и `save` потеряли бы раздел, записанный соседом между ними.
+      remove: (layer, id) =>
+        persist(layer, (current) => {
+          const { [id]: gone, ...rest } = current;
+          return gone === undefined ? { document: undefined, result: false } : { document: rest, result: true };
+        }),
     };
     const stateStore: LayerStore = {
       load: async () => (opening ? tolerant(stateFile) : readJson(stateFile)),
