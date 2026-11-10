@@ -66,7 +66,7 @@ flowchart LR
 
 ## Канал выпуска
 
-Пакеты выпускаются в реестр npm под scope `@cyborg-harness`; пока пакет `@cyborg-harness/contracts` собран и проверен, но не опубликован (версия `1.0.0-dev`, `access: restricted`). Состав tarball: декларации `dist/*.d.ts`, `package.json`, `README.md`, `CHANGELOG.md`; кода выполнения в нём нет, `exports` отдаёт только типы. Выпуск по тегу - задача P-10.
+Пакеты выпускаются в реестр npm под scope `@cyborg-harness`; пока пакет `@cyborg-harness/contracts` собран и проверен, но не опубликован (версия `1.0.0-dev`, `access: restricted`). Состав tarball: декларации `dist/*.d.ts`, `package.json`, `README.md`, `CHANGELOG.md`; кода выполнения в нём нет, `exports` отдаёт только типы. Выпуск по тегу `v<версия>` настроен ([P-10](https://github.com/dex-it/cyborg-harness/issues/11), `.github/workflows/release.yml`): публикацию включает владелец.
 
 ## Требования к среде
 

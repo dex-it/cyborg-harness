@@ -1,0 +1,26 @@
+name: Установка зависимостей
+description: Node 24, npm ci без скриптов и нативная сборка node-pty под Electron с кэшем по lock-файлу.
+
+# Общие шаги заданий check и budgets в ci.yml (P-10). Репозиторий нужно забрать до вызова (actions/checkout).
+# `postinstall` корня (`electron-rebuild -f -w node-pty`) собирает нативный модуль на каждом запуске; здесь он вынесен из `npm ci` и идёт только при промахе кэша.
+# Ключ кэша - lock-файл (в нём версии node-pty и Electron), ОС и архитектура. Скрипты `npm ci` не нужны больше никому: esbuild берёт бинарник из пакета платформы,
+# бинарник Electron скачивается отдельным шагом задания.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: 24
+        cache: npm
+    - run: npm ci --ignore-scripts
+      shell: bash
+    - name: node-pty (кэш нативной сборки)
+      id: pty
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+      with:
+        path: node_modules/node-pty/build
+        key: node-pty-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+    - name: node-pty (сборка под Electron, промах кэша)
+      if: steps.pty.outputs.cache-hit != 'true'
+      run: npx electron-rebuild -f -w node-pty
+      shell: bash

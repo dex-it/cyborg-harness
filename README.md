@@ -204,6 +204,6 @@ npm start             # сборка и запуск стенда
 
 Код: `core/` - ядро, `contracts/` - пакет контрактов, `playground/` - стенд и базовые плагины, `docs/` - проектные документы и страницы сайта (`docs/guide/`), `site/` - сборка сайта (Astro и Starlight).
 
-Каждый PR и пуш в `master` проверяет GitHub Actions на macOS и Linux ([`ci.yml`](.github/workflows/ci.yml)): установка, сборка, типы, линтер, тесты и `smoke`. Сайт собирается и публикуется отдельным workflow ([`docs-site.yml`](.github/workflows/docs-site.yml)).
+Каждый PR и пуш в `master` проверяет GitHub Actions на macOS и Linux ([`ci.yml`](.github/workflows/ci.yml)): установка, сборка, типы, линтер, тесты и `smoke`, бюджеты шлюза и хостов (`playground/budgets.json`), ссылки в `docs/` (`npm run check:docs-links`) и `npm audit`. Раннера Windows нет: Windows вне первой версии (D-00, строка 7; вопрос 12 SAD), матрицу расширят после решения владельца. Пакеты выходят в npm по тегу `v<версия>` ([`release.yml`](.github/workflows/release.yml), порядок - в разделе «Релизы, бюджеты и ссылки» страницы [«Тесты и CI»](docs/guide/development/tests-ci.md)). Сайт собирается и публикуется отдельным workflow ([`docs-site.yml`](.github/workflows/docs-site.yml)).
 
 План работ - [эпик «Микроядро»](https://github.com/dex-it/cyborg-harness/issues/15) и [дорожная карта](docs/06-plans/roadmap.md); правила для задач и меток - на странице [«Разработка»](docs/guide/development/index.md).
