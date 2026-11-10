@@ -148,7 +148,7 @@ test('withFileLock: замок, обновлённый держателем за
   });
   assert.throws(() => withFileLock(file, () => 'не должно', { timeoutMs: 300, staleMs: 30_000 }), new RegExp(`pid ${String(process.ppid)}`));
   assert.ok(refreshed > 0, 'охрана снятия брала замок: проверка не пустая');
-  assert.equal(JSON.parse(await readFile(lock, 'utf8')).pid, process.ppid, 'свежий замок держателя цел');
+  assert.equal((JSON.parse(await readFile(lock, 'utf8')) as { pid: number }).pid, process.ppid, 'свежий замок держателя цел');
 });
 
 test('слой пользователя: remove раздела читает и пишет под замком, раздел соседа, записанный между чтением и записью, не теряется', async (t) => {
@@ -166,18 +166,18 @@ test('слой пользователя: remove раздела читает и �
     const document = JSON.parse(read(userFile, 'utf8')) as { settings: Record<string, unknown> };
     writeFileSync(userFile, JSON.stringify({ ...document, settings: { ...document.settings, neighbour: { value: 3 } } }));
   };
-  let neighbour = false;
+  const neighbour = { wrote: false };
   t.mock.method(fs, 'readFileSync', (file: string, encoding: 'utf8') => {
     const text = read(file, encoding);
-    if (file === userFile && !neighbour && statSync(`${userFile}.write.lock`, { throwIfNoEntry: false }) === undefined) {
-      neighbour = true;
+    if (file === userFile && !neighbour.wrote && statSync(`${userFile}.write.lock`, { throwIfNoEntry: false }) === undefined) {
+      neighbour.wrote = true;
       neighbourWrites();
     }
     return text;
   });
   assert.equal(await config.remove('user', 'victim'), true);
   t.mock.restoreAll();
-  if (!neighbour) neighbourWrites();
+  if (!neighbour.wrote) neighbourWrites();
   const settings = (JSON.parse(await readFile(userFile, 'utf8')) as { settings: Record<string, unknown> }).settings;
   assert.deepEqual(Object.keys(settings).sort(), ['kept', 'neighbour'], 'victim стёрт, соседние разделы целы');
   assert.equal(await config.remove('user', 'victim'), false, 'второй remove ничего не стирает');
