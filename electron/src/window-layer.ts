@@ -57,7 +57,7 @@ export class WindowLayerView {
 
   // Модальное окно плагина (K-13): <dialog> в слое поверх страницы, во фрейме его вид. showModal() запирает фокус и делает остальной документ inert;
   // `main` помечается явно, чтобы не зависеть от того, как движок считает фреймы под диалогом. Escape закрывает окно в главном процессе (`dismissModal`):
-  // нажатие во фрейме вида до документа окна не доходит.
+  // нажатие во фрейме вида до документа окна не доходит, если только автор не оставил Escape виду (`escape: "view"`).
   private syncModal(shown: ShownModal | undefined, layout: readonly LayoutRow[]): void {
     if (this.modal && this.modal.id !== shown?.id) {
       this.modal.done = true;
@@ -75,6 +75,14 @@ export class WindowLayerView {
     dialog.dataset.view = m.view;
     dialog.dataset.modal = String(m.id);
     dialog.setAttribute('aria-label', m.title);
+    // Размер просит автор окна; больше экрана окно не бывает. Чего автор не назвал, то задаёт стиль приложения.
+    if (m.size?.width !== undefined) dialog.style.width = `min(${String(m.size.width)}px, 90vw)`;
+    if (m.size?.height !== undefined) dialog.style.height = `min(${String(m.size.height)}px, 80vh)`;
+    // Escape оставлен виду: ядро нажатие не гасит (`Kernel.dismissModal` вернул false), а сам <dialog> по Escape в своём документе (фокус на кнопке закрытия) не закрывается.
+    if (m.escape === 'view') {
+      dialog.dataset.escape = 'view';
+      dialog.addEventListener('cancel', (event) => event.preventDefault());
+    }
     const frame = url === undefined ? undefined : document.createElement('iframe');
     const open: OpenModal = { id: m.id, dialog, pluginId: m.pluginId, view: m.view, frame, done: false };
     const close = el('button', 'layer-modal-close', 'Закрыть') as HTMLButtonElement;

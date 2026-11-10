@@ -1064,6 +1064,23 @@ async function main() {
   await waitFor('Escape закрыл окно', async () => !(await modalOpen()));
   assert.ok(lines().some((l) => l.includes('panels: форма вернула: ничего')), 'владелец не узнал об отмене');
 
+  // #163: размер окна от автора и Escape, оставленный виду. Окно 700 x 300; Escape доходит до вида и окно не закрывает, закрывает кнопка вида.
+  await ev("(window.__own = window.playground.runCommand('panels.form-own'), 0)");
+  await waitFor('окно с размером автора показано', modalOpen);
+  assert.equal(await ev("document.querySelector('dialog.layer-modal').style.width"), 'min(700px, 90vw)', 'размер окна не от автора');
+  assert.equal(await ev("document.querySelector('dialog.layer-modal').dataset.escape"), 'view', 'слой не знает, что Escape у вида');
+  const ownBox = await ev("(() => { const r = document.querySelector('dialog.layer-modal').getBoundingClientRect(); return { width: r.width, height: r.height, vw: window.innerWidth, vh: window.innerHeight }; })()");
+  assert.ok(Math.abs(ownBox.width - Math.min(700, ownBox.vw * 0.9)) <= 2 && Math.abs(ownBox.height - Math.min(300, ownBox.vh * 0.8)) <= 2, `размер окна на экране не 700 x 300: ${JSON.stringify(ownBox)}`);
+  await waitFor('вид окна смонтирован', async () => (await inForm("document.getElementById('escaped') !== null")) === true);
+  await ev("window.focus(), document.querySelector('dialog.layer-modal iframe').focus()");
+  await inForm('window.focus()');
+  await press('Escape');
+  await waitFor('Escape дошёл до вида', async () => (await inForm("document.getElementById('escaped')?.textContent ?? null")) === 'Escape получил вид');
+  assert.equal(await modalOpen(), true, 'Escape закрыл окно, которое оставило его виду');
+  await inForm("document.getElementById('cancel').click()");
+  await waitFor('окно снято кнопкой вида', async () => !(await modalOpen()));
+  assert.deepEqual(await ev('window.__own'), {}, 'владелец не получил undefined');
+
   // Диалог из главной части без вида (ctx.dialogs.show): очередь окна та же, что у диалогов видов.
   await ev("(window.__confirm = window.playground.runCommand('panels.confirm'), 0)");
   await waitFor('вопрос главной части показан', () => ev("!!document.querySelector('dialog.layer-ask[data-plugin=\"panels\"] [data-choice=\"yes\"]')"));

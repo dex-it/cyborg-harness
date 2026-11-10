@@ -442,13 +442,13 @@ test('модальное окно в слое: размер и Escape задаё
   const own = layer.showModal('a', 'form', 'Большое', undefined, { size: { width: 800, height: 600 }, escape: 'view' });
   assert.deepEqual(layer.snapshot.modal, { id: own.id, pluginId: 'a', view: 'form', title: 'Большое', size: { width: 800, height: 600 }, escape: 'view' });
   assert.equal(layer.dismissModal(), false, 'Escape принадлежит виду: слой окна не закрывает');
-  assert.equal(layer.snapshot.modal?.id, own.id, 'окно осталось на экране');
+  assert.equal(modalOf(layer)?.id, own.id, 'окно осталось на экране');
   layer.cancelModal(own.id);
   assert.equal(await own.result, undefined, 'закрыть такое окно по-прежнему можно: крестиком и самим видом');
 
   const half = layer.showModal('a', 'form', 'Узкое', undefined, { size: { width: 300 } });
-  assert.deepEqual(layer.snapshot.modal?.size, { width: 300 }, 'заданная одна сторона не дополняется выдуманной другой');
-  assert.equal(layer.snapshot.modal?.escape, undefined);
+  assert.deepEqual(modalOf(layer)?.size, { width: 300 }, 'заданная одна сторона не дополняется выдуманной другой');
+  assert.equal(modalOf(layer)?.escape, undefined);
   assert.equal(layer.dismissModal(), true, 'escape "close" - прежнее поведение');
   await half.result;
 });
@@ -512,16 +512,16 @@ test('ctx.views.modal: размер и Escape из просьбы доходят
 
   const result = k.run('chat.raw', 'form', { size: { width: 720, height: 480 }, escape: 'view' });
   await until(() => k.window.modal !== undefined);
-  assert.deepEqual(k.window.modal?.size, { width: 720, height: 480 });
-  assert.equal(k.window.modal?.escape, 'view');
+  assert.deepEqual(modalOf({ snapshot: k.window })?.size, { width: 720, height: 480 });
+  assert.equal(modalOf({ snapshot: k.window })?.escape, 'view');
   assert.equal(k.dismissModal(), false, 'Escape принадлежит виду');
   k.closeModal('chat', 'form', 'ок');
   assert.equal(await result, 'ок');
 
   const close = k.run('chat.raw', 'form', { escape: 'close', size: { height: 200 } });
   await until(() => k.window.modal !== undefined);
-  assert.deepEqual(k.window.modal?.size, { height: 200 });
-  assert.equal(k.window.modal?.escape, undefined, '"close" - умолчание, в снимок не идёт');
+  assert.deepEqual(modalOf({ snapshot: k.window })?.size, { height: 200 });
+  assert.equal(modalOf({ snapshot: k.window })?.escape, undefined, '"close" - умолчание, в снимок не идёт');
   assert.equal(k.dismissModal(), true);
   assert.equal(await close, undefined);
   await k.unload();
