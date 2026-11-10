@@ -5,7 +5,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent, PluginContext, PluginModule } from '@cyborg-harness/contracts';
 import type { LayerStore } from '@cyborg-harness/core';
-import { agentContractSuite, sandbox, startKernel, type InlinePlugin, type Sandbox } from '@cyborg-harness/testing';
+import { agentContractSuite, sandbox, startKernel, type InlinePlugin } from '@cyborg-harness/testing';
 import { claudeArgs, LAUNCH_SCRIPT, waitAfterStop } from '../plugins/agent-claude-code/index.ts';
 import { NEXT_ACTIONS_PROMPT } from '../plugins/next-actions/index.ts';
 import { readyAfter } from '../plugins/sessions/index.ts';

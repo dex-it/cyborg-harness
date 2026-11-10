@@ -34,9 +34,11 @@ export const consumer: PluginModule = {
     void sessions?.onChange((e) => {
       if (e.change.type === 'waiting') ctx.log(`${e.title}: ${e.change.reason}`);
       // @ts-expect-error у варианта cwd нет reason
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- проверка компилятора: тип обращения к несуществующему полю - error
       if (e.change.type === 'cwd') ctx.log(e.change.reason);
     });
     // @ts-expect-error подписка возвращает Subscription асинхронно, у Promise нет dispose
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call -- проверка компилятора: dispose у Promise не существует
     void sessions?.onChange(() => undefined).dispose();
     // @ts-expect-error мажорной версии 2 у cyborg.sessions нет
     ctx.contracts.get('cyborg.sessions', 2);

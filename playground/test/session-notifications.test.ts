@@ -103,7 +103,7 @@ test('клик по уведомлению поднимает окно и зап
 });
 
 test('без права notify у плагина нет ctx.os.notify: он говорит об этом в журнале и ничего не показывает, цепочка событий работает', async () => {
-  await using s = await chainRig({ notifier: ({ permissions: _dropped, ...manifest }) => manifest });
+  await using s = await chainRig({ notifier: (manifest) => Object.fromEntries(Object.entries(manifest).filter(([key]) => key !== 'permissions')) });
   assert.ok(s.logs.some(([id, line]) => id === 'session-notifications' && line.includes('нет права notify')), 'плагин сообщил, что показывать нечем');
   const session = await s.newSession();
   s.k.emit({ kind: 'focus', focused: false });

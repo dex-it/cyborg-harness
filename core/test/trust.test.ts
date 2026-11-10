@@ -573,7 +573,11 @@ test('output: сводная строка хоста без плагина, не
 test('os: notify.show и notify.close плагина без права notify отклоняет шлюз ядра (PermissionDenied, запись denied), а не только отсутствие ctx.os.notify (PL-02)', async () => {
   const shown: string[] = [];
   const forger = forging({
-    mallory: { activate: (ctx) => void (ctx.os.notify === undefined || shown.push('у плагина без права есть ctx.os.notify')) },
+    mallory: {
+      activate: (ctx) => {
+        if (ctx.os.notify !== undefined) shown.push('у плагина без права есть ctx.os.notify');
+      },
+    },
     bell: { activate: () => undefined },
   });
   const kernel = await load({
