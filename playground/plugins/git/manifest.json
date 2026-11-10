@@ -24,7 +24,17 @@
     "process": [
       {
         "program": "git",
-        "args": ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "status", "--porcelain=v1", "-z", "--branch"]
+        "args": ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "status", "--porcelain=v1", "-z", "--branch"],
+        "env": ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_*", "GIT_CONFIG_VALUE_*"]
+      },
+      {
+        "program": "git",
+        "args": ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "config", "--show-scope", "--null", "--name-only", "--get-regexp", "^filter\\..+\\.(clean|process|required)$"],
+        "env": ["LC_ALL"]
+      },
+      {
+        "program": "git",
+        "args": ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "ls-files", "--stage", "-z"]
       }
     ]
   }

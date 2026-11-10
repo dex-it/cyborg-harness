@@ -74,8 +74,10 @@ export interface Pilot {
   readonly k: Kernel;
   readonly box: Sandbox;
   readonly repo: string;
-  /** Запуски git: по строке на запуск, как их видит программа-обёртка в PATH. */
+  /** Запуски `git status`: по строке на запуск, как их видит программа-обёртка в PATH; их число - стоимость одного опроса дерева. */
   gitRuns(): Promise<string[]>;
+  /** Все запуски git по порядку (перекрытие фильтров добавляет к каждому status `config` и `ls-files`). */
+  gitCalls(): Promise<string[]>;
   /** fs.watch шлюза: открытые за всё время, закрытые, события до склейки. */
   readonly watches: { readonly opened: string[]; closed: number; raw: number; peak: number; readonly live: () => number };
   [Symbol.asyncDispose](): Promise<void>;
@@ -163,12 +165,14 @@ export async function startPilot(options: PilotOptions): Promise<Pilot> {
     },
     watchdog: options.watchdog ?? { interval: 500, timeout: 20_000, strikes: 3 },
   });
+  const calls = async () => (await readFile(log, 'utf8')).split('\n').filter(Boolean);
   return {
     k,
     box,
     repo,
     watches,
-    gitRuns: async () => (await readFile(log, 'utf8')).split('\n').filter(Boolean),
+    gitRuns: async () => (await calls()).filter((line) => line.includes(' status ')),
+    gitCalls: calls,
     [Symbol.asyncDispose]: () => k.unload(),
   };
 }
