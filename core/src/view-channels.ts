@@ -40,8 +40,11 @@ export function createViewChannels(ctx: KernelContext): ViewChannels {
   }
 
   function attach({ live, onRequest }: BridgeEnd): void {
-    onRequest('views', { pluginId: 'string', method: ['post', 'modal'], args: 'array' }, (p) => {
+    onRequest('views', { pluginId: 'string', method: ['post', 'modal'], args: 'array' }, (p, _signal, op) => {
       const m = live(p.pluginId);
+      // Главная часть обращается к виду: операция выходит на мост вида (Г2).
+      op.enter('bridge');
+      op.target(`bridge:views.${p.method}`);
       if (p.method === 'modal') return openModal(m, p.args[0], p.args[1]);
       const view = p.args[0];
       if (typeof view !== 'string') throw new CoreError('Invalid', `${m.id}: канал вида - строка с именем из ui.views`);
@@ -51,8 +54,10 @@ export function createViewChannels(ctx: KernelContext): ViewChannels {
       options.onViewMessage?.(m.id, view, p.args[1]);
       return undefined;
     });
-    onRequest('dialogs', { pluginId: 'string', method: ['show'], args: 'array' }, (p) => {
+    onRequest('dialogs', { pluginId: 'string', method: ['show'], args: 'array' }, (p, _signal, op) => {
       const id = live(p.pluginId).id;
+      op.enter('bridge');
+      op.target('bridge:dialogs.show');
       const spec = p.args[0];
       // Меню стоит у точки в координатах вида, а у главной части вида нет.
       if (isRecord(spec) && spec.kind === 'menu') throw new CoreError('Invalid', `${id}: меню привязано к виду, у главной части есть только ask`);

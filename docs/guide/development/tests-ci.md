@@ -13,7 +13,7 @@ description: "Какие проверки гоняет репозиторий, �
 | `npm test` | модульные, сценарные и стресс-тесты на встроенном `node:test` |
 | `npm run smoke` | дымовой тест окна по DevTools Protocol |
 | `npm run demo` | сценарии ядра в консоли с пошаговым режимом `--step` |
-| `npm run spike`, `npm run spike:hosts`, `npm run spike:gateway` | замеры фреймов, хостов и шлюза, не тесты; `spike:gateway` - проверка бюджета для CI по медиане трёх прогонов |
+| `npm run spike`, `npm run spike:hosts`, `npm run spike:gateway` | замеры фреймов, хостов и шлюза, не тесты; `spike:gateway` - проверка бюджета для CI по медиане трёх прогонов с включённой трассой операций (`--trace=off` - база) |
 | `npm run check:docs-links` | относительные ссылки и якоря в `docs/` и `README.md`: путь с точным регистром, заголовок-цель; падает на битой |
 | `npm run check:budgets -- --gateway gateway.json [--hosts hosts.json]` | сверка JSON замеров (`spike:gateway --json`, `spike:hosts --json`) с порогами `playground/budgets.json` |
 | `npm run release -- plan v0.1.0 --rehearsal` | репетиция выпуска: что выйдет по тегу, что пропущено, чего не хватает (см. «Релизы» ниже) |

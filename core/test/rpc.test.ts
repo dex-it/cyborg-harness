@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CoreError } from '../src/errors.ts';
-import { Endpoint, type Port } from '../src/rpc.ts';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { Endpoint, type Owner, type Port } from '../src/rpc.ts';
 
 function pair(): [Endpoint, Endpoint] {
   const listeners: [((m: unknown) => void)[], ((m: unknown) => void)[]] = [[], []];
@@ -195,6 +196,8 @@ test('отмена ждущего запроса входит в плагин-в
       current = id;
       entered.push(id);
     },
+    chain: () => undefined,
+    within: <R>(_chain: number | undefined, run: () => R) => run(),
   };
   const endpoint = new Endpoint({ post: () => undefined, onMessage: () => undefined }, owner);
   const abort = new AbortController();
@@ -215,4 +218,57 @@ test('close обрывает работу обработчиков: сигнал
   b.close(new CoreError('HostGone', 'упал'));
   assert.equal(first(s).aborted, true);
   assert.equal((first(s).reason as CoreError).code, 'HostGone');
+});
+
+/** Owner с цепочкой в AsyncLocalStorage, как у ядра и хоста (core/src/trace.ts, host-runtime.ts). */
+function chained(): Owner & { readonly als: AsyncLocalStorage<number | undefined> } {
+  const als = new AsyncLocalStorage<number | undefined>();
+  return { als, current: () => undefined, enter: () => undefined, chain: () => als.getStore(), within: (chain, run) => als.run(chain, run) };
+}
+
+test('цепочка: запрос и уведомление несут номер цепочки Owner, обработчик собеседника идёт внутри неё, ответный запрос продолжает её (FR-CH-4002)', async () => {
+  const listeners: [((m: unknown) => void)[], ((m: unknown) => void)[]] = [[], []];
+  const sent: unknown[] = [];
+  const port = (to: 0 | 1, from: 0 | 1): Port => ({
+    post(message) {
+      sent.push(message);
+      const copy = structuredClone(message);
+      setImmediate(() => listeners[to].forEach((l) => l(copy)));
+    },
+    onMessage: (l) => void listeners[from].push(l),
+  });
+  const [oa, ob] = [chained(), chained()];
+  const a = new Endpoint(port(1, 0), oa);
+  const b = new Endpoint(port(0, 1), ob);
+  const seen: unknown[] = [];
+  b.handle('work', async () => {
+    seen.push(['work', ob.chain()]);
+    await b.request('back', null);
+    return ob.chain();
+  });
+  a.handle('back', () => void seen.push(['back', oa.chain()]));
+  b.handle('note', () => void seen.push(['note', ob.chain()]));
+
+  assert.equal(await oa.als.run(7, () => a.request('work', null)), 7);
+  oa.als.run(8, () => a.notify('note', null));
+  a.notify('note', null);
+  await a.request('back', null).catch(() => undefined);
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(seen, [['work', 7], ['back', 7], ['note', 8], ['note', undefined]]);
+  assert.ok(sent.some((m) => (m as { t: string; c?: number }).t === 'req' && (m as { c?: number }).c === 7));
+  assert.ok(sent.filter((m) => (m as { t: string }).t === 'res').every((m) => !('c' in (m as object))), 'ответ номера не несёт');
+});
+
+test('цепочка: номер не по форме от собеседника отбрасывается, обработчик идёт вне цепочки, а не в цепочке того, кто доставил сообщение', async () => {
+  const owner = chained();
+  let deliver: (m: unknown) => void = () => undefined;
+  const seen: unknown[] = [];
+  const b = new Endpoint({ post: () => undefined, onMessage: (l) => (deliver = l) }, owner);
+  b.handle('work', () => void seen.push(owner.chain()));
+  owner.als.run(5, () => {
+    for (const c of ['x', 1.5, null, Number.NaN, undefined]) deliver({ t: 'note', m: 'work', p: null, c });
+    deliver({ t: 'note', m: 'work', p: null, c: 3 });
+  });
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(seen, [undefined, undefined, undefined, undefined, undefined, 3]);
 });
