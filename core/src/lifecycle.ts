@@ -5,6 +5,7 @@ import type { Counter, KernelContext, Lifecycle, PtyDrop } from './kernel-contex
 import type { DisableOptions, UninstallReport } from './kernel-types.ts';
 import { isValidId } from './manifest-fields.ts';
 import type { PluginManifest } from './manifest.ts';
+import { isLifecycleEntry } from './status.ts';
 
 /** Очередь операций над плагинами, выключение и включение, страйки сторожа, снятие плагина и выгрузка ядра. */
 export function createLifecycle(ctx: KernelContext): Lifecycle {
@@ -120,7 +121,7 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     strikes.delete(pluginId);
     switchedOff.delete(pluginId);
     pool.forgetFailures(ctx.hostOf(pluginId) ?? pluginId);
-    const last = (id: string) => ctx.journal.findLast((e) => e.pluginId === id && e.kind !== 'key-conflict');
+    const last = (id: string) => ctx.journal.findLast((e) => e.pluginId === id && isLifecycleEntry(e));
     const follows = (id: string) => {
       const e = last(id);
       return e?.kind === 'skipped' || (e?.kind === 'unloaded' && e.by === pluginId && id !== pluginId);

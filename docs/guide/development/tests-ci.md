@@ -8,7 +8,7 @@ description: "Какие проверки гоняет репозиторий, �
 | Команда | Что проверяет |
 |---|---|
 | `npm run build` | собирает стенд playground в `playground/dist`; перед ним, `typecheck`, `lint` и `test` сами идут `build:core` (пакет ядра) и `build:electron` (адаптер Electron) |
-| `npm run typecheck` | строгие типы ядра, браузерной части элементов `cy-*`, адаптера Electron и стенда; в том числе файлы, где строка под `@ts-expect-error` обязана не компилироваться |
+| `npm run typecheck` | строгие типы ядра, браузерной части элементов `cy-*`, адаптера Electron, шаблона плагина (`templates/plugin`) и стенда; в том числе файлы, где строка под `@ts-expect-error` обязана не компилироваться |
 | `npm run lint` | ESLint со `strictTypeChecked`, ноль предупреждений |
 | `npm test` | модульные, сценарные и стресс-тесты на встроенном `node:test` |
 | `npm run smoke` | дымовой тест окна по DevTools Protocol |
@@ -37,6 +37,7 @@ description: "Какие проверки гоняет репозиторий, �
 | Сторож импортов плагинов: плагин импортирует только `@cyborg-harness/contracts` и свои модули (на плагинах репозитория) | `plugin-imports` |
 | Проверка плагина вне репозитория `checkPlugin` и `cyborg-plugin check`: манифест, версия API, файлы из манифеста, импорты; разбор импортов сверен с компилятором на коде репозитория | `plugin-check`, `plugin-scan` |
 | Пакет `cyborg-plugin` (`tools/cyborg-plugin`): `check`, `build`, `pack`; плагин с npm-зависимостью собирается и грузится ядром в `forkHosts`, отказы по `node:*` и `electron` в исходнике и в зависимости, по файлам манифеста и `engines.cyborg`, воспроизводимый архив, состав сборки стенда | `tools/cyborg-plugin/test/` |
+| Шаблон плагина (`templates/plugin`, P-05): `checkPlugin` без замечаний, загрузка на `forkHosts`, схема `config`, потребитель контракта, нет предметных имён; собственный тест шаблона на `startKernel`; сборка и упаковка `cyborg-plugin`; копия вне репозитория на пакетах из архивов | `plugin-template`, `plugin-imports`, `templates/plugin/test/`, `tools/cyborg-plugin/test/template`, `testing/test/template` |
 | Чистота ядра: нет предметных слов, Electron, импортов вне `core/src` и зависимостей npm | `purity` |
 | Пакет ядра и публичный API: состав пакета, установка в пустой проект, хосты на собранном пакете, перечень имён по точкам входа, окно без `node:*`, граница playground | `package`, `consumer`, `hosts-dist`, `public-api` |
 | Стенд: поиск плагинов, схема `cyborg-plugin://`, мост видов, перетаскивание, билеты терминала, замеры памяти, общий набор тестов `cyborg.agent` | `electron/test/` (служба плагинов, файлы и навигация видов, терминалы, перетаскивание, каналы, граница, перечень входов, пример из README), `playground/test/` |
@@ -57,7 +58,8 @@ description: "Какие проверки гоняет репозиторий, �
 - сторож: падение и зависание хоста;
 - слой окна: диалоги `ask` и `menu`, замок, порядок фокуса по `F6` и `Shift+F6`;
 - элементы `cy-*`: определены до `mount`, работают под строгой CSP, клавиши и события;
-- воркспейс: замок с pid, второй запуск отдаёт фокус первому, «Недавние».
+- воркспейс: замок с pid, второй запуск отдаёт фокус первому, «Недавние»;
+- шаблон плагина `templates/plugin`: собран `cyborg-plugin`, лежит в каталоге пользователя, активен, вид открыт, кнопка вида выполняет команду.
 
 Проверка с настоящим `claude` пропускается, если не задана переменная `CYBORG_SMOKE_CLAUDE`. Сочетания в тесте подбираются под платформу: на macOS это `Shift+Meta+<клавиша>`, на Linux `Ctrl+Shift+<клавиша>`.
 
@@ -69,6 +71,7 @@ Workflow `.github/workflows/ci.yml` запускается на каждый pul
 |---|---|---|
 | `npm ci` на Node 24 | да | да |
 | `npm run build`, `typecheck`, `lint`, `npm test` | да | да |
+| Шаблон плагина: `cyborg-plugin check`, `build`, `pack` на `templates/plugin` | да | да |
 | Пример адаптера Electron из README собирается (`node --test electron/test/example.test.ts`) | да | да |
 | Дымовой тест | `node playground/scripts/smoke.mjs` | `xvfb-run --auto-servernum node playground/scripts/smoke.mjs --no-sandbox` |
 

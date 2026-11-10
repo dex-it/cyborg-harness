@@ -64,6 +64,9 @@ for (const [name, text] of Object.entries(builtFiles)) {
 }
 const builtReport = await buildPlugin(builtSource, { out: join(userData, 'plugins', 'built-dep') });
 assert.ok(builtReport.ok, `cyborg-plugin build: ${builtReport.problems.map((p) => p.message).join('; ')}`);
+// P-05: шаблон плагина (templates/plugin) собирается тем же инструментом, как его собрал бы автор, и ложится в каталог пользователя рядом.
+const templateReport = await buildPlugin(join(repo, 'templates', 'plugin'), { out: join(userData, 'plugins', 'example') });
+assert.ok(templateReport.ok, `cyborg-plugin build templates/plugin: ${templateReport.problems.map((p) => p.message).join('; ')}`);
 // Плагин, которого не было при старте, ядро включает только после перезапуска, поэтому он входит в plugins.enabled заранее: настройки по умолчанию берутся из main.ts стенда.
 // Ветку первого запуска (main.ts записывает DEFAULT_CONFIG сам) проходит bareWindow: у него cyborg.json заранее нет, и он сверяет записанное с DEFAULT_CONFIG.
 /** DEFAULT_CONFIG из main.ts: текст объекта идёт через esbuild, который снимает типы (аннотация в объекте не ломает разбор). */
@@ -73,7 +76,7 @@ function defaultConfig() {
   return new Function(`return ${transformSync(`(${text})`, { loader: 'ts' }).code}`)();
 }
 const userConfig = defaultConfig();
-userConfig.plugins.enabled.push('built-dep');
+userConfig.plugins.enabled.push('built-dep', 'example');
 // K-04: сторонний built-dep назван в группе duo к alice и bob - группа ему не достаётся (запись group-isolated, предупреждение в строке плагина).
 userConfig.plugins.uiGroups.duo.push('built-dep');
 writeFileSync(join(userData, 'cyborg.json'), JSON.stringify(userConfig, null, 2));
@@ -235,12 +238,12 @@ async function main() {
   await waitFor('свободное сочетание дошло до окна', () => feedHas(re('Z', 'до окна дошло')));
   log('перехват клавиш, конфликт, обмен сообщениями через три хоста');
 
-  await waitFor('виды echo, alice и bob во фреймах', async () => (await views()) === 'alice/main,bob/main,built-dep/main,echo/main,editor/main,panels/bar,panels/panel,pin-lock/main,sessions/main' && (await inView('bob', "document.readyState")) === 'complete' && (await inView('alice', "!!document.getElementById('hello')")) === true);
+  await waitFor('виды echo, alice и bob во фреймах', async () => (await views()) === 'alice/main,bob/main,built-dep/main,echo/main,editor/main,example/main,panels/bar,panels/panel,pin-lock/main,sessions/main' && (await inView('bob', "document.readyState")) === 'complete' && (await inView('alice', "!!document.getElementById('hello')")) === true);
   // Область вида задаёт манифест, окно раскладывает по раскладке ядра: оба вида panels на своих местах, у каждого свой ctx.view.
   const area = (selector) => ev(`[...document.querySelectorAll(${JSON.stringify(selector + ' [data-plugin]')})].map((f) => f.dataset.plugin + '/' + f.dataset.view).sort().join(',')`);
   assert.equal(await area('#main-view'), 'sessions/main', 'основная область не по манифесту');
   assert.equal(await area('#toolbar-view'), 'panels/bar', 'панель инструментов не по манифесту');
-  assert.equal(await area('#views'), 'alice/main,bob/main,built-dep/main,echo/main,editor/main,panels/panel,pin-lock/main', 'боковая колонка не по манифесту');
+  assert.equal(await area('#views'), 'alice/main,bob/main,built-dep/main,echo/main,editor/main,example/main,panels/panel,pin-lock/main', 'боковая колонка не по манифесту');
   const panelsText = () =>
     main(`(async () => {
       const { webContents } = process.mainModule.require('electron');
@@ -249,6 +252,68 @@ async function main() {
       return (await Promise.all(frames.map((f) => f.executeJavaScript("document.getElementById('which')?.textContent ?? ''")))).sort().join('|');
     })()`);
   await waitFor('оба вида panels показаны, каждый со своим именем', async () => (await panelsText()) === 'panels/bar: панель инструментов|panels/panel: боковая колонка');
+  // T-14: два вида одного плагина - два фрейма со своими адресами ?view=<имя>; фрейм вида находим по адресу, а не по порядку в окне.
+  const inPanels = (view, expression) =>
+    main(`(async () => {
+      const { webContents } = process.mainModule.require('electron');
+      const page = webContents.getAllWebContents().find((w) => w.getType() === 'window');
+      const frame = page.mainFrame.framesInSubtree.find((f) => f.origin === 'cyborg-plugin://panels' && new URL(f.url).searchParams.get('view') === ${JSON.stringify(view)});
+      return frame ? frame.executeJavaScript(${JSON.stringify(expression)}) : null;
+    })()`);
+  const panelsUrls = () =>
+    main(`(() => {
+      const { webContents } = process.mainModule.require('electron');
+      const page = webContents.getAllWebContents().find((w) => w.getType() === 'window');
+      return page.mainFrame.framesInSubtree.filter((f) => f.origin === 'cyborg-plugin://panels').map((f) => f.url).sort().join('|');
+    })()`);
+  assert.equal(await panelsUrls(), 'cyborg-plugin://panels/?view=bar|cyborg-plugin://panels/?view=panel', 'у видов panels нет своих адресов ?view=<имя>');
+  assert.equal(await inPanels('bar', 'document.getElementById("which").textContent'), 'panels/bar: панель инструментов', 'во фрейме ?view=bar не вид bar');
+  assert.equal(await inPanels('panel', 'document.getElementById("which").textContent'), 'panels/panel: боковая колонка', 'во фрейме ?view=panel не вид panel');
+  // Свёртка одного вида не прячет другой: кнопка в подписи своей обёртки, документ свёрнутого жив и получает onVisibilityChange.
+  const panelsBody = (view) => ev(`document.querySelector('[data-plugin="panels"][data-view="${view}"] .view-body').hidden`);
+  const panelsToggle = (view) => ev(`document.querySelector('[data-plugin="panels"][data-view="${view}"] .view-toggle').click()`);
+  const visibility = (view) => inPanels(view, 'document.getElementById("visibility").textContent');
+  assert.deepEqual([await panelsBody('bar'), await panelsBody('panel')], [false, false], 'виды panels свёрнуты до свёртки');
+  await panelsToggle('bar');
+  await waitFor('свёрнутый bar получил onVisibilityChange', async () => (await visibility('bar')) === 'скрыт');
+  assert.deepEqual([await panelsBody('bar'), await panelsBody('panel')], [true, false], 'свёртка bar спрятала panel или не спрятала bar');
+  assert.equal(await visibility('panel'), 'показан', 'свёртка bar дошла до panel');
+  await panelsToggle('bar');
+  await waitFor('развёрнутый bar снова показан', async () => (await visibility('bar')) === 'показан');
+  await panelsToggle('panel');
+  await waitFor('свёрнутый panel получил onVisibilityChange', async () => (await visibility('panel')) === 'скрыт');
+  assert.deepEqual([await panelsBody('bar'), await panelsBody('panel')], [false, true], 'свёртка panel спрятала bar или не спрятала panel');
+  assert.equal(await visibility('bar'), 'показан', 'свёртка panel дошла до bar');
+  await panelsToggle('panel');
+  await waitFor('развёрнутый panel снова показан', async () => (await visibility('panel')) === 'показан');
+  // Диалог из второго вида встаёт у фрейма своего вида: меню bar отвечает bar, а положение считается от его фрейма (первый по порядку вид тут - bar, поэтому panel проверяем отдельно).
+  const menuAt = () =>
+    ev(`(() => {
+      const d = document.querySelector('dialog.layer-menu[open]');
+      return d ? { plugin: d.dataset.plugin, left: parseFloat(d.style.left), top: parseFloat(d.style.top), width: d.getBoundingClientRect().width, height: d.getBoundingClientRect().height } : null;
+    })()`);
+  const frameBox = (view) => ev(`(() => { const r = document.querySelector('[data-plugin="panels"][data-view="${view}"] iframe').getBoundingClientRect(); return { left: r.left, top: r.top }; })()`);
+  const innerSize = () => ev('({ width: window.innerWidth, height: window.innerHeight })');
+  // Вкладка «Виды» закрыта по умолчанию: у скрытого фрейма положение нулевое, и привязку к нему не отличить от отсутствия. Открываем её на время проверки.
+  await ev("document.getElementById('tab-views').click()");
+  for (const view of ['panel', 'bar']) {
+    await inPanels(view, 'document.getElementById("menu").click()');
+    const shown = await waitFor(`меню вида ${view} в слое окна`, async () => (await menuAt())?.plugin === 'panels' && (await menuAt()));
+    const base = await frameBox(view);
+    const inner = await innerSize();
+    // Как в слое окна: точка (4, 4) вида плюс положение фрейма именно этого вида, не дальше края окна.
+    const wantLeft = Math.max(0, Math.min(base.left + 4, inner.width - shown.width));
+    const wantTop = Math.max(0, Math.min(base.top + 4, inner.height - shown.height));
+    assert.ok(Math.abs(shown.left - wantLeft) < 1 && Math.abs(shown.top - wantTop) < 1, `меню вида ${view} встало не у его фрейма: ${JSON.stringify(shown)}, ждали ${wantLeft},${wantTop}`);
+    await ev("document.querySelector('dialog.layer-menu[open] button[data-choice=\"copy\"]').click()");
+    await waitFor(`ответ меню дошёл до вида ${view}, а не до соседа`, async () => (await inPanels(view, 'document.getElementById("answer").textContent')) === 'copy');
+  }
+  const barBox = await frameBox('bar');
+  const panelBox = await frameBox('panel');
+  assert.ok(barBox.left !== panelBox.left || barBox.top !== panelBox.top, 'фреймы bar и panel стоят в одной точке: привязку диалога к фрейму вида не отличить');
+  assert.ok(panelBox.left > 0 || panelBox.top > 0, 'фрейм panel скрыт (положение 0, 0): привязку диалога к нему не отличить');
+  await ev("document.getElementById('tab-plugins').click()");
+  log('panels: два вида во фреймах со своими ?view=, независимая свёртка, меню у фрейма своего вида');
   assert.equal(await inView('alice', 'typeof window.playground'), 'undefined', 'вид получил мост окна');
   await inView('alice', "document.getElementById('hello').click()");
   await waitFor('вид alice → чат → вид bob', async () => /→ привет, bob/.test(await viewLog('alice')) && /← alice: привет, bob/.test(await viewLog('bob')));
@@ -325,7 +390,7 @@ async function main() {
     (await states({ chat: 'stopped', alice: 'stopped', bob: 'active' })) && lines().includes('[plugins] bob: чат пропал'),
   );
   assert.match(await text('#plugins-list [data-plugin="alice"] .plugin-reason'), /выгружен вместе с chat/);
-  await waitFor('на месте вида снятой alice - заглушка с причиной', async () => (await views()) === 'bob/main,built-dep/main,echo/main,editor/main,panels/bar,panels/panel,pin-lock/main,sessions/main' && /выгружен вместе с chat/.test(await text('#views [data-plugin="alice"] .view-reason')));
+  await waitFor('на месте вида снятой alice - заглушка с причиной', async () => (await views()) === 'bob/main,built-dep/main,echo/main,editor/main,example/main,panels/bar,panels/panel,pin-lock/main,sessions/main' && /выгружен вместе с chat/.test(await text('#views [data-plugin="alice"] .view-reason')));
   assert.ok(await ev(`[...document.querySelectorAll('#views [data-plugin="alice"] button')].some((b) => b.textContent === 'Журнал')`), 'у заглушки нет «Журнал»');
   assert.equal((await keyRow(combo('A')))?.live, 'false');
   await press(combo('A'));
@@ -335,7 +400,7 @@ async function main() {
     (await states({ chat: 'active', alice: 'active' })) && lines().includes('[plugins] bob: чат вернулся, подписываюсь снова'),
   );
   assert.notEqual(await pid('chat'), chatPid, 'после выгрузки chat должен подняться в новом процессе');
-  await waitFor('вид alice вернулся', async () => (await views()) === 'alice/main,bob/main,built-dep/main,echo/main,editor/main,panels/bar,panels/panel,pin-lock/main,sessions/main');
+  await waitFor('вид alice вернулся', async () => (await views()) === 'alice/main,bob/main,built-dep/main,echo/main,editor/main,example/main,panels/bar,panels/panel,pin-lock/main,sessions/main');
   await waitFor('новый документ alice помнит приветы из state воркспейса', async () => (await inView('alice', "document.getElementById('greeted')?.textContent")) === 'приветов: 1');
   log('выгрузка с зависимыми, загрузка в новый процесс, переподписка');
 
@@ -766,6 +831,13 @@ async function main() {
   assert.ok(lines().includes('[plugins] built-dep: зависимость внутри бандла: БАНДЛ!'), 'главная часть из index.mjs не исполнила код зависимости');
   assert.equal(await inView('built-dep', "document.getElementById('out')?.textContent"), 'ВИД!', 'вид из ui/ui.js не исполнил код зависимости');
   log('cyborg-plugin: собранный каталог с npm-зависимостью (manifest.json, index.mjs, ui/ui.js) загружен стендом, вид открыт');
+
+  // P-05: плагин из шаблона активен, его вид открыт, кнопка вида выполняет команду main-части и показывает ответ (значение config по умолчанию).
+  assert.equal(await state('example'), 'active', 'плагин из шаблона не включился');
+  await waitFor('вид шаблона открыт: в нём кнопка cy-button', async () => (await inView('example', "document.getElementById('hello')?.localName")) === 'cy-button');
+  await inView('example', "document.getElementById('hello').click()");
+  await waitFor('ответ команды example.hello в виде шаблона', async () => (await inView('example', "document.getElementById('answer')?.textContent")) === 'привет');
+  log('шаблон плагина: собран cyborg-plugin, активен, вид открыт, команда из вида ответила');
 
   const lock = JSON.parse(readFileSync(join(userData, 'workspace.cyborg.json.lock'), 'utf8'));
   assert.equal(typeof lock.pid, 'number', 'замок воркспейса без pid');
