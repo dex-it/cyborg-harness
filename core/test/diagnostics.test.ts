@@ -20,6 +20,7 @@ import { waitFor } from './wait-for.ts';
 declare module '@cyborg-harness/contracts' {
   interface Contracts {
     'dx.base': { 1: { work(arg: string): Promise<void> } };
+    'dx.ticker': { 1: { onTick(listener: (n: number) => void): { dispose(): void } } };
   }
 }
 
@@ -441,4 +442,35 @@ test('кольцо в ядре: шумный плагин выводит в жу
   const noisy = ring.filter((r) => (r.src === 'log' && r.pluginId === 'noisy') || (r.src === 'trace' && r.record.kind === 'operation' && r.record.caller === 'plugin:noisy'));
   assert.ok(noisy.length <= 100, `шумный плагин держит не больше своего предела: ${String(noisy.length)}`);
   d.close();
+});
+
+test('кольцо: шумный поставщик событий контракта (остаток K-28) держит в кольце не больше своего предела, запись о сбое соседа остаётся', async () => {
+  const d = diag(new MemoryFs(), { capacity: 600, perPlugin: 120 });
+  let fire: (n: number) => void = () => undefined;
+  const table: Record<string, PluginModule> = {
+    ticker: {
+      activate(c) {
+        const listeners = new Set<(n: number) => void>();
+        fire = (n) => listeners.forEach((l) => l(n));
+        c.contracts.provide('dx.ticker', '1.0', {
+          onTick(listener: (n: number) => void) {
+            listeners.add(listener);
+            return { dispose: () => void listeners.delete(listener) };
+          },
+        });
+      },
+    },
+    user: { activate: (c) => void c.contracts.get('dx.ticker', 1)?.onTick(() => undefined) },
+  };
+  const k = await boot(d, table, [manifest('ticker', { provides: { 'dx.ticker': '1.0' } }), manifest('user', { optional: { 'dx.ticker': '^1' } })], { hosts: { t: ['ticker'], u: ['user'] } });
+  d.sinks.onJournal(failed('quiet', 'сосед упал'));
+  await waitFor('подписка потребителя дошла до поставщика', () => d.recent().some((r) => r.src === 'trace' && r.record.kind === 'operation' && r.record.target.includes('onTick')));
+  for (let i = 0; i < 3000; i++) fire(i);
+  await waitFor('события дошли до трассы', () => d.recent().filter((r) => r.src === 'trace').length >= 100);
+  const ring = d.recent();
+  const events = ring.filter((r) => r.src === 'trace' && r.record.kind === 'operation' && r.record.caller === 'plugin:ticker');
+  assert.ok(events.length > 0 && events.length <= 120, `записей событий в кольце: ${String(events.length)}`);
+  assert.ok(ring.some((r) => r.src === 'journal' && r.entry.pluginId === 'quiet'), 'запись о сбое соседа в кольце');
+  assert.ok(ring.length <= 600);
+  await k.unload();
 });
