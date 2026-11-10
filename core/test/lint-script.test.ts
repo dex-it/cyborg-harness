@@ -12,7 +12,7 @@ test('линт: процесс на пакет, затем остаток реп
   assert.ok(Array.isArray(plan));
   const runs = plan as readonly (readonly string[])[];
   const groups = runs.slice(0, -1).map((args) => args.filter((a) => !a.startsWith('-')));
-  assert.ok(groups.length >= 7, `пакетов в плане ${groups.length}`);
+  assert.ok(groups.length >= 8, `пакетов в плане ${groups.length}`);
   for (const g of groups) assert.equal(g.length, 1, `в одном процессе один пакет: ${g.join(' ')}`);
   const rest = runs.at(-1);
   assert.ok(rest, 'остаток репозитория');

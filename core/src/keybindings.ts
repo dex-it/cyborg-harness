@@ -72,6 +72,9 @@ export function applyUserKeys(table: Map<string, Keybinding>, user: readonly Use
 
 const MAX_PER_PLUGIN = 128;
 const MAX_ARGS_BYTES = 4096;
+/** Ключ признака «виден» от вызова без вида: имя вида не бывает пустым. */
+const NO_VIEW = '';
+
 const WHEN_FLAGS = ['repeat', 'dialog', 'visible'] as const;
 
 interface Resolved {
@@ -115,7 +118,8 @@ export function createKeyRegistry(ctx: KernelContext): KeyRegistry {
   const platform = ctx.options.platform ?? process.platform;
   const entries = new Map<number, Dynamic>();
   const winners = new Map<string, Dynamic>();
-  const visible = new Set<string>();
+  /** Видимые виды по плагину: плагин виден, пока виден хоть один его вид. Ключ `NO_VIEW` - признак на весь плагин от вызова без вида. */
+  const visible = new Map<string, Set<string>>();
   let seq = 0;
 
   const losersOf = (key: string): { pluginId: string; command: string }[] =>
@@ -204,9 +208,16 @@ export function createKeyRegistry(ctx: KernelContext): KeyRegistry {
     dropFor,
     lookup,
     rows: () => [...[...ctx.keys.values()].map(withLosers), ...[...winners.values()].map(dynamicRow)],
-    setVisible(pluginId, value) {
-      if (!ctx.byId.has(pluginId)) throw new CoreError('Unavailable', `плагина ${pluginId} нет`);
-      if (value) visible.add(pluginId);
+    setVisible(pluginId, value, view) {
+      const m = ctx.byId.get(pluginId);
+      if (!m) throw new CoreError('Unavailable', `плагина ${pluginId} нет`);
+      if (view !== undefined && !Object.hasOwn(m.ui?.views ?? {}, view)) throw new CoreError('Unavailable', `у плагина ${pluginId} нет вида ${view}`);
+      const views = visible.get(pluginId) ?? new Set<string>();
+      if (value) views.add(view ?? NO_VIEW);
+      // Скрыт без вида: приложение не различает виды, и скрытым становится плагин целиком.
+      else if (view === undefined) views.clear();
+      else views.delete(view);
+      if (views.size > 0) visible.set(pluginId, views);
       else visible.delete(pluginId);
     },
   };

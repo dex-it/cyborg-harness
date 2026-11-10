@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 
 const root = join(import.meta.dirname, '..');
-const PACKAGES = ['contracts', 'core', 'testing', 'electron', 'tools', 'templates', 'playground'];
+const PACKAGES = ['contracts', 'core', 'testing', 'electron', 'tools', 'templates', 'playground', 'scripts'];
 const base = ['--max-warnings=0'];
 
 const args = process.argv.slice(2);

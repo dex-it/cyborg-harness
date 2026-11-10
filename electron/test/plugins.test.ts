@@ -456,6 +456,40 @@ test('служба окна: динамическое сочетание кно�
   );
 });
 
+test('служба окна: видимость приходит по виду, сочетание when.visible у плагина с двумя видами живо, пока виден хоть один (#145)', async (t) => {
+  const userData = tmp();
+  const dir = path.join(userData, 'plugins');
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['panels'] } }));
+  plugin(dir, 'panels', { commands: { 'panels.go': {} }, ui: { views: { bar: './bar.js', panel: './panel.js' } } }, 'export default {}');
+  const modules: Record<string, PluginModule> = {
+    panels: {
+      async activate(ctx) {
+        ctx.commands.register('panels.go', () => undefined);
+        await ctx.keys.register({ key: 'F2', command: 'panels.go', when: { visible: true } });
+      },
+    },
+  };
+  const service = new PluginsService({ changed: () => {}, alert: () => {} }, () => 5);
+  await service.start({
+    userData,
+    builtinDir: path.join(userData, 'нет'),
+    userPlugins: true,
+    spawnHost: inlineHosts(async (entry) => modules[/\/(\w+)\/index\.mjs$/.exec(entry)?.[1] ?? ''] ?? { activate() {} }),
+    platform: 'linux',
+    log: () => {},
+  });
+  t.after(() => service.unload());
+  const f2 = { key: 'F2', code: 'F2', control: false, alt: false, shift: false, meta: false };
+  service.setViewVisible('panels', true, 'bar');
+  service.setViewVisible('panels', true, 'panel');
+  service.setViewVisible('panels', false, 'bar');
+  assert.equal(service.press(f2), true, 'panel на экране, а сочетание погасло');
+  service.setViewVisible('panels', false, 'panel');
+  assert.equal(service.press(f2), false, 'виден ни один вид');
+  service.setViewVisible('panels', true, 'нет-такого');
+  assert.equal(service.press(f2), false, 'вид, которого нет, ядро молча не принимает');
+});
+
 test('виды: ui.inlineStyles манифеста доходит до PluginUi (CSP вида считается по нему), без флага поля нет', async () => {
   const userData = tmp();
   const dir = path.join(userData, 'plugins');

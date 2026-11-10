@@ -1,0 +1,31 @@
+{
+  "decision": {
+    "source": "https://github.com/dex-it/cyborg-harness/issues/21",
+    "row": 6,
+    "date": "2026-11-07",
+    "text": "Бюджеты NFR-CH-1001, приняты владельцем: вызов через шлюз ctx.os не более 1 мс на p99 до 64 КиБ, событие fs.watch не позже 5 мс на p99 после склейки 50 мс, вывод терминала не более 16 мс; мера - медиана трёх прогонов. Бюджеты старта окна и памяти не заданы (остаток строки 6).",
+    "norm": "docs/03-requirements/01-plugin-host/srs.md#nfr-ch-1001-накладные-расходы"
+  },
+  "gateway": {
+    "measure": "npm run spike:gateway --json: медиана p99 цены (вызов из плагина минус то же действие без шлюза) за три прогона",
+    "callP99Ms": 1,
+    "watchP99Ms": 5,
+    "maxBytes": 65536,
+    "blocking": ["linux"],
+    "guarded": ["fs.readText", "fs.watch", "pty.write", "secrets.get"],
+    "blockingMargin": 1.5,
+    "why": "Общий раннер шумит (macos-check.md: замер на рабочей машине шёл при load average 20-29), поэтому красит PR не любое число выше бюджета. Платформа: Linux; macOS печатает таблицу в сводку, пока по истории запусков не набран запас (у fs.watch на macOS FSEvents склеивает события сам, цена выходит отрицательной). Пути: fs.readText.cold зависит от диска раннера (на GitHub Linux p99 2-3 мс против 0,3-0,4 мс у readText), а у net.fetch цена тонет в шуме вычитания (на раннере от -2 до +1,4 мс); они идут справочно. Запас: красит значение выше бюджета, умноженного на blockingMargin; регрессия шлюза (+2 мс на каждый вызов) видна на всех охраняемых путях."
+  },
+  "hosts": {
+    "measure": "npm run spike:hosts --json: память хоста (Linux PSS, macOS footprint - меры разные, пороги свои на платформу) и p99 вызова из главного процесса в хост",
+    "blocking": [],
+    "limits": {
+      "linux": { "pssPerHostMb": null, "callP99Ms": null },
+      "darwin": { "pssPerHostMb": null, "callP99Ms": null }
+    },
+    "why": "Порогов для памяти и старта владелец не задал (D-00, строка 6, остаток: предложение «не хуже базы Cyborg на 10%», база - docs/05-verification/cyborg-baseline.md). Пока поле null, задание печатает числа и ничего не краснит. Число в limits и платформа в blocking включают проверку."
+  },
+  "notMeasured": [
+    { "metric": "вывод терминала до кадра", "limitMs": 16, "why": "замер не заведён (roadmap, раздел 5); бюджет принят, проверка появится вместе с замером" }
+  ]
+}
