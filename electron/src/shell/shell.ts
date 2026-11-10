@@ -2,13 +2,13 @@
 
 import { defineElements } from '@cyborg-harness/core/elements';
 import { connectView, keepFocus, mountModule } from '@cyborg-harness/core/ui-shell';
-import type { ViewBridge } from '../view-protocol.ts';
+import type { ShellBridge } from '../view-protocol.ts';
 import { violationNote } from './csp-note.ts';
 
 const script = document.currentScript as HTMLScriptElement;
 const { plugin = '', view = '', entry = '' } = script.dataset;
 const root = document.getElementById('cyborg-view') ?? document.body;
-const bridge = (window as unknown as { cyborgView: ViewBridge }).cyborgView;
+const bridge = (window as unknown as { cyborgView: ShellBridge }).cyborgView;
 
 function fail(error: unknown): void {
   const box = document.createElement('p');
@@ -19,10 +19,11 @@ function fail(error: unknown): void {
 }
 
 async function start(): Promise<void> {
-  // Отказ CSP не виден ни в разметке, ни в ленте ядра: стиль просто не применился. Консоль фрейма вида называет причину.
+  // Отказ CSP не виден ни в разметке, ни в ленте ядра: стиль просто не применился. Причину называет консоль фрейма вида и запись в журнале плагина (#160).
   document.addEventListener('securitypolicyviolation', (event) => {
-    // eslint-disable-next-line no-console -- консоль фрейма плагина: отказ CSP в ленту ядра не идёт
+    // eslint-disable-next-line no-console -- консоль фрейма плагина: тот же текст, что в журнале плагина, для разработчика с DevTools
     console.warn(violationNote(plugin, event));
+    bridge.cspViolation(event.violatedDirective, event.blockedURI);
   });
   defineElements();
   const ctx = await connectView(bridge, {

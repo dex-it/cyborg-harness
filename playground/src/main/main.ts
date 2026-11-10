@@ -4,13 +4,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, dialog, Notification, powerMonitor } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, Notification, powerMonitor, shell } from 'electron';
 import { RecentWorkspaces, withFileLock } from '@cyborg-harness/core';
 import {
   alertNotification,
   bindAppMenu,
   bindWindow,
   electronOs,
+  fileDiagnostics,
   guardNavigation,
   isolateSession,
   PluginsService,
@@ -34,6 +35,7 @@ import {
   workspaceInstance,
 } from '@cyborg-harness/electron';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
+import { createErrorReporter, type ErrorNotice } from './main-errors.ts';
 import { quietPipes } from './quiet-pipes.ts';
 import { runSpike } from './spike.ts';
 import { runHostsSpike } from './spike-hosts.ts';
@@ -44,6 +46,40 @@ const APP_NAME = 'Cyborg Playground';
 // Своя папка данных: cyborg.json и пользовательские плагины playground не смешиваются с настройками Cyborg.
 app.setName(APP_NAME);
 registerViewScheme();
+
+/**
+ * Окно необработанной ошибки, которое не исчезает: полный текст, «Копировать» (в буфер; после копирования окно открывается снова),
+ * «Показать файл журнала», «Закрыть». До готовности приложения `dialog.showMessageBox` недоступен - окно ждёт `ready`.
+ */
+async function showErrorNotice(notice: ErrorNotice): Promise<void> {
+  await app.whenReady();
+  for (;;) {
+    const { response } = await dialog.showMessageBox({
+      type: 'error',
+      title: APP_NAME,
+      message: `Необработанная ошибка главного процесса (${notice.kind})`,
+      detail: `${notice.text}\nЖурнал: ${notice.logFile}`,
+      buttons: ['Копировать', 'Показать файл журнала', 'Закрыть'],
+      defaultId: 2,
+      cancelId: 2,
+      noLink: true,
+    });
+    if (response === 0) {
+      await clipboard.writeText(notice.text);
+      continue;
+    }
+    if (response === 1) shell.showItemInFolder(notice.logFile);
+    return;
+  }
+}
+
+// Свой обработчик отменяет штатное окно «Uncaught Exception»: ошибка попадает в журнал, в stderr и в это окно, а процесс не падает молча.
+const errorReporter = createErrorReporter({
+  logFile: path.join(app.getPath('userData'), 'logs', 'main-errors.log'),
+  notify: (notice) => void showErrorNotice(notice),
+});
+process.on('uncaughtException', (error) => errorReporter.report('uncaughtException', error));
+process.on('unhandledRejection', (reason) => errorReporter.report('unhandledRejection', reason));
 
 /** `--spike=<файл>`: замеры видов во фреймах (SAD, открытый вопрос 11) вместо окна плагинов. */
 const spikeOut = process.argv.find((a) => a.startsWith('--spike='))?.slice('--spike='.length);
@@ -121,8 +157,9 @@ const claim = spiking
 /** Первый запуск: alice и bob делят хост c - видно, как падение одного процесса снимает обоих, а чат в хосте b живёт. */
 const DEFAULT_CONFIG = {
   plugins: {
-    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions', 'sessions', 'pin-lock', 'panels', 'editor'],
-    hosts: { a: ['echo'], b: ['chat'], c: ['alice', 'bob'], d: ['flaky'], agents: ['agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions'] },
+    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions', 'sessions', 'session-notifications', 'pin-lock', 'panels', 'editor'],
+    // session-notifications в своём хосте (PL-02): события sessions идут к нему через границу процессов.
+    hosts: { a: ['echo'], b: ['chat'], c: ['alice', 'bob'], d: ['flaky'], notifications: ['session-notifications'], agents: ['agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions'] },
     // K-04: виды alice и bob делят origin и процесс рендера, остальные - по одному на плагин.
     uiGroups: { duo: ['alice', 'bob'] },
   },
@@ -206,12 +243,18 @@ const start = () => {
     return;
   }
   const hosts = utilityHosts(path.join(__dirname, 'plugin-host.mjs'));
+  // K-30: журнал, строки плагинов и трасса уходят в кольцо и в файлы `userData/diagnostics/<воркспейс>`; окно показывает причину сбоя прошлого запуска и выгружает диагностику.
+  const version = `${APP_NAME} ${app.getVersion()}`;
+  // eslint-disable-next-line no-console -- отказ диска виден в stderr приложения и в строке «Диагностика» окна
+  const diagnostics = fileDiagnostics(userData, workspaceFile, { app: version, onProblem: (text) => console.error(`[diagnostics] ${text}`) });
   // node-pty живёт в своём процессе ядра: его зависание не замораживает окно (K-01).
   const ptyHost = utilityPtyHost(path.join(__dirname, 'pty-host.js'));
   void plugins.start({
     userData,
     workspace: workspaceFile,
     appName: APP_NAME,
+    diagnostics,
+    versions: { app: version },
     migrate: migrateLegacyWorkspace,
     safeMode,
     userPlugins,

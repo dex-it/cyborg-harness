@@ -7,7 +7,7 @@ import { byId, el } from './dom.ts';
 import { ViewsPanel } from './views-panel.ts';
 import { moveFocus } from './focus.ts';
 import { SideTabs } from './side-tabs.ts';
-import { actionsFor, clock, conflictText, groupLabel, groupNote, journalFor, keyStatus, mergeFeed, originNote, sortedPlugins, STATE_LABEL, summary, userPluginsNotice, viewSlots, workspaceActionError, type ActionButton } from './plugins-model.ts';
+import { actionsFor, clock, conflictText, diagnosticsLine, exportMessage, groupLabel, groupNote, journalFor, keyStatus, mergeFeed, originNote, previousNote, sortedPlugins, STATE_LABEL, summary, userPluginsNotice, viewSlots, workspaceActionError, type ActionButton } from './plugins-model.ts';
 
 export interface PluginsPort {
   pluginsSnapshot(): Promise<PluginsSnapshot>;
@@ -29,6 +29,8 @@ export interface PluginsPort {
   openWorkspaceInNewWindow(file: string): Promise<Reply>;
   /** Перезапуск приложения с флагом `--safe-mode` или без него. */
   setSafeMode(on: boolean): Promise<Reply>;
+  /** Выгрузка диагностики одним файлом: диалог «Сохранить как» открывает главный процесс. */
+  exportDiagnostics(): Promise<Reply>;
   onWindowCommand(listener: (command: string) => void): void;
 }
 
@@ -46,6 +48,10 @@ export class PluginsPanel {
   private readonly safeModeEl = byId('safe-mode', HTMLElement);
   private readonly userPluginsEl = byId('user-plugins', HTMLElement);
   private readonly safeModeEnter = byId('safe-mode-enter', HTMLButtonElement);
+  private readonly diagnosticsEl = byId('diagnostics', HTMLElement);
+  private readonly diagnosticsStatusEl = byId('diagnostics-status', HTMLElement);
+  private readonly diagnosticsResultEl = byId('diagnostics-result', HTMLElement);
+  private readonly diagnosticsExport = byId('diagnostics-export', HTMLButtonElement);
   private readonly feedEl = byId('feed', HTMLElement);
   private readonly journalTitle = byId('plugins-journal-title', HTMLElement);
   private readonly journalAll = byId('plugins-journal-all', HTMLButtonElement);
@@ -77,6 +83,7 @@ export class PluginsPanel {
     this.journalAll.addEventListener('click', () => this.showJournal(null));
     byId('workspace-open', HTMLButtonElement).addEventListener('click', () => void this.workspaceAction('Открыть воркспейс', () => port.openWorkspace()));
     this.safeModeEnter.addEventListener('click', () => void port.setSafeMode(true));
+    this.diagnosticsExport.addEventListener('click', () => void this.exportDiagnostics());
     byId('safe-mode-exit', HTMLButtonElement).addEventListener('click', () => void port.setSafeMode(false));
     port.onPluginsChanged(() => void this.refresh());
     port.onWindowCommand((command) => {
@@ -126,6 +133,9 @@ export class PluginsPanel {
     this.userPluginsEl.textContent = notice ?? '';
     this.userPluginsEl.hidden = notice === undefined;
     this.safeModeEnter.hidden = snapshot.safeMode || snapshot.phase === 'no-workspace';
+    const diagnostics = diagnosticsLine(snapshot.diagnostics);
+    this.diagnosticsEl.hidden = diagnostics === undefined;
+    this.diagnosticsStatusEl.textContent = diagnostics ?? '';
     this.listEl.replaceChildren(...sortedPlugins(snapshot.plugins).map((row) => this.row(row, snapshot.canHang)));
     this.keysEl.replaceChildren(...(snapshot.keys.length ? snapshot.keys.map((row) => this.keyRow(row)) : [this.emptyKeys()]));
     const { current, recent } = snapshot.workspace;
@@ -157,6 +167,8 @@ export class PluginsPanel {
     const groupWarning = groupNote(row);
     if (groupWarning) item.append(el('p', 'plugin-group-note', groupWarning));
     if (row.reason) item.append(el('p', 'plugin-reason', row.reason));
+    const previous = previousNote(row);
+    if (previous) item.append(el('p', 'plugin-previous', previous));
     if (row.permissions.length > 0) {
       const list = el('ul', 'plugin-permissions');
       list.setAttribute('aria-label', `Права ${row.id}`);
@@ -256,6 +268,18 @@ export class PluginsPanel {
     if (ptys.length === 0) return this.port.disablePlugin(id);
     const choice = await askPty(id, plugins, ptys);
     return choice === 'cancel' ? {} : this.port.disablePlugin(id, choice === 'keep');
+  }
+
+  /** Кнопка «Выгрузить диагностику…»: диалог выбора файла открывает главный процесс; итог (куда лёг файл или почему не вышло) виден рядом с кнопкой. */
+  private async exportDiagnostics(): Promise<void> {
+    this.diagnosticsExport.disabled = true;
+    try {
+      this.diagnosticsResultEl.textContent = exportMessage(await this.port.exportDiagnostics());
+    } catch (error) {
+      this.diagnosticsResultEl.textContent = `Выгрузка: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      this.diagnosticsExport.disabled = false;
+    }
   }
 
   /** Отказ главного процесса (процесс не запустился, воркспейса нет в «Недавних») виден рядом с кнопкой, а не теряется. */

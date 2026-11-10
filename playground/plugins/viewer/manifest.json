@@ -1,0 +1,18 @@
+{
+  "id": "viewer",
+  "version": "1.0.0",
+  "engines": {
+    "cyborg": "^1"
+  },
+  "commands": {
+    "viewer.open": {
+      "args": ["record"],
+      "callers": "plugins",
+      "guard": { "fs.read": "0.path" }
+    },
+    "viewer.current": {}
+  },
+  "permissions": {
+    "fs.read": ["workspace"]
+  }
+}

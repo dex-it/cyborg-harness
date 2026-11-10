@@ -4,6 +4,9 @@
   "engines": {
     "cyborg": "^1"
   },
+  "provides": {
+    "cyborg.sessions": "1.0"
+  },
   "consumes": {
     "cyborg.agent": "^1",
     "cyborg.session-prompt": "^1",

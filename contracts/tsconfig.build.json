@@ -12,5 +12,5 @@
     "outDir": "dist",
     "rootDir": "."
   },
-  "include": ["index.ts", "agent.ts", "elements.ts", "os.ts", "plugin.ts", "view.ts"]
+  "include": ["index.ts", "agent.ts", "elements.ts", "git.ts", "os.ts", "plugin.ts", "tree.ts", "view.ts"]
 }

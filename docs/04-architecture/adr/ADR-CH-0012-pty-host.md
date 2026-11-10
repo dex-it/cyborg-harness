@@ -1,10 +1,9 @@
 ---
 id: ADR-CH-0012
 status: accepted
-date: 2026-11-08
-relates_to: product, cyborg-harness, ADR-CH-0001, ADR-CH-0003, ADR-CH-0004
+date: 2026-11-10
+relates_to: 01-plugin-host
 origin: derived
-quality-checks: входных записей нет
 ---
 
 # ADR-CH-0012 pty держит ядро в отдельном pty-хосте; вывод к виду идёт мимо хоста плагина
