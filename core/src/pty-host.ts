@@ -39,6 +39,7 @@ export interface PtyHostInit {
   readonly ptyInput: number;
   readonly ptyInputBurst: number;
   readonly ptyInputRate: number;
+  readonly ptyQueue: number;
   readonly ptyFlushMs: number;
   readonly ptyFlushChars: number;
   readonly backlog: number;
@@ -107,7 +108,7 @@ export class PtyHost {
   readonly #ending = new Set<Entry>();
   /** Запуски в пути: `end` на них приходит раньше, чем процесс есть. */
   readonly #spawning = new Map<string, { ended: boolean }>();
-  #limits: PtyHostInit = { ptyInput: LIMITS.ptyInput, ptyInputBurst: LIMITS.ptyInputBurst, ptyInputRate: LIMITS.ptyInputRate, ptyFlushMs: LIMITS.ptyFlushMs, ptyFlushChars: LIMITS.ptyFlushChars, backlog: BACKLOG_LIMIT };
+  #limits: PtyHostInit = { ptyInput: LIMITS.ptyInput, ptyInputBurst: LIMITS.ptyInputBurst, ptyInputRate: LIMITS.ptyInputRate, ptyQueue: LIMITS.ptyQueue, ptyFlushMs: LIMITS.ptyFlushMs, ptyFlushChars: LIMITS.ptyFlushChars, backlog: BACKLOG_LIMIT };
 
   constructor(port: Port, backend: PtyBackend, options: PtyHostOptions = {}) {
     this.#backend = backend;
@@ -180,9 +181,13 @@ export class PtyHost {
       proc.kill();
       throw new CoreError('NotFound', `pty ${p.key} отозван до запуска`);
     }
-    const entry: Entry = { key: p.key, proc, cols: p.options.cols, rows: p.options.rows, tail: new Tail(this.#limits.backlog), budget: new InputBudget(this.#limits.ptyInputBurst, this.#limits.ptyInputRate), attached: true, viewers: new Map(), pending: [], pendingChars: 0, flushed: -Infinity };
+    const entry: Entry = { key: p.key, proc, cols: p.options.cols, rows: p.options.rows, tail: new Tail(this.#limits.backlog), budget: new InputBudget(this.#limits.ptyInputBurst, this.#limits.ptyInputRate, this.#limits.ptyQueue), attached: true, viewers: new Map(), pending: [], pendingChars: 0, flushed: -Infinity };
     this.#entries.set(p.key, entry);
-    proc.onData((data) => this.#output(entry, data));
+    proc.onData((data) => {
+      // Вывод - признак, что программа жива и читает: счёт непрочитанного ввода начинается заново (#167).
+      entry.budget.heard();
+      this.#output(entry, data);
+    });
     proc.onExit(({ exitCode, signal }) => {
       clearTimeout(entry.reaper);
       this.#ending.delete(entry);

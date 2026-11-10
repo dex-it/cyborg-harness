@@ -397,6 +397,41 @@ test('pty-хост: ввод в pty, чья программа не читает
   host.kill();
 });
 
+test('pty-хост: программа не читает stdin и молчит - после ptyQueue ввод отклоняется Invalid и в очередь процесса не попадает; вывод процесса снимает отказ (#167)', async () => {
+  const backend = fakePty();
+  const host = inlinePtyHost(backend)();
+  const ep = new Endpoint(host.port);
+  await ep.request('init', { ...INIT, ptyInputBurst: 1 << 30, ptyInputRate: 1 << 30, ptyQueue: 2500 });
+  const heard: string[] = [];
+  ep.handle('data', (p: { data: string }) => void heard.push(p.data));
+  await ep.request('spawn', { key: 'k', ...SPAWN });
+  const proc = backend.procs[0]!;
+  // Подделка выводит приглашение после запуска: оно тоже вывод и обнуляет счёт, поэтому ввод начинается после него.
+  await waitFor('приглашение дошло до хоста', () => heard.length > 0);
+  const chunk = 'x'.repeat(1000);
+  const replies: string[] = [];
+  for (let i = 0; i < 6; i++) {
+    try {
+      await ep.request('write', { key: 'k', data: chunk });
+      replies.push('ok');
+    } catch (error) {
+      replies.push((error as { code?: string }).code ?? 'другое');
+    }
+  }
+  assert.deepEqual(replies, ['ok', 'ok', 'Invalid', 'Invalid', 'Invalid', 'Invalid'], 'ввод 1000 Б: 2000 принято, третий превысил бы потолок 2500');
+  ep.notify('write', { key: 'k', data: chunk });
+  await ep.request('ping', null);
+  assert.equal(proc.writes.join('').length, 2000, 'отказанный ввод, в том числе уведомлением, процессу не передан');
+  await assert.rejects(ep.request('write', { key: 'k', data: chunk }), { code: 'Invalid', message: /не читает ввод/ });
+  await ep.request('write', { key: 'k', data: 'x'.repeat(500) });
+
+  proc.emit('вывод');
+  await ep.request('write', { key: 'k', data: chunk });
+  await ep.request('write', { key: 'k', data: chunk });
+  assert.equal(proc.writes.join('').length, 2000 + 500 + 2000, 'после вывода программы потолок отсчитывается заново');
+  host.kill();
+});
+
 test('pty-хост: запас ввода пополняется со скоростью ptyInputRate и не копится выше ptyInputBurst; у каждого pty свой запас', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
   const backend = fakePty();

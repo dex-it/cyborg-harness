@@ -297,6 +297,59 @@ test('NFR-CH-1005: записи с ошибкой и жизненного цик
   assert.deepEqual(kept, ['обычная строка до сбоя'], 'сброс ошибки унёс и накопленное перед ней; хвост после неё потерян - это вопрос 2');
 });
 
+test('ротация: поток шумного плагина на несколько размеров файла не стирает запись failed соседа, previousFailures() её отдаёт (#180, У-49)', () => {
+  const fsys = new MemoryFs();
+  const first = diag(fsys, { fileBytes: 4000, files: 3, keepBytes: 3000 });
+  first.sinks.onJournal(failed('neighbour', 'причина вчерашнего сбоя'));
+  const line = 'q'.repeat(300);
+  for (let i = 0; i < 400; i++) first.sinks.onLog('noisy', `${String(i)} ${line}`, 'info');
+  first.close();
+  const noise = names(fsys).filter((n) => n !== 'diagnostics.keep.log').reduce((n, name) => n + fsys.size(name), 0);
+  assert.ok(noise <= 3 * 4000, 'файлы потока держат свой предел');
+  assert.ok(
+    names(fsys).every((name) => !fsys.records(name).some((r) => r.src === 'log' && r.text.startsWith('0 '))),
+    'поток действительно прошёл через ротацию: его начало ушло',
+  );
+  assert.ok(fsys.size('diagnostics.keep.log') <= 3000, 'файл записей сбоев держит свой предел');
+
+  const second = diag(fsys, { fileBytes: 4000, files: 3, keepBytes: 3000 });
+  assert.equal(second.previousFailures().get('neighbour')?.text, 'не поднялся в хосте h: причина вчерашнего сбоя');
+  assert.ok(second.export({}).includes('причина вчерашнего сбоя'), 'выгрузка читает и файл записей сбоев');
+  assert.ok(second.stored().bytes >= fsys.size('diagnostics.keep.log'), 'размер на диске включает файл записей сбоев');
+  second.close();
+});
+
+test('ротация: файл записей сбоев держит предел - старые записи вытесняются новыми, свежая остаётся', () => {
+  const fsys = new MemoryFs();
+  const d = diag(fsys, { fileBytes: 1500, files: 1, keepBytes: 1200 });
+  for (let i = 0; i < 40; i++) {
+    d.sinks.onJournal(failed(`p${String(i)}`, 'x'.repeat(100)));
+    d.sinks.onLog('noisy', 'w'.repeat(900), 'info');
+    d.flush();
+  }
+  d.close();
+  assert.ok(fsys.size('diagnostics.keep.log') <= 1200, `${String(fsys.size('diagnostics.keep.log'))} Б`);
+  const kept = fsys.records('diagnostics.keep.log').flatMap((r) => (r.src === 'journal' && r.entry.pluginId ? [r.entry.pluginId] : []));
+  assert.ok(kept.length >= 2 && kept.includes('p38'), `в файле: ${kept.join(' ')}`);
+  assert.ok(!kept.includes('p0'), 'самая старая запись вытеснена');
+});
+
+test('ротация: отказ чтения уходящего файла не ломает ротацию - шум уходит, причина названа через onProblem', () => {
+  const fsys = new MemoryFs();
+  const problems: string[] = [];
+  const d = diag(fsys, { fileBytes: 1500, files: 2, keepBytes: 1200, onProblem: (t) => problems.push(t) });
+  const read = fsys.read;
+  fsys.read = (name) => {
+    if (name === 'diagnostics.1.log') throw Object.assign(new Error('EIO: /Users/кто-то/x'), { code: 'EIO' });
+    return read(name);
+  };
+  for (let i = 0; i < 40; i++) d.sinks.onLog('noisy', 'w'.repeat(300), 'info');
+  d.close();
+  assert.ok(names(fsys).length <= 2, 'ротация прошла');
+  assert.equal(problems.length, 1, 'причина названа один раз');
+  assert.match(problems[0] ?? '', /записи сбоев.*\(EIO\)/);
+});
+
 test('предел числа файлов уменьшили между запусками: лишние старые файлы убираются при старте', () => {
   const fsys = new MemoryFs();
   for (const name of ['diagnostics.log', 'diagnostics.1.log', 'diagnostics.2.log', 'diagnostics.3.log', 'другой.txt']) fsys.files.set(name, '');
