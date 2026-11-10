@@ -74,6 +74,8 @@ export interface PluginManifest {
     readonly overlay?: string;
     /** Рекомендация автора: группа рендера, с которой плагин хочет делить origin и процесс рендера; итог решают `plugins.uiGroups` и поставка (`Kernel.groupOf`). */
     readonly group?: string;
+    /** `true` - виду нужны инлайн-стили (`<style>`, атрибут `style`: xterm, Monaco), и приложение разрешает их его CSP; без флага стили вида - только файлы своего origin и `adoptedStyleSheets`. Решение автора, сторонним плагинам действует так же. */
+    readonly inlineStyles?: true;
   };
   /** `onStart` - окно закрыто с первого кадра, плагин активируется сразу, даже `lazy`. */
   readonly lock?: { readonly onStart: true };
