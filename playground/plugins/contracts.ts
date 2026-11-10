@@ -9,6 +9,8 @@ declare module '@cyborg-harness/contracts' {
 
 export interface Echo {
   say(text: string): Promise<string>;
+  /** Состояние для пункта меню «Echo: отметка» (`contributes.menus`, K-08). */
+  marked(): Promise<boolean>;
 }
 
 export interface ChatMessage {

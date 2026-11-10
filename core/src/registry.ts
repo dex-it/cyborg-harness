@@ -69,6 +69,12 @@ export class ContractRegistry {
     return undefined;
   }
 
+  /** Собственный контракт плагина: так ядро читает состояние пункта меню у плагина, который сам владеет состоянием. Не отдан сейчас - undefined. */
+  provided(pluginId: string, contract: string, wanted: number): ContractImpl | undefined {
+    const mine = (this.#entries.get(contract) ?? []).filter((e) => e.pluginId === pluginId && major(e.version) === wanted);
+    return mine.reduce<Provider | undefined>((best, e) => (!best || newer(e.version, best.version) ? e : best), undefined)?.impl;
+  }
+
   /** consumes: все отданные сейчас поставщики подходящей версии этой мажорной. */
   all(consumerId: string, contract: string, wanted: number): Provider[] {
     const range = own(this.#manifest(consumerId).consumes, contract);

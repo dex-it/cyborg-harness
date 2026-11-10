@@ -3,6 +3,7 @@ import { isValidRange, parseVersion, satisfies } from './semver.ts';
 import { normalizeKey } from './keys.ts';
 import { isValidId, show } from './manifest-fields.ts';
 import { readDocuments, type DocumentDecl, type Placement } from './manifest-layout.ts';
+import { readContributes, type Contributes } from './manifest-menus.ts';
 import { readProvides } from './manifest-provides.ts';
 import { readUi } from './manifest-ui.ts';
 import { readPermissions, type PluginPermissions } from './permissions.ts';
@@ -81,6 +82,8 @@ export interface PluginManifest {
   readonly lock?: { readonly onStart: true };
   /** Типы документов плагина; `restorable` - документ переживает перезапуск окна, `area` и `order` - место вкладки. */
   readonly documents?: Readonly<Record<string, DocumentDecl>>;
+  /** Вклады в окно, которыми ядро распоряжается само: пункты меню (`contributes.menus`). */
+  readonly contributes?: Contributes;
   readonly permissions: PluginPermissions;
 }
 
@@ -90,7 +93,7 @@ export type ManifestResult =
 
 const TOP_LEVEL = new Set([
   '$schema', 'id', 'version', 'engines', 'provides', 'requires', 'optional', 'consumes', 'commands', 'keybindings',
-  'config', 'state', 'permissions', 'ui', 'documents', 'host', 'activation', 'lock',
+  'config', 'state', 'permissions', 'ui', 'documents', 'host', 'activation', 'lock', 'contributes',
 ]);
 
 /** Ключи верхнего уровня, которые знает разбор; по ним `checkPlugin` сверяет, что каждый новый ключ учтён в проверке файлов. */
@@ -134,6 +137,7 @@ export function parseManifest(raw: unknown, apiVersion?: string): ManifestResult
   const permissions = readPermissions(raw.permissions, errors);
   const ui = readUi(raw.ui, errors);
   const documents = readDocuments(raw.documents, errors);
+  const contributes = readContributes(raw.contributes, commands, { provides, requires, optional }, errors);
   if (raw.host !== undefined && raw.host !== 'own') errors.push(`host: допустимо только "own", получено ${show(raw.host)}`);
   if (raw.activation !== undefined && raw.activation !== 'lazy') errors.push(`activation: допустимо только "lazy", получено ${show(raw.activation)}`);
   const lock = isRecord(raw.lock) && raw.lock.onStart === true && Object.keys(raw.lock).length === 1;
@@ -170,6 +174,7 @@ export function parseManifest(raw: unknown, apiVersion?: string): ManifestResult
       ...(ui && { ui }),
       ...(lock && { lock: { onStart: true as const } }),
       ...(documents && { documents }),
+      ...(contributes && { contributes }),
     },
   };
 }

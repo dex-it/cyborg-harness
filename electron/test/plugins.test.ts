@@ -6,9 +6,10 @@ import path from 'node:path';
 import { inlineHosts } from '@cyborg-harness/core';
 import type { PluginModule } from '@cyborg-harness/core';
 import { WINDOW_OWNER } from '@cyborg-harness/core';
+import { ENTRY_FILES as CHECKED_ENTRY_FILES } from '@cyborg-harness/core/plugin-check';
 import type { KeyRow } from '../src/snapshot.ts';
 import { resolveViewRequest, viewCsp, viewHeaders } from '../src/view-files.ts';
-import { discoverPlugins, PluginsService, readSchemaFile, startPlugins } from '../src/plugins.ts';
+import { discoverPlugins, ENTRY_FILES, PluginsService, readSchemaFile, startPlugins } from '../src/plugins.ts';
 import { waitFor } from './wait-for.ts';
 
 // Контракт для плагинов-подделок теста: карту контрактов приложения (playground/plugins/contracts.ts) пакет не знает.
@@ -46,12 +47,52 @@ test('поиск: встроенные раньше пользовательск
   assert.deepEqual([...found.origins], [['files', builtin], ['notes', user]]);
 });
 
+test('поиск: набор имён точки входа тот же, что у проверки плагина (check и сборка): иначе check одобрит плагин, который стенд не найдёт', () => {
+  assert.deepEqual(ENTRY_FILES, CHECKED_ENTRY_FILES);
+});
+
+test('поиск: порядок index.mjs, index.js, index.ts; каталог с таким именем точкой входа не считается', () => {
+  const dir = tmp();
+  plugin(dir, 'first', {}, 'export default {}', 'index.js');
+  fs.writeFileSync(path.join(dir, 'first', 'index.ts'), 'export default {}');
+  fs.mkdirSync(path.join(dir, 'first', 'index.mjs'));
+  plugin(dir, 'second', {}, 'export default {}', 'index.ts');
+  const found = discoverPlugins([dir]);
+  assert.match(found.entries.get('first') ?? '', /first\/index\.js$/, 'каталог index.mjs пропущен, index.js раньше index.ts');
+  assert.match(found.entries.get('second') ?? '', /second\/index\.ts$/);
+});
+
+test('поиск: несколько точек входа в каталоге - загружается первая, и в problems сказано, какая и из каких', () => {
+  const dir = tmp();
+  plugin(dir, 'both', {}, 'export default {}', 'index.js');
+  fs.writeFileSync(path.join(dir, 'both', 'index.ts'), 'export default {}');
+  plugin(dir, 'single', {}, 'export default {}', 'index.js');
+  const found = discoverPlugins([dir]);
+  assert.deepEqual(found.problems, [`${path.join(dir, 'both')}: точек входа несколько (index.js, index.ts), загружается index.js`]);
+});
+
+test('поиск: точки входа нет - в problems причина с именами, которые ищутся, а загрузка называет ожидаемый путь', async (t) => {
+  const userData = tmp();
+  const builtinDir = tmp();
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['empty'] } }));
+  plugin(builtinDir, 'empty', {});
+  const found = discoverPlugins([builtinDir]);
+  const home = path.join(builtinDir, 'empty');
+  assert.deepEqual(found.problems, [`${home}: нет точки входа (ищутся index.mjs, index.js, index.ts), плагин empty не запустится`]);
+  assert.match(found.entries.get('empty') ?? '', /empty\/index\.mjs$/, 'ядро получает путь первого кандидата, а не id');
+  const kernel = await startPlugins({ userData, builtinDir, spawnHost: inlineHosts((entry) => import(entry).then((m: { default: PluginModule }) => m.default)), log: () => {} });
+  t.after(() => kernel.unload());
+  const failed = kernel.journal.find((e) => e.kind === 'failed' && e.pluginId === 'empty');
+  assert.ok(failed?.kind === 'failed' && failed.error.includes(`${home}${path.sep}index.mjs`), 'в журнале путь файла, которого нет');
+});
+
 test('поиск: повтор id внутри одного каталога называет оба каталога плагина, действует первый по имени', () => {
   const user = tmp();
-  fs.mkdirSync(path.join(user, 'b'));
-  fs.writeFileSync(path.join(user, 'b', 'manifest.json'), JSON.stringify({ id: 'z' }));
-  fs.mkdirSync(path.join(user, 'a'));
-  fs.writeFileSync(path.join(user, 'a', 'manifest.json'), JSON.stringify({ id: 'z' }));
+  for (const home of ['b', 'a']) {
+    fs.mkdirSync(path.join(user, home));
+    fs.writeFileSync(path.join(user, home, 'manifest.json'), JSON.stringify({ id: 'z' }));
+    fs.writeFileSync(path.join(user, home, 'index.mjs'), 'export default {}');
+  }
   const found = discoverPlugins([user]);
   assert.deepEqual(found.problems, [`повтор id z в ${path.join(user, 'b')}: действует ${path.join(user, 'a')}`]);
 });

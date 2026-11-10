@@ -8,6 +8,7 @@ import { app, BrowserWindow, dialog, Notification, powerMonitor } from 'electron
 import { RecentWorkspaces, withFileLock } from '@cyborg-harness/core';
 import {
   alertNotification,
+  bindAppMenu,
   bindWindow,
   electronOs,
   guardNavigation,
@@ -29,6 +30,7 @@ import {
   windowChannel,
   windowEvents,
   workspaceInfo,
+  type AppMenuItem,
   workspaceInstance,
 } from '@cyborg-harness/electron';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
@@ -64,6 +66,18 @@ const safeMode = process.argv.includes('--safe-mode');
 const userPlugins = process.argv.includes(USER_PLUGINS_FLAG);
 
 let win: BrowserWindow | undefined;
+
+/**
+ * Меню приложения (K-08): свои меню и пункты здесь, пункты плагинов (`contributes.menus`) встают в меню с `menu` и в меню ядра, которых тут нет («Инструменты»).
+ * Правка нужна и для буфера обмена: role copy и paste меню Edit действуют на сфокусированный кадр, вложенный тоже (issue #2).
+ */
+const menuBase: AppMenuItem[] = [
+  ...(process.platform === 'darwin' ? [{ role: 'appMenu' } as const] : []),
+  { label: 'Воркспейс', menu: 'workspace', submenu: [{ role: process.platform === 'darwin' ? 'close' : 'quit' }] },
+  { role: 'editMenu' },
+  { label: 'Вид', menu: 'view', submenu: [{ role: 'toggleDevTools' }] },
+  { label: 'Окно', menu: 'window', submenu: [{ role: 'minimize' }] },
+];
 
 // Сессия Chromium этого воркспейса лежит в своём каталоге внутри userData: два процесса не делят localStorage и кэш.
 isolateSession(app.getPath('userData'), workspaceFile);
@@ -180,6 +194,7 @@ const start = () => {
     fs.renameSync(tmp, config);
   });
   createWindow();
+  bindAppMenu(plugins, menuBase);
   // Причина видна человеку в окне, а не только в stderr: без неё «повторный запуск не поднимает окно» выглядит поломкой.
   if (instanceProblem !== undefined && win !== undefined) void dialog.showMessageBox(win, { type: 'warning', message: APP_NAME, detail: instanceProblem });
   watchPower(plugins);

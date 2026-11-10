@@ -11,7 +11,8 @@
     "echo.ping",
     "echo.files",
     "echo.tty",
-    "echo.terminal"
+    "echo.terminal",
+    "echo.mark"
   ],
   "permissions": {
     "fs.read": [
@@ -27,6 +28,12 @@
       "command": "echo.ping"
     }
   ],
+  "contributes": {
+    "menus": [
+      { "id": "ping", "menu": "tools", "title": "Echo: пинг", "command": "echo.ping", "order": 100, "accelerator": "CmdOrCtrl+Alt+E" },
+      { "id": "mark", "menu": "tools", "title": "Echo: отметка", "command": "echo.mark", "order": 200, "checked": { "contract": "demo.echo", "major": 1, "member": "marked" } }
+    ]
+  },
   "ui": {
     "views": {
       "main": "./ui/ui.js"

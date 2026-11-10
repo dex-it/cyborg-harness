@@ -10,7 +10,7 @@
 
 | Импорт | Что даёт | Где работает |
 |---|---|---|
-| `@cyborg-harness/electron` | служба плагинов (`PluginsService`, `startPlugins`, `discoverPlugins`), хосты (`utilityHosts`), среда ОС (`electronOs`), схема видов (`registerViewScheme`, `serveViews`, `resolveViewRequest`, `guardNavigation`), каналы (`registerWindowChannels`, `registerViewChannels`, `windowChannel`, `viewChannel`), окно и приложение (`windowEvents`, `bindWindow`, `watchPower`, `watchTheme`, `singleInstance`, `workspaceInstance` (экземпляр на воркспейс, K-20), `isolateSession`, `quitAfterPlugins`, `showWindow`), перезапуски и «новое окно» (`restarts`, `workspaceInfo`, `newWindowArgs`, `DEFAULT_RESTART_FLAGS`), ключ и каталог экземпляра (`instanceKey`, `NO_WORKSPACE_KEY`, `sessionDataDir`) | главный процесс Electron |
+| `@cyborg-harness/electron` | служба плагинов (`PluginsService`, `startPlugins`, `discoverPlugins`), хосты (`utilityHosts`), среда ОС (`electronOs`), схема видов (`registerViewScheme`, `serveViews`, `resolveViewRequest`, `guardNavigation`), каналы (`registerWindowChannels`, `registerViewChannels`, `windowChannel`, `viewChannel`), окно и приложение (`windowEvents`, `bindWindow`, `bindAppMenu`, `appMenuTemplate`, `watchPower`, `watchTheme`, `singleInstance`, `workspaceInstance` (экземпляр на воркспейс, K-20), `isolateSession`, `quitAfterPlugins`, `showWindow`), перезапуски и «новое окно» (`restarts`, `workspaceInfo`, `newWindowArgs`, `DEFAULT_RESTART_FLAGS`), ключ и каталог экземпляра (`instanceKey`, `NO_WORKSPACE_KEY`, `sessionDataDir`) | главный процесс Electron |
 | `@cyborg-harness/electron/host-entry` | точка входа файла для `utilityProcess`: `process.parentPort` -> `runHost` ядра; имён не экспортирует | процесс хоста (`utilityProcess`) |
 | `@cyborg-harness/electron/preload` | мосты: `windowApi()` (окно просит у главного процесса), `exposeViewBridge()` (`window.cyborgView` во фрейме вида), `inViewFrame`, `inWindowDocument` | preload (песочница) |
 | `@cyborg-harness/electron/window` | общее главного процесса и окна: снимок `PluginsSnapshot` и строки `PluginRow`, `WindowLayerView` (слой окна: диалоги видов и замки), протокол видов (`VIEW_SCHEME`, `viewOrigin`, `groupOfOrigin`, `PATH_MIME`) | окно (браузер), без `node:*` и Electron |
@@ -34,6 +34,7 @@ Peer-зависимости: `@cyborg-harness/core`, `@cyborg-harness/contracts`
 - перехват клавиш ядром раньше страницы, события фокуса окна, сна, пробуждения и блокировки экрана, выход с ожиданием `onBeforeQuit` плагинов, одиночный экземпляр;
 - перезапуск приложения при смене воркспейса и безопасного режима с вопросом о живых pty;
 - слой окна: диалоги видов и экраны замков из снимка ядра (`WindowLayerView`);
+- меню приложения по вкладам плагинов: `bindAppMenu(plugins, base)` ставит `Menu.setApplicationMenu` из снимка `Kernel.menus` и пересобирает его при смене снимка, нажатие пункта исполняет его команду через ядро; `appMenuTemplate` - то же шаблоном без Electron;
 - раскладку видов: `PluginsSnapshot.layout` (`LayoutRow`) - упорядоченный снимок `Kernel.layout` (область, `order`, заголовок), у вида плагина свой адрес для `<iframe>`; плагин с несколькими видами показывает все.
 
 Делает приложение (в playground это `playground/src/main/main.ts` и `playground/src/renderer`):
@@ -41,7 +42,8 @@ Peer-зависимости: `@cyborg-harness/core`, `@cyborg-harness/contracts`
 - имя приложения (`app.setName`, заголовок окна, `appName`) и папку данных; без имени заголовок подписан «Cyborg»;
 - разбор командной строки: `--workspace=`, `--no-workspace`, `--safe-mode` (имена флагов `restarts` берёт из `RestartFlags`), выбор воркспейса при старте и конфигурацию первого запуска (`cyborg.json`);
 - список встроенных плагинов (`builtinDir`) и воспроизводимую сборку приложения: бандл главного процесса, preload, файл хоста, оболочка вида рядом с окном;
-- **раскладку окна**: области, вкладки, в какой области какой вид; меню; стили слоя окна (`.layer-dialog`, `.lock-screen`);
+- **раскладку окна**: области, вкладки, в какой области какой вид; стили слоя окна (`.layer-dialog`, `.lock-screen`);
+- **меню приложения**: свои меню и пункты (`base` для `bindAppMenu`: роли `appMenu`, `editMenu`, пункты воркспейса), подписи меню ядра (`workspace`, `view`, `tools`, `window`) и куда они встают; пункты плагинов приходят из снимка;
 - окно (`BrowserWindow`) и его настройки: `preload`, `contextIsolation`, `sandbox`, `nodeIntegrationInSubFrames` (последнее нужно для моста вида);
 - каналы, специфичные для приложения: `workspace:open` и `app:safe-mode` в playground регистрируются через `windowChannel` поверх `restarts()`;
 - решение, что показывать на заблокированном экране, сверх того, что отдаёт ядро, и любую предметную область: адаптер её не знает.
