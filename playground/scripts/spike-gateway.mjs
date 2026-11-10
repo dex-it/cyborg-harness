@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { crashOf } from './crash-reports.mjs';
 
 const repo = resolve(import.meta.dirname, '..', '..');
 const OWN = /^--(budget|watch-budget|runs|trace)=/;
@@ -33,9 +34,12 @@ async function measureOnce() {
   const dir = mkdtempSync(join(tmpdir(), 'cyborg-spike-gateway-'));
   const out = join(dir, 'gateway.json');
   try {
+    const started = Date.now();
     const app = spawn(join(repo, 'node_modules', '.bin', 'electron'), [repo, `--spike-gateway=${out}`, `--user-data-dir=${join(dir, 'data')}`, `--gateway-trace=${trace}`, ...process.argv.slice(2).filter((a) => !own(a))], { stdio: ['ignore', 'inherit', 'inherit'] });
     const code = await new Promise((r) => app.once('exit', r));
-    return { code, ...JSON.parse(readFileSync(out, 'utf8')) };
+    // Выход приложения с недоставленным выходом pty роняет Electron SIGABRT (#185): падение при выходе - ошибка прогона, а не «код null».
+    const crash = await crashOf(app, started);
+    return { code, crash, ...JSON.parse(readFileSync(out, 'utf8')) };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -81,7 +85,7 @@ const costs = perRun[0].map((c) => {
   };
 });
 const failed = costs.filter((c) => c.over);
-const errors = results.flatMap((r, i) => (r.code !== 0 || r.error ? [`прогон ${String(i + 1)}: ${r.error ?? `код ${String(r.code)}`}`] : []));
+const errors = results.flatMap((r, i) => (r.code !== 0 || r.error || r.crash ? [`прогон ${String(i + 1)}: ${r.crash ?? r.error ?? `код ${String(r.code)}`}`] : []));
 
 if (json) console.log(JSON.stringify({ budgetMs: budget, watchBudgetMs: watchBudget, trace, runs: results, costs }, null, 2));
 else {
