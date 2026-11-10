@@ -15,7 +15,7 @@ Cyborg Harness - микроядро для настольных приложен
 
 ## Карта
 
-- `docs/` - проект Cyborg Harness: ресёрч, BRD и SRS фич (`CH-`), сценарии, SAD и ADR-CH, замеры хостов и фреймов, дорожная карта; вход - docs/README.md
+- `docs/` - проект Cyborg Harness: ресёрч, BRD продукта, SRS и истории с критериями приёмки фич (`CH-`), сценарии (`UC-{ФИЧА}-NNNN`), SAD и ADR-CH, замеры хостов и фреймов, дорожная карта; вход - docs/README.md
 - `core/` - ядро плагинов по SAD без зависимостей: загрузчик, граф контрактов, хосты со сторожем, журнал и состояние плагинов; тесты `core/test`, сценарии `core/examples`
 - `contracts/` - пакет объявлений `@cyborg-harness/contracts`: карта контрактов имя -> мажорная версия -> тип; правила и пример - `contracts/README.md`, проверки компилятора - `core/test/contracts-types.ts`
 - `electron/` - пакет адаптера `@cyborg-harness/electron`: всё, что связывает ядро с Electron (служба PluginsService, хосты в utilityProcess и вход хоста, среда ctx.os, схема cyborg-plugin и мост видов, каналы IPC, preload, слой окна, оболочка вида); граница «что даёт пакет, что делает приложение» и пример - `electron/README.md`, тесты `electron/test`
