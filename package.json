@@ -41,6 +41,7 @@
     "snapshot:contracts": "node contracts/scripts/check-api.ts --update",
     "lint": "eslint --max-warnings 0 .",
     "check:docs-links": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-docs-links.ts docs README.md",
+    "check:budgets": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-budgets.ts",
     "postinstall": "electron-rebuild -f -w node-pty"
   },
   "devDependencies": {
