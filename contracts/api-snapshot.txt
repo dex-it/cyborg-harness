@@ -507,6 +507,7 @@ export interface PluginDocuments {
     open(type: string, init: DocumentInit): Promise<string>;
     save(id: string, change: DocumentChange): Promise<void>;
     close(id: string): Promise<void>;
+    reveal(id: string): Promise<void>;
     onClose(listener: (id: string) => void): Disposable;
 }
 export interface ViewChannel {
@@ -532,6 +533,7 @@ export interface PluginDialogs {
 }
 export interface PluginWindow {
     onFocusChange(listener: (focused: boolean) => void): Disposable;
+    focused(): Promise<boolean>;
     setTitle(segment: string | undefined): Promise<void>;
 }
 export interface PluginSystem {
@@ -550,6 +552,7 @@ export interface PluginModule {
 import type { Subscription } from './index.js';
 export interface Sessions {
     onChange(listener: (event: SessionEvent) => void): Subscription;
+    reveal?(sessionId: string): Promise<void>;
 }
 export interface SessionEvent {
     readonly sessionId: string;

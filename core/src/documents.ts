@@ -82,6 +82,11 @@ export class DocumentTable {
     await this.#commit();
   }
 
+  /** Документ свой и открыт: id для окна; чужой, закрытый и незнакомый - `NotFound`. */
+  reveal(pluginId: string, id: unknown): string {
+    return this.#own(pluginId, id)[1].id;
+  }
+
   /** Закрытие человеком из окна: владелец, если он активен, узнаёт об этом от приложения. */
   async closeAny(id: string): Promise<StoredDocument> {
     const at = this.#docs.findIndex((d) => d.id === id);

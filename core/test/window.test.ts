@@ -373,6 +373,66 @@ test('заголовок окна: воркспейс, фрагменты по i
   await k.unload();
 });
 
+// #193: у onFocusChange нет начального состояния, плагин, поднятый при окне без фокуса, пропускал первое событие.
+test('ctx.window.focused: без источника окно активно, источник приложения задаёт начальное, события ядра ведут дальше, поздний плагин видит текущее', async () => {
+  const contexts = new Map<string, PluginContext>();
+  const watcher: PluginModule = {
+    activate(ctx) {
+      contexts.set(ctx.pluginId, ctx);
+      return undefined;
+    },
+  };
+  let appFocus = false;
+  const bare = kernel({ early: watcher }, { enabled: ['early'], manifests: [manifest('early')] });
+  const k0 = await bare.start();
+  assert.equal(await contexts.get('early')?.window.focused(), true, 'приложение фокус не называло - окно считается активным, как и до этого API');
+  k0.emit({ kind: 'focus', focused: false });
+  assert.equal(await contexts.get('early')?.window.focused(), false, 'событие приложения запоминается без источника');
+  await k0.unload();
+
+  const { start } = kernel({ early: watcher, late: watcher }, { enabled: ['early', 'late'], manifests: [manifest('early'), manifest('late')], windowFocused: () => appFocus });
+  const k = await start();
+  const early = contexts.get('early')!;
+  assert.equal(await early.window.focused(), false, 'окно запущено без фокуса: источник приложения называет это до первого события');
+  const seen: boolean[] = [];
+  early.window.onFocusChange((f) => seen.push(f));
+  k.emit({ kind: 'focus', focused: true });
+  assert.equal(await early.window.focused(), true, 'после события ответ идёт от события, а не от источника');
+  appFocus = false;
+  assert.equal(await early.window.focused(), true, 'источник только задаёт начальное значение');
+  k.emit({ kind: 'focus', focused: false });
+  assert.equal(await early.window.focused(), false);
+  await k.disable('late');
+  await k.enable('late');
+  assert.equal(await contexts.get('late')?.window.focused(), false, 'плагин, включённый позже, видит текущее состояние, а не «активно»');
+  await waitFor('слушатель получил перемены', () => seen.length === 2);
+  assert.deepEqual(seen, [true, false], 'onFocusChange по-прежнему сообщает только перемены');
+  await k.unload();
+});
+
+// #194: активация вкладки меняет то, что видит человек, а под чужим замком окно ему не принадлежит (как диалог системы и команда клика).
+test('documents.reveal под чужим замком окна - Unavailable и окно не тронуто, после снятия замка работает', async () => {
+  const contexts = new Map<string, PluginContext>();
+  const revealed: string[] = [];
+  const ed: PluginModule = {
+    activate(ctx) {
+      contexts.set(ctx.pluginId, ctx);
+      return undefined;
+    },
+  };
+  const { start } = kernel({ ed, pin }, { enabled: ['ed', 'pin'], manifests: [manifest('ed', { documents: { note: {} } }), pinManifest()], onDocumentReveal: (id) => revealed.push(id) });
+  const k = await start();
+  const docs = contexts.get('ed')!.documents;
+  const id = await docs.open('note', { title: 'A' });
+  await k.run('pin.lock', false);
+  await assert.rejects(docs.reveal(id), { code: 'Unavailable' });
+  assert.deepEqual(revealed, []);
+  await k.run('pin.unlock');
+  await docs.reveal(id);
+  assert.deepEqual(revealed, [id]);
+  await k.unload();
+});
+
 // K-13: модальное окно плагина (вид с area "modal"). Слой хранит очередь и результат, окно рисует показанное.
 test('модальное окно в слое: по одному и по порядку, закрывает владелец своего вида, отмена окна даёт undefined, выгрузка закрывает свои', async () => {
   const snaps: WindowSnapshot[] = [];
