@@ -163,7 +163,7 @@ export function settingsLayer(file: string): { load(): Record<string, unknown> |
 export interface PluginsList {
   readonly enabled: readonly string[];
   readonly hosts: Readonly<Record<string, readonly string[]>>;
-  /** `plugins.uiGroups`: группа рендера -> плагины. Слой воркспейса перекрывает пользователя по имени группы и идёт первым: плагин, названный в двух группах, получает ту, что названа раньше. */
+  /** `plugins.uiGroups`: группа рендера -> плагины. Только из файла пользователя: группа делит мост плагинов, а присланный файл воркспейса такого права не имеет (ADR-CH-0015, п. 5); поле воркспейса не действует и попадает в `Workspace.problems`. */
   readonly uiGroups: Readonly<Record<string, readonly string[]>>;
   /** Сначала пользователя, затем воркспейса: у одного сочетания последнее слово за воркспейсом. */
   readonly keybindings: readonly UserKeybinding[];
@@ -210,10 +210,12 @@ function pluginsOf(
   doc: Record<string, unknown> | undefined,
   file = '',
   problem: (message: string) => void = () => undefined,
+  trusted = true,
 ): { enabled?: string[]; hosts?: Record<string, string[]>; uiGroups?: Record<string, string[]>; keybindings: UserKeybinding[] } {
   const plugins = isRecord(doc?.plugins) ? doc.plugins : {};
   const keys = Array.isArray(plugins.keybindings) ? plugins.keybindings : [];
-  const uiGroups = uiGroupsOf(plugins.uiGroups, file, problem);
+  if (!trusted && plugins.uiGroups !== undefined) problem(`${file}: plugins.uiGroups: группы рендера берутся только из файла пользователя, поле воркспейса не действует`);
+  const uiGroups = trusted ? uiGroupsOf(plugins.uiGroups, file, problem) : undefined;
   return {
     keybindings: keys.filter((k): k is UserKeybinding => isRecord(k) && typeof k.key === 'string' && (typeof k.command === 'string' || k.command === null)),
     ...(Array.isArray(plugins.enabled) && { enabled: strings(plugins.enabled) }),
@@ -341,12 +343,12 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
     const state = await SectionStore.open(stateStore, ['workspace']);
     opening = false;
     const user = pluginsOf(tolerant(options.userFile), options.userFile, (m) => problems.push(m));
-    const own = pluginsOf(legacy ? legacy.config : doc, file, (m) => problems.push(m));
+    const own = pluginsOf(legacy ? legacy.config : doc, file, (m) => problems.push(m), false);
     const plugins: PluginsList = {
       enabled: own.enabled ?? user.enabled ?? [],
       hosts: { ...user.hosts, ...own.hosts },
-      // Воркспейс первым: плагин, названный и там и там, получает группу воркспейса.
-      uiGroups: { ...own.uiGroups, ...Object.fromEntries(Object.entries(user.uiGroups ?? {}).filter(([group]) => !Object.hasOwn(own.uiGroups ?? {}, group))) },
+      // Группа рендера делит мост плагинов: источник - слой пользователя (TRUSTED_LAYER), присланный воркспейс её не задаёт.
+      uiGroups: user.uiGroups ?? {},
       keybindings: [...user.keybindings, ...own.keybindings],
     };
     let enabledNow = plugins.enabled;
