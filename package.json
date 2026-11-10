@@ -52,7 +52,7 @@
     "@electron/rebuild": "^4.2.1",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.5",
-    "electron": "^45.0.0",
+    "electron": "^45.2.3",
     "esbuild": "^0.28.2",
     "eslint": "^10.14.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
