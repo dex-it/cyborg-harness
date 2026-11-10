@@ -1,12 +1,13 @@
 // Замер пилота PL-04 (files, git, viewer): дерево репозитория через границу плагинов, fs.watch вместо опроса. Запуск: npm run pilot:files -- --repo <путь> [--repo ...].
 // Репозиторий клонируется во временный каталог (git clone --local), исходный не трогается. Ядро и плагины - как в playground/test/pilot-files.test.ts: три хоста-процесса (forkHosts),
 // не Electron: цена шлюза здесь - цена канала child_process, а не utilityProcess (разница описана в docs/05-verification/pilot-files-git.md).
-// Параметры: --runs=<n> прогонов на репозиторий (3), --samples=<n> вызовов на замер задержки (300), --idle=<с> окно простоя (10), --expand=<n> раскрытых каталогов (48), --json=<файл>.
+// Параметры: --runs=<n> прогонов на репозиторий (3), --samples=<n> вызовов на замер задержки (300), --idle=<с> окно простоя (10), --expand=<n> раскрытых каталогов (48), --control=0 без контрольного
+// рекурсивного слежения в checkout (на Linux оно удваивает работу Node по inotify), --json=<файл>.
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, watch, writeFileSync } from 'node:fs';
 import { cpus, loadavg } from 'node:os';
 import path from 'node:path';
-import { performance } from 'node:perf_hooks';
+import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
 import { sandbox } from '@cyborg-harness/testing';
 import { startPilot } from '../test/pilot-kit.ts';
@@ -24,6 +25,7 @@ const SAMPLES = flag('samples', 300);
 const WARMUP = 30;
 const IDLE_MS = flag('idle', 10) * 1000;
 const EXPAND = flag('expand', 48);
+const CONTROL = flag('control', 1) !== 0;
 const jsonOut = args.find((a) => a.startsWith('--json='))?.slice(7);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -147,7 +149,7 @@ function mismatches(st) {
       continue;
     }
     const tree = node.entries.map((e) => e[0]).toSorted();
-    if (disk.length !== tree.length || disk.some((n, i) => n !== tree[i])) bad.push(`${path.basename(node.dir)}: имён на диске ${disk.length}, в дереве ${tree.length}${node.stale ? ' (устарел)' : ''}`);
+    if (disk.length !== tree.length || disk.some((n, i) => n !== tree[i])) bad.push(`${path.basename(node.dir)}: имён на диске ${disk.length}, в дереве ${tree.length}`);
   }
   return bad;
 }
@@ -156,24 +158,32 @@ async function checkout(p, repo, rev, expandedCount) {
   const before = await state(p);
   const gitBefore = (await p.gitRuns()).length;
   const rawBefore = p.watches.raw;
-  // Для сравнения: одно рекурсивное слежение Node за корнем (FSEvents на macOS, обход каталогов на Linux).
+  // Для сравнения: второе рекурсивное слежение Node за корнем (FSEvents на macOS, обход каталогов и inotify на каждый каталог на Linux); `--control=0` его не открывает.
   let recursive = 0;
   let recursiveLast = 0;
   const t0 = performance.now();
-  const rw = watch(repo, { recursive: true }, () => {
-    recursive++;
-    recursiveLast = performance.now() - t0;
-  });
+  const rw = CONTROL
+    ? watch(repo, { recursive: true }, () => {
+        recursive++;
+        recursiveLast = performance.now() - t0;
+      })
+    : undefined;
   await sleep(300);
+  // Отставание цикла событий процесса замера - это главный процесс приложения: пока слежение Node разбирает события, он не отвечает.
+  const lag = monitorEventLoopDelay({ resolution: 10 });
+  lag.enable();
   const start = performance.now();
   await run('git', ['checkout', '-q', rev], { cwd: repo });
   const checkoutMs = performance.now() - start;
   const settledMs = await settle(p);
-  rw.close();
+  lag.disable();
+  rw?.close();
   const after = await state(p);
   const statusCli = git(repo, 'status', '--porcelain=v1').split('\n').filter(Boolean).length;
   return {
     checkoutMs: round(checkoutMs, 0),
+    loopLagMaxMs: round(lag.max / 1e6, 0),
+    loopLagP99Ms: round(lag.percentile(99) / 1e6, 0),
     lastChangeAfterCheckoutMs: round(settledMs, 0),
     rawEvents: p.watches.raw - rawBefore,
     batches: after.counters.batches - before.counters.batches,
@@ -183,8 +193,8 @@ async function checkout(p, repo, rev, expandedCount) {
     lists: after.counters.list - before.counters.list,
     markRuns: after.counters.markRuns - before.counters.markRuns,
     gitStatusRuns: (await p.gitRuns()).length - gitBefore,
-    recursiveEvents: recursive,
-    recursiveLastMs: round(recursiveLast - (start - t0), 0),
+    recursiveEvents: CONTROL ? recursive : null,
+    recursiveLastMs: CONTROL ? round(recursiveLast - (start - t0), 0) : null,
     expanded: expandedCount,
     watchesLive: after.watches,
     treeMismatches: mismatches(after),
