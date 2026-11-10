@@ -307,14 +307,17 @@ export class Diagnostics {
         size = 0;
       }
       let text = '';
+      let bytes = 0;
       let count = 0;
       for (const line of lines) {
-        if (count > 0 && size + Buffer.byteLength(text) + Buffer.byteLength(line) > fileBytes) break;
+        const length = Buffer.byteLength(line);
+        if (count > 0 && size + bytes + length > fileBytes) break;
         text += line;
+        bytes += length;
         count++;
       }
       this.#fs.append(CURRENT, text);
-      this.#sizes.set(CURRENT, size + Buffer.byteLength(text));
+      this.#sizes.set(CURRENT, size + bytes);
       let first = this.#firsts.get(CURRENT) ?? Infinity;
       for (const record of this.#batch.splice(0, count)) first = Math.min(first, record.at);
       this.#firsts.set(CURRENT, first);
