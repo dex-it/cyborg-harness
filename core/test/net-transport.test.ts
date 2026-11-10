@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import dns from 'node:dns';
 import http from 'node:http';
 import net, { type AddressInfo } from 'node:net';
-import { gzipSync } from 'node:zlib';
+import { brotliCompressSync, deflateRawSync, deflateSync, gzipSync, zstdCompressSync } from 'node:zlib';
 import { closePools, guardedLookup, isLocalAddress, transport, type Lookup, type TransportRequest } from '../src/net-transport.ts';
 
 // Пробы ревью K-25 (#99): транспорт net.fetch на node:http(s) с общими пулами соединений.
@@ -146,12 +146,29 @@ test('isLocalAddress: стенды 192.0.0.0/24 и 198.18.0.0/15, локальн
   for (const a of ['192.0.1.1', '198.17.255.255', '198.20.0.1', '64:ff9b:2::1', '64:ff9a::1']) assert.equal(isLocalAddress(a), false, a);
 });
 
+test('isLocalAddress: документация, стенды, Teredo, discard и трансляция IPv4 в IPv6 (реестры IANA special-purpose) отвергаются; соседние публичные - нет (#132)', () => {
+  const refused = [
+    '192.0.2.1', '192.0.2.255', '198.51.100.7', '203.0.113.200', // документация IPv4
+    '2001:2::1', '2001:2:0:ffff::1', // стенд замеров IPv6 2001:2::/48
+    '2001:db8::1', '2001:db8:ffff::1', '3fff::1', '3fff:fff:ffff::1', // документация IPv6
+    '100::1', '100::ffff:ffff:ffff:ffff', // discard-only 100::/64
+    '2001::1', '2001:0:4136:e378:8000:63bf:3fff:fdd2', // Teredo 2001::/32
+    '::ffff:0:8.8.8.8', '0:0:0:0:ffff:0:0:1', // ::ffff:0:0:0/96, IPv4-IPv6 translation (RFC 2765)
+  ];
+  const allowed = [
+    '192.0.3.1', '192.0.1.255', '198.51.99.255', '198.51.101.1', '203.0.112.255', '203.0.114.1', // соседи документации IPv4
+    '2001:3::1', '2001:1:ffff::1', '2001:4860::8888', '2001:db7::1', '2001:db9::1', '3ffe::1', '3fff:1000::1', '100:0:0:1::1', '2606:4700::1111',
+  ];
+  for (const a of refused) assert.equal(isLocalAddress(a), true, a);
+  for (const a of allowed) assert.equal(isLocalAddress(a), false, a);
+});
+
 test('transport: content-encoding при пустом теле (HEAD, пустой объект) - пустой ответ, как у прежнего fetch, а не ошибка распаковки', async () => {
   using s = await listen((request, response) => {
     response.writeHead(200, { 'content-encoding': request.url?.slice(1) ?? '', 'content-length': request.method === 'HEAD' ? '25' : '0' });
     response.end();
   });
-  for (const encoding of ['gzip', 'deflate', 'br']) {
+  for (const encoding of ['gzip', 'deflate', 'br', 'zstd']) {
     const url = new URL(`http://127.0.0.1:${String(s.port)}/${encoding}`);
     for (const method of ['HEAD', 'GET']) {
       const response = await transport(url, base('a', { method }));
@@ -160,4 +177,43 @@ test('transport: content-encoding при пустом теле (HEAD, пусто
     }
   }
   closePools('a');
+});
+
+async function decodedBy(encoding: string | string[], body: Buffer): Promise<{ text: string; encoding: string | null; length: string | null }> {
+  using s = await listen((_request, response) => {
+    const list = Array.isArray(encoding) ? encoding : [encoding];
+    response.writeHead(200, list.flatMap((e) => ['content-encoding', e])).end(body);
+  });
+  const response = await transport(new URL(`http://127.0.0.1:${String(s.port)}/`), base('chain'));
+  const text = await response.text();
+  closePools('chain');
+  return { text, encoding: response.headers.get('content-encoding'), length: response.headers.get('content-length') };
+}
+
+test('transport: цепочка content-encoding распаковывается звено за звеном - перечень через запятую и повторные заголовки (#132)', async () => {
+  const once = gzipSync('hello');
+  assert.deepEqual(await decodedBy('gzip, gzip', gzipSync(once)), { text: 'hello', encoding: null, length: null });
+  assert.equal((await decodedBy('deflate, br', brotliCompressSync(deflateSync('chain')))).text, 'chain');
+  assert.equal((await decodedBy(['gzip', 'br'], brotliCompressSync(gzipSync('two headers')))).text, 'two headers');
+  assert.equal((await decodedBy('GZIP , identity', gzipSync('case'))).text, 'case');
+});
+
+test('transport: zstd и сырой deflate распаковываются, как у прежнего fetch (#132)', async () => {
+  assert.equal((await decodedBy('zstd', zstdCompressSync('zstd body'))).text, 'zstd body');
+  assert.equal((await decodedBy('deflate', deflateSync('zlib wrapped'))).text, 'zlib wrapped');
+  assert.equal((await decodedBy('deflate', deflateRawSync('raw deflate'))).text, 'raw deflate');
+  assert.equal((await decodedBy('deflate, gzip', gzipSync(deflateRawSync('raw in chain')))).text, 'raw in chain');
+});
+
+test('transport: звеньев больше предела (4) - отказ, а не байты плагину; неизвестное звено - ответ без распаковки с заголовком как есть (#132)', async () => {
+  let body = Buffer.from('deep');
+  for (let i = 0; i < 5; i++) body = gzipSync(body);
+  await assert.rejects(decodedBy('gzip, gzip, gzip, gzip, gzip', body), (e: unknown) => e instanceof Error && e.message.includes('content-encoding'));
+  let four = Buffer.from('deep');
+  for (let i = 0; i < 4; i++) four = gzipSync(four);
+  assert.equal((await decodedBy('gzip, gzip, gzip, gzip', four)).text, 'deep');
+  const raw = gzipSync('opaque');
+  const unknown = await decodedBy('gzip, compress', raw);
+  assert.equal(unknown.encoding, 'gzip, compress');
+  assert.equal(unknown.text, raw.toString());
 });

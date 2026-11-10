@@ -161,7 +161,8 @@ export interface KeyRegistry {
   /** Владелец не работает или условия не прошли - undefined; без `press` условия не проверяются. */
   lookup(key: string, press?: KeyPress): Keybinding | undefined;
   rows(): Keybinding[];
-  setVisible(pluginId: string, visible: boolean): void;
+  /** Видимость вида; без `view` - признак на весь плагин (`false` скрывает все его виды). Нет плагина или вида - `Unavailable`. */
+  setVisible(pluginId: string, visible: boolean, view?: string): void;
 }
 
 /** Меню окна по вкладам плагинов: снимок, перечитывание источников состояния и нажатие пункта. */

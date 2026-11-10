@@ -53,7 +53,7 @@ export function registerWindowChannels({ plugins, window }: WindowChannelsOption
     if (!isRecord(arg) || typeof arg.id !== 'string' || typeof arg.view !== 'string' || typeof arg.visible !== 'boolean' || !win) return;
     // Видов у плагина может быть несколько, каждый во фрейме со своим ?view=: свёрнутый вид не прячет остальные, а сосед по группе рендера - тем более.
     for (const frame of framesOfPlugin(win.webContents, plugins.groupOf(arg.id), arg.id)) if (viewOfUrl(frame.url) === arg.view) frame.send('view:visibility', arg.visible);
-    plugins.setViewVisible(arg.id, arg.visible);
+    plugins.setViewVisible(arg.id, arg.visible, arg.view);
   });
 }
 
