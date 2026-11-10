@@ -2,7 +2,7 @@
   "id": "panels",
   "version": "1.0.0",
   "engines": { "cyborg": "^1" },
-  "commands": { "panels.ping": {}, "panels.form": {}, "panels.confirm": {}, "panels.form-own": {} },
+  "commands": { "panels.ping": {}, "panels.form": {}, "panels.confirm": {}, "panels.form-own": {}, "panels.form-fit": {} },
   "ui": {
     "views": {
       "panel": { "module": "./ui/panel.js", "area": "sidebar", "order": 900, "title": "Панель" },

@@ -1121,12 +1121,48 @@ async function main() {
   await waitFor('окно снято кнопкой вида', async () => !(await modalOpen()));
   assert.deepEqual(await ev('window.__own'), {}, 'владелец не получил undefined');
 
+  // #197: окно «по содержимому». Окно не видит содержимое чужого по origin фрейма, поэтому высоту области вида просит сам вид (ctx.modal.resize):
+  // окно растёт вокруг фрейма (шапка + область вида), выше 80% экрана не бывает, а неверную высоту ядро отвергает, окно не меняется.
+  await ev("(window.__fit = window.playground.runCommand('panels.form-fit'), 0)");
+  await waitFor('окно по содержимому показано', modalOpen);
+  await waitFor('вид окна по содержимому смонтирован', async () => (await inForm("document.getElementById('shrink') !== null")) === true);
+  const fitBox = () =>
+    ev(`(() => {
+      const d = document.querySelector('dialog.layer-modal').getBoundingClientRect();
+      const h = document.querySelector('dialog.layer-modal .layer-modal-head').getBoundingClientRect();
+      const f = document.querySelector('dialog.layer-modal iframe').getBoundingClientRect();
+      return { window: d.height, head: h.height, frame: f.height, vh: window.innerHeight };
+    })()`);
+  const fitted = () => inForm("document.getElementById('fitted').textContent");
+  const near = (actual, expected, what) => assert.ok(Math.abs(actual - expected) <= 4, `${what}: ${actual} вместо ${expected}`);
+  await inForm("document.getElementById('shrink').click()");
+  await waitFor('вид получил ответ на просьбу о высоте', async () => /^высота: \d+$/.test(await fitted()));
+  const asked = Number((await fitted()).slice('высота: '.length));
+  const shrunk = await fitBox();
+  const ceiling = shrunk.vh * 0.8;
+  if (asked + shrunk.head + 2 <= ceiling) {
+    near(shrunk.frame, asked, 'область вида не той высоты, о которой просил вид');
+    near(shrunk.window, asked + shrunk.head, 'окно не выросло вокруг области вида (шапка + область)');
+  } else near(shrunk.window, ceiling, 'окно выше потолка 80vh');
+  await inForm("document.getElementById('grow').click()");
+  await waitFor('вид получил ответ на просьбу выше экрана', async () => (await fitted()) === 'высота: 4000');
+  const grown = await fitBox();
+  near(grown.window, grown.vh * 0.8, 'окно по просьбе 4000 не упёрлось в потолок 80vh');
+  assert.ok(grown.frame <= grown.window, 'область вида вылезла из окна');
+  await inForm("document.getElementById('bad').click()");
+  await waitFor('ядро отвергло неверную высоту', async () => /100/.test(await inForm("document.getElementById('fit-error').textContent")));
+  near((await fitBox()).window, grown.window, 'отвергнутая просьба изменила окно');
+  assert.equal(await fitted(), 'высота: 4000', 'отвергнутая просьба прошла');
+  await inForm("document.getElementById('cancel').click()");
+  await waitFor('окно по содержимому снято', async () => !(await modalOpen()));
+  assert.deepEqual(await ev('window.__fit'), {}, 'владелец не получил undefined');
+
   // Диалог из главной части без вида (ctx.dialogs.show): очередь окна та же, что у диалогов видов.
   await ev("(window.__confirm = window.playground.runCommand('panels.confirm'), 0)");
   await waitFor('вопрос главной части показан', () => ev("!!document.querySelector('dialog.layer-ask[data-plugin=\"panels\"] [data-choice=\"yes\"]')"));
   await ev("document.querySelector('dialog.layer-ask[data-plugin=\"panels\"] [data-choice=\"yes\"]').click()");
   assert.deepEqual(await ev('window.__confirm'), { value: 'yes' }, 'ответ человека не дошёл до главной части');
-  log('модальное окно плагина: поверх окна, остальное inert, фокус заперт, результат и Escape доходят владельцу; диалог главной части отвечает');
+  log('модальное окно плагина: поверх окна, остальное inert, фокус заперт, результат и Escape доходят владельцу; высоту по содержимому просит вид, потолок 80vh держится; диалог главной части отвечает');
 
   const lock = JSON.parse(readFileSync(join(userData, 'workspace.cyborg.json.lock'), 'utf8'));
   assert.equal(typeof lock.pid, 'number', 'замок воркспейса без pid');
