@@ -1,7 +1,6 @@
 {
   "name": "@cyborg-harness/core",
   "version": "0.1.0",
-  "private": true,
   "description": "Ядро плагинов Cyborg Harness: загрузчик, граф контрактов, хосты со сторожем, журнал; без npm-зависимостей",
   "type": "module",
   "license": "UNLICENSED",
@@ -21,7 +20,9 @@
     "./elements": { "types": "./dist/elements/elements.d.ts", "default": "./dist/elements/elements.js" },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md"],
+  "files": ["dist", "README.md", "CHANGELOG.md"],
+  "repository": { "type": "git", "url": "git+https://github.com/dex-it/cyborg-harness.git", "directory": "core" },
+  "publishConfig": { "registry": "https://registry.npmjs.org/", "access": "restricted" },
   "peerDependencies": {
     "@cyborg-harness/contracts": ">=1.0.0-0 <2.0.0"
   }

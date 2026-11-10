@@ -1,0 +1,118 @@
+name: Release
+
+# Выпуск пакетов @cyborg-harness/contracts, @cyborg-harness/core, @cyborg-harness/electron в npm (scope @cyborg-harness, D-00 строка 3; SAD 3.3, «Канал»).
+#   push тега v<версия> - проверка (verify) и, если владелец включил публикацию, настоящий выпуск (publish);
+#   pull_request, workflow_dispatch - репетиция: те же шаги проверки и `npm publish --dry-run`, публиковать нельзя.
+# Версии пакетов независимы: тег v0.1.0 выпускает пакеты с версией 0.1.0, остальные пропускает (scripts/release.ts). Правила и порядок - docs/guide/development/tests-ci.md.
+#
+# Защита выпуска (слоями; любой один слой не даст опубликовать):
+#   1. публикует только задание publish, оно идёт лишь на push тега и лишь при переменной репозитория RELEASE_PUBLISH=true;
+#   2. задание publish стоит в окружении npm-publish: владелец включает в нём обязательных ревьюеров и ограничение «только теги v*», секрет NPM_TOKEN лежит в этом окружении;
+#   3. токен npm - гранулярный, только запись в пакеты @cyborg-harness, срок до года; в workflow права GITHUB_TOKEN - contents: read;
+#   4. publish проверяет, что коммит тега входит в master, и публикует те tarball, которые собрал и проверил verify (сборка один раз);
+#   5. scripts/release.ts без `--publish` и RELEASE_PUBLISH=true вместе всегда делает `npm publish --dry-run`.
+# Действия закреплены по SHA, как в ci.yml.
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'scripts/release.ts'
+      - 'contracts/package.json'
+      - 'contracts/CHANGELOG.md'
+      - 'core/package.json'
+      - 'core/CHANGELOG.md'
+      - 'electron/package.json'
+      - 'electron/CHANGELOG.md'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Репетиция выпуска: тег вида v0.1.0 (ничего не публикуется)'
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: проверка и сборка архивов
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      # Нативный модуль и бинарник Electron не нужны: пакеты собираются без них.
+      - run: npm ci --ignore-scripts
+      - name: тег и состав выпуска
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          out="$RUNNER_TEMP/release"
+          if [ "$EVENT" = push ]; then
+            tag="$REF_NAME"; rehearsal=""
+          elif [ -n "$INPUT_TAG" ]; then
+            tag="$INPUT_TAG"; rehearsal="--rehearsal"
+          else
+            # PR: репетиция на версии ядра из ветки.
+            tag="v$(node -p "require('./core/package.json').version")"; rehearsal="--rehearsal"
+          fi
+          npm run --silent release -- plan "$tag" --out "$out" $rehearsal | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "out=$out" >> "$GITHUB_OUTPUT"
+      - run: npm run build:packages
+      - run: npm run check:contracts
+      - name: архивы (npm pack)
+        run: npm run --silent release -- pack "${{ steps.plan.outputs.out }}"
+      - name: сухая публикация (npm publish --dry-run)
+        run: npm run --silent release -- publish "${{ steps.plan.outputs.out }}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: ${{ steps.plan.outputs.out }}
+          retention-days: 14
+          if-no-files-found: error
+
+  publish:
+    name: публикация в npm
+    needs: verify
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && vars.RELEASE_PUBLISH == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: npm-publish
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: коммит тега входит в master
+        run: |
+          git fetch --no-tags origin master
+          git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD || { echo "::error::коммит тега не входит в master: выпуск только с master"; exit 1; }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: ${{ runner.temp }}/release
+      - name: публикация проверенных архивов
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          RELEASE_PUBLISH: 'true'
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/release.ts publish "$RUNNER_TEMP/release" --publish

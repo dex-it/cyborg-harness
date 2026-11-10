@@ -16,8 +16,8 @@ describe('состав архива @cyborg-harness/electron (npm pack --dry-run
     files = packed.files.map((f) => f.path);
   });
 
-  it('есть сборка, объявления, оболочка вида, README и package.json', () => {
-    for (const expected of ['package.json', 'README.md', 'dist/src/index.js', 'dist/src/index.d.ts', 'dist/src/host-entry.js', 'dist/src/index-preload.js', 'dist/src/index-window.js', 'dist/shell/shell.js', 'dist/shell/shell.css']) {
+  it('есть сборка, объявления, оболочка вида, README, CHANGELOG и package.json', () => {
+    for (const expected of ['package.json', 'README.md', 'CHANGELOG.md', 'dist/src/index.js', 'dist/src/index.d.ts', 'dist/src/host-entry.js', 'dist/src/index-preload.js', 'dist/src/index-window.js', 'dist/shell/shell.js', 'dist/shell/shell.css']) {
       assert.ok(files.includes(expected), `нет ${expected}`);
     }
   });

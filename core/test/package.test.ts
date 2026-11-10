@@ -106,13 +106,13 @@ describe('собранный пакет (core/dist)', () => {
     assert.ok(!fs.existsSync(path.join(core, 'dist', 'src', 'plugin-cli-bin.js')), 'в сборке ядра остался вход команды');
   });
 
-  it('npm pack: в архиве dist, package.json и README, без исходников и тестов', () => {
+  it('npm pack: в архиве dist, package.json, README и CHANGELOG, без исходников и тестов', () => {
     const out = runCommand('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: core });
     const [pack] = JSON.parse(out) as [{ files: { path: string }[] }];
     const names = pack.files.map((f) => f.path);
-    assert.ok(names.includes('package.json') && names.includes('README.md'), 'нет package.json или README.md');
+    assert.ok(names.includes('package.json') && names.includes('README.md') && names.includes('CHANGELOG.md'), 'нет package.json, README.md или CHANGELOG.md');
     for (const name of names) {
-      assert.ok(name === 'package.json' || name === 'README.md' || name.startsWith('dist/'), `лишний файл в архиве: ${name}`);
+      assert.ok(name === 'package.json' || name === 'README.md' || name === 'CHANGELOG.md' || name.startsWith('dist/'), `лишний файл в архиве: ${name}`);
       assert.ok(!name.endsWith('.ts') || name.endsWith('.d.ts'), `исходный .ts в архиве: ${name}`);
     }
     for (const target of exportTargets()) assert.ok(names.includes(target.slice(2)), `в архиве нет ${target}`);

@@ -111,3 +111,21 @@ test('порт терминала: не пришёл за срок - отказ,
   assert.deepEqual(events, []);
   assert.deepEqual(await ports.request(8, { op: 'write', data: 'x' }), { error: 'терминал 8 закрыт' });
 });
+
+test('порт терминала: ввод длиннее предела pty отклоняется в preload до postMessage, ответ - ошибка; в пределе и размер идут как обычно (#134)', async () => {
+  const ports = terminalPorts();
+  const { port, host, seen } = pair();
+  ports.arrived(5, port);
+  assert.equal(await ports.connect(5, 8), true);
+
+  const refused = await ports.request(5, { op: 'write', data: 'x'.repeat(9) });
+  assert.match(refused.error ?? '', /ввод больше 8/);
+  const fits = ports.request(5, { op: 'write', data: 'x'.repeat(8) });
+  const resize = ports.request(5, { op: 'resize', cols: 80, rows: 24 });
+  await waitFor('ввод в пределе и размер дошли до хоста', () => seen.length >= 2);
+  assert.deepEqual(seen, [{ id: 1, op: 'write', data: 'x'.repeat(8) }, { id: 2, op: 'resize', cols: 80, rows: 24 }], 'отклонённый ввод ушёл в порт');
+  host.postMessage({ id: 1, ok: true });
+  host.postMessage({ id: 2, ok: true });
+  assert.deepEqual([await fits, await resize], [{}, {}]);
+  ports.close(5);
+});

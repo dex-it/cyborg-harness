@@ -3,6 +3,10 @@
 export interface ResourceLimits {
   /** Байт UTF-8 в одном вводе pty - из главной части и из вида. */
   readonly ptyInput: number;
+  /** Запас ввода одного pty, байт: столько можно отдать сразу, не глядя на скорость (вставка, набор). Ядро не видит, читает ли программа stdin, и ограничивает сами байты (У-47). */
+  readonly ptyInputBurst: number;
+  /** Скорость пополнения запаса ввода одного pty, байт в секунду: дольше этого предела программа, не читающая stdin, копит очередь в памяти pty-хоста. */
+  readonly ptyInputRate: number;
   /** Живых pty у плагина, включая ждущие attach после падения хоста или выключения. */
   readonly ptys: number;
   /** Мс склейки вывода pty: первый кусок после затишья уходит сразу, следующие - пачкой через столько мс. 0 - каждый кусок сразу. */
@@ -21,6 +25,8 @@ export interface ResourceLimits {
   readonly subscriptions: number;
   /** Слушателей `onIdle` у плагина. */
   readonly idleWatchers: number;
+  /** Байт одного сообщения канала «главная часть - вид» в любую сторону (размер по `v8.serialize`); больше - `Invalid`. */
+  readonly viewMessage: number;
   /** Байт UTF-8 в строке `ctx.log` и в строке вывода хоста; длиннее обрезается с пометкой (FR-CH-4018). */
   readonly logLineBytes: number;
   /** Строк плагина за интервал `logWindowMs`; сверх этого строки в журнал по одной не идут, а в конце интервала пишется одна сводная запись `log-summary`. */
@@ -29,10 +35,15 @@ export interface ResourceLimits {
   readonly logWindowMs: number;
   /** Сколько мс подряд плагин может превышать `logRate`, прежде чем ядро его выключит (запись `switched-off` с `reason: 'log-flood'`). */
   readonly logFloodMs: number;
+  /** Интервал счётчика частого потока в трассе (вывод pty, события `fs.watch`), мс: за него пишется одна запись с числом сообщений и байт (FR-CH-4005). */
+  readonly traceStreamMs: number;
 }
 
 export const LIMITS: ResourceLimits = {
   ptyInput: 1024 * 1024,
+  // Числа выбраны ядром (задача #134): запас в четыре предела ввода, чтобы вставка 1 МиБ не упёрлась в него и повторялась, и 256 КиБ/с вдвое выше пиковой скорости агента, которого читает программа.
+  ptyInputBurst: 4 * 1024 * 1024,
+  ptyInputRate: 256 * 1024,
   ptys: 32,
   ptyFlushMs: 4,
   ptyFlushChars: 64 * 1024,
@@ -42,11 +53,14 @@ export const LIMITS: ResourceLimits = {
   readText: 8 * 1024 * 1024,
   subscriptions: 256,
   idleWatchers: 64,
+  viewMessage: 64 * 1024,
   // Числа предложены нормой (SRS фичи 04, вопрос 10), владелец их не принял: меняются здесь одной строкой.
   logLineBytes: 8 * 1024,
   logRate: 100,
   logWindowMs: 1000,
   logFloodMs: 10_000,
+  // Предложение нормы (SRS фичи 04, вопрос 10), владелец его не принял.
+  traceStreamMs: 1000,
 };
 
 export function limitsOf(...overrides: (Partial<ResourceLimits> | undefined)[]): ResourceLimits {

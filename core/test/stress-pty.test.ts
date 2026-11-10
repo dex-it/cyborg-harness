@@ -13,6 +13,7 @@ import { isRecord } from '../src/wire.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { fakePty } from '../../testing/src/fake-pty.ts';
 import { fakeView } from './view-channel.ts';
+import { waitFor } from './wait-for.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 
 // Ядро выгружается после каждого теста файла, и упавшим тоже: иначе слежение и программы держат процесс файла (core/test/kernels.ts).
@@ -175,22 +176,23 @@ test('stress-pty: вывод идёт без остановки, хост пад
   const emit = (n: number) => {
     for (let i = 0; i < n; i++) proc.emit(`[${String(seq++).padStart(6, '0')}]`);
   };
-  h0.onData(() => undefined);
+  let delivered = '';
+  h0.onData((c) => void (delivered += c));
   emit(200);
-  await sleep(30);
+  await waitFor('первые 200 кусков дошли до владельца', () => delivered.endsWith('[000199]'));
   s.handles[0]?.kill();
   emit(200);
   await s.k.idle();
-  await sleep(30);
-  const id = (await ctx.os.pty!.list())[0]?.id;
-  assert.ok(id, 'pty пережил падение хоста');
+  // Пока хост плагина возвращается, list отвечает отказом: проба повторяется.
+  const id = await waitFor('pty пережил падение хоста', async () => (await ctx.os.pty!.list())[0]?.id);
   const h1: PtyHandle = await ctx.os.pty!.attach(id);
   let live = '';
   h1.onData((c) => void (live += c));
   const backlog = h1.backlog;
   emit(100);
-  await sleep(60);
   const count = seq;
+  const last = `[${String(count - 1).padStart(6, '0')}]`;
+  await waitFor('последний кусок дошёл до подписчика', () => (backlog + live).endsWith(last));
   const text = backlog + live;
   // Хвост в пределах 256 КБ целиком: от первой записи до последней подряд, каждая ровно один раз.
   const parts = text.match(/\[\d{6}\]/g) ?? [];
@@ -310,7 +312,7 @@ test('stress-pty: 10 000 мелких кусков - хосту и зрител�
   const wire = await t.spawn('p', spawnOpts);
   const proc = backend.procs[0];
   assert.ok(proc);
-  await sleep(10);
+  await waitFor('приглашение подставного pty дошло до владельца', () => host.data === '$ ');
   const view = fakeView();
   const opened = await t.openTerminal('p', t.share('p', wire.id), view.channel);
   assert.equal(opened.backlog, '$ ');
@@ -330,7 +332,7 @@ test('stress-pty: 10 000 мелких кусков - хосту и зрител�
     if (i % 1000 === 999 && i < 9999) await sleep(5);
   }
   proc.exit(0);
-  await sleep(50);
+  await waitFor('выход дошёл до владельца и зрителя', () => host.order.at(-1) === 'pty.exit' && view.order.at(-1) === 'exit');
   assert.equal(host.data, `$ ab${all}`);
   assert.equal(view.data.join(''), `ab${all}`);
   assert.ok(host.messages < 100, `в хост ушло ${String(host.messages)} сообщений на 10 002 куска`);

@@ -7,6 +7,7 @@ import { load, type JournalEntry, type LoadOptions } from '../src/loader.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { MENU_OWNER, WINDOW_OWNER } from '../src/window-layer.ts';
+import { waitFor } from './wait-for.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 
@@ -299,7 +300,7 @@ test('падение хоста снимает динамические реги
   const k = await start();
   await keys('buttons').register({ key: 'F3', command: 'buttons.plain' });
   handles.get('buttons')?.kill();
-  await new Promise((r) => setTimeout(r, 80));
+  await waitFor('сторож записал падение хоста', () => k.journal.some((e) => e.kind === 'host-down'));
   await k.idle();
   assert.ok(k.active.includes('buttons'), 'сторож вернул плагин');
   assert.equal(k.keybinding('F3'), undefined, 'хост мёртв - слушать некому');
@@ -382,6 +383,37 @@ test('when.visible: пока приложение не сказало, что в
   await k.enable('buttons');
   await keys('buttons').register({ key: 'F1', command: 'buttons.plain', when: { visible: true } });
   assert.equal(k.keybinding('F1', {})?.pluginId, 'buttons', 'видимость - состояние окна, выгрузка плагина её не сбрасывает');
+  await k.unload();
+});
+
+test('when.visible: у плагина с двумя видами свёртка одного не гасит сочетание, пока виден другой; порядок событий не важен (#145)', async () => {
+  const panels = manifest('panels', { commands: { 'panels.go': {} }, ui: { views: { bar: './bar.js', panel: './panel.js' } } });
+  const { start, keys } = harness({ panels: idle }, { enabled: ['panels'], manifests: [panels] });
+  const k = await start();
+  await keys('panels').register({ key: 'F1', command: 'panels.go', when: { visible: true } });
+  const works = () => k.keybinding('F1', {})?.pluginId === 'panels';
+  k.setViewVisible('panels', true, 'bar');
+  k.setViewVisible('panels', true, 'panel');
+  assert.ok(works());
+  k.setViewVisible('panels', false, 'bar');
+  assert.ok(works(), 'panel на экране, а when.visible погас');
+  k.setViewVisible('panels', true, 'bar');
+  k.setViewVisible('panels', false, 'panel');
+  assert.ok(works(), 'развернули bar, свернули panel - bar на экране');
+  k.setViewVisible('panels', false, 'bar');
+  assert.ok(!works(), 'виден ни один вид');
+  // Повторное «виден» от одного вида не считается за два: свёртка этого вида снимает его целиком.
+  k.setViewVisible('panels', true, 'bar');
+  k.setViewVisible('panels', true, 'bar');
+  k.setViewVisible('panels', false, 'bar');
+  assert.ok(!works());
+  assert.throws(() => k.setViewVisible('panels', true, 'ghost'), { code: 'Unavailable' }, 'такого вида у плагина нет');
+  // Без вида - как прежде: признак на весь плагин, «скрыт» без вида гасит все его виды.
+  k.setViewVisible('panels', true, 'bar');
+  k.setViewVisible('panels', true);
+  assert.ok(works());
+  k.setViewVisible('panels', false);
+  assert.ok(!works());
   await k.unload();
 });
 

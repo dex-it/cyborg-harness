@@ -12,6 +12,7 @@ import type { Notices } from './notices.ts';
 import type { OsEnvironment, OsGateway } from './os-gateway.ts';
 import type { ContractRegistry } from './registry.ts';
 import type { Endpoint } from './rpc.ts';
+import type { OpHandle, Trace } from './trace.ts';
 import type { HostHandle } from './transports.ts';
 import type { Parsed, WireSpec } from './wire.ts';
 import type { WindowLayer } from './window-layer.ts';
@@ -61,6 +62,8 @@ export interface Subscription {
   readonly providerHost: Host;
   /** Номер аргумента -> номер колбэка в хосте потребителя. */
   readonly callbacks: readonly (string | undefined)[];
+  /** Вызов, который открыл подписку, в записи трассы: `<контракт>@<версия>#<член>` (события подписки пишутся от него). */
+  readonly of: string;
 }
 
 /** Что часть получает при подключении к хосту: проверка, что плагин из этого хоста, и регистрация обработчиков его сообщений. */
@@ -69,9 +72,9 @@ export interface BridgeEnd {
   readonly mine: (pluginId: string) => PluginManifest;
   /** `mine` плюс плагин active или активируется: снятый плагин общего хоста (хост жив ради соседей) ничего не пишет в ядро. */
   readonly live: (pluginId: string) => PluginManifest;
-  /** Запрос с ответом: недоверенный вход сверяется со схемой до обработчика. */
-  readonly onRequest: <const S extends WireSpec>(method: string, spec: S, handler: (p: Parsed<S>, signal: AbortSignal) => unknown) => void;
-  /** Уведомление: отказ идёт в лог, потому что вернуть его отправителю некому. */
+  /** Запрос с ответом: недоверенный вход сверяется со схемой до обработчика. Запрос - операция трассы (Г1): обработчик дописывает в `op` границы, адресата и право. */
+  readonly onRequest: <const S extends WireSpec>(method: string, spec: S, handler: (p: Parsed<S>, signal: AbortSignal, op: OpHandle) => unknown) => void;
+  /** Уведомление: отказ идёт в лог, потому что вернуть его отправителю некому, и в трассу записью об отказе. */
   readonly onNote: <const S extends WireSpec>(method: string, spec: S, handler: (p: Parsed<S>) => void) => void;
 }
 
@@ -137,7 +140,8 @@ export interface ContractCalls {
   /** Новому хосту - всё, что уже предоставлено. */
   announce(host: Host): void;
   dropFor(pluginId: string): void;
-  callAs(caller: string, contract: string, major: number, member: string, args: readonly unknown[]): Promise<unknown>;
+  /** `op` - операция трассы, если вызов её начал (мост вида); меню и прочие чтения ядра идут без записи. */
+  callAs(caller: string, contract: string, major: number, member: string, args: readonly unknown[], op?: OpHandle): Promise<unknown>;
 }
 
 /** Реестр команд и их запуск. */
@@ -146,7 +150,8 @@ export interface Commands {
   attach(end: BridgeEnd): void;
   dropFor(pluginId: string): void;
   run(command: string, ...args: unknown[]): Promise<unknown>;
-  runOwn(pluginId: string, command: string, args: unknown[]): Promise<unknown>;
+  /** `from` - кто просит: вид плагина (мост, по умолчанию) либо человек (клик по уведомлению) - от этого зависят caller и граница записи в трассе. */
+  runOwn(pluginId: string, command: string, args: unknown[], from?: 'view' | 'user'): Promise<unknown>;
 }
 
 /** Динамические сочетания рядом со статической таблицей `ctx.keys`; нажатие и список читают обе через эту часть. */
@@ -156,7 +161,8 @@ export interface KeyRegistry {
   /** Владелец не работает или условия не прошли - undefined; без `press` условия не проверяются. */
   lookup(key: string, press?: KeyPress): Keybinding | undefined;
   rows(): Keybinding[];
-  setVisible(pluginId: string, visible: boolean): void;
+  /** Видимость вида; без `view` - признак на весь плагин (`false` скрывает все его виды). Нет плагина или вида - `Unavailable`. */
+  setVisible(pluginId: string, visible: boolean, view?: string): void;
 }
 
 /** Меню окна по вкладам плагинов: снимок, перечитывание источников состояния и нажатие пункта. */
@@ -203,11 +209,22 @@ export interface ViewsState {
   forget(pluginId: string): Promise<number>;
 }
 
+/** Главная часть и вид: канал сообщений (в `LoadOptions.onViewMessage` и слушателям в хосте), модальные окна и диалоги главной части. */
+export interface ViewChannels {
+  attach(end: BridgeEnd): void;
+  /** Сообщение вида; плагин назвало приложение по origin фрейма. */
+  fromView(pluginId: string, view: string, message: unknown): Promise<void>;
+  /** Вид закрывает своё модальное окно с результатом. */
+  closeModal(pluginId: string, view: string, result: unknown): void;
+}
+
 /** Строки плагинов и вывод хостов: уровень, предел длины и частоты, вычёркивание секретов, дальше - `LoadOptions.onLog`. */
 export interface PluginLog {
   attach(end: BridgeEnd): void;
   /** Строка самого ядра о хосте (отказ по заметке, сбой перезапуска): с меткой `хост <id>` и под теми же пределами, что вывод хоста, - в ней может быть текст с провода. */
   hostLine(hostId: string, text: string, level: LogLevel): void;
+  /** Строка самого ядра о плагине (снятие после выключения не удалось, сбой команды по клику на уведомление): под теми же пределами, что `ctx.log`, но и от выключенного сторожем плагина не отбрасывается. */
+  pluginLine(pluginId: string, text: string, level: LogLevel): void;
   /** Плагин снят: начатый интервал дописывается сводной записью, счёт строк начинается заново. */
   drop(pluginId: string): void;
   /** Выгрузка ядра: то же для всех источников. */
@@ -231,6 +248,7 @@ export interface Parts {
   readonly sections: Sections;
   readonly osRequests: OsRequests;
   readonly views: ViewsState;
+  readonly viewChannels: ViewChannels;
   readonly logs: PluginLog;
   readonly bridge: Bridge;
 }
@@ -239,6 +257,8 @@ export interface KernelContext {
   readonly options: LoadOptions;
   readonly journal: JournalEntry[];
   readonly record: (entry: JournalEntry) => void;
+  /** Трасса операций на границах (K-28); без `LoadOptions.onTrace` выключена. */
+  readonly trace: Trace;
   /** Закрывает окна склейки повторов (`denied`, `deprecated-call`): счёт не теряется при выгрузке. */
   readonly flushRepeats: () => void;
   /** Включённые в `plugins.enabled` при запуске. */

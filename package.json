@@ -21,9 +21,9 @@
     "build": "node playground/scripts/build.mjs",
     "start": "npm run build && electron .",
     "pretypecheck": "npm run build:packages",
-    "typecheck": "node node_modules/typescript7/bin/tsc --noEmit -p core && node node_modules/typescript7/bin/tsc --noEmit -p core/elements && node node_modules/typescript7/bin/tsc --noEmit -p testing && node node_modules/typescript7/bin/tsc --noEmit -p electron && node node_modules/typescript7/bin/tsc --noEmit -p tools/cyborg-plugin && node node_modules/typescript7/bin/tsc --noEmit -p templates/plugin && node node_modules/typescript7/bin/tsc --noEmit -p playground",
+    "typecheck": "node node_modules/typescript7/bin/tsc --noEmit -p core && node node_modules/typescript7/bin/tsc --noEmit -p core/elements && node node_modules/typescript7/bin/tsc --noEmit -p testing && node node_modules/typescript7/bin/tsc --noEmit -p electron && node node_modules/typescript7/bin/tsc --noEmit -p tools/cyborg-plugin && node node_modules/typescript7/bin/tsc --noEmit -p templates/plugin && node node_modules/typescript7/bin/tsc --noEmit -p playground && node node_modules/typescript7/bin/tsc --noEmit -p scripts",
     "pretest": "npm run build:packages",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-force-exit --test-timeout=120000 'core/test/*.test.ts' 'contracts/test/*.test.ts' 'testing/test/*.test.ts' 'electron/test/*.test.ts' 'playground/src/**/*.test.ts' 'playground/test/*.test.ts' 'tools/cyborg-plugin/test/*.test.ts' 'templates/plugin/test/*.test.ts'",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-force-exit --test-timeout=120000 'core/test/*.test.ts' 'contracts/test/*.test.ts' 'testing/test/*.test.ts' 'electron/test/*.test.ts' 'playground/src/**/*.test.ts' 'playground/test/*.test.ts' 'tools/cyborg-plugin/test/*.test.ts' 'templates/plugin/test/*.test.ts' 'scripts/test/*.test.ts'",
     "demo": "node core/examples/run.ts",
     "smoke": "npm run build && node playground/scripts/smoke.mjs",
     "pack:delivery": "npm run build && node playground/scripts/pack-delivery.mjs",
@@ -43,6 +43,9 @@
     "snapshot:contracts": "node contracts/scripts/check-api.ts --update",
     "snapshot:api": "node core/scripts/api-surface.ts --update",
     "lint": "eslint --max-warnings 0 .",
+    "check:docs-links": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-docs-links.ts docs README.md",
+    "check:budgets": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-budgets.ts",
+    "release": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/release.ts",
     "postinstall": "electron-rebuild -f -w node-pty"
   },
   "devDependencies": {

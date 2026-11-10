@@ -8,11 +8,15 @@ export interface Port {
   onMessage(listener: (message: unknown, transfer?: readonly unknown[]) => void): void;
 }
 
+/**
+ * `c` - цепочка операций, из которой послано сообщение (FR-CH-4002, `Owner.chain`); без него сообщение начинает цепочку само.
+ * Хост плагина собеседнику не доверяется: цепочка нужна диагностике, а не решению о правах.
+ */
 type Message =
-  | { readonly t: 'req'; readonly id: number; readonly m: string; readonly p: unknown }
+  | { readonly t: 'req'; readonly id: number; readonly m: string; readonly p: unknown; readonly c?: number }
   | { readonly t: 'res'; readonly id: number; readonly ok: true; readonly v: unknown }
   | { readonly t: 'res'; readonly id: number; readonly ok: false; readonly e: WireError }
-  | { readonly t: 'note'; readonly m: string; readonly p: unknown }
+  | { readonly t: 'note'; readonly m: string; readonly p: unknown; readonly c?: number }
   /** `reason` - причина отказа ядра (например `Timeout`), если это она; иначе поставщик увидит `Cancelled`. */
   | { readonly t: 'cancel'; readonly id: number; readonly reason?: WireError };
 
@@ -48,10 +52,14 @@ function readCancelReason(raw: WireError | undefined): CoreError {
   return CANCEL_CODES.includes(reason.code) ? reason : new CoreError('Cancelled', 'запрос отменён');
 }
 
-/** Чей код ждёт ответа: продолжение после ответа идёт от имени того, кто спросил. */
+/** Чей код ждёт ответа: продолжение после ответа идёт от имени того, кто спросил. Тот же механизм несёт цепочку операций трассы (FR-CH-4002). */
 export interface Owner {
   current(): string | undefined;
   enter(owner: string | undefined): void;
+  /** Цепочка операций, в которой идёт этот код: запрос и уведомление уходят с её номером; undefined - код вне цепочки. */
+  chain(): number | undefined;
+  /** Обработчик сообщения собеседника исполняется в цепочке `chain` (undefined - в новой, а не в цепочке того, кто доставил сообщение). */
+  within<R>(chain: number | undefined, run: () => R): R;
 }
 
 /** Запрос-ответ и уведомления поверх порта; сообщения одного порта приходят в порядке отправки. */
@@ -99,7 +107,7 @@ export class Endpoint {
       const unlisten = signal ? this.#onAbort(id, signal, reject, discard, owner) : () => undefined;
       this.#pending.set(id, { resolve, reject, owner, unlisten });
       try {
-        this.#send({ t: 'req', id, m: method, p: params }, `${method}: аргументы`);
+        this.#send({ t: 'req', id, m: method, p: params, ...this.#chainOf() }, `${method}: аргументы`);
       } catch (error) {
         this.#pending.delete(id);
         unlisten();
@@ -129,7 +137,19 @@ export class Endpoint {
 
   notify(method: string, params: unknown): void {
     if (this.#closed) return;
-    this.#send({ t: 'note', m: method, p: params }, `${method}: данные`);
+    this.#send({ t: 'note', m: method, p: params, ...this.#chainOf() }, `${method}: данные`);
+  }
+
+  #chainOf(): { readonly c: number } | undefined {
+    const c = this.#owner?.chain();
+    return c === undefined ? undefined : { c };
+  }
+
+  /** Обработчик сообщения идёт в цепочке отправителя; номер чужой и не по форме отбрасывается. */
+  #within<R>(message: Message, run: () => R): R {
+    if (!this.#owner) return run();
+    const c = message.t === 'req' || message.t === 'note' ? message.c : undefined;
+    return this.#owner.within(Number.isSafeInteger(c) ? c : undefined, run);
   }
 
   /** Обрывает канал: ждущие ответа получают ошибку, новые запросы отклоняются сразу. */
@@ -188,7 +208,7 @@ export class Endpoint {
     const handler = this.#handlers.get(message.m);
     if (message.t === 'note') {
       try {
-        await handler?.(message.p as never, NEVER);
+        await this.#within(message, () => handler?.(message.p as never, NEVER));
       } catch {
         // У уведомления нет отправителя, которому вернуть ошибку.
       }
@@ -198,7 +218,7 @@ export class Endpoint {
     this.#serving.set(message.id, controller);
     try {
       if (!handler) throw new CoreError('Remote', `нет обработчика ${message.m}`);
-      const value = await handler(message.p as never, controller.signal);
+      const value = await this.#within(message, () => handler(message.p as never, controller.signal));
       if (!controller.signal.aborted) this.#reply({ t: 'res', id: message.id, ok: true, v: value }, `${message.m}: результат`);
     } catch (error) {
       if (!controller.signal.aborted) this.#reply({ t: 'res', id: message.id, ok: false, e: toWire(error) }, `${message.m}: ошибка`);
