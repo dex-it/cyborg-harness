@@ -32,6 +32,8 @@ export interface PluginsPort {
   /** Выгрузка диагностики одним файлом: диалог «Сохранить как» открывает главный процесс. */
   exportDiagnostics(): Promise<Reply>;
   onWindowCommand(listener: (command: string) => void): void;
+  /** Плагин просит сделать вкладку документа активной. */
+  onRevealDocument(listener: (id: string) => void): void;
 }
 
 const LOCAL_LIMIT = 50;
@@ -60,6 +62,10 @@ export class PluginsPanel {
   private readonly tabs = new SideTabs(byId('side-tabs', HTMLElement));
   private snapshot: PluginsSnapshot | null = null;
   private focus: string | null = null;
+  /** Вкладка документа, которую выбрал плагин (`ctx.documents.reveal`); строки перерисовываются по снимку, поэтому id помнит панель. */
+  private activeDocument: string | null = null;
+  /** Прокрутить к активной строке при ближайшей отметке: просьба могла прийти раньше снимка с документом. */
+  private scrollToActive = false;
   private readonly errors = new Map<string, string>();
   private readonly busy = new Set<string>();
   /** Нажатия, которые ядро не забрало: о них знает только страница. */
@@ -90,7 +96,31 @@ export class PluginsPanel {
       if (command === 'cyborg.window.focus-next') moveFocus(1);
       if (command === 'cyborg.window.focus-prev') moveFocus(-1);
     });
+    port.onRevealDocument((id) => this.revealDocument(id));
     window.addEventListener('keydown', (event) => this.reached(event));
+  }
+
+  /** Просьба плагина: вкладка документа становится активной и видимой, даже если человек ушёл на другую панель или другой документ. */
+  private revealDocument(id: string): void {
+    this.activeDocument = id;
+    this.scrollToActive = true;
+    this.tabs.reveal(this.documentsEl);
+    this.markActiveDocument();
+    // Строки приходят со снимком: если документ открыт только что, а снимка с ним ещё нет, отметка встанет при ближайшей отрисовке.
+    void this.refresh();
+  }
+
+  private markActiveDocument(): void {
+    for (const item of this.documentsEl.querySelectorAll<HTMLElement>('.document-row')) {
+      const active = item.dataset.document === this.activeDocument;
+      if (!active) {
+        item.removeAttribute('aria-current');
+        continue;
+      }
+      item.setAttribute('aria-current', 'true');
+      if (this.scrollToActive) item.scrollIntoView({ block: 'nearest' });
+      this.scrollToActive = false;
+    }
   }
 
   /** Записи журнала идут пачками: пока снимок в пути, следующие изменения сливаются в один повтор. */
@@ -142,6 +172,7 @@ export class PluginsPanel {
     this.workspaceEl.textContent = current === null ? 'Воркспейс не открыт' : `Воркспейс: ${current}`;
     this.recentEl.replaceChildren(...recent.map((file) => this.recentRow(file)));
     this.documentsEl.replaceChildren(...(snapshot.documents.length ? snapshot.documents.map((row) => this.documentRow(row)) : [el('li', 'empty', 'Документов нет')]));
+    this.markActiveDocument();
     this.renderFeed();
     this.renderJournal();
     this.views.sync(viewSlots(snapshot.plugins, snapshot.layout));

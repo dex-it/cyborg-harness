@@ -18,6 +18,7 @@ export function windowApi(): WindowApi {
     runCommand: (command: string): Promise<Reply> => ipcRenderer.invoke('plugins:run', command),
     onPluginsChanged: (listener: () => void): void => void ipcRenderer.on('plugins:changed', () => listener()),
     onWindowCommand: (listener: (command: string) => void): void => void ipcRenderer.on('window:command', (_event, command: string) => listener(command)),
+    onRevealDocument: (listener: (id: string) => void): void => void ipcRenderer.on('documents:reveal', (_event, id: string) => listener(id)),
     setViewVisible: (id: string, view: string, visible: boolean): Promise<void> => ipcRenderer.invoke('views:visibility', { id, view, visible }),
     answerDialog: (id: number, choice: string | undefined): Promise<Reply> => ipcRenderer.invoke('window:answer', { id, choice }),
     cancelModal: (id: number): Promise<Reply> => ipcRenderer.invoke('window:modal-cancel', { id }),

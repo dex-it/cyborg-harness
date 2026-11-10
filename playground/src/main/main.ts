@@ -267,6 +267,8 @@ const start = () => {
     spawnHost: hosts.spawn,
     pidOf: hosts.pidOf,
     idleSeconds: () => powerMonitor.getSystemIdleTime(),
+    // Окно могло потерять фокус, пока ядро запускалось: плагин узнаёт это из ctx.window.focused(), а не ждёт перемены.
+    windowFocused: () => win?.isFocused() ?? true,
     os: electronOs({ userData, roots: () => [workspace], protectedPaths: [workspaceFile, `${workspaceFile}.lock`], workspaceFile, raiseWindow: () => showWindow(win), ptyHost: ptyHost.spawn }),
     // Короче, чем в Cyborg: зависание по кнопке «Повесить хост» видно через пару секунд.
     watchdog: { interval: 500, timeout: 2500 },
