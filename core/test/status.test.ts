@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { JournalEntry } from '../src/loader.ts';
-import { describeEntry, entryLevel, entryPlugins, pluginStatuses } from '../src/status.ts';
+import { describeEntry, entryLevel, entryPlugins, isLifecycleEntry, pluginStatuses } from '../src/status.ts';
 
 const view = (journal: JournalEntry[]) => pluginStatuses(journal).map((s) => `${s.id}:${s.state}:${s.cause?.kind}:${s.revivable ? 'R' : '-'}`);
 
@@ -61,4 +61,31 @@ test('вызов устаревшего члена: словами с вызыв
   ];
   assert.deepEqual(view(journal), ['tabs:active:activated:-', 'sessions:active:activated:-']);
   assert.deepEqual(view([call]), [], 'запись о вызове сама плагин в списке не заводит');
+});
+
+test('isLifecycleEntry: записи о работе плагина - да, отказы, вызовы устаревшего, сроки pty и выбор хоста - нет', () => {
+  const lifecycle: JournalEntry[] = [
+    { pluginId: 'a', kind: 'activated', hostId: 'h', ms: 1 },
+    { pluginId: 'a', kind: 'skipped', reason: 'нет поставщика' },
+    { pluginId: 'a', kind: 'unloaded', by: 'b' },
+    { pluginId: 'a', kind: 'failed', hostId: 'h', error: 'x' },
+    { pluginId: 'a', kind: 'revived' },
+    { pluginId: 'a', kind: 'switched-off', strikes: 1, affects: [] },
+  ];
+  const aside: JournalEntry[] = [
+    { pluginId: 'a', kind: 'denied', method: 'fs.readText', detail: '/etc/hostname', repeats: 2 },
+    { pluginId: 'a', kind: 'deprecated-call', provider: 'b', contract: 'c.d', member: 'm' },
+    { pluginId: 'a', kind: 'pty-expired', id: 'pty-1', program: 'sh', graceMs: 1 },
+    { pluginId: 'a', kind: 'key-conflict', key: 'mod+k', command: 'a.go', winner: 'b' },
+    { pluginId: 'a', kind: 'unhandled-rejection', error: 'x' },
+    { pluginId: 'a', kind: 'host-isolated', group: 'g', hostId: 'h' },
+    { pluginId: 'a', kind: 'host-own-grouped', group: 'g', neighbours: ['b'] },
+    { pluginId: 'a', kind: 'third-party' },
+    { kind: 'key-ignored', key: 'mod+x', command: null, reason: 'нет команды' },
+  ];
+  assert.deepEqual(lifecycle.filter((e) => !isLifecycleEntry(e)), []);
+  assert.deepEqual(aside.filter(isLifecycleEntry), []);
+  // Состояние по журналу прежнее: запись не жизненного цикла после unloaded не будит плагин и не меняет причину остановки.
+  const stopped = pluginStatuses([lifecycle[0]!, lifecycle[2]!, ...aside]);
+  assert.deepEqual(stopped.map((s) => [s.id, s.state, s.cause?.kind]), [['a', 'stopped', 'unloaded']]);
 });
