@@ -48,7 +48,7 @@ function ptyHosts(backend: PtyBackend) {
   return { spawn, hosts };
 }
 
-async function setup(options: { backend?: PtyBackend; watchdog?: LoadOptions['watchdog']; plugins?: string[] } = {}) {
+async function setup(options: { backend?: PtyBackend; watchdog?: LoadOptions['watchdog']; plugins?: string[]; limits?: LoadOptions['limits'] } = {}) {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-pty-host-')));
   const backend = options.backend ?? fakePty();
   const hosts = ptyHosts(backend);
@@ -62,6 +62,7 @@ async function setup(options: { backend?: PtyBackend; watchdog?: LoadOptions['wa
     manifests: ids.map((id) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, permissions: shell })),
     os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), env: { PATH: '/usr/bin' }, ptyHost: hosts.spawn },
     watchdog: { interval: 10, timeout: 100, ...options.watchdog },
+    ...(options.limits && { limits: options.limits }),
     spawnHost: (id) => {
       const h = plugin(id);
       handles.set(id, h);
@@ -330,4 +331,79 @@ test('выгрузка: pty-хост глух к endAll, плагин после
   await sleep(30);
   assert.equal(watching(), base, 'слежение, пришедшее после выгрузки плагина, пережило unload()');
   await rm(root, { recursive: true, force: true });
+});
+
+// #134 (У-47): программа pty не читает stdin - очередь node-pty растёт без предела. Читаемость ядру не видна, поэтому ввод ограничен запасом и скоростью (ведро байт) на каждый pty.
+const INIT = { ptyInput: 1024, ptyFlushMs: 4, ptyFlushChars: 1024, backlog: 100 };
+const SPAWN = { file: 'sh', args: [], options: { name: 'xterm-256color', env: {}, cols: 80, rows: 24 } };
+
+test('pty-хост: ввод в pty, чья программа не читает stdin, сверх запаса отклоняется Invalid; в очередь процесса не попадает ни запросом, ни уведомлением', async () => {
+  const backend = fakePty();
+  const host = inlinePtyHost(backend)();
+  const ep = new Endpoint(host.port);
+  await ep.request('init', { ...INIT, ptyInputBurst: 4096, ptyInputRate: 1 });
+  await ep.request('spawn', { key: 'k', ...SPAWN });
+  const proc = backend.procs[0]!;
+  const chunk = 'x'.repeat(1000);
+  const replies: string[] = [];
+  for (let i = 0; i < 10; i++) {
+    try {
+      await ep.request('write', { key: 'k', data: chunk });
+      replies.push('ok');
+    } catch (error) {
+      replies.push((error as { code?: string }).code ?? 'другое');
+    }
+  }
+  assert.deepEqual(replies, ['ok', 'ok', 'ok', 'ok', ...Array<string>(6).fill('Invalid')]);
+  ep.notify('write', { key: 'k', data: chunk });
+  await tick();
+  // Невычитанное - всё, что хост отдал процессу: подделка stdin не читает.
+  const queued = proc.writes.join('').length;
+  assert.ok(queued <= 4096, `в очереди процесса ${String(queued)} Б при запасе 4096`);
+  await assert.rejects(ep.request('write', { key: 'k', data: chunk }), { code: 'Invalid', message: /ввод быстрее 1 Б\/с/ });
+  host.kill();
+});
+
+test('pty-хост: запас ввода пополняется со скоростью ptyInputRate и не копится выше ptyInputBurst; у каждого pty свой запас', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+  const backend = fakePty();
+  const host = inlinePtyHost(backend)();
+  const ep = new Endpoint(host.port);
+  await ep.request('init', { ...INIT, ptyInputBurst: 2048, ptyInputRate: 1000 });
+  await ep.request('spawn', { key: 'a', ...SPAWN });
+  await ep.request('spawn', { key: 'b', ...SPAWN });
+  const chunk = 'x'.repeat(1000);
+  const write = (key: string, data = chunk) => ep.request('write', { key, data });
+  await write('a');
+  await write('a');
+  await assert.rejects(write('a'), { code: 'Invalid' });
+  await write('b');
+  t.mock.timers.setTime(1_000_000 + 1000);
+  await write('a');
+  await assert.rejects(write('a'), { code: 'Invalid' }, 'за секунду пополнилось 1000 Б, не больше');
+  // Простой дольше времени полного пополнения даёт не больше запаса.
+  t.mock.timers.setTime(1_000_000 + 3_600_000);
+  await write('a');
+  await write('a');
+  await assert.rejects(write('a'), { code: 'Invalid' }, 'запас вырос выше ptyInputBurst');
+  // Ввод больше остатка не принимается частью и остаток не трогает.
+  await assert.rejects(write('a', 'x'.repeat(100)), { code: 'Invalid' });
+  await write('a', 'x'.repeat(48));
+  assert.equal(backend.procs[0]?.writes.join('').length, 2000 + 1000 + 2000 + 48);
+  assert.equal(backend.procs[1]?.writes.join('').length, 1000, 'запас соседнего pty не затронут');
+  host.kill();
+});
+
+test('вид: ввод в порт сверх запаса получает ошибку в ответе на write, а не молчание; обычный ввод и вставка до предела проходят', async () => {
+  await using s = await setup({ limits: { ptyInput: 1024, ptyInputBurst: 3000, ptyInputRate: 1 } });
+  const h = await s.pty().spawn({ program: '/bin/bash', persist: true });
+  const v = fakeView();
+  await s.k.openTerminal('agent', await h.share(), v.channel);
+  assert.deepEqual(await v.write('ls\r'), { ok: true });
+  assert.deepEqual(await v.write('x'.repeat(1024)), { ok: true }, 'вставка до предела одного ввода');
+  assert.deepEqual(await v.write('y'.repeat(1024)), { ok: true });
+  const refused = await v.write('z'.repeat(1024));
+  assert.match(refused.error ?? '', /ввод быстрее 1 Б\/с/);
+  assert.equal(s.backend.procs[0]?.writes.join('').length, 3 + 1024 + 1024);
+  assert.deepEqual(await v.write('ok'), { ok: true }, 'мелкий ввод после отказа проходит: запас ещё есть');
 });

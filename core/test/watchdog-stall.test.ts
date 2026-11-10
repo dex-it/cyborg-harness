@@ -21,7 +21,7 @@ function stall(ms: number): void {
 interface Rig {
   readonly k: Kernel;
   /** Сколько пингов ушло хостам. */
-  pings(): number;
+  readonly pings: () => number;
 }
 
 /** Хост в процессе теста, чей первый пинг занимает цикл ядра на `STALL` мс; `during` - что случилось с хостом, пока цикл стоял. */
@@ -33,7 +33,9 @@ async function stalled(during?: (real: HostHandle) => void): Promise<Rig> {
     return {
       ...real,
       port: {
-        ...real.port,
+        onMessage: (listener) => {
+          real.port.onMessage(listener);
+        },
         post(message, transfer) {
           const ping = typeof message === 'object' && message !== null && (message as { t?: unknown; m?: unknown }).t === 'req' && (message as { m?: unknown }).m === 'ping';
           real.port.post(message, transfer);
@@ -66,7 +68,9 @@ test('сторож: хост ответил на пинг, пока цикл я�
 
 test('сторож: хост упал, пока цикл ядра стоял дольше срока, - в журнале crash, а не hang', async () => {
   // Выход процесса доходит до ядра на итерацию цикла позже первого таймера сторожа.
-  const { k } = await stalled((real) => void setImmediate(() => setImmediate(() => real.kill())));
+  const { k } = await stalled((real) => {
+    setImmediate(() => setImmediate(() => real.kill()));
+  });
   await waitFor('перезапуск хоста', () => k.journal.some((e) => e.kind === 'host-restart'));
   await k.idle();
   assert.deepEqual(downs(k).map((d) => d.reason), ['crash']);
@@ -76,8 +80,18 @@ test('сторож: хост, который молчит по-настояще�
   const base = inlineHosts(async () => ({ activate: () => undefined }));
   const spawnHost: SpawnHost = (id) => {
     const real = base(id);
-    // Хост не отвечает ни на что после init.
-    return { ...real, port: { ...real.port, post: (message, transfer) => void ((message as { m?: unknown }).m === 'ping' || real.port.post(message, transfer)) } };
+    // Хост не отвечает на пинг.
+    return {
+      ...real,
+      port: {
+        onMessage: (listener) => {
+          real.port.onMessage(listener);
+        },
+        post(message, transfer) {
+          if ((message as { m?: unknown }).m !== 'ping') real.port.post(message, transfer);
+        },
+      },
+    };
   };
   const k = track(await load({
     apiVersion: PLUGIN_API_VERSION,

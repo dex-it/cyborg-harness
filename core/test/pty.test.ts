@@ -362,3 +362,19 @@ test('пределы pty: ввод больше предела - Invalid, pty ж
   await s.pty('term').spawn({ program: '/bin/bash' });
   await s.pty('term').spawn({ program: '/bin/bash' });
 });
+
+test('pty.write из хоста плагина: сверх запаса ввода Invalid сразу в вызове, pty жив и принимает ввод по мере пополнения; у соседнего pty свой запас (#134)', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+  await using s = await setup({ term: shell }, true, { ptyInput: 1024, ptyInputBurst: 2048, ptyInputRate: 1000 });
+  const a = await s.pty('term').spawn({ program: '/bin/bash' });
+  const b = await s.pty('term').spawn({ program: '/bin/bash' });
+  const chunk = 'x'.repeat(1000);
+  await a.write(chunk);
+  await a.write(chunk);
+  await assert.rejects(a.write(chunk), { code: 'Invalid', message: /ввод быстрее 1000 Б\/с/ });
+  await b.write(chunk);
+  assert.equal(s.backend.procs[0]!.writes.join('').length, 2000, 'отказанный ввод дошёл до процесса');
+  t.mock.timers.setTime(1_000_000 + 1000);
+  await a.write(chunk);
+  assert.equal(s.backend.procs[0]!.writes.join('').length, 3000);
+});

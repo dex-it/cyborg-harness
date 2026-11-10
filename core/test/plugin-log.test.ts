@@ -481,8 +481,9 @@ test('клик по уведомлению: текст ошибки команд
 });
 
 test('клик по уведомлению: плагин выключен потоком строк, но ещё не снят, - строка ядра о нём идёт (сторож отбрасывает только строки самого плагина)', async () => {
-  const gate = Promise.withResolvers<void>();
-  const { k, ctx, lines, journal, clicks } = await clickRig(() => new Error('команда упала'), { limits: { logRate: 2, logWindowMs: 100, logFloodMs: 300 } }, gate.promise);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const { k, ctx, lines, journal, clicks } = await clickRig(() => new Error('команда упала'), { limits: { logRate: 2, logWindowMs: 100, logFloodMs: 300 } }, gate);
   await k.disable('slow');
   const held = k.enable('slow');
   const stop = pour((i) => ctx.bell?.log(`поток ${String(i)}`), 10, 5);
@@ -496,7 +497,7 @@ test('клик по уведомлению: плагин выключен пот
     await waitFor('строка ядра о клике после выключения', () => lines.some(([id, m]) => id === 'bell' && m === 'клик по уведомлению: команда упала'));
   } finally {
     stop();
-    gate.resolve();
+    release();
     await held;
     await k.unload();
   }

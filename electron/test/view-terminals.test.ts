@@ -37,7 +37,7 @@ test('терминалы вида: порт уходит фрейму и pty-х�
     (_pluginId, ticket, ch) => {
       if (ticket !== 'билет') return Promise.reject(new Error('билет терминала не найден'));
       channel = ch;
-      const view: TerminalView = { id: 'pty-1', pid: 7, program: '/bin/sh', args: [], persist: true, backlog: '$ ', close: () => void done.push('close') };
+      const view: TerminalView = { id: 'pty-1', pid: 7, program: '/bin/sh', args: [], persist: true, backlog: '$ ', input: 1024, close: () => void done.push('close') };
       return Promise.resolve(view);
     },
     () => {
@@ -54,7 +54,7 @@ test('терминалы вида: порт уходит фрейму и pty-х�
   assert.deepEqual(pairs[0]?.closed, ['host', 'view'], 'после отказа порты остались открытыми');
 
   const opened = await terminals.open(own, 'echo', 'билет');
-  assert.deepEqual(opened, { value: { id: 'pty-1', pid: 7, program: '/bin/sh', args: [], persist: true, backlog: '$ ', tid: 2 } });
+  assert.deepEqual(opened, { value: { id: 'pty-1', pid: 7, program: '/bin/sh', args: [], persist: true, backlog: '$ ', input: 1024, tid: 2 } });
   assert.equal(channel?.hostEnd, pairs[1]?.pair.port1, 'ядру ушёл не тот конец порта');
   assert.deepEqual(own.posted.map((p) => [p.channel, p.message]), [['view:terminal:port', { tid: 2 }]]);
   assert.deepEqual(own.posted[0]?.transfer, [pairs[1]?.pair.port2], 'фрейм получил не свой конец порта');
@@ -73,7 +73,7 @@ test('терминалы вида: pty-хост потерян - вид узна
   const terminals = new ViewTerminals(
     (_p, _t, ch) => {
       channels.push(ch);
-      return Promise.resolve({ id: 'pty-1', pid: 7, program: 'sh', args: [], persist: false, backlog: '', close: () => undefined });
+      return Promise.resolve({ id: 'pty-1', pid: 7, program: 'sh', args: [], persist: false, backlog: '', input: 1024, close: () => undefined });
     },
     () => fakePair().pair,
   );
@@ -98,7 +98,7 @@ test('терминалы вида: фрейм ушёл, пока термина�
   const done: string[] = [];
   const pairs: ReturnType<typeof fakePair>[] = [];
   const terminals = new ViewTerminals(
-    () => Promise.resolve({ id: 'pty-1', pid: 7, program: 'sh', args: [], persist: false, backlog: '', close: () => void done.push('close') }),
+    () => Promise.resolve({ id: 'pty-1', pid: 7, program: 'sh', args: [], persist: false, backlog: '', input: 1024, close: () => void done.push('close') }),
     () => {
       const p = fakePair();
       pairs.push(p);
@@ -174,7 +174,7 @@ test('терминалы вида: канал закрыт, пока шёл open
   const terminals = new ViewTerminals(
     (_p, _t, ch) => {
       ch.closed(state.lost);
-      return Promise.resolve({ id: 'pty-1', pid: 7, program: 'sh', args: [], persist: false, backlog: '', close: () => void done.push('close') });
+      return Promise.resolve({ id: 'pty-1', pid: 7, program: 'sh', args: [], persist: false, backlog: '', input: 1024, close: () => void done.push('close') });
     },
     () => {
       const p = fakePair();
