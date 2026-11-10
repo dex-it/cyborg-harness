@@ -30,7 +30,10 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run typecheck
+      # ESLint со strictTypeChecked подбирается к 2 ГиБ кучи Node на раннере macOS и падает «JavaScript heap out of memory» - даём 4 ГиБ.
       - run: npm run lint
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - run: npm test
       # Публичные типы пакета контрактов изменились - версия пакета выше, чем в ветке назначения (contracts/README.md, «Установка и версии»).
       - name: contracts (снимок API и версия)
