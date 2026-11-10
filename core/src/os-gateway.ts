@@ -11,6 +11,7 @@ import type { DirEntry, FileSlice, FileStat, HttpResponse, OpenDialogOptions, Pr
 import { CoreError } from './errors.ts';
 import { limitsOf, type ResourceLimits } from './limits.ts';
 import { isValidId } from './manifest-fields.ts';
+import { namedPaths } from './named-paths.ts';
 import type { PluginManifest } from './manifest.ts';
 import { closePools, guardedLookup, isLocalAddress, transport } from './net-transport.ts';
 import type { NotifyLimits, ShowNotice } from './notices.ts';
@@ -1010,6 +1011,7 @@ export class OsGateway {
         const roots = args[0];
         if (!Array.isArray(roots) || !roots.every((r): r is string => typeof r === 'string' && path.isAbsolute(r))) throw new CoreError('Invalid', `${method}: ожидается список абсолютных путей`);
         const accepted: string[] = [];
+        const named = await this.#namedRoots(m);
         // Корень - каталог проекта: корень ФС, домашний каталог или каталог приложения открыли бы плагинам с workspace всё.
         const closed = await Promise.all([this.#home(), this.#env.dataDir, this.#env.tempDir, ...(this.#env.appDir === undefined ? [] : [this.#env.appDir]), ...(this.#env.protectedPaths ?? [])].map(real));
         for (const r of roots) {
@@ -1017,6 +1019,11 @@ export class OsGateway {
           const stat = await fs.stat(dir).catch(() => undefined);
           if (!stat?.isDirectory()) throw this.#denied(m, method, `корень не каталог: ${r}`);
           if (path.dirname(dir) === dir || closed.some((c) => inside(dir, c))) throw this.#denied(m, method, `корень шире проекта: ${r}`);
+          // Корень из присланного файла воркспейса области не открывает (У-40, ADR-CH-0015): его подтверждает человек - слоем пользователя или выбором в диалоге.
+          const sent = named.workspace.find((w) => inside(w, dir) || inside(dir, w));
+          if (sent !== undefined && !named.confirmed.some((c) => inside(c, dir))) {
+            throw this.#denied(m, method, `корень ${r} назван в слое workspace (файл воркспейса, путь ${sent}), а корни областей берутся только из слоя пользователя (файл пользователя) или выбора человека в диалоге`);
+          }
           accepted.push(dir);
         }
         this.#roots.set(m.id, accepted);
@@ -1025,6 +1032,17 @@ export class OsGateway {
       default:
         throw new CoreError('Invalid', `${method}: такого вызова ctx.os нет`);
     }
+  }
+
+  /**
+   * Пути из config плагина по слоям: `workspace` - из файла воркспейса, `confirmed` - то, что назвал человек (слой пользователя) или выбрал в диалоге (`granted`).
+   * Берётся принятое ядром значение (`approve`), а не то, что плагин записал после: запись плагина в слой пользователя защитой не считается.
+   */
+  async #namedRoots(m: PluginManifest): Promise<{ workspace: string[]; confirmed: string[] }> {
+    const { trusted, untrusted } = this.#approved.get(m.id) ?? this.#configOf(m.id);
+    const resolve = (config: Record<string, unknown>) => Promise.all(namedPaths(config).map((name) => real(this.#expand(name))));
+    const [workspace, user] = await Promise.all([resolve(untrusted), resolve(trusted)]);
+    return { workspace, confirmed: [...user, ...(this.#granted.get(m.id) ?? [])] };
   }
 
   async #store(): Promise<SecretStore> {
