@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { MessageChannel } from 'node:worker_threads';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { TerminalEvent } from '../src/view-protocol.ts';
+import { waitFor } from './wait-for.ts';
 import { terminalPorts, type PortLike } from '../src/terminal-ports.ts';
 
 /** Порт preload (`port1`) и «pty-хост» по ту сторону (`host`); у `MessagePort` Node слушатель назначается так же. */
@@ -36,7 +37,7 @@ test('порт терминала: данные и выход приходят �
   host.postMessage({ data: 'вывод' });
   const write = ports.request(3, { op: 'write', data: 'ls\r' });
   const resize = ports.request(3, { op: 'resize', cols: 0, rows: 24 });
-  await sleep(20);
+  await waitFor('оба запроса дошли до хоста', () => seen.length >= 2);
   assert.deepEqual(seen, [{ id: 1, op: 'write', data: 'ls\r' }, { id: 2, op: 'resize', cols: 0, rows: 24 }]);
   host.postMessage({ id: 2, error: 'terminal.resize: размер - целые 1..1000' });
   host.postMessage({ id: 1, ok: true });
@@ -45,6 +46,8 @@ test('порт терминала: данные и выход приходят �
 
   host.postMessage({ exit: { code: 0 } });
   host.postMessage({ data: 'после выхода не бывает' });
+  await waitFor('вывод и выход дошли до вида', () => events.length >= 2);
+  // Отсутствие события: сообщение после выхода идёт за ним по тому же порту и уже доставлено или не придёт.
   await sleep(20);
   assert.deepEqual(events, [{ tid: 3, data: 'вывод' }, { tid: 3, exit: { code: 0 } }]);
   assert.deepEqual(await ports.request(3, { op: 'write', data: 'x' }), { error: 'терминал 3 закрыт' }, 'порт после выхода остался открытым');
@@ -62,7 +65,8 @@ test('порт терминала: порт приходит позже отве
   host.postMessage({ exit: 'нет' });
   host.postMessage({ id: 99, ok: true });
   host.postMessage({ data: 'ok' });
-  await sleep(20);
+  await waitFor('данные дошли до вида', () => events.length >= 1);
+  // Отсутствие события: строка, кривой exit и чужой id идут до данных по тому же порту и уже отброшены.
   assert.deepEqual(events, [{ tid: 5, data: 'ok' }]);
   assert.equal(await ports.connect(6), false);
 });

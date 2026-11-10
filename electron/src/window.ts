@@ -2,8 +2,9 @@
 import { app, nativeTheme, Notification, powerMonitor, type BrowserWindow } from 'electron';
 import type { PluginsEvents, PluginsService } from './plugins.ts';
 import { themeTokens } from './theme.ts';
-import { viewOfUrl, viewOrigin } from './view-protocol.ts';
-import { framesOf, viewFrames } from './views.ts';
+import { viewOfUrl } from './view-protocol.ts';
+import { framesOfPlugin } from './view-frames.ts';
+import { viewFrames } from './views.ts';
 
 const alive = (win: BrowserWindow | undefined): win is BrowserWindow => win !== undefined && !win.isDestroyed();
 
@@ -45,14 +46,15 @@ export function windowEvents(getWindow: () => BrowserWindow | undefined): Plugin
       if (alive(win)) win.webContents.send('plugins:changed');
     },
     alert: (title, body) => alertNotification(title, body, () => showWindow(getWindow())),
-    log: (pluginId, line) => {
+    log: (pluginId, line, group) => {
       const win = getWindow();
-      if (alive(win)) for (const frame of framesOf(win.webContents, viewOrigin(pluginId))) frame.send('view:log', line);
+      // Строку лога получают кадры самого плагина, а не всей группы рендера.
+      if (alive(win)) for (const frame of framesOfPlugin(win.webContents, group, pluginId)) frame.send('view:log', line);
     },
-    viewMessage: (pluginId, view, message) => {
+    viewMessage: (pluginId, view, message, group) => {
       const win = getWindow();
-      // Фрейм вида знает своё имя по ?view= в адресе; плагин - по origin: чужому плагину и чужому виду сообщение не достаётся.
-      if (alive(win)) for (const frame of framesOf(win.webContents, viewOrigin(pluginId))) if (viewOfUrl(frame.url) === view) frame.send('view:channel', message);
+      // Фрейм вида знает своё имя по ?view= в адресе, плагин - по адресу внутри группы рендера: сосед по группе и чужой вид сообщение не получают.
+      if (alive(win)) for (const frame of framesOfPlugin(win.webContents, group, pluginId)) if (viewOfUrl(frame.url) === view) frame.send('view:channel', message);
     },
     title: (title) => {
       const win = getWindow();

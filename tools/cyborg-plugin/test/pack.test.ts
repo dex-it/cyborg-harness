@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
@@ -9,6 +8,7 @@ import { packPlugin } from '../src/pack.ts';
 import { runCli } from '../src/cli.ts';
 import { splitName, tarGz } from '../src/tar.ts';
 import { cleanup, fresh, plugin, write } from './fixture.ts';
+import { runCommand } from '../../../core/test/run-command.ts';
 
 after(cleanup);
 
@@ -31,11 +31,11 @@ describe('packPlugin (P-06 п. 2): упаковка собранного кат�
     assert.equal(report.archive, archive);
     assert.equal(report.bytes, fs.statSync(archive).size);
     assert.deepEqual(report.files.map((f) => f.path), ['config.schema.json', 'index.mjs', 'index.mjs.map', 'manifest.json', 'ui/ui.css', 'ui/ui.js', 'ui/ui.js.map']);
-    const names = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\n');
+    const names = runCommand('tar', ['-tzf', archive]).trim().split('\n');
     assert.deepEqual(names, report.files.map((f) => `acme.dep/${f.path}`));
     const into = fresh('extract');
     fs.mkdirSync(into);
-    execFileSync('tar', ['-xzf', archive, '-C', into]);
+    runCommand('tar', ['-xzf', archive, '-C', into]);
     for (const f of report.files) assert.deepEqual(fs.readFileSync(path.join(into, 'acme.dep', f.path)), fs.readFileSync(path.join(dir, f.path)), f.path);
   });
 
@@ -130,7 +130,7 @@ describe('packPlugin (P-06 п. 2): упаковка собранного кат�
     const archive = path.join(fresh('arch'), 'long.tgz');
     fs.mkdirSync(path.dirname(archive));
     await packPlugin(dir, { out: archive });
-    assert.ok(execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).includes(`acme.dep/${deep}`));
+    assert.ok(runCommand('tar', ['-tzf', archive]).includes(`acme.dep/${deep}`));
     const long = await built({ [`ui/${'x'.repeat(120)}.css`]: 'x' });
     const refused = await packPlugin(long, { out: path.join(fresh('arch'), 'y.tgz') });
     assert.equal(refused.ok, false);
@@ -157,7 +157,7 @@ describe('tar: ustar', () => {
     const archive = path.join(fresh('arch'), 'empty.tgz');
     fs.mkdirSync(path.dirname(archive));
     fs.writeFileSync(archive, tarGz([]));
-    assert.equal(execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }), '');
+    assert.equal(runCommand('tar', ['-tzf', archive]), '');
   });
 
   it('размер, кратный блоку, и пустой файл читаются без искажений', () => {
@@ -166,7 +166,7 @@ describe('tar: ustar', () => {
     fs.writeFileSync(archive, tarGz([{ name: 'r/block', data: new Uint8Array(512).fill(7) }, { name: 'r/empty', data: new Uint8Array(0) }, { name: 'r/кириллица.txt', data: Buffer.from('да') }]));
     const into = fresh('extract');
     fs.mkdirSync(into);
-    execFileSync('tar', ['-xzf', archive, '-C', into]);
+    runCommand('tar', ['-xzf', archive, '-C', into]);
     assert.equal(fs.readFileSync(path.join(into, 'r', 'block')).length, 512);
     assert.equal(fs.readFileSync(path.join(into, 'r', 'empty')).length, 0);
     assert.equal(fs.readFileSync(path.join(into, 'r', 'кириллица.txt'), 'utf8'), 'да');

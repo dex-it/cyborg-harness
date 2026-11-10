@@ -19,6 +19,7 @@
 - `ProcessResult.truncated`, `ProcessOptions.maxOutputBytes` [minor]: вывод `process.run` до предела с признаком обрезки вместо тихой потери; предел задаёт плагин (K-12).
 - `OsFs.realpath` [minor]: настоящий путь с проверкой области; ссылка наружу - `PermissionDenied`, нет пути - `NotFound` (K-12).
 - `PluginContext.views`, `PluginViews`, `ViewChannel`, `UiContext.channel` [minor]: канал «главная часть - вид» по имени вида, `post` и `onMessage` в обе стороны, сообщение до 64 КиБ (K-13).
+- `PluginContext.log`, `LogLevel` [minor]: второй необязательный параметр `level` (`info`, `warn`, `error`; по умолчанию `info`), существующие плагины с одним аргументом работают как прежде; ядро обрезает строку длиннее предела и не кладёт в журнал по одной строки сверх предела частоты (K-29).
 
 ## 1.0.0-dev - не выпущена
 

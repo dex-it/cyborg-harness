@@ -5,6 +5,7 @@ import type { Counter, KernelContext, Lifecycle, PtyDrop } from './kernel-contex
 import type { DisableOptions, UninstallReport } from './kernel-types.ts';
 import { isValidId } from './manifest-fields.ts';
 import type { PluginManifest } from './manifest.ts';
+import { isLifecycleEntry } from './status.ts';
 
 /** Очередь операций над плагинами, выключение и включение, страйки сторожа, снятие плагина и выгрузка ядра. */
 export function createLifecycle(ctx: KernelContext): Lifecycle {
@@ -41,6 +42,21 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     return true;
   }
 
+  function unloadSwitchedOff(id: string): void {
+    const { activation } = ctx.parts;
+    enqueue(async () => {
+      await activation.activating.get(id);
+      if (!ctx.unloading && active.includes(id)) await unloadPlugin(id);
+    }).catch((error: unknown) => options.onLog?.(id, `снятие после выключения не удалось: ${errorMessage(error)}`, 'error'));
+  }
+
+  function switchOffFlood(id: string): void {
+    if (switchedOff.has(id) || ctx.unloading) return;
+    switchedOff.add(id);
+    ctx.record({ pluginId: id, kind: 'switched-off', strikes: 0, affects: affected([id]), reason: 'log-flood' });
+    unloadSwitchedOff(id);
+  }
+
   function affected(gone: readonly string[]): string[] {
     const uses = (consumer: PluginManifest, provider: PluginManifest) =>
       [...(graph.bindings.get(consumer.id)?.values() ?? [])].includes(provider.id) ||
@@ -55,8 +71,9 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
   }
 
   function dropPlugin(pluginId: string, pty: PtyDrop = 'release'): number {
-    const { idleWatch, contracts, commands, keyRegistry } = ctx.parts;
+    const { idleWatch, contracts, commands, keyRegistry, logs } = ctx.parts;
     idleWatch.drop(pluginId);
+    logs.drop(pluginId);
     contracts.dropFor(pluginId);
     commands.dropFor(pluginId);
     keyRegistry.dropFor(pluginId);
@@ -120,7 +137,7 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     strikes.delete(pluginId);
     switchedOff.delete(pluginId);
     pool.forgetFailures(ctx.hostOf(pluginId) ?? pluginId);
-    const last = (id: string) => ctx.journal.findLast((e) => e.pluginId === id && e.kind !== 'key-conflict');
+    const last = (id: string) => ctx.journal.findLast((e) => e.pluginId === id && isLifecycleEntry(e));
     const follows = (id: string) => {
       const e = last(id);
       return e?.kind === 'skipped' || (e?.kind === 'unloaded' && e.by === pluginId && id !== pluginId);
@@ -232,6 +249,7 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     for (const pluginId of unloaded) forgetOs(pluginId);
     layer.clear();
     pool.stopAll();
+    ctx.parts.logs.flush();
     ctx.flushRepeats();
   }
 
@@ -241,6 +259,8 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     enqueue,
     idle,
     strike,
+    switchOffFlood,
+    unloadSwitchedOff,
     affected,
     dropPlugin,
     forgetOs,

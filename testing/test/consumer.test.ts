@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import { runCommand } from '../../core/test/run-command.ts';
 
 // P-08, приёмка 2: пустой проект вне репозитория ставит тест-кит из архивов `npm pack` по номерам версий (вместе с ядром и контрактами)
 // и проходит свой тест на startKernel. Реестр не нужен: ставятся tarball-ы.
@@ -13,15 +13,8 @@ const tsc = path.join(root, 'node_modules', 'typescript7', 'bin', 'tsc');
 
 let work = '';
 let project = '';
-/** Команда с пределом времени; при отказе в сообщение идёт её вывод. NODE_TEST_CONTEXT убран: внутри `node --test` вложенный `node --test` молчал бы, считая себя дочерним. */
-function run(cmd: string, args: string[], cwd: string): string {
-  try {
-    return execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NODE_TEST_CONTEXT: undefined }, timeout: 90_000, killSignal: 'SIGKILL' });
-  } catch (error) {
-    const e = error as { message: string; stdout?: string; stderr?: string };
-    throw new Error(`${cmd} ${args.join(' ')} (cwd ${cwd}): ${e.message}\n--- stdout\n${e.stdout ?? ''}\n--- stderr\n${e.stderr ?? ''}`, { cause: error });
-  }
-}
+/** Команда с пределом времени; при отказе в сообщение идёт её вывод (core/test/run-command.ts). NODE_TEST_CONTEXT убран: внутри `node --test` вложенный `node --test` молчал бы, считая себя дочерним. */
+const run = (cmd: string, args: string[], cwd: string): string => runCommand(cmd, args, { cwd, env: { NODE_TEST_CONTEXT: undefined } });
 
 function pack(dir: string): string {
   const [out] = JSON.parse(run('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', work], dir)) as [{ filename: string }];

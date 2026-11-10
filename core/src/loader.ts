@@ -11,6 +11,7 @@ import type { Kernel, LoadOptions } from './kernel-types.ts';
 import { createLifecycle } from './lifecycle.ts';
 import { createKeyRegistry } from './keybindings.ts';
 import { createOsRequests } from './os-requests.ts';
+import { createPluginLog } from './plugin-log.ts';
 import { createSections } from './sections.ts';
 import { createViewChannels } from './view-channels.ts';
 import { createViewsState } from './views-state.ts';
@@ -30,6 +31,7 @@ const createParts = (ctx: KernelContext): Parts => ({
   osRequests: createOsRequests(ctx),
   views: createViewsState(ctx),
   viewChannels: createViewChannels(ctx),
+  logs: createPluginLog(ctx),
   bridge: createBridge(ctx),
 });
 

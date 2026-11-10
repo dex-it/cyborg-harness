@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import type { LogLevel } from '@cyborg-harness/contracts';
 import {
   describeEntry,
   describeOpenCommands,
@@ -30,7 +31,8 @@ import {
 } from '@cyborg-harness/core';
 import { errorMessage, isRecord } from './guards.ts';
 import type { FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginOrigin, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from './snapshot.ts';
-import { viewOrigin } from './view-protocol.ts';
+import { viewUrl } from './view-protocol.ts';
+import type { ViewGroups } from './view-frames.ts';
 import type { PluginUi } from './view-files.ts';
 
 const ENTRY_FILES = ['index.mjs', 'index.js', 'index.ts'];
@@ -131,7 +133,7 @@ export interface StartOptions {
   /** Секунды простоя пользователя по ОС - для `ctx.system.onIdle`. */
   readonly idleSeconds?: () => number;
   readonly onJournal?: (entry: JournalEntry) => void;
-  readonly onLog?: (pluginId: string, message: string) => void;
+  readonly onLog?: (pluginId: string, message: string, level: LogLevel) => void;
   /** Главная часть плагина послала сообщение виду: окно отдаёт его фреймам этого плагина с этим именем вида. */
   readonly onViewMessage?: (pluginId: string, view: string, message: unknown) => void;
   /** Что не дошло до ядра; по умолчанию - в log. */
@@ -171,6 +173,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     enabled: ws.plugins.enabled,
     manifests: found.manifests,
     hosts: ws.plugins.hosts,
+    uiGroups: ws.plugins.uiGroups,
     keybindings: ws.plugins.keybindings,
     // Признак поставки - каталог установки, а не манифест: сторонний автор пишет в манифест что угодно.
     bundled: [...found.origins].filter(([, dir]) => dir === options.builtinDir).map(([id]) => id),
@@ -194,9 +197,9 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     onWindow: (snapshot) => options.onWindow?.(snapshot),
     onDocuments: () => options.onDocuments?.(),
     onKeptPty: () => options.onKeptPty?.(),
-    onLog: (id, message) => {
-      options.log(`[plugins] ${id}: ${message}`);
-      options.onLog?.(id, message);
+    onLog: (id, message, level) => {
+      options.log(`[plugins] ${id}${level === 'info' ? '' : ` [${level}]`}: ${message}`);
+      options.onLog?.(id, message, level);
     },
     onViewMessage: (id, view, message) => options.onViewMessage?.(id, view, message),
   }).catch((error: unknown) => {
@@ -245,10 +248,10 @@ export interface PluginsEvents {
   changed(): void;
   /** Плагин выключился во время работы: видов у плагинов пока нет, поэтому одно уведомление ядра (SAD §3.5). */
   alert(title: string, body: string): void;
-  /** Сообщение плагина: его вид получает строку сразу, без снимка. */
-  log?(pluginId: string, line: FeedLine): void;
-  /** Главная часть плагина послала сообщение виду `view` (`ctx.views.channel`): окно отдаёт его фреймам этого плагина с этим именем и никому больше. */
-  viewMessage?(pluginId: string, view: string, message: unknown): void;
+  /** Сообщение плагина: его вид получает строку сразу, без снимка. `group` - группа рендера плагина: кадры соседей по группе строки не получают. */
+  log?(pluginId: string, line: FeedLine, group: string | undefined): void;
+  /** Главная часть плагина послала сообщение виду `view` (`ctx.views.channel`): окно отдаёт его фреймам этого плагина с этим именем и никому больше (`group` - группа рендера плагина). */
+  viewMessage?(pluginId: string, view: string, message: unknown, group: string | undefined): void;
   /** Заголовок окна от ядра: воркспейс, фрагменты плагинов, приложение. */
   title?(title: string): void;
   /** Команда окна (`WINDOW_COMMANDS`): исполняет окно, а не плагин. */
@@ -263,7 +266,7 @@ export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProb
 const FEED_LIMIT = 300;
 
 /** Ядро плагинов глазами окна playground: журнал, состояние плагинов, клавиши, лента сообщений и кнопки над ними. */
-export class PluginsService {
+export class PluginsService implements ViewGroups {
   private kernel: Kernel | undefined;
   private phase: PluginsSnapshot['phase'] = 'starting';
   private workspace: WorkspaceInfo = { current: null, recent: [] };
@@ -336,9 +339,9 @@ export class PluginsService {
         onKeptPty: () => this.events.changed(),
         onLog: (pluginId, text) => {
           const line = this.say({ kind: 'log', subject: pluginId, text });
-          this.events.log?.(pluginId, line);
+          this.events.log?.(pluginId, line, this.groupOf(pluginId));
         },
-        onViewMessage: (pluginId, view, message) => this.events.viewMessage?.(pluginId, view, message),
+        onViewMessage: (pluginId, view, message) => this.events.viewMessage?.(pluginId, view, message, this.groupOf(pluginId)),
       });
       this.phase = 'ready';
       this.showTitle(this.kernel.window.title);
@@ -367,14 +370,23 @@ export class PluginsService {
     return stamped;
   }
 
-  /** Виды плагина: по ним протокол cyborg-plugin отдаёт оболочку и файлы; `wake` - запрос пришёл от показа вида. */
-  uiOf(pluginId: string, wake = false): PluginUi | undefined {
+  /** Группа рендера плагина с видами (`Kernel.groupOf`): хост адреса его видов, по ней мост проверяет, что плагин кадра состоит в группе кадра. */
+  groupOf(pluginId: string): string | undefined {
+    return this.kernel?.groupOf(pluginId);
+  }
+
+  /** Виды плагина: по ним протокол cyborg-plugin отдаёт оболочку и файлы. Ленивый плагин не будит: см. `wake`. */
+  uiOf(pluginId: string): PluginUi | undefined {
     const dir = this.views.get(pluginId);
     const ui = this.kernel?.manifests.find((m) => m.id === pluginId)?.ui;
-    if (dir === undefined || ui === undefined) return undefined;
-    // Показ вида - вызов ленивого плагина: мосту вида нужна его главная часть.
-    if (wake) void this.kernel?.wake(pluginId).catch(() => undefined);
-    return { dir, views: ui.views, ...(ui.overlay !== undefined && { overlay: ui.overlay }) };
+    const group = this.groupOf(pluginId);
+    if (dir === undefined || ui === undefined || group === undefined) return undefined;
+    return { dir, group, views: ui.views, ...(ui.overlay !== undefined && { overlay: ui.overlay }) };
+  }
+
+  /** Показ вида - вызов ленивого плагина: мосту вида нужна его главная часть. Зовут после сверки группы адреса (`resolveViewRequest`). */
+  wake(pluginId: string): void {
+    void this.kernel?.wake(pluginId).catch(() => undefined);
   }
 
   emit(event: SystemEvent): void {
@@ -515,6 +527,8 @@ export class PluginsService {
         .filter(([, spec]) => spec.args.every((a) => a.optional))
         .map(([name]) => name);
       const origin = this.origins.get(s.id);
+      const group = this.views.has(s.id) ? kernel?.groupOf(s.id) : undefined;
+      const isolated = this.entries.findLast(({ entry }) => entry.kind === 'group-isolated' && entry.pluginId === s.id)?.entry;
       return {
         id: s.id,
         ...(origin !== undefined && { origin }),
@@ -525,7 +539,9 @@ export class PluginsService {
         commands,
         permissions: manifest ? [...describePermissions(manifest.permissions), ...describeOpenCommands(manifest.commands)] : [],
         ...(manifest && { version: manifest.version }),
-        ...(manifest?.ui?.overlay !== undefined && this.views.has(s.id) && { overlay: `${viewOrigin(s.id)}/?view=overlay` }),
+        ...(manifest?.ui?.overlay !== undefined && this.views.has(s.id) && group !== undefined && { overlay: viewUrl(group, s.id, 'overlay') }),
+        ...(group !== undefined && { group }),
+        ...(isolated && { groupWarning: describeEntry(isolated) }),
         ...(host !== undefined && { host }),
         ...(pid !== undefined && { pid }),
         ...(s.cause && s.state !== 'active' && { reason: describeEntry(s.cause) }),
@@ -537,7 +553,10 @@ export class PluginsService {
       };
     });
     // Адрес вида решает метка раскладки ядра: у не включённого в настройках плагина вида нет, у снятого окно рисует заглушку на том же месте.
-    const layout: LayoutRow[] = (kernel?.layout ?? []).map((e) => ({ ...e, ...(e.kind === 'view' && e.mark !== 'not-enabled' && this.views.has(e.pluginId) && { url: `${viewOrigin(e.pluginId)}/?view=${e.name}` }) }));
+    const layout: LayoutRow[] = (kernel?.layout ?? []).map((e) => {
+      const group = e.kind === 'view' && e.mark !== 'not-enabled' && this.views.has(e.pluginId) ? kernel?.groupOf(e.pluginId) : undefined;
+      return { ...e, ...(group !== undefined && { url: viewUrl(group, e.pluginId, e.name) }) };
+    });
     const keys: KeyRow[] = (kernel?.keybindings ?? []).map((k) => ({
       key: k.key,
       command: k.command,
