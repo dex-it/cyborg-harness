@@ -214,7 +214,7 @@ function pour(write: (i: number) => void, perTick: number, every: number): () =>
 }
 
 test('поток: плагин выше предела частоты дольше срока выключается (switched-off, log-flood), строки после этого не идут, сосед пишет как прежде', async () => {
-  const { k, ctx, lines, journal } = await rig(['a', 'b'], { limits: { logRate: 2, logWindowMs: 40, logFloodMs: 160 } });
+  const { k, ctx, lines, journal } = await rig(['a', 'b'], { limits: { logRate: 1, logWindowMs: 80, logFloodMs: 320 } });
   const stopA = pour((i) => ctx.a?.log(`поток ${String(i)}`), 10, 5);
   const stopB = pour((i) => ctx.b?.log(`сосед ${String(i)}`), 1, 60);
   try {
@@ -254,7 +254,7 @@ test('поток: всплески выше предела с паузами д�
 });
 
 test('поток: после «Включить снова» плагин пишет в журнал, счёт потока начат заново', async () => {
-  const { k, ctx, lines, journal } = await rig(['a'], { limits: { logRate: 2, logWindowMs: 40, logFloodMs: 120 } });
+  const { k, ctx, lines, journal } = await rig(['a'], { limits: { logRate: 1, logWindowMs: 80, logFloodMs: 240 } });
   const stop = pour((i) => ctx.a?.log(`поток ${String(i)}`), 10, 5);
   try {
     await until('выключение', () => switchedOff(journal, 'a').length === 1, 5000);
@@ -268,6 +268,49 @@ test('поток: после «Включить снова» плагин пиш
     assert.deepEqual(k.active, ['a']);
   } finally {
     stop();
+    await k.unload();
+  }
+});
+
+/** Всплеск из `n` строк в момент `at` на подставных часах (`Date`); хост доставляет строки через очередь, поэтому после всплеска короткая пауза. */
+async function burst(t: { mock: { timers: { setTime(ms: number): void } } }, ctx: () => PluginContext | undefined, at: number, n: number): Promise<void> {
+  t.mock.timers.setTime(at);
+  for (let i = 0; i < n; i++) ctx()?.log(`всплеск ${String(at)}.${String(i)}`);
+  await sleep(25);
+}
+
+test('поток: всплески через паузу короче окна, но с частотой в среднем ниже предела, потоком не считаются (FR-CH-4018: «подряд» - без паузы)', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+  // Предел 2 строки за 1 с, всплеск в 3 строки раз в 1990 мс: в среднем 1,5 строки/с. За 14 с набегает больше срока в 5 с, если паузу меньше окна считать продолжением.
+  const { k, ctx, journal } = await rig(['a'], { limits: { logRate: 2, logWindowMs: 1000, logFloodMs: 5000 } });
+  try {
+    for (let i = 0; i < 8; i++) await burst(t, () => ctx.a, 1_000_000 + i * 1990, 3);
+    await burst(t, () => ctx.a, 1_000_000 + 8 * 1990, 1);
+    assert.equal(summaries(journal, 'a').length, 8, 'каждый всплеск дал сводную запись');
+    assert.deepEqual(switchedOff(journal, 'a'), []);
+    assert.deepEqual(k.active, ['a']);
+  } finally {
+    await k.unload();
+  }
+});
+
+test('поток: плагин снят до срока - счёт потока начат заново, switched-off не пишется ни при снятии, ни после «Включить»', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+  const { k, ctx, journal } = await rig(['a'], { limits: { logRate: 2, logWindowMs: 1000, logFloodMs: 5000 } });
+  try {
+    // Пять интервалов подряд сверх предела: поток идёт 4 с из 5.
+    for (let i = 0; i < 5; i++) await burst(t, () => ctx.a, 1_000_000 + i * 1000, 3);
+    // Снятие дописывает последний интервал (поток стал бы 5 с), но решения о потоке не принимает.
+    await k.disable('a');
+    assert.deepEqual(switchedOff(journal, 'a'), [], 'выключен при снятии');
+    await k.enable('a');
+    // Прежний счёт, доживи он до этих строк, дал бы 5 с и выключение; новый - 1 с.
+    await burst(t, () => ctx.a, 1_000_000 + 5000, 3);
+    await burst(t, () => ctx.a, 1_000_000 + 6000, 3);
+    await burst(t, () => ctx.a, 1_000_000 + 7000, 1);
+    assert.deepEqual(switchedOff(journal, 'a'), []);
+    assert.deepEqual(k.active, ['a']);
+  } finally {
     await k.unload();
   }
 });

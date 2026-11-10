@@ -11,10 +11,10 @@ interface Window {
   lines: number;
   skipped: number;
   errors: number;
-  /** Последняя пропущенная `error`, уже обработанная. */
+  /** Последняя пропущенная `error` как пришла: рендерится один раз, при закрытии интервала. */
   lastError: string | undefined;
   timer: ReturnType<typeof setTimeout> | undefined;
-  /** С какого момента строк подряд больше предела в каждом интервале; undefined - поток спал. */
+  /** С какого момента интервалы сверх предела идут без пауз; undefined - поток спал. */
   floodSince: number | undefined;
   /** Конец последнего интервала сверх предела. */
   floodEnd: number | undefined;
@@ -44,10 +44,12 @@ export function createPluginLog(ctx: KernelContext): PluginLog {
       w.floodSince = undefined;
       return;
     }
-    if (isPlugin(origin)) ctx.record({ pluginId: origin, kind: 'log-summary', skipped, errors, ...(lastError !== undefined && { lastError }) });
-    else options.onLog?.(origin, `строк сверх предела за интервал: ${String(skipped)}, из них error: ${String(errors)}` + (lastError === undefined ? '' : `; последняя error: ${lastError}`), 'warn');
-    // Интервал сверх предела, начатый не позже окна после конца прошлого, продолжает поток; тишина дольше окна его обрывает.
-    if (w.floodSince === undefined || w.floodEnd === undefined || start - w.floodEnd > limits.logWindowMs) w.floodSince = start;
+    const last = lastError === undefined ? undefined : render(origin, lastError, w.hostId);
+    if (isPlugin(origin)) ctx.record({ pluginId: origin, kind: 'log-summary', skipped, errors, ...(last !== undefined && { lastError: last }) });
+    else options.onLog?.(origin, `строк сверх предела за интервал: ${String(skipped)}, из них error: ${String(errors)}` + (last === undefined ? '' : `; последняя error: ${last}`), 'warn');
+    // Интервал сверх предела продолжает поток, если начался не позже чем через время одной строки на пределе (окно / предел) после конца прошлого: дальше между
+    // интервалами проходит пауза, в которой частота была ниже предела (всплески по `предел + 1` строк раз в полтора окна дают в среднем меньше предела). Меньше - дрожание таймера.
+    if (w.floodSince === undefined || w.floodEnd === undefined || start - w.floodEnd > limits.logWindowMs / Math.max(1, limits.logRate)) w.floodSince = start;
     w.floodEnd = start + limits.logWindowMs;
     if (judge && isPlugin(origin) && w.floodEnd - w.floodSince >= limits.logFloodMs) ctx.parts.lifecycle.switchOffFlood(origin);
   }
@@ -90,7 +92,7 @@ export function createPluginLog(ctx: KernelContext): PluginLog {
     w.skipped++;
     if (level === 'error') {
       w.errors++;
-      w.lastError = render(origin, raw, w.hostId);
+      w.lastError = raw;
     }
     w.timer ??= setTimeout(() => close(origin, w), Math.max(0, w.start + limits.logWindowMs - now));
     w.timer.unref();
