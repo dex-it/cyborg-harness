@@ -381,7 +381,7 @@ async function main() {
 
   // K-05: закрытая CSP вида и флаг ui.inlineStyles. echo, alice и bob флага не объявили, sessions и editor объявили (xterm и Monaco).
   const viewCspHeader = (id) => inView(id, 'fetch(location.href).then((r) => r.headers.get("content-security-policy"))');
-  const STRICT = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'";
+  const STRICT = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'";
   const WITH_INLINE = STRICT.replace("style-src 'self'", "style-src 'self' 'unsafe-inline'");
   for (const id of ['echo', 'alice', 'bob']) assert.equal(await viewCspHeader(id), STRICT, `${id}: CSP вида без флага не строгая`);
   for (const id of ['sessions', 'editor']) assert.equal(await viewCspHeader(id), WITH_INLINE, `${id}: с флагом CSP не несёт инлайн-стилей`);
@@ -438,6 +438,30 @@ async function main() {
       'картинка из сети загрузилась',
     );
     assert.equal(await inView('echo', 'fetch(location.href).then((r) => r.status)'), 200, 'свой origin вид читает');
+    // #161: default-src не покрывает base-uri и form-action, они закрыты явно. <base href> не меняет адрес относительных запросов вида,
+    // отправка формы отклонена CSP (form-action), и сервер снаружи запроса не получает (счёт outside проверяется ниже).
+    assert.deepEqual(
+      JSON.parse(
+        await inView('echo', `new Promise((resolve) => {
+          const seen = [];
+          document.addEventListener('securitypolicyviolation', (e) => seen.push(e.effectiveDirective));
+          const before = document.baseURI;
+          const base = document.createElement('base');
+          base.href = 'http://127.0.0.1:1/k161/';
+          document.head.append(base);
+          const baseChanged = document.baseURI !== before || new URL('x.js', document.baseURI).origin !== location.origin;
+          base.remove();
+          const form = document.createElement('form');
+          form.method = 'get';
+          form.action = ${JSON.stringify(outsideUrl)};
+          document.body.append(form);
+          form.submit();
+          setTimeout(() => { form.remove(); resolve(JSON.stringify({ baseChanged, seen: [...new Set(seen)].sort() })); }, 300);
+        })`),
+      ),
+      { baseChanged: false, seen: ['base-uri', 'form-action'] },
+      '<base href> сменил адреса вида или форма ушла наружу',
+    );
     await sleep(300);
     assert.equal(outside, 0, 'запрос вида дошёл до сервера снаружи');
   } finally {
