@@ -9,6 +9,7 @@ import { WINDOW_OWNER } from '@cyborg-harness/core';
 import { DELIVERY_FILE, writeDelivery } from '@cyborg-harness/core/delivery';
 import type { KeyRow } from '../src/snapshot.ts';
 import { discoverPlugins, PluginsService, readSchemaFile, startPlugins } from '../src/plugins.ts';
+import { waitFor } from './wait-for.ts';
 
 // Контракт для плагинов-подделок теста: карту контрактов приложения (playground/plugins/contracts.ts) пакет не знает.
 declare module '@cyborg-harness/contracts' {
@@ -177,9 +178,11 @@ test('старт: включённый плагин активен, миграц
     config: { migrate: (_, d) => ({ who: d.name }) },
     activate(ctx) {
       ctx.log(`привет, ${String(ctx.config?.get().who)}`);
+      ctx.log('осторожно', 'warn');
     },
   };
   const lines: string[] = [];
+  const levels: string[] = [];
   const kernel = await startPlugins({
     userData,
     builtinDir: path.join(userData, 'нет'),
@@ -189,9 +192,12 @@ test('старт: включённый плагин активен, миграц
       return greeter;
     }),
     log: (line) => lines.push(line),
+    onLog: (id, message, level) => levels.push(`${id} [${level}] ${message}`),
   });
   assert.deepEqual(kernel.active, ['greeter']);
-  assert.ok(lines.includes('[plugins] greeter: привет, мир'));
+  assert.ok(lines.includes('[plugins] greeter: привет, мир'), 'info - без пометки уровня');
+  assert.ok(lines.includes('[plugins] greeter [warn]: осторожно'), 'уровень не info - пометка в строке журнала приложения');
+  assert.deepEqual(levels, ['greeter [info] привет, мир', 'greeter [warn] осторожно']);
   assert.ok(lines.some((l) => l.includes('"pluginId":"idle","kind":"disabled"')));
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { plugins, settings: { greeter: { $version: 2, who: 'мир' } } });
   await kernel.unload();
@@ -285,7 +291,7 @@ test('служба окна: сочетания с конфликтом, пер�
   assert.equal(service.press({ ...ctrlShiftE, shift: false }), false, 'свободное сочетание ядро не забирает');
   assert.equal(service.press(ctrlShiftE), true);
   // Запись ear.hi идёт после асинхронного вызова контракта; под нагрузкой фиксированной паузы в 20 мс не хватало.
-  for (let i = 0; i < 150 && service.snapshot().feed.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  await waitFor('две записи ленты', () => service.snapshot().feed.length >= 2);
   assert.deepEqual(
     service.snapshot().feed.map((l) => [l.kind, l.subject, l.text]),
     [
@@ -356,7 +362,7 @@ test('служба окна: динамическое сочетание кно�
   service.setInputFocus('nonsense');
   service.setInputFocus('text');
   assert.equal(service.press(f('F3'), true), true, 'repeat и input: any');
-  for (let i = 0; i < 150 && ran.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  await waitFor('две выполненные команды', () => ran.length >= 2);
   assert.deepEqual(ran, [['build'], ['again']]);
   assert.deepEqual(
     service.snapshot().keys.filter((k) => k.pluginId === 'buttons').map((k) => [k.key, k.live]),
@@ -387,8 +393,8 @@ test('виды: адрес у плагина с ui в манифесте и у �
       },
     },
   };
-  const pushed: [string, string][] = [];
-  const service = new PluginsService({ changed: () => {}, alert: () => {}, log: (id, line) => pushed.push([id, line.text]) }, () => 7);
+  const pushed: [string, string, string | undefined][] = [];
+  const service = new PluginsService({ changed: () => {}, alert: () => {}, log: (id, line, group) => pushed.push([id, line.text, group]) }, () => 7);
   await service.start({
     userData,
     builtinDir: path.join(userData, 'нет'),
@@ -397,8 +403,8 @@ test('виды: адрес у плагина с ui в манифесте и у �
     log: () => {},
   });
 
-  assert.deepEqual(service.snapshot().layout, [{ pluginId: 'face', kind: 'view', name: 'main', area: 'sidebar', order: 1000, url: 'cyborg-plugin://face/?view=main' }]);
-  assert.deepEqual(service.uiOf('face'), { dir: path.join(dir, 'face'), views: { main: './ui/ui.js' } });
+  assert.deepEqual(service.snapshot().layout, [{ pluginId: 'face', kind: 'view', name: 'main', area: 'sidebar', order: 1000, url: 'cyborg-plugin://solo_face/face/?view=main' }]);
+  assert.deepEqual(service.uiOf('face'), { dir: path.join(dir, 'face'), group: 'solo_face', views: { main: './ui/ui.js' } });
   assert.equal(service.uiOf('voice'), undefined);
   assert.deepEqual(service.snapshot().plugins.find((p) => p.id === 'voice')?.permissions, ['другие плагины могут звать команды: voice.ping'], 'открытые чужим команды - в правах словами');
   assert.deepEqual(service.snapshot().plugins.find((p) => p.id === 'face')?.permissions, []);
@@ -419,9 +425,9 @@ test('виды: адрес у плагина с ui в манифесте и у �
   assert.deepEqual(await service.runFor('face', 42), { error: 'нет имени команды' });
   assert.deepEqual(service.logsOf('face'), [{ at: 7, kind: 'log', subject: 'face', text: 'привет' }]);
   assert.deepEqual(pushed, [
-    ['face', 'привет'],
-    ['voice', 'pong'],
-  ]);
+    ['face', 'привет', 'solo_face'],
+    ['voice', 'pong', undefined],
+  ], 'лог идёт с группой рендера плагина: у плагина без видов её нет');
 
   assert.deepEqual(await service.disable('voice'), {});
   assert.deepEqual(service.contractFor('face', 'demo.echo', 1), { value: false });
@@ -429,8 +435,51 @@ test('виды: адрес у плагина с ui в манифесте и у �
   assert.deepEqual(await service.disable('face'), {});
   const face = service.snapshot().plugins.find((p) => p.id === 'face');
   assert.equal(face?.state, 'stopped');
-  assert.deepEqual(service.snapshot().layout, [{ pluginId: 'face', kind: 'view', name: 'main', area: 'sidebar', order: 1000, mark: 'disabled', url: 'cyborg-plugin://face/?view=main' }], 'снятому плагину окно рисует заглушку на месте вида');
+  assert.deepEqual(service.snapshot().layout, [{ pluginId: 'face', kind: 'view', name: 'main', area: 'sidebar', order: 1000, mark: 'disabled', url: 'cyborg-plugin://solo_face/face/?view=main' }], 'снятому плагину окно рисует заглушку на месте вида');
   await service.unload();
+});
+
+test('группы рендера: виды плагинов поставки в одной группе делят origin, адрес несёт плагина; сторонний один, с предупреждением в строке плагина', async () => {
+  const userData = tmp();
+  const builtinDir = tmp();
+  // guest назван в группе duo в config, mine просит duo манифестом: сторонние остаются каждый в своей группе.
+  fs.writeFileSync(
+    path.join(userData, 'cyborg.json'),
+    JSON.stringify({ plugins: { enabled: ['alice', 'bob', 'echo', 'guest', 'mine'], uiGroups: { duo: ['alice', 'bob', 'guest'], 'bad name': ['echo'] } } }),
+  );
+  const view = { ui: { views: { main: './ui/ui.js' } } };
+  for (const id of ['alice', 'bob', 'echo']) plugin(builtinDir, id, view, 'export default {}');
+  plugin(path.join(userData, 'plugins'), 'guest', { ui: { views: { main: './ui/ui.js', side: './ui/side.js' } } }, 'export default {}');
+  plugin(path.join(userData, 'plugins'), 'mine', { ui: { views: { main: './ui/ui.js' }, group: 'duo' } }, 'export default {}');
+  const service = new PluginsService({ changed: () => {}, alert: () => {} }, () => 1);
+  await service.start({ userData, builtinDir, userPlugins: true, spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {} });
+  try {
+    const snapshot = service.snapshot();
+    const urls = snapshot.layout.map((e) => [e.pluginId, e.name, e.url]);
+    assert.deepEqual(urls, [
+      ['alice', 'main', 'cyborg-plugin://duo/alice/?view=main'],
+      ['bob', 'main', 'cyborg-plugin://duo/bob/?view=main'],
+      ['echo', 'main', 'cyborg-plugin://echo/echo/?view=main'],
+      ['guest', 'main', 'cyborg-plugin://solo_guest/guest/?view=main'],
+      ['guest', 'side', 'cyborg-plugin://solo_guest/guest/?view=side'],
+      ['mine', 'main', 'cyborg-plugin://solo_mine/mine/?view=main'],
+    ]);
+    assert.deepEqual(snapshot.plugins.map((p) => [p.id, p.group]), [['alice', 'duo'], ['bob', 'duo'], ['echo', 'echo'], ['guest', 'solo_guest'], ['mine', 'solo_mine']]);
+    // Предупреждение о группе - у стороннего, которому было с кем делить; у плагина поставки и у одиночки его нет.
+    const warning = (id: string) => snapshot.plugins.find((p) => p.id === id)?.groupWarning;
+    assert.match(warning('guest') ?? '', /сторонний плагин не делит группу рендера: группа duo не действует, работает в своей guest/);
+    assert.match(warning('mine') ?? '', /сторонний плагин не делит группу рендера: группа duo не действует, работает в своей mine/);
+    assert.equal(warning('alice'), undefined);
+    assert.equal(warning('echo'), undefined);
+    assert.ok(snapshot.problems.some((p) => p.includes('plugins.uiGroups.bad name')), 'ошибка поля plugins.uiGroups - в «Не дошло до ядра»');
+    assert.equal(snapshot.journal.filter((l) => l.plugins.includes('guest') && l.text.includes('группу рендера')).length, 1);
+    // Протокол: плагин обслуживается только под хостом своей группы.
+    assert.deepEqual([service.groupOf('alice'), service.groupOf('bob'), service.groupOf('guest'), service.groupOf('nobody')], ['duo', 'duo', 'solo_guest', undefined]);
+    assert.equal(service.uiOf('alice')?.group, 'duo');
+    assert.equal(service.uiOf('mine')?.group, 'solo_mine');
+  } finally {
+    await service.unload();
+  }
 });
 
 test('схема раздела: файл из каталога плагина проверяет config до активации, ссылка наружу - отказ', async () => {
@@ -482,16 +531,12 @@ test('plugins.enabled из файла воркспейса без перезап
   });
   // Без выгрузки упавший тест держит слежение, и процесс файла не выходит.
   t.after(() => kernel.unload());
-  const until = async (what: string, ok: () => boolean) => {
-    for (let i = 0; i < 100 && !ok(); i++) await new Promise((r) => setTimeout(r, 20));
-    assert.ok(ok(), what);
-  };
   assert.deepEqual(kernel.active, ['a', 'b']);
   write(['a']);
-  await until('b выключен', () => applied === 1);
+  await waitFor('b выключен', () => applied === 1);
   assert.deepEqual(kernel.active, ['a']);
   write(['a', 'b', 'c']);
-  await until('b включён', () => applied === 2);
+  await waitFor('b включён', () => applied === 2);
   assert.deepEqual(kernel.active, ['a', 'b']);
   assert.deepEqual(problems, ['plugins.enabled: c - включатся после перезапуска']);
 });
@@ -510,10 +555,10 @@ test('несколько видов: оба адреса в раскладке �
     const layout = service.snapshot().layout;
     const of = (id: string) => layout.filter((e) => e.pluginId === id).map((e) => [e.name, e.url, e.mark]);
     assert.deepEqual(of('duo'), [
-      ['main', 'cyborg-plugin://duo/?view=main', undefined],
-      ['side-tree', 'cyborg-plugin://duo/?view=side-tree', undefined],
+      ['main', 'cyborg-plugin://solo_duo/duo/?view=main', undefined],
+      ['side-tree', 'cyborg-plugin://solo_duo/duo/?view=side-tree', undefined],
     ]);
-    assert.deepEqual(of('solo'), [['main', 'cyborg-plugin://solo/?view=main', undefined]]);
+    assert.deepEqual(of('solo'), [['main', 'cyborg-plugin://solo_solo/solo/?view=main', undefined]]);
     assert.deepEqual(of('bare'), []);
     assert.deepEqual(of('spare'), [['main', undefined, 'not-enabled']], 'невключённому окно вид не рисует');
     assert.deepEqual(await service.disable('duo'), {});

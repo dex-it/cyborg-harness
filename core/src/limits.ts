@@ -21,6 +21,14 @@ export interface ResourceLimits {
   readonly subscriptions: number;
   /** Слушателей `onIdle` у плагина. */
   readonly idleWatchers: number;
+  /** Байт UTF-8 в строке `ctx.log` и в строке вывода хоста; длиннее обрезается с пометкой (FR-CH-4018). */
+  readonly logLineBytes: number;
+  /** Строк плагина за интервал `logWindowMs`; сверх этого строки в журнал по одной не идут, а в конце интервала пишется одна сводная запись `log-summary`. */
+  readonly logRate: number;
+  /** Интервал счёта строк плагина, мс; он же интервал сводной записи. */
+  readonly logWindowMs: number;
+  /** Сколько мс подряд плагин может превышать `logRate`, прежде чем ядро его выключит (запись `switched-off` с `reason: 'log-flood'`). */
+  readonly logFloodMs: number;
 }
 
 export const LIMITS: ResourceLimits = {
@@ -34,6 +42,11 @@ export const LIMITS: ResourceLimits = {
   readText: 8 * 1024 * 1024,
   subscriptions: 256,
   idleWatchers: 64,
+  // Числа предложены нормой (SRS фичи 04, вопрос 10), владелец их не принял: меняются здесь одной строкой.
+  logLineBytes: 8 * 1024,
+  logRate: 100,
+  logWindowMs: 1000,
+  logFloodMs: 10_000,
 };
 
 export function limitsOf(...overrides: (Partial<ResourceLimits> | undefined)[]): ResourceLimits {

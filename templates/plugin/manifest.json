@@ -1,0 +1,10 @@
+{
+  "id": "example",
+  "version": "1.0.0",
+  "engines": { "cyborg": "^1" },
+  "provides": { "example.greeting": "1.0" },
+  "commands": { "example.hello": {} },
+  "keybindings": [{ "key": "CmdOrCtrl+Shift+E", "command": "example.hello" }],
+  "config": { "version": 1, "schema": "./config.schema.json" },
+  "ui": { "views": { "main": "./ui/ui.js" } }
+}

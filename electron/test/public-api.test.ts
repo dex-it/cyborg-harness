@@ -65,6 +65,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'UtilityPtyHost',
       'ViewChannelsOptions',
       'ViewCsp',
+      'ViewGroups',
       'ViewRequest',
       'WindowChannelsOptions',
     ],
@@ -74,7 +75,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
   './preload': { source: 'src/index-preload.ts', values: ['exposeViewBridge', 'inViewFrame', 'inWindowDocument', 'viewBridge', 'windowApi'], types: ['WindowApi'] },
   './window': {
     source: 'src/index-window.ts',
-    values: ['PATH_MIME', 'VIEW_SCHEME', 'WindowLayerView', 'pluginOfOrigin', 'viewOrigin'],
+    values: ['PATH_MIME', 'VIEW_SCHEME', 'WindowLayerView', 'groupOfOrigin', 'viewOrigin'],
     types: ['FeedLine', 'KeptPtyRow', 'KeyRow', 'LayoutRow', 'PluginJournalLine', 'PluginOrigin', 'PluginRow', 'PluginState', 'PluginsSnapshot', 'Reply', 'TerminalEvent', 'ViewBridge', 'ViewDrop', 'WindowApi', 'WindowPort', 'WorkspaceInfo'],
   },
 };

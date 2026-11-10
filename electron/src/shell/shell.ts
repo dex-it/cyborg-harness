@@ -28,8 +28,8 @@ async function start(): Promise<void> {
     // eslint-disable-next-line no-console -- консоль фрейма плагина: в ленту ядра ошибки слушателей не идут
     report: (error) => console.error(error),
   });
-  // Классический скрипт разрешает import() от своего адреса /.cyborg/, а путь манифеста - от каталога плагина.
-  const module: unknown = await import(new URL(entry, `${location.origin}/`).href);
+  // Классический скрипт разрешает import() от своего адреса /<плагин>/.cyborg/, а путь манифеста - от каталога плагина: origin общий на группу, плагин в пути.
+  const module: unknown = await import(new URL(entry, `${location.origin}/${plugin}/`).href);
   const mounted = mountModule(module, root, ctx);
   const focus = keepFocus(window, root);
   addEventListener(

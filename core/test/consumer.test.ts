@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import { runCommand } from './run-command.ts';
 
 // P-02, приёмка 1: пустой проект вне репозитория ставит оба пакета из архивов `npm pack` по номерам версий,
 // собирается (tsc) и запускает сценарий из core/examples. Реестр не нужен: ставятся tarball-ы.
@@ -14,15 +14,8 @@ const tsc = path.join(root, 'node_modules', 'typescript7', 'bin', 'tsc');
 let work = '';
 let project = '';
 let corePack = '';
-/** Команда с пределом времени: зависшая npm не должна держать весь `npm test`; при отказе в сообщение идёт её вывод. */
-function run(cmd: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = {}): string {
-  try {
-    return execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env }, timeout: 90_000, killSignal: 'SIGKILL' });
-  } catch (error) {
-    const e = error as { message: string; stdout?: string; stderr?: string };
-    throw new Error(`${cmd} ${args.join(' ')} (cwd ${cwd}): ${e.message}\n--- stdout\n${e.stdout ?? ''}\n--- stderr\n${e.stderr ?? ''}`, { cause: error });
-  }
-}
+/** Команда с пределом времени: зависшая npm не должна держать весь `npm test`; при отказе в сообщение идёт её вывод (core/test/run-command.ts). */
+const run = (cmd: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = {}): string => runCommand(cmd, args, { cwd, env });
 
 /**
  * Упаковывает пакет в `work` и возвращает путь архива. Жизненный цикл пакета (`prepack`) идёт как у настоящей публикации:

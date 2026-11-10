@@ -10,6 +10,7 @@ export { framesOf, registerViewScheme, serveViews } from './views.ts';
 export { resolveStaticFile, resolveViewRequest, VIEW_CSP } from './view-files.ts';
 export type { PluginUi, ViewCsp, ViewRequest } from './view-files.ts';
 export { guardNavigation } from './navigation.ts';
+export type { ViewGroups } from './view-frames.ts';
 export type { PortPair } from './view-terminals.ts';
 export { registerViewChannels, registerWindowChannels, viewChannel, windowChannel } from './channels.ts';
 export type { ViewChannelsOptions, WindowChannelsOptions } from './channels.ts';

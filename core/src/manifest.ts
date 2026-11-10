@@ -72,6 +72,8 @@ export interface PluginManifest {
     readonly placement?: Readonly<Record<string, Placement>>;
     /** Модуль замка окна, вид с именем `overlay`: только при праве `ui.lock`. */
     readonly overlay?: string;
+    /** Рекомендация автора: группа рендера, с которой плагин хочет делить origin и процесс рендера; итог решают `plugins.uiGroups` и поставка (`Kernel.groupOf`). */
+    readonly group?: string;
   };
   /** `onStart` - окно закрыто с первого кадра, плагин активируется сразу, даже `lazy`. */
   readonly lock?: { readonly onStart: true };

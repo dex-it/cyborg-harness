@@ -2,6 +2,7 @@ import type { JournalEntry } from './kernel-types.ts';
 
 export const MAX_DENIED = 1000;
 export const MAX_DEPRECATED = 1000;
+export const MAX_LOG_SUMMARIES = 1000;
 export const DENIED_WINDOW_MS = 5000;
 /** Имя pty-хоста в журнале: записи `host-down`, `host-restart` и `host-abandoned` с этим `hostId` - о нём, а не о хосте плагинов. */
 export const PTY_HOST_ID = 'pty-host';
@@ -11,13 +12,13 @@ type Denied = Extract<JournalEntry, { kind: 'denied' }>;
 type DeprecatedCall = Extract<JournalEntry, { kind: 'deprecated-call' }>;
 
 /** Виды записей, которых в журнале не больше предела каждого: их поток идёт от плагина, а не от его состояния. */
-const BOUNDS: Partial<Record<JournalEntry['kind'], number>> = { denied: MAX_DENIED, 'deprecated-call': MAX_DEPRECATED };
+const BOUNDS: Partial<Record<JournalEntry['kind'], number>> = { denied: MAX_DENIED, 'deprecated-call': MAX_DEPRECATED, 'log-summary': MAX_LOG_SUMMARIES };
 
 /**
  * Записей каждого ограниченного вида (`BOUNDS`) в списке не больше `limit` (по умолчанию - предел вида); прочие записи не трогаются: из них выводится состояние плагинов.
  *
- * Остальные виды записей без предела осознанно. Это события жизненного цикла (загрузка, активация, снятие, сбои плагинов
- * и хостов): их число задают плагины, перезапуски и действия человека, а не частота вызовов. Череда сбоев подряд
+ * Остальные виды записей без предела осознанно. Это в основном события жизненного цикла (`isLifecycleEntry` в status.ts: загрузка, активация, снятие, сбои плагинов
+ * и хостов); остальные (сочетания, pty по сроку, выбор хоста) пишутся раз на событие, а не на вызов. Число первых задают плагины, перезапуски и действия человека, а не частота вызовов. Череда сбоев подряд
  * (`watchdog.strikes` сбоев, каждый не позже `watchdog.window` после прошлого) выключает плагин или оставляет хост, так что рост медленный: не чаще
  * нескольких записей на плагин за окно. Отказы шлюза и вызовы членов с `@deprecated` идут от каждого вызова, поэтому их и ограничивают, и склеивают
  * (`DeniedCollapse`). Срезать записи жизненного цикла нельзя: по `skipped` и `unloaded` ядро решает, что вернуть при
