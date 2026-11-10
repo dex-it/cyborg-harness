@@ -37,6 +37,14 @@ export function navigationAllowed(nav: Navigation, windowUrl: string, mainFrame:
   return by === target && groupOfOrigin(nav.frame?.origin ?? '') === by;
 }
 
+/**
+ * Плагин, на которого записывается отказ навигации: плагин кадра-инициатора; если инициатор не кадр вида (дочерний srcdoc или about:blank внутри вида,
+ * кадр после pushState) или его нет, - плагин навигируемого кадра. Вид окна и чужие страницы плагина не имеют.
+ */
+export function navigationPlugin(nav: Navigation, groups: ViewGroups): string | undefined {
+  return (nav.initiator && pluginOfFrame(nav.initiator, groups)) ?? (nav.frame && pluginOfFrame(nav.frame, groups)) ?? undefined;
+}
+
 /** Окно не открывает новых окон и не уходит со своих адресов (У-23): ссылки наружу - только `shell.openExternal` по праву. */
 export function guardNavigation(contents: WebContents, windowUrl: string, denied: (pluginId: string, url: string) => void, groups: ViewGroups): void {
   // Открывший фрейм Electron не называет, а referrer со схемы cyborg-plugin пуст: окно отклоняется без записи в журнал.
@@ -44,8 +52,7 @@ export function guardNavigation(contents: WebContents, windowUrl: string, denied
   contents.on('will-frame-navigate', (event) => {
     if (navigationAllowed(event, windowUrl, contents.mainFrame)) return;
     event.preventDefault();
-    const by = event.initiator ?? event.frame;
-    const pluginId = by ? pluginOfFrame(by, groups) : undefined;
+    const pluginId = navigationPlugin(event, groups);
     if (pluginId !== undefined) denied(pluginId, event.url);
   });
 }

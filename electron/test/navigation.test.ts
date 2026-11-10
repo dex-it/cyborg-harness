@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { WebFrameMain } from 'electron';
-import { navigationAllowed } from '../src/navigation.ts';
+import { navigationAllowed, navigationPlugin } from '../src/navigation.ts';
 
 const frame = (origin: string) => ({ origin }) as WebFrameMain;
 const page = 'file:///app/renderer/index.html';
@@ -45,4 +45,22 @@ test('навигация: внутри группы вид переходит м
   assert.equal(sub('cyborg-plugin://panels/alice/', echo, panels), false, 'вид другой группы увёл фрейм группы');
   assert.equal(sub('cyborg-plugin://panels/alice/', panels, null), true, 'перезагрузка кадра группы');
   assert.equal(sub('cyborg-plugin://panels/alice/', echo, null), false, 'удалённый инициатор подставил вид группы в чужой кадр');
+});
+
+test('навигация: отказ записывается на плагин инициатора, а если инициатор не кадр вида - на плагин навигируемого кадра', () => {
+  const groups = { groupOf: (id: string) => ({ alice: 'panels', bob: 'panels' })[id] };
+  const view = (url: string) => ({ url, origin: 'cyborg-plugin://panels' }) as WebFrameMain;
+  const alice = view('cyborg-plugin://panels/alice/?view=main');
+  const bob = view('cyborg-plugin://panels/bob/');
+  // Инициатор - кадр вида: отвечает он, а не навигируемый.
+  assert.equal(navigationPlugin({ url: 'https://evil.example/', isMainFrame: false, frame: bob, initiator: alice }, groups), 'alice');
+  // Дочерний srcdoc или about:blank внутри вида, кадр после pushState: адреса вида у инициатора нет - запись идёт на плагин кадра.
+  const srcdoc = { url: 'about:srcdoc', origin: 'cyborg-plugin://panels' } as WebFrameMain;
+  assert.equal(navigationPlugin({ url: 'https://evil.example/', isMainFrame: false, frame: alice, initiator: srcdoc }, groups), 'alice');
+  const moved = view('cyborg-plugin://panels/nobody/');
+  assert.equal(navigationPlugin({ url: 'https://evil.example/', isMainFrame: false, frame: bob, initiator: moved }, groups), 'bob');
+  // Без инициатора (перезагрузка, удалённый инициатор) - плагин кадра.
+  assert.equal(navigationPlugin({ url: 'https://evil.example/', isMainFrame: false, frame: bob, initiator: null }, groups), 'bob');
+  // Ни там ни там вида нет (кадр окна): плагина нет, записи не будет.
+  assert.equal(navigationPlugin({ url: 'https://evil.example/', isMainFrame: false, frame: main, initiator: main }, groups), undefined);
 });
