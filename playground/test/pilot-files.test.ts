@@ -62,12 +62,27 @@ async function started(files: Readonly<Record<string, string>> = FILES, ids: Par
   };
   return { box, repo, p, [Symbol.asyncDispose]: dispose };
 }
-/** Дерево устоялось: отметки запрошены и больше не меняются. */
-const settled = (p: Pilot, runs = 1) =>
-  waitFor('отметки получены и запросов в работе нет', async () => {
+const QUIET_MS = 500;
+
+/**
+ * Дерево устоялось: отметки запрошены, запросов в работе нет, и ни счётчики, ни число сырых событий не менялись QUIET_MS подряд.
+ * Одного «запросов нет» мало: запоздалое событие (дубль от FSEvents после удаления пробного файла) запускает запрос позже, чем тест снял снимок,
+ * и такой запрос подхватывал правку, сделанную уже после снимка (так упал тест нерекурсивного слежения на macOS).
+ */
+const settled = (p: Pilot, runs = 1) => {
+  let last = '';
+  let since = Date.now();
+  return waitFor('дерево устоялось: отметки получены, запросов и событий нет', async () => {
     const st = await state(p);
-    return st.counters.markRuns >= runs && !st.pending ? true : undefined;
+    const key = `${JSON.stringify(st.counters)}/${String(st.version)}/${String(p.watches.raw)}`;
+    if (key !== last || st.pending || st.counters.markRuns < runs) {
+      last = key;
+      since = Date.now();
+      return undefined;
+    }
+    return Date.now() - since >= QUIET_MS ? true : undefined;
   });
+};
 
 test('files: дерево корня и раскрытие каталога идут через fs.list шлюза; .git скрыт; отметки приходят от git из другого хоста', async () => {
   await using s = await started();
