@@ -10,13 +10,20 @@ import { pluginStatuses } from '../src/status.ts';
 import { isRecord } from '../src/wire.ts';
 import { forkHosts, type SpawnHost } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
+import { waitFor } from './wait-for.ts';
+
+// Срок молчания хоста до «завис». Тест, который ждёт зависания, берёт HANG_MS: хватает, чтобы свежий хост успел подняться на занятом раннере,
+// а не быть принятым за зависший, но зависание всё равно находится за пару секунд. Остальные тесты берут QUIET_MS: у них зависания быть не должно,
+// и «ядро долго не читало сообщения» не может обогнать падение или убийство хоста и записаться раньше них лишним `hang`.
+const HANG_MS = 1500;
+const QUIET_MS = 30_000;
 
 const manifests = [
   { id: 'files', version: '1.0.0', engines: { cyborg: '^1' }, provides: { 'test.files': '1.0' } },
   { id: 'consumer', version: '1.0.0', engines: { cyborg: '^1' }, optional: { 'test.files': '^1' }, commands: { 'consumer.call': { args: ['string'], rest: 'any' }, 'consumer.state': {} } },
 ];
 
-function start(strikes = 3, spawnHost: SpawnHost = forkHosts()): Promise<Kernel> {
+function start(strikes = 3, spawnHost: SpawnHost = forkHosts(), timeout = HANG_MS): Promise<Kernel> {
   return load({
     apiVersion: PLUGIN_API_VERSION,
     enabled: ['files', 'consumer'],
@@ -24,7 +31,7 @@ function start(strikes = 3, spawnHost: SpawnHost = forkHosts()): Promise<Kernel>
     hosts: { storage: ['files'], ui: ['consumer'] },
     spawnHost,
     entry: (m) => new URL(`./fixtures/${m.id}.ts`, import.meta.url).href,
-    watchdog: { interval: 50, timeout: 400, strikes },
+    watchdog: { interval: 50, timeout, strikes },
   });
 }
 
@@ -34,7 +41,7 @@ const downs = (k: Kernel) =>
   k.journal.filter((e): e is Extract<JournalEntry, { kind: 'host-down' }> => e.kind === 'host-down').map((d) => [d.hostId, d.reason, d.culprits, d.affects]);
 
 test('вызов между процессами: данные, исключение и функция в результате', async () => {
-  const k = await start();
+  const k = await start(3, forkHosts(), QUIET_MS);
   try {
     assert.equal(await k.run('consumer.call', 'read', 'a.txt'), 'data:a.txt');
     await assert.rejects(k.run('consumer.call', 'fail'), { code: 'Remote', message: 'нет файла' });
@@ -62,7 +69,7 @@ test('зависание: сторож убивает хост, виновник
 });
 
 test('падение процесса идёт тем же путём, что и зависание', async () => {
-  const k = await start();
+  const k = await start(3, forkHosts(), QUIET_MS);
   try {
     await assert.rejects(k.run('consumer.call', 'crash'), { code: 'HostGone' });
     await k.idle();
@@ -103,7 +110,7 @@ const shared = [
   { id: 'calm', version: '1.0.0', engines: { cyborg: '^1' }, commands: { 'calm.echo': { args: ['any'], callers: 'plugins' }, 'calm.pid': {} } },
 ];
 
-function startShared(strikes = 3, spawnHost: SpawnHost = forkHosts()): Promise<Kernel> {
+function startShared(strikes = 3, spawnHost: SpawnHost = forkHosts(), timeout = HANG_MS): Promise<Kernel> {
   return load({
     apiVersion: PLUGIN_API_VERSION,
     enabled: ['busy', 'calm'],
@@ -112,13 +119,13 @@ function startShared(strikes = 3, spawnHost: SpawnHost = forkHosts()): Promise<K
     bundled: ['busy', 'calm'],
     spawnHost,
     entry: (m) => new URL(`./fixtures/${m.id}.ts`, import.meta.url).href,
-    watchdog: { interval: 50, timeout: 400, strikes },
+    watchdog: { interval: 50, timeout, strikes },
   });
 }
 
 async function hostDown(k: Kernel): Promise<void> {
   const before = downs(k).length;
-  for (let i = 0; i < 100 && downs(k).length === before; i++) await sleep(20);
+  await waitFor('запись host-down в журнале', () => downs(k).length > before, { timeout: HANG_MS + 15_000 });
   await k.idle();
 }
 
@@ -176,7 +183,7 @@ test('сторож: зависание без вызовов в полёте - �
 });
 
 test('сторож: процесс упал в таймере плагина - страйк ему', async () => {
-  const k = await startShared();
+  const k = await startShared(3, forkHosts(), QUIET_MS);
   try {
     await k.run('busy.exit');
     await hostDown(k);
@@ -187,7 +194,7 @@ test('сторож: процесс упал в таймере плагина - �
 });
 
 test('сторож: процесс хоста убит снаружи - сбой не вменяется плагину, чей код шёл последним', async () => {
-  const k = await startShared();
+  const k = await startShared(3, forkHosts(), QUIET_MS);
   try {
     process.kill((await k.run('calm.pid')) as number, 'SIGKILL');
     await hostDown(k);
@@ -203,11 +210,11 @@ const rejections = (k: Kernel) =>
 async function rejected(k: Kernel, run: () => Promise<unknown>): Promise<void> {
   const before = rejections(k).length;
   await run();
-  for (let i = 0; i < 100 && rejections(k).length === before; i++) await sleep(20);
+  await waitFor('запись unhandled-rejection в журнале', () => rejections(k).length > before);
 }
 
 test('сторож: необработанное отклонение плагина - запись на него, хост и сосед живут', async () => {
-  const k = await startShared(5);
+  const k = await startShared(5, forkHosts(), QUIET_MS);
   try {
     const pid = await k.run('calm.pid');
     await rejected(k, () => k.run('busy.reject.timer'));
@@ -231,7 +238,7 @@ test('сторож: необработанное отклонение плаги
 });
 
 test('сторож: отклонение после await вменяется начавшему цепочку, а не соседу, чей код шёл последним', async () => {
-  const k = await startShared();
+  const k = await startShared(3, forkHosts(), QUIET_MS);
   try {
     await rejected(k, async () => {
       await k.run('busy.reject.await', 150);
@@ -244,7 +251,7 @@ test('сторож: отклонение после await вменяется н�
 });
 
 test('сторож: исключение в queueMicrotask и process.nextTick - хост падает, виновник назван', async () => {
-  const k = await startShared();
+  const k = await startShared(3, forkHosts(), QUIET_MS);
   try {
     for (const command of ['busy.throw.microtask', 'busy.throw.tick']) {
       await k.run(command);
@@ -270,7 +277,7 @@ test('сторож: плагин, снятый по страйкам, остаё
     bundled: ['busy', 'calm'],
     spawnHost: forkHosts(),
     entry: (m) => new URL(`./fixtures/${m.id}.ts`, import.meta.url).href,
-    watchdog: { interval: 50, timeout: 400, strikes: 3 },
+    watchdog: { interval: 50, timeout: QUIET_MS, strikes: 3 },
   });
   try {
     const marks = () => Object.fromEntries(k.layout.map((e) => [e.pluginId, e.mark ?? 'ok']));
@@ -285,7 +292,7 @@ test('сторож: плагин, снятый по страйкам, остаё
 });
 
 test('сторож: три отклонения подряд выключают только виновника - хост не падает и не бросается, сосед работает', async () => {
-  const k = await startShared(3);
+  const k = await startShared(3, forkHosts(), QUIET_MS);
   try {
     const pid = await k.run('calm.pid');
     for (let i = 0; i < 3; i++) await rejected(k, () => k.run('busy.reject.timer'));
@@ -304,10 +311,12 @@ test('сторож: три отклонения подряд выключают 
 });
 
 test('сторож: исключение, отклонение и таймер вне цепочки плагина - сбой кода хоста, виновника нет', async () => {
-  const k = await startShared();
+  const k = await startShared(3, forkHosts(), QUIET_MS);
   try {
     for (const command of ['busy.host.throw', 'busy.host.reject', 'busy.host.timer']) {
       await k.run(command);
+      // Ответ на команду уже получен: событие окна - первое, что хост увидит после него, и оно взводит ловушку.
+      k.emit({ kind: 'focus', focused: true });
       await hostDown(k);
     }
     assert.deepEqual(downs(k), [
@@ -401,4 +410,16 @@ test('forkHosts: заданный путь входа работает и исп
     await k.unload();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('forkHosts: запись в канал уже убитого хоста - не необработанное событие error процесса ядра (EPIPE), хост просто сообщает о выходе', async () => {
+  const host = forkHosts({ silent: true })('epipe');
+  const exit = new Promise<number | null>((resolve) => host.onExit(resolve));
+  // Пока цикл событий занят, канал ещё `connected`, а собеседник уже мёртв: запись идёт в закрытый конец.
+  host.kill();
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
+  host.port.post({ t: 'note', m: 'system', p: null });
+  host.port.post({ t: 'note', m: 'system', p: null });
+  await exit;
+  await sleep(100);
 });
