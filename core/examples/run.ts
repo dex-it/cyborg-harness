@@ -116,7 +116,10 @@ function journalLine(e: JournalEntry): string {
       return e.error ? `${red('✖')} ${id} снят с ошибкой: ${e.error}` : `${dim('↓')} ${id} снят`;
     case 'unhandled-rejection':
       return `${yellow('⚠')} ${id} необработанное отклонение промиса: ${e.error}`;
+    case 'log-summary':
+      return `${yellow('⚠')} ${id} строк сверх предела за интервал: ${String(e.skipped)}, из них error: ${String(e.errors)}`;
     case 'switched-off':
+      if (e.reason === 'log-flood') return `${red('⏻')} ${id} выключен: поток строк выше предела не стихает`;
       return `${red('⏻')} ${id} выключен после ${e.strikes} сбоев за сессию${e.affects.length > 0 ? `; без него: ${e.affects.join(', ')}` : ''}`;
     case 'host-down': {
       const why = e.reason === 'hang' ? 'завис - не ответил на пинг' : 'процесс завершился';
@@ -222,7 +225,7 @@ async function runScenario(s: Scenario): Promise<void> {
       if (activationStarted) console.log(`  ${journalLine(e)}`);
       else early.push(e);
     },
-    onLog: (id, message) => console.log(`      ${dim(`${id}:`)} ${message}`),
+    onLog: (id, message, level) => console.log(`      ${dim(`${id}${level === 'info' ? '' : ` [${level}]`}:`)} ${message}`),
     async onGraph(graph) {
       const disabled = early.filter((e) => e.kind === 'disabled').map((e) => e.pluginId);
       if (disabled.length > 0) console.log(`  ${dim(`· не в plugins.enabled: ${disabled.join(', ')}`)}`);

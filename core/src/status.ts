@@ -51,6 +51,7 @@ const LIFECYCLE: Record<JournalEntry['kind'], boolean> = {
   'group-isolated': false,
   'host-own-grouped': false,
   'third-party': false,
+  'log-summary': false,
 };
 
 /** Запись о жизненном цикле плагина (таблица `LIFECYCLE`). */
@@ -197,7 +198,10 @@ export function describeEntry(e: JournalEntry): string {
       return `необработанное отклонение промиса: ${e.error}`;
     case 'host-own-grouped':
       return `манифест просит свой хост, но группа ${e.group} из plugins.hosts сажает его к ${list(e.neighbours)}: его зависание перезапустит и их`;
+    case 'log-summary':
+      return `строк сверх предела за интервал: ${String(e.skipped)}, из них error: ${String(e.errors)}` + (e.lastError === undefined ? '' : `; последняя error: ${e.lastError}`);
     case 'switched-off':
+      if (e.reason === 'log-flood') return 'выключен: поток строк ctx.log и вывода хоста выше предела не стихает' + (e.affects.length ? `; его контракты брали: ${list(e.affects)}` : '');
       return `выключен, сбоев подряд: ${e.strikes}` + (e.affects.length ? `; его контракты брали: ${list(e.affects)}` : '');
     case 'host-down': {
       const what = e.reason === 'hang' ? 'завис' : 'упал';
@@ -231,6 +235,7 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
     case 'denied':
     case 'deprecated-call':
     case 'pty-expired':
+    case 'log-summary':
       return 'warn';
     case 'deactivated':
       return e.error ? 'warn' : 'info';

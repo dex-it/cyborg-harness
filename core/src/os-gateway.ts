@@ -120,6 +120,8 @@ const KILL_GRACE_MS = 2000;
 const FETCH_TIMEOUT_MS = 30_000;
 const MAX_SLICE = 1024 * 1024;
 const MAX_WATCHES = 64;
+/** Сколько значений секретов на плагин ядро помнит для вычёркивания из строк; сверх этого забываются самые старые. */
+const MAX_SEEN_SECRETS = 256;
 const WATCH_COALESCE_MS = 50;
 
 type PushMethod = 'pty.data' | 'pty.exit' | 'fs.change';
@@ -386,6 +388,8 @@ export class OsGateway {
   /** Выбор человека в `dialog`: область `granted` плагина, с `GrantStore` - и после перезапуска. */
   readonly #granted = new Map<string, Set<string>>();
   readonly #grants: GrantStore | undefined;
+  /** Значения секретов, которые прошли через шлюз в этом запуске (плагин -> значения): ядро вычёркивает их из строк плагинов и хоста (FR-CH-4018, K-29). Удаление и перезапись ключа значение не забывают. */
+  readonly #secretValues = new Map<string, Set<string>>();
   #grantWrites: Promise<unknown> = Promise.resolve();
   readonly #serves: HttpServes;
   // Каталоги приложения ведёт ядро, а не человек: ссылка, подложенная на их место позже, по снятому realpath область не расширит.
@@ -479,9 +483,31 @@ export class OsGateway {
     return erased;
   }
 
+  /**
+   * Значения секретов плагинов `pluginIds`, которые шлюз выдал или принял в этом запуске (в том числе стёртые и перезаписанные: плагин ещё держит их в памяти,
+   * а прежний токен может действовать на сервере). Значение, которое плагин не получал через `ctx.os.secrets` и `ctx.secrets`, плагину неоткуда взять,
+   * поэтому в его строки оно попасть не может.
+   */
+  secretValues(pluginIds: Iterable<string>): string[] {
+    return [...pluginIds].flatMap((id) => [...(this.#secretValues.get(id) ?? [])]);
+  }
+
+  #seen<V extends string | undefined>(pluginId: string, value: V): V {
+    if (value === undefined || value === '') return value;
+    const seen = this.#secretValues.get(pluginId) ?? new Set<string>();
+    this.#secretValues.set(pluginId, seen);
+    // Свежее значение уходит в конец; плагин, пишущий без конца новые, вытесняет самые старые, а не растит память ядра и время вычёркивания.
+    seen.delete(value);
+    seen.add(value);
+    const oldest = seen.values().next();
+    if (seen.size > MAX_SEEN_SECRETS && !oldest.done) seen.delete(oldest.value);
+    return value;
+  }
+
   /** Ключи `<id>/` в хранилище секретов; шифрование ОС для стирания не нужно, поэтому `available()` не спрашивается. Число стёртых. */
   async eraseSecrets(pluginId: string): Promise<number> {
     assertOwnId(pluginId);
+    this.#secretValues.delete(pluginId);
     return (await this.#env.secrets?.deletePrefix(`${pluginId}/`)) ?? 0;
   }
 
@@ -932,8 +958,13 @@ export class OsGateway {
       case 'secrets.delete': {
         const store = await this.#store();
         const key = `${m.id}/${str(method, args[0], 'ключ')}`;
-        if (method === 'secrets.get') return store.get(key);
-        if (method === 'secrets.set') return store.set(key, str(method, args[1], 'значение'));
+        if (method === 'secrets.get') return this.#seen(m.id, await store.get(key));
+        if (method === 'secrets.set') {
+          const value = str(method, args[1], 'значение');
+          await store.set(key, value);
+          this.#seen(m.id, value);
+          return undefined;
+        }
         return store.delete(key);
       }
       case 'secrets.resolve':
@@ -1009,6 +1040,7 @@ export class OsGateway {
     if (scheme === undefined) {
       const value = await (await this.#store()).get(`${m.id}/${ref}`);
       if (value === undefined) throw new CoreError('Unavailable', `секрета ${ref} нет`);
+      this.#seen(m.id, value);
       return { value };
     }
     if (!this.refAllowed(m, ref)) throw this.#denied(m, 'secrets.resolve', `ссылка вне secrets.ref: ${ref}`);

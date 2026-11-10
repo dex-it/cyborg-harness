@@ -2,6 +2,7 @@ import type { JournalEntry } from './kernel-types.ts';
 
 export const MAX_DENIED = 1000;
 export const MAX_DEPRECATED = 1000;
+export const MAX_LOG_SUMMARIES = 1000;
 export const DENIED_WINDOW_MS = 5000;
 /** Имя pty-хоста в журнале: записи `host-down`, `host-restart` и `host-abandoned` с этим `hostId` - о нём, а не о хосте плагинов. */
 export const PTY_HOST_ID = 'pty-host';
@@ -11,7 +12,7 @@ type Denied = Extract<JournalEntry, { kind: 'denied' }>;
 type DeprecatedCall = Extract<JournalEntry, { kind: 'deprecated-call' }>;
 
 /** Виды записей, которых в журнале не больше предела каждого: их поток идёт от плагина, а не от его состояния. */
-const BOUNDS: Partial<Record<JournalEntry['kind'], number>> = { denied: MAX_DENIED, 'deprecated-call': MAX_DEPRECATED };
+const BOUNDS: Partial<Record<JournalEntry['kind'], number>> = { denied: MAX_DENIED, 'deprecated-call': MAX_DEPRECATED, 'log-summary': MAX_LOG_SUMMARIES };
 
 /**
  * Записей каждого ограниченного вида (`BOUNDS`) в списке не больше `limit` (по умолчанию - предел вида); прочие записи не трогаются: из них выводится состояние плагинов.

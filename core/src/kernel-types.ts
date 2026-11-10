@@ -1,4 +1,4 @@
-import type { PtyInfo } from '@cyborg-harness/contracts';
+import type { LogLevel, PtyInfo } from '@cyborg-harness/contracts';
 import type { SectionResult, SectionStore } from './config.ts';
 import type { DocumentRow } from './documents.ts';
 import type { ContractGraph, Rejection } from './graph.ts';
@@ -72,10 +72,18 @@ export type JournalEntry =
   | {
       readonly pluginId: string;
       readonly kind: 'switched-off';
+      /** Сбоев подряд; при `reason: 'log-flood'` сбоев не было - 0. */
       readonly strikes: number;
       /** Активные плагины, которые брали его контракты. */
       readonly affects: readonly string[];
+      /** `log-flood` - поток строк `ctx.log` и вывода хоста дольше `LIMITS.logFloodMs` выше `LIMITS.logRate`; без поля - сбои сторожа. */
+      readonly reason?: 'log-flood';
     }
+  /**
+   * Строки плагина сверх предела частоты за интервал (`LIMITS.logRate` за `LIMITS.logWindowMs`): по одной они в журнал не идут, в конце интервала пишется эта запись.
+   * Состояния плагина она не меняет. `lastError` - последняя пропущенная строка уровня `error`, обрезанная до предела длины.
+   */
+  | { readonly pluginId: string; readonly kind: 'log-summary'; readonly skipped: number; readonly errors: number; readonly lastError?: string }
   | {
       readonly pluginId?: undefined;
       readonly kind: 'host-down';
@@ -159,7 +167,8 @@ export interface LoadOptions {
   /** Граф решён, код плагинов ещё не запускался. */
   readonly onGraph?: ((graph: ContractGraph) => Promise<void> | undefined) | undefined;
   readonly onJournal?: ((entry: JournalEntry) => void) | undefined;
-  readonly onLog?: ((pluginId: string, message: string) => void) | undefined;
+  /** Строка плагина (`ctx.log`) или хоста, с уровнем; `pluginId` у строки хоста, чей плагин определить нельзя, - `хост <id>`. */
+  readonly onLog?: ((pluginId: string, message: string, level: LogLevel) => void) | undefined;
   /** Из чего ядро собирает заголовок окна вокруг фрагментов плагинов. */
   readonly windowTitle?: WindowTitle | undefined;
   /** Диалог на экране, очередь и замки поменялись: приложение перерисовывает слой окна. */
