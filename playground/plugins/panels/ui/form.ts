@@ -9,7 +9,8 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable | undefined
     root.textContent = 'Вид form открывается только как модальное окно';
     return undefined;
   }
-  const initial = typeof modal.data === 'object' && modal.data !== null ? (modal.data as { name?: unknown }).name : undefined;
+  const data = typeof modal.data === 'object' && modal.data !== null ? (modal.data as { name?: unknown; ownEscape?: unknown }) : {};
+  const initial = data.name;
   const label = Object.assign(document.createElement('label'), { textContent: 'Название ' });
   const name = Object.assign(document.createElement('input'), { id: 'name', value: typeof initial === 'string' ? initial : '' });
   label.append(name);
@@ -18,8 +19,18 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable | undefined
   create.addEventListener('click', () => void modal.close({ name: name.value }).catch(() => undefined));
   cancel.addEventListener('click', () => void modal.close().catch(() => undefined));
   root.append(label, create, cancel);
+  // Окно просило Escape себе (`escape: "view"`): нажатие доходит сюда, и вид сам решает, что оно значит; здесь - только отмечает его и окно не закрывает.
+  const escaped = Object.assign(document.createElement('p'), { id: 'escaped' });
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') escaped.textContent = 'Escape получил вид';
+  };
+  if (data.ownEscape === true) {
+    document.addEventListener('keydown', onKey);
+    root.append(escaped);
+  }
   return {
     dispose() {
+      document.removeEventListener('keydown', onKey);
       root.replaceChildren();
     },
   };
