@@ -25,6 +25,8 @@ for await (const line of createInterface({ input: process.stdin })) {
     await suggest();
     hook({ hook_event_name: 'Stop' });
   }
+  // Только работа, без вопроса: сессия снова занята (снимает уведомление «ждёт»).
+  if (line === 'work') hook({ hook_event_name: 'PostToolUse', tool_name: 'Bash' });
   if (line === 'ask') {
     hook({ hook_event_name: 'PostToolUse', tool_name: 'Bash' });
     await suggest();

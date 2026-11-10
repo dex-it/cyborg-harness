@@ -105,6 +105,7 @@ export interface Contracts {
   'cyborg.agent': { 1: Agent };
   'cyborg.agent-tool': { 1: AgentTool };
   'cyborg.session-prompt': { 1: SessionPrompt };
+  'cyborg.sessions': { 1: Sessions };
 }
 ```
 
@@ -223,6 +224,8 @@ pty держит ядро: `ctx.os.pty.spawn({ program, args, cwd, env, cols, ro
 Системный промпт сессии собирается из контракта `cyborg.session-prompt` (кратность many, `fragment(): string`): потребитель берёт фрагменты всех поставщиков по порядку их id, пустые и упавшие пропускает и передаёт в `launch({ promptFragments })`. В playground вклад даёт `session-isolation` - текст изоляции сегодняшнего Cyborg.
 
 Инструменты агенту даёт контракт `cyborg.agent-tool` (кратность many): `tools()` перечисляет `{ name, description, inputSchema }`, `call(name, input, { sessionId })` отвечает `{ text, isError?, actions? }`. Потребитель - в playground `sessions` с правом `serve` - собирает их в один сервер MCP (Streamable HTTP, ответ JSON без SSE) и передаёт в `launch({ tools: { url, token } })`; токен у каждой сессии свой и называет её, поэтому поставщик передаёт его через окружение процесса - не в argv и не в файле, их видят другие пользователи машины (`agent-claude-code`: переменная `CYBORG_MCP_TOKEN`, файл `--mcp-config=<файл>` со ссылкой `${CYBORG_MCP_TOKEN}` в заголовке и разрешение `mcp__cyborg` в своих `--settings`). Имя инструмента - `[A-Za-z0-9_-]` до 64 знаков; при повторе берётся поставщик с меньшим id. `actions` - кнопки под сессией: до 6, подпись до 40 знаков, управляющие символы срезаны; новый запрос человека их снимает. В playground инструмент `suggest_actions` и фрагмент промпта, который велит его звать, даёт `next-actions` - замена комментария `cyborg-buttons` сегодняшнего Cyborg.
+
+События сессий отдаёт контракт `cyborg.sessions` (кратность one, тип - `contracts/sessions.ts`, черновик пилота PL-02): `onChange(listener)` сообщает `{ sessionId, title, change }`, где `change` - `cwd`, `activity` (в том числе новый запрос человека), `waiting` (`reason`) или `exit` (`code`). Поставщик - `sessions`, потребитель в playground - `session-notifications`. Контракт пока содержит только события; `create`, `send`, `reveal` и метки добавятся минорными версиями, поэтому потребитель пропускает незнакомый вариант `change`.
 
 ## Элементы ядра
 

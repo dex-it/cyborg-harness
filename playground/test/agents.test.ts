@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFile, chmod, mkdir, readFile, stat, utimes, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, stat, utimes, writeFile } from 'node:fs/promises';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent, PluginContext, PluginModule } from '@cyborg-harness/contracts';
 import type { LayerStore } from '@cyborg-harness/core';
-import { agentContractSuite, sandbox, startKernel, type InlinePlugin, type Sandbox } from '@cyborg-harness/testing';
+import { agentContractSuite, sandbox, startKernel, type InlinePlugin } from '@cyborg-harness/testing';
 import { claudeArgs, LAUNCH_SCRIPT, waitAfterStop } from '../plugins/agent-claude-code/index.ts';
 import { NEXT_ACTIONS_PROMPT } from '../plugins/next-actions/index.ts';
 import { readyAfter } from '../plugins/sessions/index.ts';
@@ -13,22 +13,11 @@ import { collectTools } from '../plugins/sessions/mcp.ts';
 import { projectDirName } from '../plugins/agent-claude-code/history.ts';
 import { ISOLATION_PROMPT } from '../plugins/session-isolation/index.ts';
 import { waitFor } from '../../core/test/wait-for.ts';
+import { agentEnv } from './chain-rig.ts';
 
 const PLUGINS = path.join(import.meta.dirname, '..', 'plugins');
 const PROVIDERS = ['agent-claude-code', 'agent-shell'];
 const manifestOf = (id: string): unknown => JSON.parse(readFileSync(path.join(PLUGINS, id, 'manifest.json'), 'utf8'));
-
-/** Среда поставщиков: подставной claude в PATH и оболочка входа без профиля (/etc/profile переписал бы PATH, и тест не нашёл бы свой claude). */
-async function agentEnv(box: Sandbox): Promise<{ home: string; env: Record<string, string> }> {
-  const bin = box.path('bin');
-  await mkdir(bin);
-  await writeFile(path.join(bin, 'claude'), '#!/bin/sh\necho "2.1.7 (Claude Code)"\n');
-  const shell = path.join(bin, 'login-shell');
-  await writeFile(shell, '#!/bin/sh\nshift\nexec /bin/sh -c "$@"\n');
-  await chmod(path.join(bin, 'claude'), 0o755);
-  await chmod(shell, 0o755);
-  return { home: box.root, env: { PATH: `${bin}:/usr/bin:/bin`, HOME: box.root, SHELL: shell } };
-}
 
 interface ChannelMessage {
   readonly ticket: string;

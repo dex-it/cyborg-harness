@@ -25,7 +25,8 @@
 - `PluginContext.log`, `LogLevel` [minor]: второй необязательный параметр `level` (`info`, `warn`, `error`; по умолчанию `info`), существующие плагины с одним аргументом работают как прежде; ядро обрезает строку длиннее предела и не кладёт в журнал по одной строки сверх предела частоты (K-29).
 - `Contracts['cyborg.git']`, `Git`, `GitStatus`, `GitChange`, `GitCode` [minor]: черновик контракта `cyborg.git` v1 - `status(repo)` и `onChange(repo, listener)`; остальные члены SAD (`headContent`, `branches`, `switch`, `remotes`, `files`) придут необязательными (PL-04).
 - `Contracts['cyborg.tree-decoration']`, `TreeDecoration`, `TreeMark`, `TreeMarkKind` [minor]: черновик контракта `cyborg.tree-decoration` v1, кратность many - `marks(root)` и `onChange(listener)` (PL-04).
+- `cyborg.sessions` v1, `Sessions`, `SessionEvent`, `SessionChange` [minor]: черновик пилота PL-02 - события сессий `onChange` (`cwd`, `activity`, `waiting`, `exit`); остальные члены реестра (`create`, `send`, `reveal`, метки) придут минорными версиями.
 
 ## 1.0.0-dev - не выпущена
 
-Линия разработки до первого выпуска: типы меняются без повышения версии (проверка `--base` её не требует), снимок `api-snapshot.txt` обновляется. Первый выпуск `1.0.0` фиксирует набор: `cyborg.agent` v1, `cyborg.agent-tool` v1, `cyborg.session-prompt` v1, API плагина (`PluginModule`, `PluginContext`, `UiModule`, `UiContext`), `ctx.os`, элементы ядра `cy-*`. Выпуск в реестр - задача P-10 после заморозки API (K-21).
+Линия разработки до первого выпуска: типы меняются без повышения версии (проверка `--base` её не требует), снимок `api-snapshot.txt` обновляется. Первый выпуск `1.0.0` фиксирует набор: `cyborg.agent` v1, `cyborg.agent-tool` v1, `cyborg.session-prompt` v1, `cyborg.sessions` v1 (черновик), API плагина (`PluginModule`, `PluginContext`, `UiModule`, `UiContext`), `ctx.os`, элементы ядра `cy-*`. Выпуск в реестр - задача P-10 после заморозки API (K-21).
