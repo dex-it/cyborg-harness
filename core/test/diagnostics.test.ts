@@ -474,3 +474,29 @@ test('кольцо: шумный поставщик событий контра�
   assert.ok(ring.length <= 600);
   await k.unload();
 });
+
+test('выгрузка: записи всех видов читаются строкой, граф с отказом, пустое ядро и неназванные версии, запись больше строки файла - метка, дата вне диапазона не ломает текст', () => {
+  const fsys = new MemoryFs();
+  const d = diag(fsys);
+  d.sinks.onTrace({ kind: 'stream', stream: 'fs-watch', pluginId: 'p', hostId: 'h', at: 5, intervalMs: 1000, messages: 4, bytes: 80 });
+  d.sinks.onTrace({ kind: 'exit', id: 7, chain: 3, at: 6, pluginId: 'p', target: 'os:process.run', right: 'process', code: null, signal: 'SIGKILL' });
+  d.sinks.onTrace({ kind: 'operation', id: 8, chain: 8, at: 7, caller: 'user', target: 'command:x', boundaries: ['contract'], durationMs: 1, argsBytes: 0, resultBytes: 0, outcome: 'error' });
+  d.sinks.onJournal({ pluginId: undefined, kind: 'key-ignored', key: 'Ctrl+K', command: null, reason: 'нет команды' });
+  d.sinks.onJournal({ pluginId: 'big', kind: 'invalid', errors: ['x'.repeat(70_000)] });
+  d.sinks.onGraph({ order: [], rejected: new Map([['bad', [{ kind: 'duplicate' }]]]), bindings: new Map() });
+  d.flush();
+  fsys.files.set('diagnostics.1.log', `${JSON.stringify({ r: 1, src: 'log', at: 1e30, pluginId: 'old', level: 'info', text: 'строка\nс переводом' })}\n`);
+  const text = d.export({ kernel: { manifests: [], journal: [], hostOf: () => undefined } });
+  assert.match(text, /трасса поток fs-watch p \(хост h\): сообщений 4, 80 Б за 1000 мс/);
+  assert.match(text, /трасса выход os:process\.run p цепочка 3: код null, сигнал SIGKILL/);
+  assert.match(text, /user -> command:x, границы contract, 1 мс, аргументы 0 Б, результат 0 Б, отказ \?/);
+  assert.match(text, /журнал warn сочетания: plugins\.keybindings: Ctrl\+K -> null не применено/);
+  assert.match(text, /запись \(journal\) размером \d+ Б не помещается в строку файла и не сохранена/);
+  assert.match(text, /\n {2}плагинов нет\n/);
+  assert.match(text, /\n {2}отвергнут bad: второй плагин с тем же id\n/);
+  assert.match(text, /привязки: нет/);
+  assert.match(text, /Ядро: API плагинов /);
+  assert.ok(!text.includes('Приложение:'));
+  assert.match(text, /строка info old: строка ⏎ с переводом/);
+  assert.match(text, /\n1e\+30 з\d /);
+});
