@@ -243,7 +243,7 @@ quality-checks: входных записей нет
 | [K-07 #44](https://github.com/dex-it/cyborg-harness/issues/44) | `ctx.keys.register` с условием, единый реестр сочетаний | влита, PR #121 |
 | [K-08 #45](https://github.com/dex-it/cyborg-harness/issues/45) | вклады плагинов в меню окна | не начато; K-03 и K-07 влиты, ждёт формы поля меню (строка 8 D-00) |
 | [K-09 #46](https://github.com/dex-it/cyborg-harness/issues/46) | отмена запросов между плагинами | влита, PR #122: `AbortSignal` последним аргументом; форма ждёт подтверждения владельца (строка 8 D-00) |
-| [K-13 #60](https://github.com/dex-it/cyborg-harness/issues/60) | канал «главная часть - вид», модальные окна плагина | итерация 3, на ревью: канал, `modal` как род области, `ctx.dialogs.show` (только `ask`); буфер обмена - через команду главной части, `UiContext.clipboard` не вводится |
+| [K-13 #60](https://github.com/dex-it/cyborg-harness/issues/60) | канал «главная часть - вид», модальные окна плагина | итерация 3, на ревью, PR #159: канал, `modal` как род области, `ctx.dialogs.show` (только `ask`); буфер обмена - через команду главной части, `UiContext.clipboard` не вводится |
 | [PL-02 #18](https://github.com/dex-it/cyborg-harness/issues/18) | пилот: хук - статус - уведомление в другом плагине | не начато |
 | [PL-07 #30](https://github.com/dex-it/cyborg-harness/issues/30) | пилот: CLI-плагин с отменой и пулом процессов (срез трекеров) | не начато |
 | [PL-08 #32](https://github.com/dex-it/cyborg-harness/issues/32) | пилот: раскладка окна Cyborg на областях и меню | не начато |
