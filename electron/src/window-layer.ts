@@ -1,11 +1,13 @@
 // Слой окна (SAD §3.8): диалоги видов поверх всех фреймов и экраны замков. Что показывать, решает ядро; окно только рисует снимок.
 
-import type { ShownDialog, WindowSnapshot } from '@cyborg-harness/core/window';
-import type { PluginRow, Reply } from './snapshot.ts';
+import type { ShownDialog, ShownModal, WindowSnapshot } from '@cyborg-harness/core/window';
+import type { LayoutRow, PluginRow, Reply } from './snapshot.ts';
 import { el } from './dom.ts';
 
 export interface WindowPort {
   answerDialog(id: number, choice: string | undefined): Promise<Reply>;
+  /** Человек закрыл модальное окно плагина в самом окне (крестик, закрытие диалога); владелец получает undefined. */
+  cancelModal(id: number): Promise<Reply>;
 }
 
 interface Open {
@@ -15,12 +17,23 @@ interface Open {
   done: boolean;
 }
 
+interface OpenModal {
+  readonly id: number;
+  readonly dialog: HTMLDialogElement;
+  readonly pluginId: string;
+  readonly view: string;
+  readonly frame: HTMLIFrameElement | undefined;
+  /** Закрытие уже ушло ядру или окно снято ядром: закрытие диалога больше не отвечает. */
+  done: boolean;
+}
+
 export class WindowLayerView {
   private readonly port: WindowPort;
   private readonly main: HTMLElement;
   private readonly lockLayer: HTMLElement;
   private readonly screens = new Map<string, HTMLElement>();
   private open: Open | undefined;
+  private modal: OpenModal | undefined;
 
   constructor(port: WindowPort, main: HTMLElement, lockLayer: HTMLElement) {
     this.port = port;
@@ -28,7 +41,9 @@ export class WindowLayerView {
     this.lockLayer = lockLayer;
   }
 
-  sync(window: WindowSnapshot, plugins: readonly PluginRow[]): void {
+  /** `layout` - раскладка ядра: адрес вида модального окна берётся из неё, как адрес любого вида. */
+  sync(window: WindowSnapshot, plugins: readonly PluginRow[], layout: readonly LayoutRow[] = []): void {
+    this.syncModal(window.modal, layout);
     this.syncLock(window, plugins);
     const shown = window.dialog;
     if (this.open && this.open.id !== shown?.id) {
@@ -40,11 +55,66 @@ export class WindowLayerView {
     if (shown && !this.open) this.show(shown);
   }
 
+  // Модальное окно плагина (K-13): <dialog> в слое поверх страницы, во фрейме его вид. showModal() запирает фокус и делает остальной документ inert;
+  // `main` помечается явно, чтобы не зависеть от того, как движок считает фреймы под диалогом. Escape закрывает окно в главном процессе (`dismissModal`):
+  // нажатие во фрейме вида до документа окна не доходит.
+  private syncModal(shown: ShownModal | undefined, layout: readonly LayoutRow[]): void {
+    if (this.modal && this.modal.id !== shown?.id) {
+      this.modal.done = true;
+      this.modal.dialog.close();
+      this.modal.dialog.remove();
+      this.modal = undefined;
+    }
+    if (shown && !this.modal) this.showModal(shown, layout.find((e) => e.kind === 'view' && e.pluginId === shown.pluginId && e.name === shown.view)?.url);
+    this.main.inert = document.body.dataset.locked === 'true' || this.modal !== undefined;
+  }
+
+  private showModal(m: ShownModal, url: string | undefined): void {
+    const dialog = el('dialog', 'layer-modal') as HTMLDialogElement;
+    dialog.dataset.plugin = m.pluginId;
+    dialog.dataset.view = m.view;
+    dialog.dataset.modal = String(m.id);
+    dialog.setAttribute('aria-label', m.title);
+    const frame = url === undefined ? undefined : document.createElement('iframe');
+    const open: OpenModal = { id: m.id, dialog, pluginId: m.pluginId, view: m.view, frame, done: false };
+    const close = el('button', 'layer-modal-close', 'Закрыть') as HTMLButtonElement;
+    close.type = 'button';
+    close.addEventListener('click', () => dialog.close());
+    const head = el('div', 'layer-modal-head');
+    head.append(el('h3', '', m.title), el('span', 'layer-from', m.pluginId), close);
+    // Фокус не уходит из окна: showModal() запирает его только в пределах документа, а Tab с последнего элемента фрейма (или Shift+Tab с первого)
+    // выводит фокус за страницу (на macOS activeElement становится body). Краевые ловушки возвращают его внутрь.
+    const edge = (toFirst: boolean): HTMLElement => {
+      const trap = el('span', 'layer-modal-trap');
+      trap.tabIndex = 0;
+      trap.setAttribute('aria-hidden', 'true');
+      trap.addEventListener('focus', () => (toFirst ? close : (frame ?? close)).focus());
+      return trap;
+    };
+    dialog.append(edge(false), head);
+    if (frame && url !== undefined) {
+      frame.src = url;
+      frame.title = `${m.pluginId}/${m.view}`;
+      dialog.append(frame);
+    } else dialog.append(el('p', 'layer-modal-missing', 'Вид окна недоступен'));
+    dialog.append(edge(true));
+    // Закрытие (кнопка, Escape в документе окна) - отмена: владелец получает undefined. Результат отдаёт сам вид через ctx.modal.close.
+    dialog.addEventListener('close', () => {
+      if (open.done) return;
+      open.done = true;
+      void this.port.cancelModal(m.id);
+    });
+    document.body.append(dialog);
+    dialog.showModal();
+    this.modal = open;
+    (frame ?? close).focus();
+  }
+
   // Чужие фреймы не только перекрыты, а скрыты и inert: ни мышь, ни Tab, ни экранный диктор до них не доходят.
   private syncLock(window: WindowSnapshot, plugins: readonly PluginRow[]): void {
     const locked = window.locks.length > 0;
     document.body.dataset.locked = String(locked);
-    this.main.inert = locked;
+    this.main.inert = locked || this.modal !== undefined;
     this.lockLayer.hidden = !locked;
     const wanted = new Map(window.locks.map((l) => [l.pluginId, plugins.find((p) => p.id === l.pluginId)?.overlay ?? ''] as const));
     for (const [key, screen] of this.screens) {
@@ -70,6 +140,8 @@ export class WindowLayerView {
   }
 
   private frameOf(d: ShownDialog): HTMLIFrameElement | null {
+    // Диалог из вида модального окна встаёт у фрейма окна, а не у фрейма боковой колонки.
+    if (this.modal?.pluginId === d.pluginId && this.modal.view === d.view && this.modal.frame) return this.modal.frame;
     const scope = d.view === 'overlay' ? this.lockLayer : this.main;
     // Плагин с несколькими видами: диалог ставится у фрейма своего вида (`data-view` у обёртки вида), а не у первого.
     const plugin = `[data-plugin="${CSS.escape(d.pluginId)}"]`;

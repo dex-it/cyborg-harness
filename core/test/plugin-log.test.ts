@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -12,6 +13,7 @@ import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { load, type JournalEntry, type Kernel, type LoadOptions } from '../src/loader.ts';
 import { describeEntry, entryLevel, pluginStatuses } from '../src/status.ts';
 import { inlineHosts } from '../src/transports.ts';
+import { waitFor } from './wait-for.ts';
 
 // K-29 (FR-CH-4009, 4010, 4018): уровень строки ctx.log, вывод хоста по плагину, предел длины и частоты, вычёркивание секретов.
 
@@ -427,4 +429,84 @@ test('секреты: значение короче 4 символов не вы
   } finally {
     await k.unload();
   }
+});
+
+// Хвост ревью K-29 (#149): строки самого ядра о плагине идут теми же пределами FR-CH-4018, что строки плагина, но не отбрасываются, если плагин уже выключен.
+
+/**
+ * Ядро с плагином `bell`: команда `bell.open` падает с текстом `fail`; клик по уведомлению (`clicks[0].click()`) запускает её через ядро.
+ * Вторая активация плагина `slow` (после `disable` и `enable`) держит очередь операций ядра, пока не открыт `gate`: снятие `bell` ждёт за ней.
+ */
+async function clickRig(fail: () => Error, options: Partial<LoadOptions> = {}, gate?: Promise<void>) {
+  const clicks: { click(): void }[] = [];
+  const ctx: Record<string, PluginContext> = {};
+  let slowRuns = 0;
+  const { k, lines, journal } = await rig(['bell', 'slow'], {
+    manifests: [manifest('bell', { commands: { 'bell.open': { args: [] } }, permissions: { notify: true } }), manifest('slow')],
+    spawnHost: inlineHosts(async (entry) => ({
+      activate: async (c: PluginContext) => {
+        ctx[entry] = c;
+        if (entry === 'slow') {
+          if (++slowRuns > 1) await gate;
+        }
+        else {
+          c.commands.register('bell.open', () => {
+            throw fail();
+          });
+        }
+      },
+    })),
+    os: { dataDir: tmpdir(), tempDir: tmpdir(), notify: (_title, _body, events) => (clicks.push(events), { close: () => undefined }), secrets: memorySecrets() },
+    ...options,
+  });
+  return { k, ctx, lines, journal, clicks };
+}
+
+test('клик по уведомлению: текст ошибки команды в строке ядра обрезан по пределу и без значений секретов (FR-CH-4018)', async () => {
+  const secret = `s3cr3t-${randomUUID()}`;
+  const { k, ctx, lines, clicks } = await clickRig(() => new Error(`${secret} ${'я'.repeat(300)}`), { limits: { logLineBytes: 64 } });
+  try {
+    await ctx.bell!.os.secrets.set('token', secret);
+    await ctx.bell!.os.notify!.show('Сессия ждёт', undefined, { onClick: { command: 'bell.open' } });
+    clicks[0]!.click();
+    await waitFor('строка о клике', () => lines.some(([id, m]) => id === 'bell' && m.startsWith('клик по уведомлению')));
+    const line = lines.find(([id]) => id === 'bell')!;
+    assert.equal(line[2], 'warn');
+    assert.ok(!line[1].includes(secret), `секрет в строке: ${line[1]}`);
+    assert.match(line[1], /\[обрезано: всего \d+ Б\]$/);
+    assert.ok(Buffer.byteLength(line[1].split(' [обрезано')[0] ?? '') <= 64);
+  } finally {
+    await k.unload();
+  }
+});
+
+test('клик по уведомлению: плагин выключен потоком строк, но ещё не снят, - строка ядра о нём идёт (сторож отбрасывает только строки самого плагина)', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const { k, ctx, lines, journal, clicks } = await clickRig(() => new Error('команда упала'), { limits: { logRate: 2, logWindowMs: 100, logFloodMs: 300 } }, gate);
+  await k.disable('slow');
+  const held = k.enable('slow');
+  const stop = pour((i) => ctx.bell?.log(`поток ${String(i)}`), 10, 5);
+  try {
+    await ctx.bell!.os.notify!.show('Сессия ждёт', undefined, { onClick: { command: 'bell.open' } });
+    await waitFor('выключение bell', () => switchedOff(journal, 'bell').length === 1, { timeout: 5000 });
+    stop();
+    // Снятие bell стоит в очереди за активацией slow: плагин выключен, а команда и уведомление ещё живы.
+    assert.deepEqual(k.active, ['bell']);
+    clicks[0]!.click();
+    await waitFor('строка ядра о клике после выключения', () => lines.some(([id, m]) => id === 'bell' && m === 'клик по уведомлению: команда упала'));
+  } finally {
+    stop();
+    release();
+    await held;
+    await k.unload();
+  }
+});
+
+test('строки ядра о плагине идут через PluginLog: прямых options.onLog вне plugin-log.ts нет', () => {
+  const dir = path.resolve(import.meta.dirname, '..', 'src');
+  const direct = readdirSync(dir)
+    .filter((f) => f.endsWith('.ts') && f !== 'plugin-log.ts')
+    .filter((f) => /\bonLog\?\.\(/.test(readFileSync(path.join(dir, f), 'utf8')));
+  assert.deepEqual(direct, []);
 });

@@ -20,6 +20,7 @@ export function windowApi(): WindowApi {
     onWindowCommand: (listener: (command: string) => void): void => void ipcRenderer.on('window:command', (_event, command: string) => listener(command)),
     setViewVisible: (id: string, view: string, visible: boolean): Promise<void> => ipcRenderer.invoke('views:visibility', { id, view, visible }),
     answerDialog: (id: number, choice: string | undefined): Promise<Reply> => ipcRenderer.invoke('window:answer', { id, choice }),
+    cancelModal: (id: number): Promise<Reply> => ipcRenderer.invoke('window:modal-cancel', { id }),
     closeDocument: (id: string): Promise<Reply> => ipcRenderer.invoke('documents:close', id),
     openWorkspace: (file?: string): Promise<Reply> => ipcRenderer.invoke('workspace:open', file),
     openWorkspaceInNewWindow: (file: string): Promise<Reply> => ipcRenderer.invoke('workspace:open-new', file),
@@ -49,7 +50,8 @@ export function viewBridge(): ViewBridge {
       const reply = (await ipcRenderer.invoke('view:terminal:open', ticket)) as Reply;
       const tid = (reply.value as { tid?: unknown } | undefined)?.tid;
       if (reply.error !== undefined || typeof tid !== 'number') return reply;
-      if (await terminals.connect(tid)) return reply;
+      const input = (reply.value as { input?: unknown }).input;
+      if (await terminals.connect(tid, typeof input === 'number' ? input : undefined)) return reply;
       // Вид получает отказ и не позовёт `terminalClose`: запись терминала и зритель в pty-хосте закрываются здесь.
       ipcRenderer.send('view:terminal:close', tid);
       return { error: `терминал ${String(tid)}: порт от ядра не пришёл` };
@@ -64,6 +66,10 @@ export function viewBridge(): ViewBridge {
     setState: (viewName, value) => ipcRenderer.invoke('view:state:set', viewName, value),
     dialog: (viewName, spec) => ipcRenderer.invoke('view:dialog', viewName, spec),
     keys: () => ipcRenderer.invoke('view:keys'),
+    modal: (viewName) => ipcRenderer.invoke('view:modal', viewName),
+    modalClose: (viewName, result) => ipcRenderer.invoke('view:modal:close', viewName, result),
+    channelPost: (viewName, message) => ipcRenderer.invoke('view:channel:post', viewName, message),
+    onChannel: (listener) => void ipcRenderer.on('view:channel', (_event, message: unknown) => listener(message)),
     onTerminal: (listener) => {
       terminals.listen(listener);
       // Потеря pty-хоста: порт молчит, главный процесс сообщает о конце событием управления.

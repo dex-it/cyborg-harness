@@ -7,7 +7,7 @@ import { isRecord } from './wire.ts';
 
 /** Запросы плагина к ядру из хоста: документы, `ctx.os` (в том числе уведомления и замок окна). */
 export function createOsRequests(ctx: KernelContext): OsRequests {
-  const { documents, gateway, layer, notices, osEnv, options } = ctx;
+  const { documents, gateway, layer, notices, osEnv } = ctx;
 
   async function notifyCall(m: PluginManifest, method: string, args: readonly unknown[]): Promise<string | undefined> {
     if (m.permissions.notify !== true) {
@@ -64,13 +64,13 @@ export function createOsRequests(ctx: KernelContext): OsRequests {
   }
 
   function clickNotice(pluginId: string, click: NotifyClick): void {
-    const { commands, lifecycle } = ctx.parts;
+    const { commands, lifecycle, logs } = ctx.parts;
     osEnv.raiseWindow?.();
     // Под чужим замком окно поднимается, а команда не идёт: как и сочетание этого плагина.
     if (!layer.allows(pluginId)) return;
     const go = () => commands.runOwn(pluginId, click.command, [...(click.args ?? [])]);
     // Хост перезапускается: команда появится, когда плагин снова поднимется.
-    (commands.owners.has(click.command) ? go() : lifecycle.idle().then(go)).catch((error: unknown) => options.onLog?.(pluginId, `клик по уведомлению: ${errorMessage(error)}`, 'warn'));
+    (commands.owners.has(click.command) ? go() : lifecycle.idle().then(go)).catch((error: unknown) => logs.pluginLine(pluginId, `клик по уведомлению: ${errorMessage(error)}`, 'warn'));
   }
 
   return { attach, clickNotice };

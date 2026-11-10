@@ -19,8 +19,8 @@ interface Box {
   readonly update: (slot: ViewSlot) => void;
 }
 
-/** Куда окно кладёт виды каждой области; боковая колонка - общая сетка вкладки «Виды», остальные - свои места окна. */
-export type AreaRoots = Readonly<Record<Area, HTMLElement>>;
+/** Куда окно кладёт виды каждой области; боковая колонка - общая сетка вкладки «Виды», остальные - свои места окна. У модального окна места в странице нет: его показывает слой окна (`WindowLayerView`) по просьбе главной части. */
+export type AreaRoots = Readonly<Record<Exclude<Area, 'modal'>, HTMLElement>>;
 
 export class ViewsPanel {
   private readonly boxes = new Map<string, Box>();
@@ -47,6 +47,7 @@ export class ViewsPanel {
     const previous = new Map<Area, HTMLElement>();
     for (const [key, slot] of wanted) {
       const area = slot.entry.area;
+      if (area === 'modal') continue; // его рисует слой окна
       let box = this.boxes.get(key);
       if (!box) {
         box = slot.mode === 'placeholder' ? this.placeholder(slot) : this.frame(slot);

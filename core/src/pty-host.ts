@@ -5,6 +5,7 @@ import type { PtyExit } from '@cyborg-harness/contracts';
 import type { MessagePort } from 'node:worker_threads';
 import { CoreError, errorMessage } from './errors.ts';
 import { LIMITS } from './limits.ts';
+import { InputBudget, inputBytes } from './pty-budget.ts';
 import { BACKLOG_LIMIT, Tail } from './pty-tail.ts';
 import type { PtyBackend, PtyProcess } from './pty-types.ts';
 import { Endpoint, type Port } from './rpc.ts';
@@ -36,6 +37,8 @@ export function nodeViewPort(raw: unknown): ViewPort {
 /** Пределы, которые главный процесс передаёт хосту при каждом запуске: хост держит те же, что `PtyTable`. */
 export interface PtyHostInit {
   readonly ptyInput: number;
+  readonly ptyInputBurst: number;
+  readonly ptyInputRate: number;
   readonly ptyFlushMs: number;
   readonly ptyFlushChars: number;
   readonly backlog: number;
@@ -72,6 +75,8 @@ interface Entry {
   cols: number;
   rows: number;
   readonly tail: Tail;
+  /** Запас ввода: программа может не читать stdin, а очередь записи node-pty не ограничена. */
+  readonly budget: InputBudget;
   /** Вывод идёт и главному процессу: владелец плагин присоединён. */
   attached: boolean;
   readonly viewers: Map<string, ViewPort>;
@@ -102,7 +107,7 @@ export class PtyHost {
   readonly #ending = new Set<Entry>();
   /** Запуски в пути: `end` на них приходит раньше, чем процесс есть. */
   readonly #spawning = new Map<string, { ended: boolean }>();
-  #limits: PtyHostInit = { ptyInput: LIMITS.ptyInput, ptyFlushMs: LIMITS.ptyFlushMs, ptyFlushChars: LIMITS.ptyFlushChars, backlog: BACKLOG_LIMIT };
+  #limits: PtyHostInit = { ptyInput: LIMITS.ptyInput, ptyInputBurst: LIMITS.ptyInputBurst, ptyInputRate: LIMITS.ptyInputRate, ptyFlushMs: LIMITS.ptyFlushMs, ptyFlushChars: LIMITS.ptyFlushChars, backlog: BACKLOG_LIMIT };
 
   constructor(port: Port, backend: PtyBackend, options: PtyHostOptions = {}) {
     this.#backend = backend;
@@ -112,7 +117,8 @@ export class PtyHost {
     port.onMessage((raw, transfer) => this.#received(raw, transfer));
     const e = this.#endpoint;
     e.handle('init', (p: PtyHostInit) => {
-      this.#limits = p;
+      // Недостающее берётся из умолчаний: главный процесс старой сборки не знает новых пределов.
+      this.#limits = { ...this.#limits, ...p };
       return null;
     });
     e.handle('ping', () => null);
@@ -172,7 +178,7 @@ export class PtyHost {
       proc.kill();
       throw new CoreError('NotFound', `pty ${p.key} отозван до запуска`);
     }
-    const entry: Entry = { key: p.key, proc, cols: p.options.cols, rows: p.options.rows, tail: new Tail(this.#limits.backlog), attached: true, viewers: new Map(), pending: [], pendingChars: 0, flushed: -Infinity };
+    const entry: Entry = { key: p.key, proc, cols: p.options.cols, rows: p.options.rows, tail: new Tail(this.#limits.backlog), budget: new InputBudget(this.#limits.ptyInputBurst, this.#limits.ptyInputRate), attached: true, viewers: new Map(), pending: [], pendingChars: 0, flushed: -Infinity };
     this.#entries.set(p.key, entry);
     proc.onData((data) => this.#output(entry, data));
     proc.onExit(({ exitCode, signal }) => {
@@ -247,11 +253,7 @@ export class PtyHost {
 
   #write(key: string, data: string): void {
     const e = this.#live(key);
-    const max = this.#limits.ptyInput;
-    // Байт UTF-8 не меньше длины строки и не больше утроенной: подсчёт нужен только между границами.
-    if (data.length > max || (data.length * 3 > max && Buffer.byteLength(data, 'utf8') > max)) {
-      throw new CoreError('Invalid', `pty: ввод больше ${String(max)} байт - разбейте его на части`);
-    }
+    e.budget.take(inputBytes(data, this.#limits.ptyInput));
     e.proc.write(data);
   }
 

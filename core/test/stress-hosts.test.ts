@@ -5,6 +5,7 @@ import { load, type JournalEntry, type Kernel, type LoadOptions } from '../src/l
 import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
+import { waitFor } from './wait-for.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 
@@ -43,12 +44,14 @@ test('stress-hosts: spawnHost бросает при перезапуске по�
   const onUnhandled = (e: unknown) => void unhandled.push(e);
   process.on('unhandledRejection', onUnhandled);
   try {
+    let attempts = 0;
     const r = rig({ a: { activate: () => undefined } }, { enabled: ['a'], manifests: [manifest('a')] }, (n) => {
+      attempts = n;
       if (n >= 2) throw new Error('spawn EAGAIN');
     });
     const k = await r.start();
     r.handles[0]?.kill();
-    await sleep(30);
+    await waitFor('сторож попытался перезапустить хост', () => attempts >= 2);
     // SAD 3.2/3.5: отказ запуска - запись в журнале у этого плагина, а не вечный отказ всех операций ядра.
     await within(k.idle(), 500, 'idle после неудачного перезапуска');
     await within(k.disable('a'), 500, 'disable после неудачного перезапуска');
@@ -109,10 +112,14 @@ test('stress-hosts: падение хоста посреди активации 
 
 test('stress-hosts: сбои «подряд» - сбой позже окна после прошлого начинает счёт заново, плагин не выключается на третьем падении за всё время', async () => {
   let n = 0;
+  let hangs = 0;
   const p: PluginModule = {
     activate(ctx) {
       n++;
-      ctx.commands.register('p.hang', () => new Promise(() => undefined));
+      ctx.commands.register('p.hang', () => {
+        hangs++;
+        return new Promise(() => undefined);
+      });
       ctx.commands.register('p.ok', () => 'ok');
       return undefined;
     },
@@ -122,7 +129,7 @@ test('stress-hosts: сбои «подряд» - сбой позже окна п�
   const k = await r.start();
   for (let i = 0; i < 3; i++) {
     const hung = k.run('p.hang').catch(() => undefined);
-    await sleep(10);
+    await waitFor('команда p.hang зависла в хосте', () => hangs === i + 1);
     r.handles[r.handles.length - 1]?.kill();
     await hung;
     await k.idle();

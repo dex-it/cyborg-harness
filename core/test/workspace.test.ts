@@ -196,9 +196,8 @@ test('правка файла извне доходит до ctx.config.onChange
   await waitFor('битый файл замечен', () => problems.length > 0);
   await assert.rejects(config.set('workspace', { minutes: 3 }), /запись отменена|JSON/);
   await writeFile(box.file, JSON.stringify({ cyborg: 2, plugins: { enabled: ['lock'] }, settings: { lock: { $version: 1, minutes: 7 } } }));
-  await new Promise((r) => setTimeout(r, 200));
-
-  await config.set('workspace', { minutes: 3 });
+  // Пока слежение не перечитало исправленный файл, запись отменяется: проба повторяется до первой удавшейся.
+  await waitFor('исправленный файл перечитан, запись снова разрешена', async () => (await config.set('workspace', { minutes: 3 }).then(() => true, () => undefined)));
   assert.deepEqual(seen, [7, 3]);
   await new Promise((r) => setTimeout(r, 200));
   assert.deepEqual(seen, [7, 3], 'своя запись вернулась через слежение');

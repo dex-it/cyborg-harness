@@ -203,11 +203,22 @@ export interface ViewsState {
   forget(pluginId: string): Promise<number>;
 }
 
+/** Главная часть и вид: канал сообщений (в `LoadOptions.onViewMessage` и слушателям в хосте), модальные окна и диалоги главной части. */
+export interface ViewChannels {
+  attach(end: BridgeEnd): void;
+  /** Сообщение вида; плагин назвало приложение по origin фрейма. */
+  fromView(pluginId: string, view: string, message: unknown): Promise<void>;
+  /** Вид закрывает своё модальное окно с результатом. */
+  closeModal(pluginId: string, view: string, result: unknown): void;
+}
+
 /** Строки плагинов и вывод хостов: уровень, предел длины и частоты, вычёркивание секретов, дальше - `LoadOptions.onLog`. */
 export interface PluginLog {
   attach(end: BridgeEnd): void;
   /** Строка самого ядра о хосте (отказ по заметке, сбой перезапуска): с меткой `хост <id>` и под теми же пределами, что вывод хоста, - в ней может быть текст с провода. */
   hostLine(hostId: string, text: string, level: LogLevel): void;
+  /** Строка самого ядра о плагине (снятие после выключения не удалось, сбой команды по клику на уведомление): под теми же пределами, что `ctx.log`, но и от выключенного сторожем плагина не отбрасывается. */
+  pluginLine(pluginId: string, text: string, level: LogLevel): void;
   /** Плагин снят: начатый интервал дописывается сводной записью, счёт строк начинается заново. */
   drop(pluginId: string): void;
   /** Выгрузка ядра: то же для всех источников. */
@@ -231,6 +242,7 @@ export interface Parts {
   readonly sections: Sections;
   readonly osRequests: OsRequests;
   readonly views: ViewsState;
+  readonly viewChannels: ViewChannels;
   readonly logs: PluginLog;
   readonly bridge: Bridge;
 }

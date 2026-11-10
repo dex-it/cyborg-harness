@@ -168,7 +168,7 @@ async function main() {
     })()`);
   // Ввод как с клавиатуры через протокол DevTools страницы: он идёт во фрейм с фокусом и не зависит от фокуса окна в оконной системе.
   const typeText = (text) => ev.send('Input.insertText', { text });
-  const KEY_CODES = { Enter: 13, ArrowDown: 40 };
+  const KEY_CODES = { Enter: 13, ArrowDown: 40, Tab: 9 };
   const tap = async (key) => {
     const base = { key, code: key, windowsVirtualKeyCode: KEY_CODES[key], ...(key === 'Enter' && { text: '\r' }) };
     await ev.send('Input.dispatchKeyEvent', { type: 'keyDown', ...base });
@@ -975,6 +975,65 @@ async function main() {
   await inView('example', "document.getElementById('hello').click()");
   await waitFor('ответ команды example.hello в виде шаблона', async () => (await inView('example', "document.getElementById('answer')?.textContent")) === 'привет');
   log('шаблон плагина: собран cyborg-plugin, активен, вид открыт, команда из вида ответила');
+  // K-13: канал «главная часть - вид». Толчок идёт виду panel и не доходит до bar (тот же плагин, другое имя вида); окно перезагружается, и канал связывается заново.
+  const inViewNamed = (id, view, expression) =>
+    main(`(async () => {
+      const { webContents } = process.mainModule.require('electron');
+      const page = webContents.getAllWebContents().find((w) => w.getType() === 'window');
+      const frame = page.mainFrame.framesInSubtree.find((f) => f.origin === 'cyborg-plugin://${id}' && new URL(f.url).searchParams.get('view') === ${JSON.stringify(view)});
+      return frame ? frame.executeJavaScript(${JSON.stringify(expression)}) : null;
+    })()`);
+  const pushes = (view) => inViewNamed('panels', view, "document.getElementById('pushed')?.textContent ?? null");
+  const ping = () => ev("window.playground.runCommand('panels.ping')");
+  await waitFor('виды panels смонтированы', async () => (await pushes('panel')) === 'толчков: 0' && (await pushes('bar')) === 'толчков: 0');
+  assert.deepEqual(await ping(), {});
+  await waitFor('толчок главной части дошёл до вида panel без опроса', async () => (await pushes('panel')) === 'толчков: 1');
+  await sleep(300);
+  assert.equal(await pushes('bar'), 'толчков: 0', 'толчок для panel дошёл до bar того же плагина');
+  await inViewNamed('panels', 'panel', "document.getElementById('reply').click()");
+  await waitFor('сообщение вида panel дошло до главной части', () => lines().some((l) => l.includes('panels: вид panel сообщил: {"from":"panel"}')));
+  const allViews = await views();
+  await ev.send('Page.reload');
+  await waitFor('виды после перезагрузки окна', async () => (await views().catch(() => '')) === allViews && (await pushes('panel').catch(() => null)) === 'толчков: 0', 30_000);
+  assert.deepEqual(await ping(), {});
+  await waitFor('после перезагрузки окна вид panel снова получает толчки главной части', async () => (await pushes('panel')) === 'толчков: 2');
+  log('канал «главная часть - вид»: толчок доходит только до вида с этим именем, ответ вида - до главной части, после перезагрузки окна канал связан заново');
+
+  // K-13: модальное окно плагина. Вид form с area "modal" встаёт слоем поверх окна, остальное inert, фокус заперт, результат уходит владельцу, Escape закрывает.
+  const modalOpen = () => ev("!!document.querySelector('dialog.layer-modal[open]')");
+  const inForm = (expression) => inViewNamed('panels', 'form', expression);
+  await ev("(window.__form = window.playground.runCommand('panels.form'), 0)");
+  await waitFor('модальное окно показано слоем окна', modalOpen);
+  assert.equal(await ev("document.querySelector('dialog.layer-modal').matches(':modal')"), true, 'окно не в верхнем слое');
+  assert.equal(await ev("document.querySelector('dialog.layer-modal').getAttribute('aria-label')"), 'Новый проект', 'название окна не от главной части');
+  assert.equal(await ev("document.getElementById('playground').inert"), true, 'виды под окном не inert');
+  assert.equal(await ev("document.activeElement?.closest('dialog.layer-modal') !== null"), true, 'фокус не в модальном окне');
+  await waitFor('вид окна получил данные главной части', async () => (await inForm("document.getElementById('name')?.value ?? null")) === 'черновик');
+  // Tab не уходит из окна: фокус остаётся внутри диалога после каждого нажатия, в том числе на выходе из фрейма вида (раннер macOS не держит фокус окна сам).
+  await ev("window.focus(), document.querySelector('dialog.layer-modal iframe').focus()");
+  for (const key of ['Tab', 'Tab', 'Tab', 'Tab', 'Tab', 'Tab', 'Tab', 'Tab']) {
+    await tap(key);
+    await waitFor(`после ${key} фокус в модальном окне`, () => ev("document.activeElement?.closest('dialog.layer-modal') !== null && !document.activeElement.classList.contains('layer-modal-trap')"));
+  }
+  await inForm("(document.getElementById('name').value = 'Проект', document.getElementById('create').click())");
+  assert.deepEqual(await ev('window.__form'), { value: { name: 'Проект' } }, 'результат вида не дошёл до владельца');
+  await waitFor('окно снято после результата', async () => !(await modalOpen()));
+  assert.equal(await ev("document.getElementById('playground').inert"), false, 'виды остались inert после закрытия окна');
+  assert.ok(lines().some((l) => l.includes('panels: форма вернула: {"name":"Проект"}')), 'главная часть не записала результат');
+
+  await ev("(window.__form = window.playground.runCommand('panels.form'), 0)");
+  await waitFor('окно показано снова', modalOpen);
+  await press('Escape');
+  assert.deepEqual(await ev('window.__form'), {}, 'Escape не вернул владельцу undefined');
+  await waitFor('Escape закрыл окно', async () => !(await modalOpen()));
+  assert.ok(lines().some((l) => l.includes('panels: форма вернула: ничего')), 'владелец не узнал об отмене');
+
+  // Диалог из главной части без вида (ctx.dialogs.show): очередь окна та же, что у диалогов видов.
+  await ev("(window.__confirm = window.playground.runCommand('panels.confirm'), 0)");
+  await waitFor('вопрос главной части показан', () => ev("!!document.querySelector('dialog.layer-ask[data-plugin=\"panels\"] [data-choice=\"yes\"]')"));
+  await ev("document.querySelector('dialog.layer-ask[data-plugin=\"panels\"] [data-choice=\"yes\"]').click()");
+  assert.deepEqual(await ev('window.__confirm'), { value: 'yes' }, 'ответ человека не дошёл до главной части');
+  log('модальное окно плагина: поверх окна, остальное inert, фокус заперт, результат и Escape доходят владельцу; диалог главной части отвечает');
 
   const lock = JSON.parse(readFileSync(join(userData, 'workspace.cyborg.json.lock'), 'utf8'));
   assert.equal(typeof lock.pid, 'number', 'замок воркспейса без pid');
