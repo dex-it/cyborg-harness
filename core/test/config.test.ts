@@ -92,3 +92,26 @@ test('хранилище: remove берёт основу из файла, а н�
   assert.equal(await s.remove('workspace', 'gone'), true);
   assert.deepEqual(docs.get('workspace'), { outside: { $version: 1, by: 'человек' } });
 });
+
+test('хранилище: remove отдаёт стирание методу remove хранилища (под его замком), а не load и save', async () => {
+  const { store, docs, saves } = memory({ user: { gone: { $version: 1 }, keep: { $version: 1 } } });
+  const calls: string[] = [];
+  const s = await SectionStore.open(
+    {
+      ...store,
+      remove: async (layer, id) => {
+        calls.push(`${layer}/${id}`);
+        const { [id]: gone, ...rest } = docs.get(layer) ?? {};
+        docs.set(layer, rest);
+        return gone !== undefined;
+      },
+    },
+    ['user'],
+  );
+  assert.equal(await s.remove('user', 'gone'), true);
+  assert.equal(await s.remove('user', 'gone'), false);
+  assert.deepEqual(calls, ['user/gone', 'user/gone']);
+  assert.deepEqual(saves, [], 'save не вызывался');
+  assert.deepEqual(s.raw('gone'), [['user', undefined]], 'память догнала файл');
+  assert.deepEqual(docs.get('user'), { keep: { $version: 1 } });
+});

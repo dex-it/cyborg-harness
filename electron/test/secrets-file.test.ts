@@ -1,9 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { fileSecrets, type SecretCipher } from '../src/secrets-file.ts';
+
+const writer = fileURLToPath(new URL('./fixtures/secrets-writer.ts', import.meta.url));
 
 /** Подмена safeStorage: «шифр» обратим и не похож на открытый текст. */
 function cipher(overrides: Partial<SecretCipher> = {}): SecretCipher {
@@ -44,13 +48,16 @@ test('fileSecrets: ключ ОС сменился - значение читае�
       decrypt: async (sealed) => ({ result: Buffer.from(sealed).reverse().toString().replace(/^sealed:/, ''), shouldReEncrypt: true }),
       encrypt: async (text) => {
         sealedAgain++;
-        return Buffer.from(`sealed:${text}`).reverse();
+        return Buffer.from(`new:${text}`);
       },
     }),
   );
   assert.equal(await store.get('a/k'), 'v');
   assert.equal(sealedAgain, 1);
-  assert.equal(await readFile(box.file, 'utf8'), before, 'то же значение, записанное заново');
+  // Новый шифр отличим от прежнего: иначе файл без перезаписи совпал бы с записанным заново.
+  assert.notEqual(await readFile(box.file, 'utf8'), before, 'перешифрованное значение не записано');
+  const stored = JSON.parse(await readFile(box.file, 'utf8')) as Record<string, string>;
+  assert.equal(Buffer.from(stored['a/k']!, 'base64').toString(), 'new:v');
 });
 
 test('fileSecrets: delete стирает один ключ', async () => {
@@ -107,4 +114,50 @@ test('fileSecrets: битый файл не стирается молча и н�
   await writeFile(box.file, '{не json');
   assert.equal(await store.deletePrefix('a/'), 0);
   assert.equal(await readFile(box.file, 'utf8'), '{не json', 'файл не перезаписан');
+});
+
+test('fileSecrets: перешифровка не возвращает значение, стёртое или переписанное во время расшифровки', async () => {
+  await using box = await sandbox();
+  await fileSecrets(box.file, cipher()).set('gone', 'старое');
+  await fileSecrets(box.file, cipher()).set('newer', 'старое');
+  let during: (() => Promise<void>) | undefined;
+  const base = cipher();
+  const rotated = fileSecrets(
+    box.file,
+    cipher({
+      decrypt: async (sealed) => {
+        const plain = await base.decrypt(sealed);
+        await during?.();
+        return { result: plain.result, shouldReEncrypt: true };
+      },
+    }),
+  );
+  const other = fileSecrets(box.file, cipher());
+  during = () => other.delete('gone');
+  assert.equal(await rotated.get('gone'), 'старое');
+  assert.equal(await other.get('gone'), undefined, 'стёртый секрет вернулся');
+  during = () => other.set('newer', 'новое');
+  assert.equal(await rotated.get('newer'), 'старое');
+  assert.equal(await other.get('newer'), 'новое', 'новое значение затёрто старым');
+});
+
+test('fileSecrets: запись не оставляет временных файлов и не рвёт файл', async () => {
+  await using box = await sandbox();
+  const store = fileSecrets(box.file, cipher());
+  for (let i = 0; i < 5; i++) await store.set(`k${String(i)}`, 'v');
+  assert.deepEqual((await readdir(path.dirname(box.file))).sort(), ['secrets.json']);
+  assert.equal(Object.keys(JSON.parse(await readFile(box.file, 'utf8')) as object).length, 5);
+});
+
+test('fileSecrets из четырёх процессов одного userData: ни один секрет не потерян', async () => {
+  await using box = await sandbox();
+  const codes = await Promise.all(
+    [0, 1, 2, 3].map((i) => {
+      const child = spawn(process.execPath, ['--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', writer, box.file, String(i), '20'], { stdio: ['ignore', 'ignore', 'inherit'] });
+      return new Promise<number | null>((resolve) => child.once('exit', resolve));
+    }),
+  );
+  assert.deepEqual(codes, [0, 0, 0, 0]);
+  const stored = JSON.parse(await readFile(box.file, 'utf8')) as Record<string, string>;
+  assert.equal(Object.keys(stored).length, 80);
 });
