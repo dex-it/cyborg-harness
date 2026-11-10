@@ -32,7 +32,7 @@ export function buildKernel(ctx: KernelContext): Kernel {
       return keyRegistry.rows();
     },
     keybinding: (key, press) => keyRegistry.lookup(key, press),
-    setViewVisible: (pluginId, visible) => keyRegistry.setVisible(pluginId, visible),
+    setViewVisible: (pluginId, visible, view) => keyRegistry.setVisible(pluginId, visible, view),
     get window() {
       return layer.snapshot;
     },
