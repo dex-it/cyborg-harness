@@ -78,13 +78,13 @@ export function createOsRequests(ctx: KernelContext): OsRequests {
   }
 
   function clickNotice(pluginId: string, click: NotifyClick): void {
-    const { commands, lifecycle } = ctx.parts;
+    const { commands, lifecycle, logs } = ctx.parts;
     osEnv.raiseWindow?.();
     // Под чужим замком окно поднимается, а команда не идёт: как и сочетание этого плагина.
     if (!layer.allows(pluginId)) return;
     const go = () => commands.runOwn(pluginId, click.command, [...(click.args ?? [])], 'user');
     // Хост перезапускается: команда появится, когда плагин снова поднимется.
-    (commands.owners.has(click.command) ? go() : lifecycle.idle().then(go)).catch((error: unknown) => ctx.parts.logs.pluginLine(pluginId, `клик по уведомлению: ${errorMessage(error)}`, 'warn'));
+    (commands.owners.has(click.command) ? go() : lifecycle.idle().then(go)).catch((error: unknown) => logs.pluginLine(pluginId, `клик по уведомлению: ${errorMessage(error)}`, 'warn'));
   }
 
   return { attach, clickNotice };

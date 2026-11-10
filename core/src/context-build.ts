@@ -76,7 +76,8 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
   const trace = new Trace(options.onTrace, {
     streamMs: limits.traceStreamMs,
     hostOf: (pluginId) => ctx.hostOf(pluginId),
-    failed: (error) => options.onLog?.('ядро', `onTrace бросил, записи трассы могут теряться: ${errorMessage(error)}`, 'error'),
+    // Через PluginLog, как все строки ядра: текст исключения приёмника идёт под пределами длины и частоты.
+    failed: (error) => ctx.parts.logs.hostLine('трасса', `onTrace бросил, записи трассы могут теряться: ${errorMessage(error)}`, 'error'),
   });
   const notices = new Notices(
     () => {

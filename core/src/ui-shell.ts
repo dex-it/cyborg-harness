@@ -35,6 +35,8 @@ export interface ViewBridge {
 export interface TerminalOpened extends PtyInfo {
   readonly tid: number;
   readonly backlog: string;
+  /** Предел одного ввода, байт: больший `terminalWrite` отклоняется в preload, не доходя до порта. */
+  readonly input: number;
 }
 
 export type TerminalEvent = { readonly tid: number; readonly data: string } | { readonly tid: number; readonly exit: PtyExit };

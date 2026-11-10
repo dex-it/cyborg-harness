@@ -460,5 +460,5 @@ test('onTrace бросил: операция идёт как шла, ядро о
   assert.equal(await r.ctx.app!.os.env!.get('TRACE_ENV'), 'env-value');
   assert.equal(await r.ctx.app!.contracts.get('trace.files', 1)!.read!('x'), 'data:x');
   assert.ok(calls >= 2, 'приёмник звался на каждую запись');
-  assert.deepEqual(r.logs.filter((l) => l.includes('onTrace')), ['ядро: onTrace бросил, записи трассы могут теряться: приёмник упал']);
+  assert.deepEqual(r.logs.filter((l) => l.includes('onTrace')), ['хост трасса: onTrace бросил, записи трассы могут теряться: приёмник упал']);
 });

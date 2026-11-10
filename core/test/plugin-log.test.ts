@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -9,12 +10,10 @@ import type { PluginContext } from '@cyborg-harness/contracts';
 import { memorySecrets } from '../../testing/src/memory.ts';
 import { sandbox } from '../../testing/src/sandbox.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
-import type { BridgeEnd, KernelContext } from '../src/kernel-context.ts';
-import { limitsOf } from '../src/limits.ts';
 import { load, type JournalEntry, type Kernel, type LoadOptions } from '../src/loader.ts';
-import { createPluginLog } from '../src/plugin-log.ts';
 import { describeEntry, entryLevel, pluginStatuses } from '../src/status.ts';
 import { inlineHosts } from '../src/transports.ts';
+import { waitFor } from './wait-for.ts';
 
 // K-29 (FR-CH-4009, 4010, 4018): уровень строки ctx.log, вывод хоста по плагину, предел длины и частоты, вычёркивание секретов.
 
@@ -432,60 +431,82 @@ test('секреты: значение короче 4 символов не вы
   }
 });
 
-// Хвост ревью K-29 (#149): строки самого ядра о плагине шли в onLog мимо пределов длины и частоты и без вычёркивания секретов.
+// Хвост ревью K-29 (#149): строки самого ядра о плагине идут теми же пределами FR-CH-4018, что строки плагина, но не отбрасываются, если плагин уже выключен.
 
-test('ядро о плагине: ошибка команды клика по уведомлению идёт под пределами - без значения секрета и не длиннее предела', async () => {
-  const { os } = withSecrets();
-  const secret = `s3cr3t-${randomUUID()}`;
-  const events: { click(): void }[] = [];
-  const { k, ctx, lines } = await rig(['a'], {
-    manifests: [manifest('a', { permissions: { notify: true }, commands: { 'a.click': {} } })],
-    os: { ...os, notify: (_title, _body, e) => (events.push(e), { close: () => undefined }) },
-    limits: { logLineBytes: 80 },
+/**
+ * Ядро с плагином `bell`: команда `bell.open` падает с текстом `fail`; клик по уведомлению (`clicks[0].click()`) запускает её через ядро.
+ * Вторая активация плагина `slow` (после `disable` и `enable`) держит очередь операций ядра, пока не открыт `gate`: снятие `bell` ждёт за ней.
+ */
+async function clickRig(fail: () => Error, options: Partial<LoadOptions> = {}, gate?: Promise<void>) {
+  const clicks: { click(): void }[] = [];
+  const ctx: Record<string, PluginContext> = {};
+  let slowRuns = 0;
+  const { k, lines, journal } = await rig(['bell', 'slow'], {
+    manifests: [manifest('bell', { commands: { 'bell.open': { args: [] } }, permissions: { notify: true } }), manifest('slow')],
+    spawnHost: inlineHosts(async (entry) => ({
+      activate: async (c: PluginContext) => {
+        ctx[entry] = c;
+        if (entry === 'slow') {
+          if (++slowRuns > 1) await gate;
+        }
+        else {
+          c.commands.register('bell.open', () => {
+            throw fail();
+          });
+        }
+      },
+    })),
+    os: { dataDir: tmpdir(), tempDir: tmpdir(), notify: (_title, _body, events) => (clicks.push(events), { close: () => undefined }), secrets: memorySecrets() },
+    ...options,
   });
+  return { k, ctx, lines, journal, clicks };
+}
+
+test('клик по уведомлению: текст ошибки команды в строке ядра обрезан по пределу и без значений секретов (FR-CH-4018)', async () => {
+  const secret = `s3cr3t-${randomUUID()}`;
+  const { k, ctx, lines, clicks } = await clickRig(() => new Error(`${secret} ${'я'.repeat(300)}`), { limits: { logLineBytes: 64 } });
   try {
-    await ctx.a!.os.secrets.set('token', secret);
-    ctx.a!.commands.register('a.click', () => {
-      throw new Error(`отказ с ${secret}: ${'x'.repeat(200)}`);
-    });
-    await ctx.a!.os.notify!.show('t', 'b', { onClick: { command: 'a.click' } });
-    events[0]!.click();
-    await until('строка о клике', () => lines.length === 1);
-    const [id, message, level] = lines[0]!;
-    assert.deepEqual([id, level], ['a', 'warn']);
-    assert.match(message, /^клик по уведомлению: отказ с \[секрет\]: x+ \[обрезано: всего \d+ Б\]$/);
-    assert.ok(!message.includes(secret));
-    assert.ok(Buffer.byteLength(message.split(' [обрезано')[0]!) <= 80);
+    await ctx.bell!.os.secrets.set('token', secret);
+    await ctx.bell!.os.notify!.show('Сессия ждёт', undefined, { onClick: { command: 'bell.open' } });
+    clicks[0]!.click();
+    await waitFor('строка о клике', () => lines.some(([id, m]) => id === 'bell' && m.startsWith('клик по уведомлению')));
+    const line = lines.find(([id]) => id === 'bell')!;
+    assert.equal(line[2], 'warn');
+    assert.ok(!line[1].includes(secret), `секрет в строке: ${line[1]}`);
+    assert.match(line[1], /\[обрезано: всего \d+ Б\]$/);
+    assert.ok(Buffer.byteLength(line[1].split(' [обрезано')[0] ?? '') <= 64);
   } finally {
     await k.unload();
   }
 });
 
-test('ядро о плагине: строка ядра о выключенном плагине не отбрасывается, а его собственная отбрасывается; пределы длины и частоты и вычёркивание секретов те же', () => {
-  const secret = `s3cr3t-${randomUUID()}`;
-  const lines: Line[] = [];
-  const records: JournalEntry[] = [];
-  const handlers = new Map<string, (p: never) => void>();
-  const ctx = {
-    options: { onLog: (pluginId: string, message: string, level: string) => void lines.push([pluginId, message, level]) },
-    limits: limitsOf({ logLineBytes: 60, logRate: 2, logWindowMs: 60_000 }),
-    gateway: { secretValues: (ids: readonly string[]) => (ids.includes('a') ? [secret] : []) },
-    byId: new Map([['a', {}]]),
-    hostOf: () => 'h',
-    record: (e: JournalEntry) => void records.push(e),
-    parts: { lifecycle: { switchedOff: new Set(['a']), switchOffFlood: () => undefined } },
-  } as unknown as KernelContext;
-  const log = createPluginLog(ctx);
-  log.attach({ onNote: (method: string, _spec: unknown, handler: (p: never) => void) => void handlers.set(method, handler), mine: (id: string) => ({ id }), host: { id: 'h' } } as unknown as BridgeEnd);
+test('клик по уведомлению: плагин выключен потоком строк, но ещё не снят, - строка ядра о нём идёт (сторож отбрасывает только строки самого плагина)', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const { k, ctx, lines, journal, clicks } = await clickRig(() => new Error('команда упала'), { limits: { logRate: 2, logWindowMs: 100, logFloodMs: 300 } }, gate);
+  await k.disable('slow');
+  const held = k.enable('slow');
+  const stop = pour((i) => ctx.bell?.log(`поток ${String(i)}`), 10, 5);
+  try {
+    await ctx.bell!.os.notify!.show('Сессия ждёт', undefined, { onClick: { command: 'bell.open' } });
+    await waitFor('выключение bell', () => switchedOff(journal, 'bell').length === 1, { timeout: 5000 });
+    stop();
+    // Снятие bell стоит в очереди за активацией slow: плагин выключен, а команда и уведомление ещё живы.
+    assert.deepEqual(k.active, ['bell']);
+    clicks[0]!.click();
+    await waitFor('строка ядра о клике после выключения', () => lines.some(([id, m]) => id === 'bell' && m === 'клик по уведомлению: команда упала'));
+  } finally {
+    stop();
+    release();
+    await held;
+    await k.unload();
+  }
+});
 
-  handlers.get('log')!({ pluginId: 'a', message: 'своя строка выключенного', level: 'info' } as never);
-  assert.deepEqual(lines, [], 'собственная строка выключенного плагина не идёт');
-  log.pluginLine('a', `снятие не удалось: ${secret} ${'x'.repeat(100)}`, 'error');
-  log.pluginLine('a', 'вторая', 'warn');
-  log.pluginLine('a', 'третья сверх предела', 'error');
-  assert.equal(lines.length, 2, 'сверх предела частоты по одной не идёт');
-  assert.match(lines[0]![1], /^снятие не удалось: \[секрет\] x+ \[обрезано: всего \d+ Б\]$/);
-  assert.deepEqual([lines[0]![0], lines[0]![2], lines[1]], ['a', 'error', ['a', 'вторая', 'warn']]);
-  log.flush();
-  assert.deepEqual(records.map((e) => (e.kind === 'log-summary' ? [e.skipped, e.errors, e.lastError] : e.kind)), [[1, 1, 'третья сверх предела']], 'пропущенное считается сводной записью');
+test('строки ядра о плагине идут через PluginLog: прямых options.onLog вне plugin-log.ts нет', () => {
+  const dir = path.resolve(import.meta.dirname, '..', 'src');
+  const direct = readdirSync(dir)
+    .filter((f) => f.endsWith('.ts') && f !== 'plugin-log.ts')
+    .filter((f) => /\bonLog\?\.\(/.test(readFileSync(path.join(dir, f), 'utf8')));
+  assert.deepEqual(direct, []);
 });

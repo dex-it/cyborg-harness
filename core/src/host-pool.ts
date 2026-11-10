@@ -99,13 +99,19 @@ export function createHostPool(ctx: KernelContext): HostPool {
     endpoint.request('init', ctx.wire).catch(ignore);
     ctx.parts.contracts.announce(host);
 
+    let tickAt = performance.now();
     host.timer = setInterval(() => {
+      const now = performance.now();
+      // Тик пришёл позже срока: цикл событий самого ядра стоял (занятый раннер, долгий синхронный код). Таймеры идут раньше фазы poll, где обрабатываются
+      // ответ на пинг и выход процесса хоста, поэтому молчание, совпавшее с простоем ядра, - не вина хоста: оно в срок зависания не засчитывается.
+      const stalled = Math.max(0, now - tickAt - watchdog.interval);
+      tickAt = now;
       if (host.down) return;
       if (host.pingAt !== undefined) {
-        if (performance.now() - host.pingAt > watchdog.timeout) hostDown(host, 'hang');
+        if (now - host.pingAt - stalled > watchdog.timeout) hostDown(host, 'hang');
         return;
       }
-      host.pingAt = performance.now();
+      host.pingAt = now;
       const mark = host.seq;
       endpoint.request('ping', null).then((sent) => {
         host.pingAt = undefined;

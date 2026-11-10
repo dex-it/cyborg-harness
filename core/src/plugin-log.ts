@@ -76,16 +76,16 @@ export function createPluginLog(ctx: KernelContext): PluginLog {
 
   /**
    * Строка источника: в пределах интервала уходит в `onLog`, сверх предела только считается (помнится лишь последняя `error`, её несёт сводная запись).
-   * `byCore` - строку пишет само ядро о плагине: выключенному плагину она не отбрасывается (отбросить значит скрыть причину), но счёт интервала общий.
+   * `fromKernel` - строка самого ядра о плагине: выключенный сторожем плагин свои строки не пишет, а ядро о нём пишет (снятие не удалось, клик по его уведомлению).
    */
-  function line(origin: string, raw: string, level: LogLevel, hostId?: string, byCore = false): void {
+  function line(origin: string, raw: string, level: LogLevel, hostId?: string, fromKernel = false): void {
     const { switchedOff } = ctx.parts.lifecycle;
-    if (!byCore && switchedOff.has(origin)) return;
+    if (!fromKernel && switchedOff.has(origin)) return;
     const now = Date.now();
     const w = windowOf(origin, hostId);
     if (w.start !== undefined && now - w.start >= limits.logWindowMs) close(origin, w);
     // Закрытый интервал мог оказаться последним терпимым: плагин выключен, эта строка уже не принимается.
-    if (!byCore && switchedOff.has(origin)) return;
+    if (!fromKernel && switchedOff.has(origin)) return;
     w.start ??= now;
     if (w.lines < limits.logRate) {
       w.lines++;
