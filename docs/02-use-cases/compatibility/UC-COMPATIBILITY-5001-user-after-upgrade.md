@@ -1,6 +1,8 @@
 ---
 level: use-case
-feature: cyborg-harness
+id: UC-COMPATIBILITY-5001
+feature: 05-compatibility
+touches: 01-plugin-host, 02-extension-contracts
 status: review
 date: 2026-11-10
 origin: derived

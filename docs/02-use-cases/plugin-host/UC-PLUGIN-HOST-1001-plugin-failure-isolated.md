@@ -1,6 +1,8 @@
 ---
 level: use-case
-feature: cyborg-harness
+id: UC-PLUGIN-HOST-1001
+feature: 01-plugin-host
+touches: 02-extension-contracts, 04-observability
 status: review
 date: 2026-11-10
 origin: derived

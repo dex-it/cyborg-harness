@@ -9,7 +9,7 @@ origin: derived
 
 ## 1. SRS overview
 
-Как плагины связываются и показывают себя: контракты в манифесте, события подпиской, команды и сочетания, виды и документы в `<iframe>`, слой окна, контракт агента и плагин `agent-claude-code`, доступность элементов ядра. Закрывает BR-CH-001, BR-CH-003. Сценарии - [второй агент](../../02-use-cases/second-agent/scenario.md), [автор встроенного плагина](../../02-use-cases/maintainer-adds-feature/scenario.md), расширение 4а сценария [сбой плагина](../../02-use-cases/plugin-failure-isolated/scenario.md). Устройство - [SAD](../../04-architecture/design/sad.md), цели 3.4, 3.8, 3.9, разделы 4 и 5; типы - пакет `@cyborg-harness/contracts` (`contracts/`). Метод проверки называет тест ядра (`core/test`), тест playground (`playground/test`, `playground/src/main/*.test.ts`) или дымовой тест окна (`playground/scripts/smoke.mjs`, `npm run smoke`). Что не сделано - помечено «Ещё нет» или «Отложено», остаток - [дорожная карта](../../06-plans/roadmap.md). Раскладка норм по фичам - [03-requirements](../README.md).
+Как плагины связываются и показывают себя: контракты в манифесте, события подпиской, команды и сочетания, виды и документы в `<iframe>`, слой окна, контракт агента и плагин `agent-claude-code`, доступность элементов ядра. Закрывает BR-CH-001, BR-CH-003. Сценарии - [второй агент](../../02-use-cases/extension-contracts/UC-EXTENSION-CONTRACTS-2002-second-agent.md), [автор встроенного плагина](../../02-use-cases/extension-contracts/UC-EXTENSION-CONTRACTS-2001-maintainer-adds-feature.md), расширение 4а сценария [сбой плагина](../../02-use-cases/plugin-host/UC-PLUGIN-HOST-1001-plugin-failure-isolated.md). Устройство - [SAD](../../04-architecture/design/sad.md), цели 3.4, 3.8, 3.9, разделы 4 и 5; типы - пакет `@cyborg-harness/contracts` (`contracts/`). Метод проверки называет тест ядра (`core/test`), тест playground (`playground/test`, `playground/src/main/*.test.ts`) или дымовой тест окна (`playground/scripts/smoke.mjs`, `npm run smoke`). Что не сделано - помечено «Ещё нет» или «Отложено», остаток - [дорожная карта](../../06-plans/roadmap.md). Раскладка норм по фичам - [03-requirements](../README.md).
 
 ## 2. Требования
 
@@ -72,7 +72,7 @@ origin: derived
 ### FR-CH-2015 Поставщики агентов без правки ядра
 
 - **Требование:** `sessions` собирает всех поставщиков `cyborg.agent` (кратность `many`) и показывает кнопку новой сессии на каждого; добавление поставщика не меняет код ядра и `sessions`.
-- **traced from:** BR-CH-003; `second-agent`, шаги 1, 2, 4.
+- **traced from:** BR-CH-003; `UC-EXTENSION-CONTRACTS-2002`, шаги 1, 2, 4.
 - **источник:** [SAD, раздел 5](../../04-architecture/design/sad.md#5-пример-базовая-часть); `playground/plugins/sessions`.
 - **verification:** испытание - `playground/test/agents.test.ts` («cyborg.agent, общий набор…» для двух поставщиков); дымовой тест - «cyborg.agent: два поставщика…».
 - **класс:** Functions.
@@ -80,7 +80,7 @@ origin: derived
 ### FR-CH-2016 Программа агента не найдена
 
 - **Требование:** когда `facts` отвечает `found: false`, сессия не создаётся, команда отвечает ошибкой «<название>: программа не найдена», кнопка агента подписана тем же.
-- **traced from:** BR-CH-003; `second-agent`, расширение 5а.
+- **traced from:** BR-CH-003; `UC-EXTENSION-CONTRACTS-2002`, расширение 5а.
 - **источник:** `playground/plugins/sessions/index.ts`, `playground/plugins/sessions/ui/ui.ts`.
 - **verification:** испытание. Ещё нет: теста на отказ `sessions` при `found: false`.
 - **класс:** Functions.
@@ -88,7 +88,7 @@ origin: derived
 ### FR-CH-2017 Причина выхода 127
 
 - **Требование:** процесс агента, вышедший с кодом 127, получает от `ended` причину `notFound`.
-- **traced from:** BR-CH-003; `second-agent`, расширение 7а.
+- **traced from:** BR-CH-003; `UC-EXTENSION-CONTRACTS-2002`, расширение 7а.
 - **источник:** `contracts/agent.ts` (`RecoveryHint`).
 - **verification:** испытание - `playground/test/agents.test.ts` («cyborg.agent, общий набор…», проверка кода 127).
 - **класс:** Functions.
@@ -96,7 +96,7 @@ origin: derived
 ### FR-CH-2018 Агент без следов
 
 - **Требование:** у поставщика с `capabilities.events: false` работают запуск, вывод и ввод; подписка `watch` молчит, состояние «ждёт» у такой сессии не показывается.
-- **traced from:** BR-CH-003; `second-agent`, расширение 1а.
+- **traced from:** BR-CH-003; `UC-EXTENSION-CONTRACTS-2002`, расширение 1а.
 - **источник:** `playground/plugins/agent-shell`.
 - **verification:** испытание - `playground/test/agents.test.ts` («cyborg.agent, общий набор…» для `agent-shell`: запуск, пустая история). Ещё нет: теста, что `sessions` не показывает «ждёт» без событий.
 - **класс:** Functions.
@@ -104,7 +104,7 @@ origin: derived
 ### FR-CH-2019 Агент без продолжения сессии
 
 - **Требование:** у поставщика без `capabilities.resume` сессия после перезапуска приложения поднимается новой в той же вкладке; `resumeId` ему не передаётся.
-- **traced from:** BR-CH-003; `second-agent`, расширение 7б.
+- **traced from:** BR-CH-003; `UC-EXTENSION-CONTRACTS-2002`, расширение 7б.
 - **источник:** [SAD, 5.3](../../04-architecture/design/sad.md#53-восстановление-сессий).
 - **verification:** испытание. Ещё нет: теста на поставщика без `resume` (есть только «sessions: восстановленная сессия claude продолжается через resume поставщика», `playground/test/agents.test.ts`).
 - **класс:** Functions.
@@ -112,7 +112,7 @@ origin: derived
 ### FR-CH-2020 Агент без MCP
 
 - **Требование:** сессия агента, не знающего MCP, идёт без инструментов `cyborg.agent-tool` и без кнопок следующих шагов; остальные возможности сессии не меняются.
-- **traced from:** BR-CH-003; `second-agent`, расширение 7в.
+- **traced from:** BR-CH-003; `UC-EXTENSION-CONTRACTS-2002`, расширение 7в.
 - **источник:** `playground/plugins/sessions`, `playground/plugins/next-actions`.
 - **verification:** испытание. Ещё нет: теста на поставщика без MCP.
 - **класс:** Functions.
@@ -120,7 +120,7 @@ origin: derived
 ### FR-CH-2021 Ядро без имён плагинов
 
 - **Требование:** в коде ядра нет имён плагинов; добавление встроенного плагина не требует правки `core/src`.
-- **traced from:** BR-CH-001; `maintainer-adds-feature`, шаг 7, расширение 7а.
+- **traced from:** BR-CH-001; `UC-EXTENSION-CONTRACTS-2001`, шаг 7, расширение 7а.
 - **источник:** [SAD, раздел 2](../../04-architecture/design/sad.md#2-что-есть-ядро).
 - **verification:** анализ. Ещё нет: проверки, ищущей id плагинов в `core/src`.
 - **класс:** Maintainability.
@@ -128,7 +128,7 @@ origin: derived
 ### FR-CH-2022 Род области и порядок вида
 
 - **Требование:** плагин объявляет у вида (`ui.views.<имя>`) и у типа документа (`documents.<тип>`) род области `area` - `sidebar`, `main`, `toolbar` или `popup` - и порядок `order` (конечное число); неизвестная область, нечисловой `order` или лишнее поле отвергают манифест с именем поля. Не объявленное подставляет ядро: вид встаёт в `sidebar`, документ - в `main`, `order` - 1000; вид, записанный строкой пути модуля, остаётся допустимым. Ядро отдаёт приложению снимок раскладки `Kernel.layout` - по `order`, при равенстве по id плагина - и помечает не включённые, выключенные и отвергнутые графом плагины, не убирая их из снимка; каркас окна строит области по снимку, не называя плагины по именам.
-- **traced from:** BR-CH-001; `maintainer-adds-feature`, шаги 1, 2.
+- **traced from:** BR-CH-001; `UC-EXTENSION-CONTRACTS-2001`, шаги 1, 2.
 - **источник:** K-03 (PR #110); D-00, строка 2 (решено, [вопрос 1](#3-открытые-вопросы)), строка 1 (принято исполнителем, [вопрос 2](#3-открытые-вопросы)); [SAD, 3.8](../../04-architecture/design/sad.md#38-изоляция-рендера); `core/src/manifest-layout.ts`, `core/src/manifest-ui.ts`, `core/src/layout.ts`.
 - **verification:** испытание - `core/test/semver-manifest.test.ts` («вид: объект с module, area, order и title…», «вид: неизвестная область и нечисловой order - отказ с именем поля», «документ: area и order типа…»), `core/test/loader.test.ts` («раскладка: по order, при равенстве по id плагина…», «раскладка: вид без размещения - боковая колонка и order 1000…», «раскладка: невключённые, выключенные и плагины вне графа помечены…»), `playground/test/plugins-model.test.ts` («в renderer нет строковых имён плагинов: области строятся из раскладки ядра»); дымовой тест - «оба вида panels показаны, каждый со своим именем».
 - **класс:** Functions.
@@ -136,7 +136,7 @@ origin: derived
 ### FR-CH-2024 Сочетания во время работы
 
 - **Требование:** плагин регистрирует сочетание клавиш во время работы с условием активности; манифестные и такие сочетания живут в одном реестре и подчиняются правилам конфликта [FR-CH-2004](#fr-ch-2004-команды-и-сочетания); `Disposable` снимает регистрацию (`ctx.keys.register` - [FR-CH-2004](#fr-ch-2004-команды-и-сочетания)).
-- **traced from:** BR-CH-001; `maintainer-adds-feature`, шаг 2.
+- **traced from:** BR-CH-001; `UC-EXTENSION-CONTRACTS-2001`, шаг 2.
 - **источник:** K-07 (PR #121); D-00, строка 8 (форма решена 2026-11-08, [вопрос 3](#3-открытые-вопросы)); [SAD, 3.9](../../04-architecture/design/sad.md#39-системные-клавиши-и-события), [SAD2, п. 10](../../04-architecture/design/sad2-disputed-points.md); `core/src/keybindings.ts`.
 - **verification:** испытание - `core/test/keys-registry.test.ts` (условия `when`, старшинство человек - окно и меню - манифест - динамические, снятие при `dispose`, выгрузке, падении хоста и откате активации), `core/test/trust.test.ts` (подделки `keys.register`).
 - **класс:** Functions.
@@ -144,7 +144,7 @@ origin: derived
 ### FR-CH-2025 Вклады в меню окна
 
 - **Требование:** плагин вкладывает пункты в меню окна объявлением в манифесте (`contributes.menus`: меню из закрытого списка `workspace`, `view`, `tools`, `window`, подпись, своя команда, порядок, сочетание); состояние пункта (`enabled`, `checked`) берётся из булева члена контракта владельца; пункты ядра плагин убрать не может; пункт неработающего плагина остаётся в меню недоступным; сочетание пункта занимает единый реестр сочетаний (FR-CH-2024).
-- **traced from:** BR-CH-001; `maintainer-adds-feature`, шаг 2.
+- **traced from:** BR-CH-001; `UC-EXTENSION-CONTRACTS-2001`, шаг 2.
 - **источник:** K-08; D-00, строка 8 (вариант (а) принят, форма решена 2026-11-10 по поручению владельца, [вопрос 5](#3-открытые-вопросы)); [SAD, 3.9](../../04-architecture/design/sad.md#вклады-в-меню-окна); [SAD2, п. 10](../../04-architecture/design/sad2-disputed-points.md).
 - **verification:** испытание - `core/test/semver-manifest.test.ts` (разбор: незнакомое поле, меню не из списка, чужая команда, источник не из контрактов плагина), `core/test/loader.test.ts` («меню: …»: упорядоченный снимок, смена `enabled` и `checked`, выключенный плагин недоступен, но не убран, сочетание в реестре и конфликт в журнале, нажатие), `electron/test/app-menu.test.ts` (шаблон меню), дымовой тест окна (меню playground из снимка, нажатие выполняет команду, галочка следует состоянию).
 - **класс:** Functions.
@@ -152,7 +152,7 @@ origin: derived
 ### FR-CH-2026 Отмена запроса между плагинами
 
 - **Требование:** потребитель отменяет начатый вызов контракта, и отмена доходит до поставщика.
-- **traced from:** BR-CH-001; `maintainer-adds-feature`, шаг 2.
+- **traced from:** BR-CH-001; `UC-EXTENSION-CONTRACTS-2001`, шаг 2.
 - **источник:** K-09; D-00, строка 8 (форма решена исполнителем K-09, ждёт подтверждения владельца, [вопрос 4](#3-открытые-вопросы)).
 - **verification:** испытание - `core/test/rpc.test.ts` («отмена: …», «cancel с неизвестным номером или не числом ничего не отменяет»), `core/test/loader.test.ts` («отмена вызова контракта: поставщик получает сигнал, вызывающий - Cancelled…», «callTimeout отменяет вызов у поставщика…», стенд `core/test/fixtures/cancel.ts`), `core/test/trust.test.ts` («cancel: чужой хост не отменяет запрос другого плагина…»). Форма ждёт подтверждения владельца до заморозки API (D-00, строка 8).
 - **класс:** Functions.
@@ -160,7 +160,7 @@ origin: derived
 ### FR-CH-2027 Канал «главная часть - вид»
 
 - **Требование:** главная часть плагина и его вид обмениваются данными по каналу ядра, граница клонирования та же, что у контрактов; модальное окно плагина открывается через слой окна [FR-CH-2006](#fr-ch-2006-слой-окна-диалоги-и-замок).
-- **traced from:** BR-CH-001; `maintainer-adds-feature`, шаг 2.
+- **traced from:** BR-CH-001; `UC-EXTENSION-CONTRACTS-2001`, шаг 2.
 - **источник:** K-13; [вопрос 6](#3-открытые-вопросы).
 - **verification:** испытание - `core/test/channel.test.ts` (доставка по плагину и имени вида, лимит, выгрузка), `core/test/ui-shell.test.ts` («connectView: канал…», «connectView: у вида модального окна есть ctx.modal…»), `core/test/window.test.ts` («модальное окно в слое…», «ctx.views.modal…», «ctx.dialogs.show…»), `electron/test/plugins.test.ts` («канал вида…», «модальное окно плагина…»), `playground/test/agents.test.ts` (sessions без опроса); дымовой тест - «канал «главная часть - вид»…» и «модальное окно плагина…». Решено 2026-11-10 по поручению владельца: модальное окно - вид с `area: "modal"` (вариант (а)), `ctx.dialogs.show` у главной части - только `ask`, `UiContext.clipboard` не вводится ([SAD, 3.8](../../04-architecture/design/sad.md#38-изоляция-рендера)).
 - **класс:** Functions.
@@ -168,7 +168,7 @@ origin: derived
 ### FR-CH-2028 Уведомления и заголовок окна
 
 - **Требование:** уведомление плагина закрывается и по клику вызывает команду, названную плагином; заголовок окна плагин задаёт через ядро.
-- **traced from:** BR-CH-001; `maintainer-adds-feature`, шаг 2.
+- **traced from:** BR-CH-001; `UC-EXTENSION-CONTRACTS-2001`, шаг 2.
 - **источник:** K-19 (PR #79); [SAD, 3.7](../../04-architecture/design/sad.md#37-безопасность-данных-и-контроль-плагинов) («Уведомления с кликом»), [SAD, 3.8](../../04-architecture/design/sad.md#38-изоляция-рендера) («Заголовок окна»); `core/src/notices.ts`, `core/src/os-gateway.ts` (`notify.show`).
 - **verification:** испытание - `core/test/os.test.ts` («notify: клик поднимает окно, закрывает уведомление и запускает свою команду…»), `core/test/events.test.ts` («клик по уведомлению, пока хост перезапускается, доходит до команды вернувшегося плагина…»), `core/test/window.test.ts` («заголовок окна: воркспейс, фрагменты по id плагина, приложение…»).
 - **класс:** Functions.
@@ -200,7 +200,7 @@ origin: derived
 ### FR-CH-2039 Уведомление о сбое плагина без видов
 
 - **Требование:** когда плагин без видов выключен после сбоя, ядро показывает одно уведомление с перечнем плагинов, которые брали его контракты (`requires`, `optional`, `consumes`); перечень совпадает с «задеты» в записи журнала.
-- **traced from:** BR-CH-002, BR-CH-006; `plugin-failure-isolated`, расширение 4а.
+- **traced from:** BR-CH-002, BR-CH-006; `UC-PLUGIN-HOST-1001`, расширение 4а.
 - **источник:** [SAD, 3.4](../../04-architecture/design/sad.md#34-связь-между-плагинами); `core/src/lifecycle.ts` (`affected`), `core/src/status.ts`.
 - **verification:** испытание - `core/test/loader.test.ts` («хост упал без виновника: журнал называет задетых через consumes…») проверяет перечень в журнале. Ещё нет: самого уведомления (ядро пишет `affects` в журнал, `notify` не зовёт).
 - **класс:** Functions.

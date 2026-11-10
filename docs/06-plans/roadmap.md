@@ -291,7 +291,7 @@ origin: derived
 
 ## 10. Опыт автора плагина
 
-**Нормы.** BR-CH-010; FR-CH-1013, NFR-CH-1008; все нормы направления - [фича 07](../03-requirements/07-author-kit/srs.md). Автор плагина, встроенного или стороннего, работает по документации, шаблону и тест-киту, не открывая код ядра ([сценарий автора](../02-use-cases/author-writes-plugin/scenario.md)).
+**Нормы.** BR-CH-010; FR-CH-1013, NFR-CH-1008; все нормы направления - [фича 07](../03-requirements/07-author-kit/srs.md). Автор плагина, встроенного или стороннего, работает по документации, шаблону и тест-киту, не открывая код ядра ([сценарий автора](../02-use-cases/author-kit/UC-AUTHOR-KIT-7001-author-writes-plugin.md)).
 
 **Есть.** Руководство в `docs/guide/authors/` и сайт документации. Пакет объявлений `@cyborg-harness/contracts`. Примеры в `core/examples/plugins` и `playground/plugins`. Тест-кит `@cyborg-harness/testing` (`startKernel`, общий набор тестов `cyborg.agent`). Инструмент `cyborg-plugin` (`check`, `build`, `pack`): `tools/cyborg-plugin`, проверка плагина вне репозитория - `checkPlugin` (`core/src/plugin-check.ts`).
 

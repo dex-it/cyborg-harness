@@ -1,6 +1,8 @@
 ---
 level: use-case
-feature: cyborg-harness
+id: UC-EXTENSION-CONTRACTS-2001
+feature: 02-extension-contracts
+touches: 01-plugin-host
 status: review
 date: 2026-11-10
 origin: derived
