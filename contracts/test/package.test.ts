@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import ts from 'typescript';
 import { buildDeclarations, rewriteSpecifiers } from '../scripts/build.ts';
+import { runCommand } from '../../core/test/run-command.ts';
 
 // P-01: пакет ставится по номеру версии, а не через paths. Тесты собирают пакет, как `npm publish`, и ставят его в пустой проект вне репозитория.
 const contracts = path.resolve(import.meta.dirname, '..');
@@ -109,7 +109,7 @@ describe('npm pack и пустой потребитель', () => {
   const packed = path.join(work, 'pack');
   let report: { filename: string; files: { path: string }[] }[] = [];
   let tarball = '';
-  const npm = (args: string[], cwd: string): string => execFileSync('npm', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const npm = (args: string[], cwd: string): string => runCommand('npm', args, { cwd });
 
   // Одна сборка и одна упаковка на все проверки: prepack пишет в contracts/dist, параллельные упаковки мешали бы друг другу.
   before(() => {
@@ -184,11 +184,7 @@ export const view: UiModule<{ innerHTML: string }> = {
       );
       npm(['install', tarball, '--offline', '--ignore-scripts', '--no-audit', '--no-fund'], project);
       assert.ok(fs.existsSync(path.join(project, 'node_modules', '@cyborg-harness', 'contracts', 'dist', 'index.d.ts')));
-      try {
-        execFileSync(process.execPath, [tsc, '-p', project], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-      } catch (e) {
-        assert.fail(`потребитель не собрался:\n${(e as { stdout?: string }).stdout ?? String(e)}`);
-      }
+      runCommand(process.execPath, [tsc, '-p', project]);
     });
   }
 });

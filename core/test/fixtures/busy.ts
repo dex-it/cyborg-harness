@@ -4,6 +4,16 @@ const hang = (): void => {
   for (;;);
 };
 
+/** Один раз на следующее событие окна/ОС от ядра (`note system`) - слушателем самого процесса, а не плагина. */
+const onSystem = (fn: () => void): void => {
+  const listener = (message: unknown): void => {
+    if (typeof message !== 'object' || message === null || (message as { t?: unknown }).t !== 'note' || (message as { m?: unknown }).m !== 'system') return;
+    process.off('message', listener);
+    fn();
+  };
+  process.on('message', listener);
+};
+
 const plugin: PluginModule = {
   activate(ctx) {
     let onFocus: 'hang' | 'reject' | undefined;
@@ -32,11 +42,13 @@ const plugin: PluginModule = {
       throw new Error('busy: nextTick');
     }), 0));
     // Слушатель процесса зовёт сам хост, вне цепочки плагина: так выглядит сбой кода хоста.
-    ctx.commands.register('busy.host.throw', () => void process.once('message', () => {
+    // Ловушку снимает только событие окна `system`, которое тест шлёт после ответа на команду: пинг сторожа мог бы обогнать ответ и уронить хост раньше него,
+    // тогда вызов в полёте назвал бы виновником плагина (раньше ловушкой был любой следующий `message`).
+    ctx.commands.register('busy.host.throw', () => onSystem(() => {
       throw new Error('хост: исключение');
     }));
-    ctx.commands.register('busy.host.reject', () => void process.once('message', () => void Promise.reject(new Error('хост: отклонение'))));
-    ctx.commands.register('busy.host.timer', () => void process.once('message', () => void setTimeout(() => {
+    ctx.commands.register('busy.host.reject', () => onSystem(() => void Promise.reject(new Error('хост: отклонение'))));
+    ctx.commands.register('busy.host.timer', () => onSystem(() => void setTimeout(() => {
       throw new Error('хост: таймер');
     }, 0)));
     // Ответ чужой команды приходит после того, как хост успел выполнить код соседа.
