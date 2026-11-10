@@ -1,18 +1,21 @@
 import type { Disposable, GitStatus, PluginContext, PluginModule, Subscription, TreeMark } from '@cyborg-harness/contracts';
+import { filterOverrides, NOT_A_REPOSITORY, SAFE_ARGS, type FilterHost } from './filters.ts';
 import { marksOf, parseStatus } from './status.ts';
 
 // Пилот PL-04: владелец git по SAD (раздел 4, правило 11). Единственный плагин с правом process на git; дереву и просмотру отдаёт состояние и отметки.
 // Правка файлов рабочего дерева сюда не доходит - её видит тот, кто следит за деревом, и просит состояние заново; здесь следят только за .git (индекс, голова).
 
-/** Аргументы закреплены правилом process в манифесте: `fsmonitor=false` - команда из .git/config чужого репозитория при `status` не запускается, `hooksPath=/dev/null` - хуки репозитория тоже (как SAFE_CONFIG в ai-cyborg); `--no-optional-locks` - status не пишет в индекс и не мешает человеку. */
-const STATUS_ARGS = ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'status', '--porcelain=v1', '-z', '--branch'];
+/**
+ * Аргументы закреплены правилами process в манифесте: `fsmonitor=false` - команда из .git/config чужого репозитория при `status` не запускается, `hooksPath=/dev/null` - хуки репозитория тоже (как SAFE_CONFIG в ai-cyborg); `--no-optional-locks` - status не пишет в индекс и не мешает человеку.
+ * Фильтры `filter.*.clean` одним ключом не отключить: их перекрывают переменные GIT_CONFIG_* ([filters.ts](./filters.ts)), для этого перед status идут `config` и `ls-files` с закреплёнными аргументами.
+ */
+const STATUS_ARGS = [...SAFE_ARGS, 'status', '--porcelain=v1', '-z', '--branch'];
 /** Имена в .git, по которым меняется то, что показывает дерево: индекс (add, commit, checkout), голова и упакованные ссылки. Ссылки в refs/ каталогом глубже не видны: fetch отметок не меняет. */
 const WATCHED = new Set(['index', 'HEAD', 'packed-refs', 'MERGE_HEAD', 'REBASE_HEAD', 'CHERRY_PICK_HEAD']);
 /** Склейка россыпи событий .git при checkout в одно оповещение. */
 const NOTIFY_MS = 100;
 /** Репозиториев под слежением: каждый занимает слежение из 64 на плагин. */
 const MAX_REPOS = 16;
-const NOT_A_REPOSITORY = /not a git repository/i;
 
 interface Tracked {
   readonly listeners: Set<() => void>;
@@ -24,14 +27,22 @@ const git: PluginModule = {
   activate(ctx: PluginContext) {
     const proc = ctx.os.process;
     if (!proc) throw new Error('нет ctx.os.process: в манифесте git нет права process');
-    const runGit = (repo: string) => proc.run('git', STATUS_ARGS, { cwd: repo, timeoutMs: 30_000 });
     const { fs } = ctx.os;
+    const host: FilterHost = {
+      git: (args, cwd, env) => proc.run('git', args, { cwd, timeoutMs: 30_000, ...(env && { env }) }),
+      async populated(dir) {
+        const [self, dotGit] = await Promise.all([fs.stat(dir).catch(() => undefined), fs.stat(`${dir}/.git`).catch(() => undefined)]);
+        return self?.kind === 'dir' && dotGit !== undefined;
+      },
+    };
     const tracked = new Map<string, Tracked>();
 
     // Один git status на репозиторий одновременно: вызовы, пришедшие во время работы, получают один следующий прогон - он начат после их запроса и не отстаёт от изменений.
     const flights = new Map<string, { running: Promise<GitStatus | null>; next?: Promise<GitStatus | null> }>();
     async function spawn(repo: string): Promise<GitStatus | null> {
-      const result = await runGit(repo);
+      const env = await filterOverrides(host, repo);
+      if (env === null) return null;
+      const result = await host.git(STATUS_ARGS, repo, env);
       if (result.code !== 0) {
         if (NOT_A_REPOSITORY.test(result.stderr)) return null;
         throw new Error(`git status: код ${String(result.code ?? result.signal)}: ${result.stderr.trim().slice(0, 200)}`);

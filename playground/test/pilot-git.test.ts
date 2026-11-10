@@ -1,8 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { appendFile, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { GitStatus, TreeMark } from '@cyborg-harness/contracts';
@@ -53,10 +52,10 @@ test('git: вызывающий без права читать репозито�
   assert.deepEqual(denied.slice(0, 2), ['nosy:via-contract', 'nosy:via-contract']);
   await assert.rejects(p.k.callAs('wide', 'cyborg.git', 1, 'status', [other]), { code: 'PermissionDenied' }, 'вызывающий читает, а git - нет');
   assert.equal(((await p.k.callAs('wide', 'cyborg.git', 1, 'status', [repo])) as GitStatus).branch, 'main');
-  assert.deepEqual(await p.gitRuns().then((r) => r.length), 1, 'отказанные вызовы git не запускали');
+  assert.deepEqual(await p.gitCalls().then((r) => r.length), 3, 'отказанные вызовы git не запускали: только config, ls-files и status одного разрешённого');
 });
 
-test('git: status не запускает команду из .git/config чужого репозитория (core.fsmonitor), правило process закрепляет аргументы', async () => {
+test('git: status не запускает команду из .git/config чужого репозитория (core.fsmonitor), статус идёт с закреплёнными аргументами', async () => {
   await using box = await sandbox('cyborg-pl04-');
   const repo = await makeRepo(box, FILES);
   const marker = box.path('pwned');
@@ -74,9 +73,69 @@ test('git: status не запускает команду из .git/config чуж
   assert.equal(existsSync(marker), false, 'команда fsmonitor из конфига репозитория выполнена');
   assert.ok(controlRan, 'контроль: этот git запускает core.fsmonitor без защиты - проверка осмысленна');
 
-  const manifest = JSON.parse(readFileSync(path.join(import.meta.dirname, '..', 'plugins', 'git', 'manifest.json'), 'utf8')) as { permissions: { process: { program: string; args: string[] }[] } };
-  assert.deepEqual(manifest.permissions.process, [{ program: 'git', args: ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'status', '--porcelain=v1', '-z', '--branch'] }]);
   assert.deepEqual((await p.gitRuns())[0], '--no-optional-locks -c core.fsmonitor=false -c core.hooksPath=/dev/null status --porcelain=v1 -z --branch');
+});
+
+/** Репозиторий с фильтром `filter.x.clean`, который при запуске создаёт маркер, и изменённым `a.txt` без смены размера: по stat git не отличит правку, поэтому читает файл через фильтр. */
+async function filterRepo(box: Awaited<ReturnType<typeof sandbox>>, config: readonly (readonly [string, string])[] = []) {
+  const repo = await makeRepo(box, { ...FILES, '.gitattributes': '*.txt filter=x\n' });
+  const marker = box.path('filter-ran');
+  git(repo, 'config', 'filter.x.clean', `sh -c 'touch "${marker}"; cat'`);
+  for (const [key, value] of config) git(repo, 'config', key, value);
+  await writeFile(path.join(repo, 'a.txt'), 'b\n');
+  return { repo, marker };
+}
+
+// Контроль без защиты: `--no-optional-locks` не даёт git обновить индекс, поэтому следующий запуск видит тот же расхождение stat и снова гонит фильтр.
+function controlRan(repo: string, marker: string): boolean {
+  execFileSync('git', ['--no-optional-locks', 'status', '--porcelain'], { cwd: repo, stdio: 'ignore' });
+  const ran = existsSync(marker);
+  rmSync(marker, { force: true });
+  return ran;
+}
+
+test('git: status не запускает clean-фильтр из .git/config чужого репозитория (filter.*.clean), изменения при этом видны', async () => {
+  await using box = await sandbox('cyborg-pl04-');
+  const { repo, marker } = await filterRepo(box, [['filter.x.required', 'true']]);
+  assert.ok(controlRan(repo, marker), 'контроль: без перекрытия этот git запускает фильтр - проверка осмысленна');
+  await using p = await startPilot({ box, repo, ids: ['git'], probes: [reader(repo)] });
+  const status = (await p.k.callAs('reader', 'cyborg.git', 1, 'status', [repo])) as GitStatus;
+  assert.deepEqual(status.changes.map((c) => `${c.index}${c.worktree} ${c.path}`), [' M a.txt'], '`required` не роняет status: ключ перекрыт значением false');
+  assert.equal(existsSync(marker), false, 'фильтр репозитория выполнен');
+  const calls = await p.gitCalls();
+  assert.equal(calls.length, 3, 'config, ls-files, status');
+  // config и ls-files независимы и идут параллельно, status - последним.
+  assert.ok(calls.slice(0, 2).some((c) => c.includes('config --show-scope --null --name-only --get-regexp')));
+  assert.ok(calls.slice(0, 2).some((c) => c.endsWith('ls-files --stage -z')));
+  assert.ok(calls[2]?.endsWith(' status --porcelain=v1 -z --branch'));
+});
+
+test('git: фильтр вложенного репозитория (подмодуль) тоже перекрыт, фильтр пользователя остаётся', async () => {
+  await using box = await sandbox('cyborg-pl04-');
+  const inner = await makeRepo(box, { 'in.txt': 'i\n', '.gitattributes': '*.txt filter=x\n' }, 'inner');
+  const repo = await makeRepo(box, FILES);
+  git(repo, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', inner, 'sub');
+  git(repo, 'commit', '-q', '-m', 'sub');
+  const marker = box.path('filter-ran');
+  git(box.path('repo', 'sub'), 'config', 'filter.x.clean', `sh -c 'touch "${marker}"; cat'`);
+  await writeFile(path.join(repo, 'sub', 'in.txt'), 'j\n');
+  assert.ok(controlRan(repo, marker), 'контроль: status родителя гонит фильтр подмодуля');
+  await using p = await startPilot({ box, repo, ids: ['git'], probes: [reader(repo)] });
+  const status = (await p.k.callAs('reader', 'cyborg.git', 1, 'status', [repo])) as GitStatus;
+  assert.deepEqual(status.changes.map((c) => c.path), ['sub']);
+  assert.equal(existsSync(marker), false, 'фильтр подмодуля выполнен');
+  assert.ok((await p.gitCalls()).some((c) => c.includes('ls-files --stage -z')));
+});
+
+test('git: правила process закрепляют перекрытие фильтров: config и ls-files с фиксированным выражением, переменные GIT_CONFIG_* только у git', async () => {
+  const manifest = JSON.parse(readFileSync(path.join(import.meta.dirname, '..', 'plugins', 'git', 'manifest.json'), 'utf8')) as { permissions: { process: { program: string; args: string[]; env?: string[] }[] } };
+  const rules = manifest.permissions.process;
+  const safe = ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'];
+  assert.deepEqual(rules.map((r) => r.args.slice(safe.length).join(' ')), ['status --porcelain=v1 -z --branch', 'config --show-scope --null --name-only --get-regexp ^filter\\..+\\.(clean|process|required)$', 'ls-files --stage -z']);
+  for (const r of rules) assert.deepEqual(r.args.slice(0, safe.length), safe);
+  assert.deepEqual(rules[0]?.env, ['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_*', 'GIT_CONFIG_VALUE_*']);
+  assert.deepEqual(rules[1]?.env, ['LC_ALL']);
+  assert.equal(rules[2]?.env, undefined);
 });
 
 test('git: параллельные status одного репозитория склеиваются - не больше двух запусков на пачку, и последний видит правку, сделанную во время первого', async () => {
