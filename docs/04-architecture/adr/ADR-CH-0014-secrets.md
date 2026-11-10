@@ -1,10 +1,9 @@
 ---
 id: ADR-CH-0014
 status: proposed
-date: 2026-11-08
+date: 2026-11-10
 relates_to: product, cyborg-harness, ADR-CH-0001, ADR-CH-0002, ADR-CH-0005
 origin: derived
-quality-checks: входных записей нет
 ---
 
 # ADR-CH-0014 Секреты: хранилище ядра - корень доверия, внешний источник - плагин, в `config` только ссылка

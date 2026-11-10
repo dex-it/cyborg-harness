@@ -1,10 +1,9 @@
 ---
 id: ADR-CH-0004
 status: review
-date: 2026-11-08
+date: 2026-11-10
 relates_to: product, cyborg-harness, ADR-0003, ADR-0012, ADR-0016
 origin: derived
-quality-checks: входных записей нет
 ---
 
 # ADR-CH-0004 Агент - обычный плагин, поставщик контракта `cyborg.agent`: описывает запуск и переводит следы в события, pty запускает потребитель

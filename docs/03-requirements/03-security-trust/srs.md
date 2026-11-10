@@ -3,7 +3,6 @@ feature: 03-security-trust
 status: review
 date: 2026-11-10
 origin: derived
-quality-checks: входных записей нет
 ---
 
 # SRS фичи 03 - безопасность и доверие

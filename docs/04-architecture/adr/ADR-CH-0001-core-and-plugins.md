@@ -1,10 +1,9 @@
 ---
 id: ADR-CH-0001
 status: review
-date: 2026-11-08
+date: 2026-11-10
 relates_to: product, cyborg-harness, ADR-0001, ADR-0002
 origin: derived
-quality-checks: входных записей нет
 ---
 
 # ADR-CH-0001 Ядро и плагины: своё компактное ядро без предметной области, все функции - равные плагины, без Cordis

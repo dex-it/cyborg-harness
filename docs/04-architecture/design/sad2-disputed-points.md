@@ -4,7 +4,6 @@ feature: cyborg-harness
 status: review
 date: 2026-11-10
 origin: derived
-quality-checks: входных записей нет
 ---
 
 # SAD2: вопросы к автору и спорные моменты

@@ -1,10 +1,9 @@
 ---
 id: ADR-CH-0015
 status: accepted
-date: 2026-11-08
+date: 2026-11-10
 relates_to: product, cyborg-harness, ADR-CH-0003, ADR-CH-0014
 origin: derived
-quality-checks: входных записей нет
 ---
 
 # ADR-CH-0015 Доверие к воркспейсу: значения, расширяющие права, ядро берёт только из слоя пользователя

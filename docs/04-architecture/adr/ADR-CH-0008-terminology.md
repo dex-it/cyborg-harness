@@ -1,10 +1,9 @@
 ---
 id: ADR-CH-0008
 status: review
-date: 2026-11-05
+date: 2026-11-10
 relates_to: product, cyborg-harness, 14-extensions
 origin: derived
-quality-checks: входных записей нет
 ---
 
 # ADR-CH-0008 Терминология: «плагин Cyborg» и «плагин Claude Code» - разные вещи; роли связи - поставщик и потребитель

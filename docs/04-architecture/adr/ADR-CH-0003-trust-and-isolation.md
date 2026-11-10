@@ -1,10 +1,9 @@
 ---
 id: ADR-CH-0003
 status: review
-date: 2026-11-08
+date: 2026-11-10
 relates_to: product, cyborg-harness, ADR-0002, ADR-CH-0001
 origin: derived
-quality-checks: входных записей нет
 ---
 
 # ADR-CH-0003 Изоляция плагинов: сбоев и рендера - для всех с первого этапа, доступа - процесс на плагин во втором; к ОС только через `ctx.os`

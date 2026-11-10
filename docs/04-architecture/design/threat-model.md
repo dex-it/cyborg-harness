@@ -4,7 +4,6 @@ feature: cyborg-harness
 status: draft
 date: 2026-11-10
 origin: derived
-quality-checks: входных записей нет
 ---
 
 # Модель угроз Cyborg Harness

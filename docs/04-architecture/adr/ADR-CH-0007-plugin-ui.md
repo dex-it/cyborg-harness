@@ -4,7 +4,6 @@ status: review
 date: 2026-11-10
 relates_to: product, cyborg-harness, ADR-CH-0005, 10-ui-preferences, 12-command-buttons
 origin: derived
-quality-checks: входных записей нет
 ---
 
 # ADR-CH-0007 Интерфейс плагинов: ядро знает роды областей, вид плагина живёт в своём `<iframe>`, сочетания объявлены в манифесте и перехватываются ядром
