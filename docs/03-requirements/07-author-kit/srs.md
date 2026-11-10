@@ -1,9 +1,8 @@
 ---
 feature: 07-author-kit
 status: review
-date: 2026-11-09
+date: 2026-11-10
 origin: derived
-quality-checks: входных записей нет
 ---
 
 # SRS фичи 07 - набор автора плагина

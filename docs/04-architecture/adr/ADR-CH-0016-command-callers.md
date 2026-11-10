@@ -1,10 +1,9 @@
 ---
 id: ADR-CH-0016
 status: accepted
-date: 2026-11-08
-relates_to: product, cyborg-harness, ADR-CH-0003, ADR-CH-0005, ADR-CH-0007, ADR-CH-0014
+date: 2026-11-10
+relates_to: 02-extension-contracts, 03-security-trust
 origin: derived
-quality-checks: входных записей нет
 ---
 
 # ADR-CH-0016 Права вызывающего у команд: исполнитель объявляет `callers`, по умолчанию команду зовёт пользователь

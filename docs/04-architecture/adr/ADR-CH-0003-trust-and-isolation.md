@@ -1,10 +1,9 @@
 ---
 id: ADR-CH-0003
 status: review
-date: 2026-11-08
-relates_to: product, cyborg-harness, ADR-0002, ADR-CH-0001
+date: 2026-11-10
+relates_to: 01-plugin-host, 03-security-trust
 origin: derived
-quality-checks: входных записей нет
 ---
 
 # ADR-CH-0003 Изоляция плагинов: сбоев и рендера - для всех с первого этапа, доступа - процесс на плагин во втором; к ОС только через `ctx.os`
@@ -21,6 +20,8 @@ quality-checks: входных записей нет
 ## Context
 
 В bb серверный код плагина грузится в процессе сервера, host-код - в отдельном процессе на плагин, манифеста прав нет, есть безопасный режим. В dsh плагин - доверенный код процесса; подтверждения касаются инструментов агента, а не плагинов. Подписей пакетов нет ни там, ни там ([bb 5.4](../../research/bb.md), [dsh 8-9](../../research/deepseek-harness.md)). Замеры: хост - ~56 МБ PSS первый и ~34 МБ каждый следующий, `<iframe>` на своём origin - +13 МБ ([спайк хостов](../../05-verification/spike-hosts.md), [спайк UI](../../05-verification/spike-iframe-ui.md)). Ресёрч-2 проверил опоры второго этапа: `utilityProcess` флаг `--permission` принимает, но не применяет; сеть и окружение флагом не закрываются; `Compartment` (`ses`) в общей виртуальной машине пробивается - Figma ушла с такой песочницы после нескольких побегов ([ресёрч-2, 2.2-2.3 и 4.2](../../research/sad2-validation.md)).
+
+Связанные решения Cyborg (корпус [ai-cyborg](https://github.com/dex-it/ai-cyborg/tree/master/docs)): ADR-0002.
 
 ## Decision
 

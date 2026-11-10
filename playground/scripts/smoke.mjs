@@ -383,7 +383,7 @@ async function main() {
 
   // K-05: закрытая CSP вида и флаг ui.inlineStyles. echo, alice и bob флага не объявили, sessions и editor объявили (xterm и Monaco).
   const viewCspHeader = (id) => inView(id, 'fetch(location.href).then((r) => r.headers.get("content-security-policy"))');
-  const STRICT = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'";
+  const STRICT = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'";
   const WITH_INLINE = STRICT.replace("style-src 'self'", "style-src 'self' 'unsafe-inline'");
   for (const id of ['echo', 'alice', 'bob']) assert.equal(await viewCspHeader(id), STRICT, `${id}: CSP вида без флага не строгая`);
   for (const id of ['sessions', 'editor']) assert.equal(await viewCspHeader(id), WITH_INLINE, `${id}: с флагом CSP не несёт инлайн-стилей`);
@@ -410,6 +410,16 @@ async function main() {
   assert.deepEqual(JSON.parse(await inlineStyle('echo')), { byElement: '0px', byAttribute: '0px', byCssom: '11px' }, 'вид без флага применил инлайн-стиль');
   assert.deepEqual(JSON.parse(await inlineStyle('alice')), { byElement: '0px', byAttribute: '0px', byCssom: '11px' }, 'вид без флага применил инлайн-стиль');
   assert.deepEqual(JSON.parse(await inlineStyle('sessions')), { byElement: '7px', byAttribute: '9px', byCssom: '11px' }, 'вид с флагом не применил инлайн-стиль');
+  // #160: отказ CSP не молчит - строка с подсказкой про ui.inlineStyles в журнале плагина-владельца (echo и alice без флага, sessions с флагом не отказан).
+  // Цикл вставок не раздувает журнал: одинаковые отказы склеиваются в одну запись с repeats.
+  await waitFor(
+    'в журнале echo отказ CSP с подсказкой про ui.inlineStyles',
+    () => lines().some((l) => l.includes('"pluginId":"echo","kind":"denied","method":"csp"') && l.includes('"reason":"csp"') && l.includes('inlineStyles')),
+  );
+  await inView('echo', `(() => { for (let i = 0; i < 200; i++) { const sheet = document.createElement('style'); sheet.textContent = 'div { margin: 1px; }'; document.head.append(sheet); sheet.remove(); } return 1; })()`);
+  await sleep(500);
+  assert.ok(lines().filter((l) => l.includes('"pluginId":"echo","kind":"denied","method":"csp"')).length <= 3, 'поток отказов CSP раздул журнал echo');
+  assert.ok(!lines().some((l) => l.includes('"pluginId":"sessions","kind":"denied","method":"csp"') && l.includes('inlineStyles')), 'sessions с флагом получил отказ на инлайн-стиль');
   // Встроенный скрипт не выполняется ни с флагом, ни без.
   for (const id of ['echo', 'sessions'])
     assert.equal(await inView(id, "(() => { const s = document.createElement('script'); s.textContent = 'window.k05Inline = 1'; document.head.append(s); s.remove(); return typeof window.k05Inline; })()"), 'undefined', `${id}: встроенный скрипт выполнился`);
@@ -440,6 +450,30 @@ async function main() {
       'картинка из сети загрузилась',
     );
     assert.equal(await inView('echo', 'fetch(location.href).then((r) => r.status)'), 200, 'свой origin вид читает');
+    // #161: default-src не покрывает base-uri и form-action, они закрыты явно. <base href> не меняет адрес относительных запросов вида,
+    // отправка формы отклонена CSP (form-action), и сервер снаружи запроса не получает (счёт outside проверяется ниже).
+    assert.deepEqual(
+      JSON.parse(
+        await inView('echo', `new Promise((resolve) => {
+          const seen = [];
+          document.addEventListener('securitypolicyviolation', (e) => seen.push(e.effectiveDirective));
+          const before = document.baseURI;
+          const base = document.createElement('base');
+          base.href = 'http://127.0.0.1:1/k161/';
+          document.head.append(base);
+          const baseChanged = document.baseURI !== before || new URL('x.js', document.baseURI).origin !== location.origin;
+          base.remove();
+          const form = document.createElement('form');
+          form.method = 'get';
+          form.action = ${JSON.stringify(outsideUrl)};
+          document.body.append(form);
+          form.submit();
+          setTimeout(() => { form.remove(); resolve(JSON.stringify({ baseChanged, seen: [...new Set(seen)].sort() })); }, 300);
+        })`),
+      ),
+      { baseChanged: false, seen: ['base-uri', 'form-action'] },
+      '<base href> сменил адреса вида или форма ушла наружу',
+    );
     await sleep(300);
     assert.equal(outside, 0, 'запрос вида дошёл до сервера снаружи');
   } finally {
