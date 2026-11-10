@@ -1,9 +1,11 @@
 import { CoreError, errorMessage } from './errors.ts';
-import { DEFAULT_ORDER, pluginMark, type LayoutMark } from './layout.ts';
+import { DEFAULT_ORDER } from './layout.ts';
 import type { KernelContext, Menus } from './kernel-context.ts';
+import type { MenuEntry } from './menu-entry.ts';
 import { resolveKey } from './keys.ts';
-import { MENU_NAMES, type MenuItemDecl, type MenuName, type StateSource } from './manifest-menus.ts';
+import { MENU_NAMES, type MenuItemDecl, type StateSource } from './manifest-menus.ts';
 import type { PluginManifest } from './manifest.ts';
+import { pluginMark } from './plugin-mark.ts';
 import { MENU_OWNER } from './window-layer.ts';
 import { own } from './wire.ts';
 
@@ -11,25 +13,6 @@ import { own } from './wire.ts';
  * Меню окна по манифестам (SAD 3.9, FR-CH-2025): что ядро знает о пунктах плагинов. Приложение собирает меню ОС по снимку `Kernel.menus`
  * и не называет плагины по именам; подписи меню, их порядок и пункты самого приложения - его дело, ядро задаёт меню из `MENU_NAMES` и порядок пунктов в них.
  */
-
-/** Строка снимка меню. Пункт плагина, который не работает, остаётся: `enabled: false` и `mark` говорят почему, убирать пункт нельзя (FR-5006, FR-10007). */
-export interface MenuEntry {
-  readonly pluginId: string;
-  /** Имя пункта внутри плагина. */
-  readonly id: string;
-  readonly menu: MenuName;
-  readonly title: string;
-  /** Своя команда плагина: исполнять её просит `Kernel.runMenuItem`. */
-  readonly command: string;
-  readonly order: number;
-  /** Сочетание пункта в записи манифеста (`CmdOrCtrl+Shift+F`): нет, если человек отдал его другой команде, освободил (`null`) или оно занято окном и другим пунктом. */
-  readonly accelerator?: string;
-  readonly enabled: boolean;
-  /** Есть только у пункта с галочкой. */
-  readonly checked?: boolean;
-  /** Почему плагин сейчас не работает; у работающего нет. */
-  readonly mark?: LayoutMark;
-}
 
 /** Имя пункта в таблице сочетаний: оно не пересекается с id плагинов и команд, в них нет `/`. */
 export const menuItemKey = (pluginId: string, id: string): string => `${pluginId}/${id}`;

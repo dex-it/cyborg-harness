@@ -1,7 +1,6 @@
 import { normalizeKey } from './keys.ts';
 import { isValidId, show, VIEW_NAME } from './manifest-fields.ts';
 import { readTitle } from './manifest-layout.ts';
-import type { CommandSpec } from './manifest.ts';
 import { allowsMajor, parseVersion } from './semver.ts';
 import { isRecord, own } from './wire.ts';
 
@@ -39,6 +38,11 @@ export interface MenuItemDecl {
 
 export interface Contributes {
   readonly menus: readonly MenuItemDecl[];
+}
+
+/** Что пункту нужно знать о команде плагина: структурный тип вместо `CommandSpec`, чтобы манифест и разбор меню не зависели друг от друга по кругу. */
+export interface MenuCommand {
+  readonly args: readonly { readonly optional?: boolean }[];
 }
 
 const MAX_ITEMS = 32;
@@ -94,7 +98,7 @@ function readSource(where: string, raw: unknown, decls: ContractDecls, errors: s
   return { contract, major, member };
 }
 
-function readItem(index: number, raw: unknown, commands: Readonly<Record<string, CommandSpec>>, decls: ContractDecls, taken: Taken, errors: string[]): MenuItemDecl | undefined {
+function readItem(index: number, raw: unknown, commands: Readonly<Record<string, MenuCommand>>, decls: ContractDecls, taken: Taken, errors: string[]): MenuItemDecl | undefined {
   if (!isRecord(raw)) {
     errors.push(`contributes.menus[${String(index)}]: ожидается объект { id, menu, title, command, ... }, получено ${show(raw)}`);
     return undefined;
@@ -142,7 +146,7 @@ function readItem(index: number, raw: unknown, commands: Readonly<Record<string,
   };
 }
 
-export function readContributes(raw: unknown, commands: Readonly<Record<string, CommandSpec>>, decls: ContractDecls, errors: string[]): Contributes | undefined {
+export function readContributes(raw: unknown, commands: Readonly<Record<string, MenuCommand>>, decls: ContractDecls, errors: string[]): Contributes | undefined {
   if (raw === undefined) return undefined;
   if (!isRecord(raw)) {
     errors.push(`contributes: ожидается { "menus": [...] }, получено ${show(raw)}`);

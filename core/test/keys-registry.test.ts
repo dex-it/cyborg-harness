@@ -187,8 +187,8 @@ test('сочетание команды окна динамически заня
   assert.equal(k.keybinding('F6')?.pluginId, WINDOW_OWNER, 'окно по-прежнему владелец');
   assert.deepEqual(
     conflicts(k.journal),
-    [],
-    'отказ - исключение плагину, а не конфликт в журнале: занять нельзя вовсе',
+    ['buttons:Ctrl+P->cyborg.menu'],
+    'сочетание окна - только исключение плагину, сочетание меню (K-08) - ещё и конфликт в журнале: человек видит, чьё нажатие обрабатывает меню',
   );
   assert.deepEqual(
     k.journal.flatMap((e) => (e.kind === 'key-ignored' ? [`${e.key}:${e.reason}`] : [])),

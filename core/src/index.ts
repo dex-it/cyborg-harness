@@ -30,7 +30,7 @@ export type { ResourceLimits } from './limits.ts';
 export type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Kernel, Keybinding, KeyPress, LoadOptions, UninstallReport, UserKeybinding, WatchdogOptions } from './loader.ts';
 export type { Area, DocumentDecl, Placement } from './manifest-layout.ts';
 export type { Contributes, MenuItemDecl, MenuName, StateSource } from './manifest-menus.ts';
-export type { MenuEntry } from './menus.ts';
+export type { MenuEntry } from './menu-entry.ts';
 export type { ArgSpec, CommandCallers, CommandSpec, KeybindingSpec, ManifestResult, PluginManifest, SectionDecl } from './manifest.ts';
 export type { WireKind } from './wire.ts';
 export type { Guard, GuardRight, MemberGuards } from './via-contract.ts';

@@ -1,5 +1,6 @@
 import { CoreError } from './errors.ts';
-import { buildLayout, pluginMark } from './layout.ts';
+import { buildLayout } from './layout.ts';
+import { pluginMark } from './plugin-mark.ts';
 import type { KernelContext } from './kernel-context.ts';
 import type { Kernel } from './kernel-types.ts';
 

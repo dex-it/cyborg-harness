@@ -6,7 +6,7 @@ import type { ContractGraph } from './graph.ts';
 import type { SectionInput, SystemEvent } from './host-runtime.ts';
 import type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Keybinding, KeyPress, LoadOptions, UninstallReport } from './kernel-types.ts';
 import type { ResourceLimits } from './limits.ts';
-import type { MenuEntry } from './menus.ts';
+import type { MenuEntry } from './menu-entry.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { Notices } from './notices.ts';
 import type { OsEnvironment, OsGateway } from './os-gateway.ts';

@@ -4,7 +4,7 @@ import type { DocumentRow } from './documents.ts';
 import type { ContractGraph, Rejection } from './graph.ts';
 import type { SystemEvent } from './host-runtime.ts';
 import type { LayoutEntry } from './layout.ts';
-import type { MenuEntry } from './menus.ts';
+import type { MenuEntry } from './menu-entry.ts';
 import type { ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { OsEnvironment } from './os-gateway.ts';
