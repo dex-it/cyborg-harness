@@ -7,6 +7,7 @@ import type { PluginContext, PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { startCancel } from './fixtures/cancel.ts';
+import { waitFor } from './wait-for.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 const settle = async () => {
@@ -187,9 +188,9 @@ test('отменённый вызов с колбэком: подписка сн
   await tick();
   abort.abort();
   await assert.rejects(call, { code: 'Cancelled' });
-  await sleep(120);
+  await waitFor('поставщик закончил открытие подписки', () => log.includes('watch:aborted'));
   assert.deepEqual(log, ['watch:aborted'], 'поставщик увидел отмену к концу своей работы');
-  assert.equal(listeners.size, 0, 'то, что поставщик успел открыть после отмены, снято');
+  await waitFor('то, что поставщик успел открыть после отмены, снято', () => listeners.size === 0);
   const sub = await api.watch(() => undefined);
   assert.equal(listeners.size, 1, 'при пределе 1 место освободилось: вторая подписка прошла');
   sub.dispose();
@@ -199,11 +200,11 @@ test('отменённый вызов с колбэком: подписка сн
 });
 
 test('callTimeout во время открытия подписки: Timeout, подписка снята, место свободно', async () => {
-  const { kernel, api, listeners, held } = await startCancel({ limits: { subscriptions: 1 }, callTimeout: 20 });
+  const { kernel, api, listeners, held, log } = await startCancel({ limits: { subscriptions: 1 }, callTimeout: 20 });
   held.watchMs = 80;
   await assert.rejects(api.watch(() => undefined, new AbortController().signal), { code: 'Timeout' });
-  await sleep(200);
-  assert.equal(listeners.size, 0);
+  await waitFor('поставщик закончил открытие подписки', () => log.some((line) => line.startsWith('watch:')));
+  await waitFor('подписка, открытая после срока, снята', () => listeners.size === 0);
   held.watchMs = 0;
   const sub = await api.watch(() => undefined);
   assert.equal(listeners.size, 1);
@@ -306,7 +307,7 @@ test('ответ поставщика пришёл в ядро после отм
   const abort = new AbortController();
   late = true;
   const call = api.watch(() => undefined, abort.signal);
-  await sleep(30);
+  await waitFor('поставщик открыл подписку', () => listeners.size === 1);
   abort.abort();
   await assert.rejects(call, { code: 'Cancelled' });
   assert.equal(listeners.size, 1, 'поставщик открыл подписку до отмены');

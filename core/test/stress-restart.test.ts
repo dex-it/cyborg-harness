@@ -6,6 +6,7 @@ import { trackKernels } from './kernels.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
+import { waitFor } from './wait-for.ts';
 
 // Ядро выгружается после каждого теста файла, и упавшим тоже: иначе слежение и программы держат процесс файла (core/test/kernels.ts).
 const track = trackKernels();
@@ -49,7 +50,7 @@ test('stress-restart: unload во время перезапуска хоста -
   const k = await t.kernel;
   const before = activations;
   t.handles[0]?.kill();
-  await sleep(5);
+  await waitFor('перезапуск хоста начался (плагины активируются заново)', () => activations > before);
   await k.unload();
   const spawned = t.spawned.length;
   await sleep(150);

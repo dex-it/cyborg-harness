@@ -12,6 +12,7 @@ import { trackKernels } from './kernels.ts';
 import { guardedLookup, isLocalAddress, type Lookup } from '../src/net-transport.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
+import { waitFor } from './wait-for.ts';
 
 // Ядро выгружается после каждого теста файла, и упавшим тоже: иначе слежение и программы держат процесс файла (core/test/kernels.ts).
 const track = trackKernels();
@@ -140,12 +141,12 @@ test('net.fetch по node:http: метод, тело и заголовки до�
   assert.deepEqual([redirect.status, redirect.headers.location, redirect.body], [302, 'http://elsewhere.example/', '']);
   assert.deepEqual(await f.net.fetch(at('/empty')).then((r) => [r.status, r.body]), [204, '']);
   await assert.rejects(f.net.fetch(at('/hang'), { timeoutMs: 50 }), { code: 'Timeout' });
+  const hits = f.hits.length;
   const pending = f.net.fetch(at('/hang')).catch(() => undefined);
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await waitFor('запрос дошёл до сервера и завис', () => f.hits.length === hits + 1);
   await f.k.unload();
   await pending;
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.equal(f.hung.length, 2, 'сервер не увидел обрыва соединений: по тайм-ауту и по выгрузке плагина');
+  await waitFor('сервер увидел обрыв соединений: по тайм-ауту и по выгрузке плагина', () => f.hung.length === 2);
 });
 
 test('net.fetch: учётные данные в адресе (http://u:p@host/) - Invalid, как у прежнего fetch', async () => {
@@ -178,6 +179,5 @@ test('net.fetch: выгрузка плагина закрывает его keep-
   const open = () => new Promise<number>((resolve) => f.server.getConnections((_e, n) => resolve(n)));
   assert.equal(await open(), 1, 'keep-alive: соединение осталось в пуле');
   await f.k.unload();
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.equal(await open(), 0, 'соединение плагина пережило его выгрузку');
+  await waitFor('соединение плагина закрыто выгрузкой', async () => (await open()) === 0);
 });
