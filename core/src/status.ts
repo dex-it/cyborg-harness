@@ -15,6 +15,47 @@ export interface PluginStatus {
   readonly revivable: boolean;
 }
 
+/**
+ * Какие виды записей журнала - события жизненного цикла плагина (загружен, пропущен, снят, упал), а какие о его работе ничего не говорят: конфликт сочетаний, отказ шлюза,
+ * вызов устаревшего члена, удержанное хостом отклонение, завершённый по сроку pty, выбор хоста. Вторые приходят в любой момент, в том числе после снятия плагина, и не должны
+ * перекрывать запись жизненного цикла: по последней из них `pluginStatuses` показывает состояние, а `enable` поставщика решает, поднимать ли зависимого.
+ * Таблица полная по типу: новый вид записи без пометки компилятор не пропустит.
+ */
+const LIFECYCLE: Record<JournalEntry['kind'], boolean> = {
+  invalid: true,
+  disabled: true,
+  'not-found': true,
+  rejected: true,
+  'safe-mode': true,
+  skipped: true,
+  config: true,
+  state: true,
+  failed: true,
+  activated: true,
+  deactivated: true,
+  revived: true,
+  waiting: true,
+  unloaded: true,
+  uninstalled: true,
+  'switched-off': true,
+  'host-down': true,
+  'host-restart': true,
+  'host-abandoned': true,
+  'key-conflict': false,
+  'key-ignored': false,
+  denied: false,
+  'deprecated-call': false,
+  'unhandled-rejection': false,
+  'pty-expired': false,
+  'host-isolated': false,
+  'host-own-grouped': false,
+  'third-party': false,
+  'log-summary': false,
+};
+
+/** Запись о жизненном цикле плагина (таблица `LIFECYCLE`). */
+export const isLifecycleEntry = (entry: JournalEntry): boolean => LIFECYCLE[entry.kind];
+
 const REVIVABLE = new Set<JournalEntry['kind']>(['switched-off', 'failed', 'skipped', 'host-abandoned']);
 
 /** Плагины, которых касается запись: свой id или перечень у записей хоста; у вызова устаревшего члена ещё и поставщик, чтобы он видел своих вызывающих. */
@@ -31,6 +72,7 @@ export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[]
   const revivable = (id: string, cause: JournalEntry) => REVIVABLE.has(cause.kind) || (cause.kind === 'unloaded' && cause.by === id);
   const set = (id: string, state: PluginState, cause: JournalEntry) => states.set(id, { id, state, cause, revivable: state === 'stopped' && revivable(id, cause) });
   for (const entry of journal) {
+    if (!isLifecycleEntry(entry)) continue;
     for (const id of entryPlugins(entry)) {
       switch (entry.kind) {
         case 'activated':
@@ -45,18 +87,6 @@ export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[]
         case 'host-down':
         case 'revived':
           set(id, 'restarting', entry);
-          break;
-        case 'key-conflict':
-        case 'key-ignored':
-        case 'denied':
-        case 'deprecated-call':
-        case 'unhandled-rejection':
-        case 'pty-expired':
-        case 'host-isolated':
-        case 'host-own-grouped':
-        case 'third-party':
-        case 'log-summary':
-          // Ни конфликт сочетаний, ни отказ шлюза, ни вызов устаревшего члена, ни удержанное хостом отклонение, ни завершённый по сроку pty, ни выбор хоста, ни сводная запись о строках сверх предела о работе плагина ничего не говорят: плагин работает как обычно.
           break;
         case 'host-restart':
           // Причиной остаётся падение: «перезапуск» без «почему» человеку ничего не говорит.

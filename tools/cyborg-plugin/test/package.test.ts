@@ -22,6 +22,13 @@ const exportTargets = (): string[] =>
 const binTarget = (): string => path.join(pkg, manifest.bin?.['cyborg-plugin'] ?? 'bin-не-объявлен');
 
 describe('package.json cyborg-plugin: bin, exports, состав пакета', () => {
+  it('после сборки пакета ссылка node_modules/.bin/cyborg-plugin стоит: скрипты check и build копии шаблона в клоне её зовут (P-05, ревью)', () => {
+    // `npm ci` ставит ссылки bin до того, как пакет собран, и для отсутствующей цели не создаёт её; ссылку возвращает `npm rebuild` в build:tools.
+    const link = path.join(pkg, '..', '..', 'node_modules', '.bin', 'cyborg-plugin');
+    assert.ok(fs.existsSync(link), `${link}: ссылки нет (npm run build:tools)`);
+    assert.equal(fs.realpathSync(link), fs.realpathSync(binTarget()));
+  });
+
   it('bin ведёт на существующий файл, первая строка - shebang node, файл исполняемый', () => {
     assert.deepEqual(Object.keys(manifest.bin ?? {}), ['cyborg-plugin']);
     assert.ok(fs.existsSync(binTarget()), `${binTarget()}: цели bin нет (npm run build:tools)`);
