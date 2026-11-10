@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path';
 import { workspaceKey } from '@cyborg-harness/core';
 import { buildPlugin } from 'cyborg-plugin';
 import { transformSync } from 'esbuild';
+import { crashOf } from './crash-reports.mjs';
 
 const repo = resolve(import.meta.dirname, '..', '..');
 const electronArgs = process.argv.slice(2);
@@ -85,6 +86,7 @@ writeFileSync(join(userData, 'cyborg.json'), JSON.stringify(userConfig, null, 2)
 
 // --inspect=0 - инспектор главного процесса: нажатие оттуда идёт через before-input-event, как с клавиатуры.
 // Собранный плагин лежит в каталоге пользователя (P-06), а он читается только с флагом (K-17).
+const startedAt = Date.now();
 const app = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${userData}`, '--remote-debugging-port=0', '--user-plugins', ...electronArgs], {
   stdio: ['ignore', 'ignore', 'pipe'],
   env: liveClaude ? process.env : { ...process.env, SHELL: join(fakeBin, 'login-shell') },
@@ -1062,6 +1064,7 @@ async function main() {
   await bareWindow();
   await safeWindow();
   await userPluginsWindow();
+  await ptyExitWindow();
 }
 
 const alive = (pid) => {
@@ -1265,6 +1268,31 @@ async function userPluginsWindow() {
   }
 }
 
+/**
+ * #185: выход приложения с процессами pty в главном процессе. `node-pty` доставляет выход из своего потока, и недоставленный к очистке окружения Node выход роняет Electron
+ * SIGABRT (в CI окна не видно, у человека на macOS - «Electron неожиданно завершил работу»). Проба убивает восемь pty и сразу выходит; чисто - код 0, без сигнала и отчёта macOS.
+ */
+async function ptyExitWindow() {
+  const dir = mkdtempSync(join(tmpdir(), 'cyborg-playground-ptyexit-'));
+  const since = Date.now();
+  const probe = spawn(join(repo, 'node_modules', '.bin', 'electron'), [join(repo, 'playground', 'scripts', 'pty-exit-probe.mjs'), `--user-data-dir=${dir}`, ...electronArgs], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  probe.stdout.on('data', (d) => (out += d));
+  probe.stderr.on('data', (d) => (out += d));
+  try {
+    await Promise.race([new Promise((r) => probe.once('exit', r)), sleep(30_000)]);
+    assert.notEqual(probe.exitCode ?? probe.signalCode, null, `проба выхода с pty не завершилась за 30 с: ${out}`);
+    const crash = await crashOf(probe, since);
+    assert.equal(crash, undefined, `выход с pty уронил Electron: ${String(crash)}\n${out}`);
+    assert.equal(probe.exitCode, 0, `проба выхода с pty: код ${String(probe.exitCode)}\n${out}`);
+    assert.match(out, /выходов доставлено 8 из 8/, 'выходы убитых pty не доставлены до выхода приложения');
+    log('выход с pty в главном процессе: drain бэкенда дождался выходов, процесс вышел без сигнала и без отчёта о падении macOS');
+  } finally {
+    probe.kill('SIGKILL');
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 /** Окно без воркспейса: свой userData, плагины не грузятся, «Недавние» - кнопками. */
 async function bareWindow() {
   const dir = mkdtempSync(join(tmpdir(), 'cyborg-playground-bare-'));
@@ -1303,7 +1331,13 @@ try {
   for (const socket of sockets) socket.close();
   app.kill('SIGTERM');
   await Promise.race([new Promise((r) => app.once('exit', r)), sleep(8000)]);
-  if (app.exitCode === null) app.kill('SIGKILL');
+  if (app.exitCode === null && app.signalCode === null) app.kill('SIGKILL');
+  // Выход приложения после всего сценария: сигнал падения или отчёт macOS о нём - провал, даже если сами проверки прошли (#185).
+  const crash = await crashOf(app, startedAt);
+  if (crash !== undefined) {
+    failed = true;
+    console.error(`smoke: ОШИБКА: приложение упало при выходе: ${crash}`);
+  }
   rmSync(userData, { recursive: true, force: true });
   process.exitCode = failed ? 1 : 0;
 }
