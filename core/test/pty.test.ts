@@ -11,6 +11,7 @@ import { fakePty, type FakeProc } from '../../testing/src/fake-pty.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { fakeView } from './view-channel.ts';
+import { waitFor } from './wait-for.ts';
 
 // Ядро выгружается после каждого теста файла, и упавшим тоже: иначе слежение и программы держат процесс файла (core/test/kernels.ts).
 const track = trackKernels();
@@ -62,12 +63,11 @@ test('pty.spawn: программа, окружение и cwd по праву; 
   assert.deepEqual([proc.file, proc.args, proc.options.cwd, proc.options.cols, proc.options.rows], ['/bin/bash', ['-l'], s.work, 120, 40]);
   assert.deepEqual(proc.options.env, { PATH: '/usr/bin', HOME: '/h', COLORTERM: 'truecolor' }, 'чужое окружение Cyborg дошло до pty');
   assert.equal(h.pid, proc.pid);
-  await tick();
   const seen: string[] = [];
   h.onData((c) => seen.push(c));
   proc.emit('ls\r\n');
-  await tick();
-  assert.deepEqual(seen, ['$ ', 'ls\r\n']);
+  await waitFor('приглашение и вывод дошли до подписчика', () => seen.join('') === '$ ls\r\n');
+  assert.deepEqual(seen.join(''), '$ ls\r\n');
   await h.write('echo 1\r');
   await h.resize(100, 30);
   await assert.rejects(h.resize(0, 30), { code: 'Invalid' });
@@ -76,7 +76,7 @@ test('pty.spawn: программа, окружение и cwd по праву; 
   const exits: PtyExit[] = [];
   h.onExit((e) => exits.push(e));
   proc.exit(3);
-  await tick();
+  await waitFor('выход дошёл до владельца', () => exits.length === 1);
   assert.deepEqual(exits, [{ code: 3 }]);
   await assert.rejects(h.write('x'), { code: 'NotFound' });
 
@@ -130,7 +130,6 @@ test('падение хоста: pty с persist живёт и копит выв�
   const kept = await s.pty('agent').spawn({ program: '/bin/bash', persist: true, cols: 90, rows: 20 });
   await s.pty('agent').spawn({ program: '/bin/bash' });
   const [keptProc, lostProc] = s.backend.procs as [FakeProc, FakeProc];
-  await tick();
   s.handles.get('agent')!.kill();
   await s.k.idle();
   assert.equal(lostProc.killed, 'SIGHUP');
@@ -145,12 +144,11 @@ test('падение хоста: pty с persist живёт и копит выв�
   const seen: string[] = [];
   h.onData((c) => seen.push(c));
   keptProc.emit('дальше');
-  await tick();
+  await waitFor('вывод дошёл до подписчика', () => seen.length === 1);
   assert.deepEqual(seen, ['дальше']);
 
   await s.k.disable('agent');
-  await tick();
-  assert.equal(keptProc.killed, 'SIGHUP', 'выключенный плагин оставил pty');
+  await waitFor('выключенный плагин не оставил pty', () => keptProc.killed === 'SIGHUP');
 });
 
 test('сирота: плагин вернулся после падения хоста, но не взял pty за срок - процесс завершён, журнал называет срок', async () => {
@@ -173,18 +171,17 @@ test('pty завершился без владельца: list показыва�
   await using s = await setup({ agent: shell });
   const kept = await s.pty('agent').spawn({ program: '/bin/bash', persist: true });
   const proc = s.backend.procs[0]!;
-  await tick();
   s.handles.get('agent')!.kill();
   await s.k.idle();
   proc.emit('bye');
   proc.exit(0);
-  await tick();
+  await waitFor('list показывает выход', async () => ((await s.pty('agent').list())[0]?.exit ? true : undefined));
   assert.deepEqual((await s.pty('agent').list()).map((i) => i.exit), [{ code: 0 }]);
   const h = await s.pty('agent').attach(kept.id);
   assert.equal(h.backlog, '$ bye');
   const exits: PtyExit[] = [];
   h.onExit((e) => exits.push(e));
-  await tick();
+  await waitFor('attach отдал выход подписчику', () => exits.length === 1);
   assert.deepEqual(exits, [{ code: 0 }]);
   assert.deepEqual(await s.pty('agent').list(), []);
 });
@@ -193,7 +190,6 @@ test('share: билет одноразовый и только для своег
   await using s = await setup({ term: shell, other: shell });
   const h = await s.pty('term').spawn({ program: '/bin/bash', persist: true, cols: 80, rows: 24 });
   const proc = s.backend.procs[0]!;
-  await tick();
   const stolen = await h.share();
   await assert.rejects(s.k.openTerminal('other', stolen, fakeView().channel), { code: 'NotFound' }, 'чужой плагин открыл билет');
   await assert.rejects(s.k.openTerminal('term', stolen, fakeView().channel), { code: 'NotFound' }, 'билет пережил первое предъявление');
@@ -210,7 +206,7 @@ test('share: билет одноразовый и только для своег
   s.handles.get('term')!.kill();
   proc.emit('хост лежит, вид видит');
   assert.deepEqual(await a.write('pwd\r'), { ok: true });
-  await tick();
+  await waitFor('вывод дошёл до вида', () => a.data.length === 1);
   assert.deepEqual(a.data, ['хост лежит, вид видит'], 'вывод в вид ходит из pty-хоста по порту, хост плагина не нужен');
   assert.equal(proc.writes.at(-1), 'pwd\r');
   await s.k.idle();
@@ -227,7 +223,7 @@ test('share: билет одноразовый и только для своег
   const back = await s.pty('term').attach(h.id);
   await s.k.openTerminal('term', await back.share(), b.channel);
   proc.exit(0);
-  await tick();
+  await waitFor('выход дошёл до вида', () => b.exit.length === 1);
   assert.deepEqual(b.exit, [{ code: 0 }]);
   assert.equal(b.closed.length, 1, 'главный процесс не узнал, что канал вида больше не нужен');
   await assert.rejects(back.share(), { code: 'NotFound' }, 'билет на завершённый pty');
@@ -252,7 +248,7 @@ test('выключение: preview называет живые pty; keepPty о�
   await s.pty('agent').spawn({ program: '/bin/bash' });
   const [termProc, doneProc] = s.backend.procs as [FakeProc, FakeProc];
   doneProc.exit(0);
-  await tick();
+  await waitFor('выход первого pty учтён', () => s.k.disablePreview('agent').ptys.length === 1);
   assert.deepEqual(s.k.disablePreview('agent'), { plugins: ['agent'], ptys: [{ pluginId: 'agent', id: term.id, pid: termProc.pid, program: '/bin/bash', args: [], persist: false }] });
   assert.deepEqual(s.k.disablePreview('quiet'), { plugins: ['quiet'], ptys: [] });
 
@@ -268,8 +264,7 @@ test('выключение: preview называет живые pty; keepPty о�
   assert.match(back.backlog, /пока плагин выключен$/);
 
   await s.k.disable('agent');
-  await tick();
-  assert.equal(termProc.killed, 'SIGHUP', 'выключение без keepPty оставило процесс');
+  await waitFor('выключение без keepPty завершило процесс', () => termProc.killed === 'SIGHUP');
 
   const parked = await s.pty('quiet').spawn({ program: '/bin/bash' });
   await s.k.disable('quiet', { keepPty: true });
@@ -293,8 +288,7 @@ test('оставленный: ждёт без срока, пока плагин 
   assert.equal(leftProc.killed, undefined, 'срок сработал, пока плагин выключен');
 
   s.k.endKeptPty(ended.id);
-  await tick();
-  assert.equal(endedProc.killed, 'SIGHUP');
+  await waitFor('оставленный процесс завершён', () => endedProc.killed === 'SIGHUP');
   assert.deepEqual(s.k.keptPty().map((p) => p.id), [left.id]);
   assert.throws(() => s.k.endKeptPty(ended.id), { code: 'NotFound' });
 
@@ -354,8 +348,7 @@ test('пределы pty: ввод больше предела - Invalid, pty ж
   assert.equal(s.backend.procs.length, 3, 'отказ не запустил процесс; предел у каждого плагина свой');
 
   s.backend.procs[1]!.exit(0);
-  await tick();
-  assert.equal((await s.pty('term').list()).find((p) => p.id === own.id), undefined);
+  await waitFor('вышедший pty не числится у плагина', async () => (await s.pty('term').list()).find((p) => p.id === own.id) === undefined);
   await s.pty('term').spawn({ program: '/bin/bash' });
   await s.k.disable('term');
   await s.k.enable('term');

@@ -9,6 +9,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { Worker } from 'node:worker_threads';
 import { RecentWorkspaces } from '../src/recent.ts';
 import { openWorkspace, readJson } from '../src/workspace.ts';
+import { waitFor } from './wait-for.ts';
 
 async function scratch(): Promise<{ dir: string; file: string; userFile: string; stateDir: string } & AsyncDisposable> {
   const dir = await mkdtemp(path.join(tmpdir(), 'cyborg-stress-ws-'));
@@ -124,11 +125,10 @@ test('stress-workspace: правка файла воркспейса извне 
     const doc = readJson(s.file) ?? {};
     fs.writeFileSync(s.file, JSON.stringify({ ...doc, settings: { edited: { by: 'human' } } }));
     await ws.config.write('workspace', 'other', 1, { k: 1 });
-    await sleep(300);
+    await waitFor('слежение сообщило о правке', () => seen.some((ids) => ids.includes('edited')));
     const settings = readJson(s.file)?.settings as Record<string, unknown>;
     assert.deepEqual(settings.edited, { by: 'human' }, 'правка человека осталась в файле');
     assert.ok(settings.other, 'запись плагина тоже на месте');
-    assert.ok(seen.some((ids) => ids.includes('edited')), `слежение сообщило о правке: ${JSON.stringify(seen)}`);
   } finally {
     sub.dispose();
     ws.close();
@@ -147,10 +147,8 @@ test('stress-workspace: 150 циклов open/watch/close не оставляю�
     sub.dispose();
     ws.close();
   }
-  await sleep(100);
+  await waitFor('слежения и таймеры погашены', () => count('FSEventWrap') === before.fs && count('Timeout') <= before.timers);
   assert.equal(fs.existsSync(`${s.file}.lock`), false);
-  assert.equal(count('FSEventWrap'), before.fs, 'fs.watch закрыты');
-  assert.ok(count('Timeout') <= before.timers, 'таймеры слежения погашены');
   const ws = await openIn(s);
   assert.deepEqual(ws.config.raw('p')[1]?.[1], { $version: 1, i: 149 });
   ws.close();

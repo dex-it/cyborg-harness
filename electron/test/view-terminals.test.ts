@@ -6,6 +6,7 @@ import type { MessagePortMain } from 'electron';
 import type { PtyExit } from '@cyborg-harness/contracts';
 import { inlinePtyHost, PtyTable, type PtyProcess, type TerminalChannel, type TerminalView } from '@cyborg-harness/core';
 import { ViewTerminals, type PortPair, type TerminalFrame } from '../src/view-terminals.ts';
+import { waitFor } from './wait-for.ts';
 
 function frame(routingId: number) {
   const sent: unknown[] = [];
@@ -145,7 +146,7 @@ test('терминалы вида на таблице ядра: тысяча к�
 
   channel.port2.postMessage({ id: 1, op: 'write', data: 'много' });
   channel.port2.postMessage({ id: 2, op: 'write', data: 'ls\r' });
-  await sleep(30);
+  await waitFor('pty-хост ответил на оба ввода', () => events.some((e) => e.id === 1) && events.some((e) => e.id === 2));
   assert.match(events.find((e) => e.id === 1)?.error ?? '', /больше 4 байт/);
   assert.equal(events.find((e) => e.id === 2)?.ok, true);
   assert.deepEqual(writes, ['ls\r']);
@@ -157,7 +158,7 @@ test('терминалы вида на таблице ядра: тысяча к�
     if (i === 499) await sleep(10);
   }
   for (const l of exits) l({ exitCode: 0 });
-  await sleep(50);
+  await waitFor('выход дошёл до порта вида', () => events.at(-1)?.exit !== undefined);
   const output = events.filter((e) => e.data !== undefined);
   assert.equal(output.map((e) => e.data).join(''), all);
   assert.ok(output.length < 10, `в порт ушло ${String(output.length)} сообщений на 1000 кусков`);

@@ -106,7 +106,6 @@ test('pty-хост упал: владельцы получают onExit, жур�
   const exits: PtyExit[] = [];
   const first = await s.pty().spawn({ program: '/bin/bash', persist: true });
   first.onExit((e) => exits.push(e));
-  await tick();
   s.hosts[0]!.handle.kill();
   // Ждём факта (владелец узнал, сторож поднял хост заново), а не 30 мс: до перезапуска любой вызов pty отвечает HostGone.
   await waitFor('владелец узнал о потере pty и сторож поднял pty-хост заново', () => exits.length > 0 && s.hosts.length === 2 && s.journal('host-restart').length > 0);
@@ -131,14 +130,13 @@ test('pty-хост завис: сторож убивает его по поро�
   const h = await s.pty().spawn({ program: '/bin/bash', persist: true });
   const exits: PtyExit[] = [];
   h.onExit((e) => exits.push(e));
-  await tick();
   s.hosts[0]!.deaf = true;
   const hung = performance.now();
-  while (s.journal('host-down').length === 0 && performance.now() - hung < 3000) await sleep(10);
+  await waitFor('сторож записал зависание pty-хоста', () => s.journal('host-down').length > 0);
   assert.equal(s.journal('host-down')[0]?.reason, 'hang');
   assert.equal(s.hosts[0]?.killedByCore, true, 'зависший pty-хост не убит');
   assert.ok(performance.now() - hung >= 100, 'сторож убил хост раньше порога');
-  await tick();
+  await waitFor('владелец узнал о потере pty', () => exits.length > 0);
   assert.deepEqual(exits, [PTY_HOST_LOST]);
   assert.match(describeEntry(s.journal('host-down')[0]!), /^pty-хост завис/);
   await s.pty().spawn({ program: '/bin/bash' });
@@ -148,11 +146,11 @@ test('pty-хост завис: сторож убивает его по поро�
 test('pty-хост упал, пока pty ждал владельца: list показывает потерянный выход, attach отдаёт его один раз с пустым хвостом', async () => {
   await using s = await setup();
   const kept = await s.pty().spawn({ program: '/bin/bash', persist: true });
-  await tick();
   s.handles.get('agent')!.kill();
   await s.k.idle();
   s.hosts[0]!.handle.kill();
-  await tick();
+  // Пока сторож поднимает pty-хост заново, list отвечает отказом: проба повторяется.
+  await waitFor('list показывает потерянный выход', async () => ((await s.pty().list())[0]?.exit ? true : undefined));
   assert.deepEqual((await s.pty().list()).map((p) => [p.id, p.exit]), [[kept.id, PTY_HOST_LOST]]);
   const back = await s.pty().attach(kept.id);
   assert.deepEqual([back.backlog, back.exit], ['', PTY_HOST_LOST]);
@@ -167,11 +165,11 @@ test('вид: pty-хост упал - главный процесс получа
   await s.k.openTerminal('agent', await h.share(), lost.channel);
   await s.k.openTerminal('agent', await h.share(), closedByFrame.channel);
   closedByFrame.close();
-  await tick();
+  await waitFor('главный процесс узнал о закрытии порта', () => closedByFrame.closed.length === 1);
   assert.deepEqual(closedByFrame.closed, [undefined], 'главный процесс не узнал, что фрейм закрыл порт');
   assert.deepEqual(lost.closed, []);
   s.hosts[0]!.handle.kill();
-  await tick();
+  await waitFor('вид узнал о потере pty-хоста', () => lost.closed.length === 1);
   assert.deepEqual(lost.closed, [PTY_HOST_LOST], 'вид о потере pty узнаёт только отсюда: порт молчит');
 });
 
@@ -182,7 +180,8 @@ test('сторож не поднимает pty-хост, который пада
     const live = s.hosts.findLast((x) => !x.killedByCore);
     assert.ok(live, `хоста для падения ${String(i)} нет`);
     live.handle.kill();
-    await tick();
+    // Два первых падения сторож чинит новым хостом; третье он не чинит - host-abandoned.
+    await waitFor(`сторож отработал падение ${String(i + 1)}`, () => (i < 2 ? s.hosts.length === i + 2 : s.journal('host-abandoned').length === 1));
   }
   assert.equal(s.journal('host-abandoned').length, 1);
   assert.equal(s.journal('host-abandoned')[0]?.hostId, 'pty-host');
@@ -194,11 +193,13 @@ test('сторож не поднимает pty-хост, который пада
 
 test('запуск асинхронный: pid приходит позже, чем решение; плагин ушёл, пока процесс поднимался, - процесс завершён, а не потерян', async () => {
   const procs: FakeProc[] = [];
+  let spawning = false;
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));
   const base = fakePty();
   const backend: PtyBackend = {
     async spawn(file, args, options) {
+      spawning = true;
       await gate;
       const proc = base.spawn(file, args, options);
       procs.push(proc);
@@ -208,12 +209,12 @@ test('запуск асинхронный: pid приходит позже, че
   await using s = await setup({ backend });
   const pending = s.pty().spawn({ program: '/bin/bash' });
   pending.catch(() => undefined);
-  await tick();
+  await waitFor('backend начал запуск процесса', () => spawning);
   s.handles.get('agent')!.kill();
   await s.k.idle();
   release();
   await assert.rejects(pending);
-  await tick();
+  await waitFor('процесс отозванного запуска завершён', () => procs[0]?.killed === 'SIGHUP');
   assert.equal(procs.length, 1);
   assert.equal(procs[0]?.killed, 'SIGHUP', 'процесс запуска, от которого отказались, жив без владельца');
 });
@@ -255,11 +256,13 @@ test('вид: размер и ввод проверяет pty-хост и отв
 });
 
 test('pty-хост: end пришёл, пока backend ещё поднимал процесс, - процесс завершён сразу после запуска, запрос отклонён', async () => {
+  let spawning = false;
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));
   const base = fakePty();
   const backend: PtyBackend = {
     async spawn(file, args, options) {
+      spawning = true;
       await gate;
       return base.spawn(file, args, options);
     },
@@ -269,9 +272,10 @@ test('pty-хост: end пришёл, пока backend ещё поднимал �
   await ep.request('init', { ptyInput: 1024, ptyFlushMs: 4, ptyFlushChars: 1024, backlog: 100 });
   const spawned = ep.request('spawn', { key: 'k', file: 'sh', args: [], options: { name: 'xterm-256color', env: {}, cols: 80, rows: 24 } });
   spawned.catch(() => undefined);
-  await tick();
+  await waitFor('backend начал запуск процесса', () => spawning);
   ep.notify('end', { key: 'k' });
-  await tick();
+  // Сообщения одного канала идут по порядку: ответ на ping значит, что `end` уже обработан.
+  await ep.request('ping', null);
   release();
   await assert.rejects(spawned, { code: 'NotFound' });
   assert.equal(base.procs[0]?.killed, 'SIGHUP', 'процесс отозванного запуска жив');
@@ -291,11 +295,10 @@ test('pty-хост: завершаемый процесс, переживший 
   const [deaf, polite] = backend.procs as [FakeProc, FakeProc];
   ep.notify('end', { key: 'deaf' });
   ep.notify('end', { key: 'polite' });
-  await tick();
-  assert.deepEqual([deaf.killed, polite.killed], ['SIGHUP', 'SIGHUP']);
+  await waitFor('оба процесса получили SIGHUP', () => deaf.killed === 'SIGHUP' && polite.killed === 'SIGHUP');
   polite.exit(0);
   polite.killed = 'не трогать';
-  await sleep(120);
+  await waitFor('срок добивания вышел', () => deaf.killed === 'SIGKILL');
   assert.equal(deaf.killed, 'SIGKILL', 'процесс, не услышавший SIGHUP, жив: завершение не закреплено');
   assert.equal(polite.killed, 'не трогать', 'вышедшему процессу ушёл SIGKILL');
 
@@ -322,14 +325,12 @@ test('выгрузка: pty-хост глух к endAll, плагин после
   // pty-хост перестал отвечать: выгрузка ждёт его, пока хосты плагинов ещё живы.
   hosts.hosts[0]!.deaf = true;
   const unloading = k.unload();
-  while (!k.journal.some((e) => e.kind === 'deactivated')) await sleep(5);
-  await sleep(30);
+  await waitFor('плагин снят', () => k.journal.some((e) => e.kind === 'deactivated'));
   // Запрос снятого плагина ядро отклоняет (K-10: запросы `os` принимает только активный плагин), так что ресурс не занят; вторая зачистка в `unload()` - запасная.
   await assert.rejects(ctx.os.fs.watch(root, () => undefined), { code: 'Unavailable' });
   assert.equal(watching(), base, 'слежение снятого плагина заняло ресурс');
   await unloading;
-  await sleep(30);
-  assert.equal(watching(), base, 'слежение, пришедшее после выгрузки плагина, пережило unload()');
+  await waitFor('слежение, пришедшее после выгрузки плагина, не пережило unload()', () => watching() === base);
   await rm(root, { recursive: true, force: true });
 });
 
@@ -356,7 +357,8 @@ test('pty-хост: ввод в pty, чья программа не читает
   }
   assert.deepEqual(replies, ['ok', 'ok', 'ok', 'ok', ...Array<string>(6).fill('Invalid')]);
   ep.notify('write', { key: 'k', data: chunk });
-  await tick();
+  // Сообщения одного канала идут по порядку: ответ на ping значит, что уведомление уже обработано.
+  await ep.request('ping', null);
   // Невычитанное - всё, что хост отдал процессу: подделка stdin не читает.
   const queued = proc.writes.join('').length;
   assert.ok(queued <= 4096, `в очереди процесса ${String(queued)} Б при запасе 4096`);
