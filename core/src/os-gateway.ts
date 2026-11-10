@@ -229,6 +229,56 @@ const inside = (dir: string, target: string) => target === dir || target.startsW
 /** Сосед `<файл>.<что угодно>` несёт содержимое защищённого файла: копия `.corrupt-<время>`, `.v1.bak`, временный файл атомарной записи. */
 const sibling = (file: string, target: string) => path.dirname(target) === path.dirname(file) && path.basename(target).startsWith(`${path.basename(file)}.`);
 
+/** Закрытые места внутри области чтения (`#zones`), настоящие пути. */
+interface Zones {
+  readonly own: readonly string[];
+  readonly plugins: readonly string[];
+  readonly appDir?: string;
+  readonly appRoots: readonly string[];
+  readonly protectedPaths: readonly string[];
+}
+
+const ZONE_TEXT = { plugin: 'каталог другого плагина', app: 'данные приложения', protected: 'защищённый путь' } as const;
+
+/** `own` - путь в своих каталогах плагина, открыт целиком; иначе к какому закрытому месту относится путь. Для записи предок защищённого пути закрыт тоже: удаление или перезапись каталога унесли бы и его. */
+function zoneOf(zones: Zones, target: string, write: boolean): 'own' | keyof typeof ZONE_TEXT | undefined {
+  if (zones.own.some((dir) => inside(dir, target))) return 'own';
+  if (zones.plugins.some((dir) => inside(dir, target))) return 'plugin';
+  if (zones.appDir !== undefined && inside(zones.appDir, target) && !zones.appRoots.some((r) => inside(r, target))) return 'app';
+  if (zones.protectedPaths.some((p) => inside(p, target) || (write && inside(target, p)) || sibling(p, target))) return 'protected';
+  return undefined;
+}
+
+/** Параметры `fs.watch` третьим аргументом: сейчас только `recursive`. */
+function watchRecursive(method: string, raw: unknown): boolean {
+  if (raw === undefined) return false;
+  if (!isRecord(raw) || (raw.recursive !== undefined && typeof raw.recursive !== 'boolean')) throw new CoreError('Invalid', `${method}: параметры - объект { recursive?: boolean }`);
+  return raw.recursive === true;
+}
+
+/** Каталога под наблюдением больше нет (удалён, заменён файлом, ссылкой или другим каталогом): причина для `onClose`; `undefined` - на месте. */
+async function dirGone(target: string, known: { readonly ino: number; readonly dev: number }): Promise<string | undefined> {
+  let now: Stats;
+  try {
+    now = await fs.lstat(target);
+  } catch (error) {
+    return `каталог удалён: ${(error as NodeJS.ErrnoException).code ?? 'нет пути'}`;
+  }
+  if (!now.isDirectory()) return 'по пути больше не каталог';
+  if (now.ino !== known.ino || now.dev !== known.dev) return 'каталог заменён другим';
+  return undefined;
+}
+
+/** Отказ ОС при постановке слежения: нехватка слежений (inotify на Linux считает по каталогу внутри, у `recursive` их тысячи) называется своим именем, а не кодом ОС. */
+function watchFailure(method: string, error: unknown, recursive: boolean): unknown {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  if (code === 'ENOSPC' || code === 'EMFILE' || code === 'ENFILE') {
+    return new CoreError('Unavailable', `${method}: ОС не дала слежение (${code})${recursive ? ': рекурсивное слежение занимает слежение ОС на каждый каталог внутри (Linux: fs.inotify.max_user_watches), следите за каталогами по отдельности' : ''}`);
+  }
+  if (code === 'ERR_FEATURE_UNAVAILABLE_ON_PLATFORM') return new CoreError('Unavailable', `${method}: рекурсивное слежение на этой платформе недоступно`);
+  return error;
+}
+
 async function real(p: string): Promise<string> {
   try {
     return await fs.realpath(p);
@@ -617,6 +667,18 @@ export class OsGateway {
     return { root: await real(parts.slice(0, at).join(path.sep) || path.sep), segs: parts.slice(at).filter(Boolean), git: false };
   }
 
+  /** Каталоги, закрытые и внутри области чтения: свои каталоги плагина (открыты), каталоги других плагинов, данные приложения вне корней воркспейса, защищённые пути. `target` решает, считать ли корни приложения. */
+  async #zones(m: PluginManifest, target: string): Promise<Zones> {
+    const own = this.pathsOf(m.id);
+    const [ownData, ownTemp] = await Promise.all([this.#realApp(own.data), this.#realApp(own.temp)]);
+    const plugins = await Promise.all([this.#env.dataDir, this.#env.tempDir].map((dir) => this.#realApp(dir)));
+    const appDir = this.#env.appDir === undefined ? undefined : await this.#realApp(this.#env.appDir);
+    // Корни приложения нужны, только если путь и каталог приложения лежат один в другом: иначе вопрос не возникает.
+    const appRoots = appDir !== undefined && (inside(appDir, target) || inside(target, appDir)) ? await Promise.all((this.#env.roots?.() ?? []).map(real)) : [];
+    const protectedPaths = await Promise.all((this.#env.protectedPaths ?? []).map(real));
+    return { own: [ownData, ownTemp], plugins, ...(appDir !== undefined && { appDir }), appRoots, protectedPaths };
+  }
+
   async #checkPath(m: PluginManifest, method: string, raw: unknown, write: boolean, right: 'fs.read' | 'fs.write' | 'shell' = write ? 'fs.write' : 'fs.read', reason?: 'via-contract'): Promise<string> {
     const given = str(method, raw, 'путь');
     if (!path.isAbsolute(given) || given.includes('\0')) throw this.#denied(m, method, `путь не абсолютный: ${given}`, reason);
@@ -627,19 +689,9 @@ export class OsGateway {
     });
     const area = matched[0]?.dir;
     if (area === undefined) throw this.#denied(m, method, `вне области ${right}: ${given}`, reason);
-    const own = this.pathsOf(m.id);
-    const isOwn = inside(await this.#realApp(own.data), target) || inside(await this.#realApp(own.temp), target);
-    if (isOwn) return target;
-    for (const dir of [this.#env.dataDir, this.#env.tempDir]) if (inside(await this.#realApp(dir), target)) throw this.#denied(m, method, `каталог другого плагина: ${given}`, reason);
-    if (this.#env.appDir !== undefined && inside(await this.#realApp(this.#env.appDir), target)) {
-      const appRoots = await Promise.all((this.#env.roots?.() ?? []).map(real));
-      if (!appRoots.some((r) => inside(r, target))) throw this.#denied(m, method, `данные приложения: ${given}`, reason);
-    }
-    for (const p of this.#env.protectedPaths ?? []) {
-      const protectedPath = await real(p);
-      // Предок защищённого пути закрыт только для записи: удаление или перезапись каталога унесли бы и его.
-      if (inside(protectedPath, target) || (write && inside(target, protectedPath)) || sibling(protectedPath, target)) throw this.#denied(m, method, `защищённый путь: ${given}`, reason);
-    }
+    const zone = zoneOf(await this.#zones(m, target), target, write);
+    if (zone === 'own') return target;
+    if (zone !== undefined) throw this.#denied(m, method, `${ZONE_TEXT[zone]}: ${given}`, reason);
     const gitOk = matched.some((a) => a.git);
     // От корня области, а не от каталога под маску: `*` совпадает и с самим `.git`, и путь внутри него был бы без сегмента `.git`.
     const inGit = matched.some((a) => path.relative(a.root, target).split(path.sep).includes('.git'));
@@ -740,6 +792,7 @@ export class OsGateway {
       }
       case 'fs.watch': {
         const id = str(method, args[1], 'id');
+        const recursive = watchRecursive(method, args[2]);
         const key = `${m.id}\0${id}`;
         if (this.#watches.has(key)) throw new CoreError('Invalid', `${method}: id ${id} уже занят`);
         if ([...this.#watches.keys()].filter((k) => k.startsWith(`${m.id}\0`)).length >= MAX_WATCHES) throw new CoreError('Invalid', `${method}: больше ${String(MAX_WATCHES)} слежений`);
@@ -752,6 +805,7 @@ export class OsGateway {
           await this.#ownDirs(m.id);
           target = await this.#checkPath(m, method, args[0], false);
           first = await fs.stat(target);
+          if (recursive && !first.isDirectory()) throw new CoreError('Invalid', `${method}: recursive ждёт каталог, а не файл: ${String(args[0])}`);
         } catch (error) {
           if (this.#watches.get(key) === reserved) this.#watches.delete(key);
           throw error;
@@ -769,10 +823,27 @@ export class OsGateway {
         // Право проверяется на каждой пачке: корни воркспейса могли сузиться после подписки.
         const send = async () => {
           timer = undefined;
-          const list = [...names];
+          let list = [...names];
           names.clear();
-          if ((await this.#checkPath(m, method, args[0], false).catch(() => undefined)) !== target) close('путь больше не в правах плагина');
-          else if (this.#watches.get(key) === close) this.#push(m.id, 'fs.change', { pluginId: m.id, id, names: list });
+          if ((await this.#checkPath(m, method, args[0], false).catch(() => undefined)) !== target) {
+            close('путь больше не в правах плагина');
+            return;
+          }
+          // Под корнем бывают места, закрытые плагину и при обычном чтении: каталоги других плагинов, данные приложения, защищённые пути. Их имён он не получает.
+          if (recursive && list.length > 0) {
+            const zones = await this.#zones(m, target);
+            list = list.filter((name) => {
+              const zone = zoneOf(zones, path.join(target, name), false);
+              return zone === undefined || zone === 'own';
+            });
+          }
+          if (this.#watches.get(key) !== close) return;
+          if (list.length > 0) this.#push(m.id, 'fs.change', { pluginId: m.id, id, names: list });
+          // Наблюдаемый каталог удалён (или заменён другим): ОС следит за прежним и больше ничего не пришлёт. Событие об этом - имя самого каталога, которое плагин не отличит от правки.
+          if (!isFile) {
+            const gone = await dirGone(target, known);
+            if (gone !== undefined && this.#watches.get(key) === close) close(gone);
+          }
         };
         // Файл под наблюдением подменяют новым (writeText, редакторы с атомарной записью): наблюдатель привязан к прежнему inode и молчал бы дальше. Поэтому у файла по событию `rename` путь сверяется заново, а по `change` - если inode пути не тот, что у наблюдателя: пока другой процесс (`tail -f`, второй плагин) держит старый файл открытым, Linux не шлёт `rename`, а только `change` старого inode. Само событие передаётся плагину: запись между переоткрытием и чтением не теряется, плагин читает файл после склейки.
         // Не обычный файл по пути (каталог, ссылка) или нет пути - наблюдение закрыто с причиной: следить за детьми каталога плагин не просил.
@@ -822,19 +893,26 @@ export class OsGateway {
         };
         const open = this.#env.watch ?? watchFs;
         const attach = (): FSWatcher => {
-          const w = open(target, (event, name) => {
+          const onEvent = (event: string, name: string | null) => {
             if (w !== watcher) return;
-            if (name) names.add(name);
+            if (name) names.add(path.sep === '/' ? name : name.split(path.sep).join('/'));
             timer ??= setTimeout(() => void send(), WATCH_COALESCE_MS);
             if (isFile) void recheck(event === 'rename');
-          });
+          };
+          const w = recursive ? open(target, { recursive: true }, onEvent) : open(target, onEvent);
           // Без слушателя ошибка наблюдателя (удалён каталог, кончились inotify) уронила бы главный процесс.
           w.on('error', (error) => {
             if (w === watcher) close(`наблюдение прервано: ${error.message}`);
           });
           return w;
         };
-        let watcher = attach();
+        let watcher: FSWatcher;
+        try {
+          watcher = attach();
+        } catch (error) {
+          if (this.#watches.get(key) === reserved) this.#watches.delete(key);
+          throw watchFailure(method, error, recursive);
+        }
         this.#watches.set(key, close);
         return undefined;
       }

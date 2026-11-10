@@ -19,6 +19,18 @@ const PLUGINS = path.join(import.meta.dirname, '..', 'plugins');
 const PROVIDERS = ['agent-claude-code', 'agent-shell'];
 const manifestOf = (id: string): unknown => JSON.parse(readFileSync(path.join(PLUGINS, id, 'manifest.json'), 'utf8'));
 
+/**
+ * Плагин следит за файлом событий через `fs.watch`, а macOS (FSEvents) начинает доставку не в тот миг, когда он вернулся: строка, дописанная сразу, пропадает навсегда.
+ * Пробная строка (повтор, не меняющий итог) дописывается, пока слежение не отзовётся; настоящие строки идут после неё и читаются по порядку, как в `armed` из `core/test/os.test.ts`.
+ */
+async function armed(file: string, probe: string, heard: () => boolean): Promise<void> {
+  await waitFor('слежение за файлом событий отозвалось на пробную строку', async () => {
+    if (heard()) return true;
+    await appendFile(file, probe);
+    return undefined;
+  }, { interval: 50 });
+}
+
 interface ChannelMessage {
   readonly ticket: string;
   readonly actions: readonly { label: string; text: string; submit?: boolean }[];
@@ -154,8 +166,13 @@ test('agent-claude-code: хуки в события контракта; прош
   const line = (o: object) => `${JSON.stringify(o)}\n`;
   await appendFile(file, line({ hook_event_name: 'SessionStart', cwd: '/old' }));
   const seen: AgentEvent[] = [];
-  const sub = await agent.watch('w1', (e) => seen.push(e));
-  await new Promise((r) => setTimeout(r, 300));
+  let probed = false;
+  // Пробные события (инструмент `armed`) в итог не входят.
+  const sub = await agent.watch('w1', (e) => {
+    if (e.type === 'activity' && e.tool === 'armed') probed = true;
+    else seen.push(e);
+  });
+  await armed(file, line({ hook_event_name: 'PostToolUse', cwd: '/w', tool_name: 'armed' }), () => probed);
   await appendFile(
     file,
     [
@@ -272,10 +289,8 @@ test('sessions: восстановленная сессия claude продол�
     await using s = await setup(store);
     await s.k.run('sessions.new', 'agent-claude-code');
     const events = s.backend.procs.at(-1)!.options.env.CYBORG_EVENTS!;
-    // watch читает только новое, а sessions.new не ждёт, пока он встанет.
-    await new Promise((r) => setTimeout(r, 300));
-    await appendFile(events, `${JSON.stringify({ hook_event_name: 'SessionStart', session_id: 'claude-77' })}\n`);
-    await waitFor('resumeId в данных документа', async () => JSON.stringify(saved).includes('claude-77'));
+    // watch читает только новое, а sessions.new не ждёт, пока он встанет: строку повторяют, пока слежение не отзовётся (повтор того же id итога не меняет).
+    await armed(events, `${JSON.stringify({ hook_event_name: 'SessionStart', session_id: 'claude-77' })}\n`, () => JSON.stringify(saved).includes('claude-77'));
   }
   await using s = await setup(store);
   const [prev] = (await s.k.run('sessions.previous')) as { id: string; resumable: boolean }[];
@@ -338,9 +353,9 @@ test('sessions + next-actions: агент зовёт инструмент по M
   assert.equal(s.channel(ticket).length, 2, 'отказ ничего не послал виду');
 
   // Человек ответил сам: хук UserPromptSubmit снимает прежние предложения.
-  await new Promise((r) => setTimeout(r, 300));
-  await appendFile(proc.options.env.CYBORG_EVENTS!, `${JSON.stringify({ hook_event_name: 'UserPromptSubmit' })}\n`);
-  await waitFor('кнопки сняты', () => s.channel(ticket).at(-1)?.actions.length === 0 && s.channel(ticket).length === 3);
+  // Повтор хука кнопки не возвращает и сообщения виду не шлёт: итог - ровно одно новое сообщение.
+  await armed(proc.options.env.CYBORG_EVENTS!, `${JSON.stringify({ hook_event_name: 'UserPromptSubmit' })}\n`, () => s.channel(ticket).at(-1)?.actions.length === 0);
+  assert.equal(s.channel(ticket).length, 3);
 
   proc.exit(0);
   await waitFor('выход сессии сообщён виду', () => s.channel(ticket).at(-1)?.ended === true);
@@ -388,10 +403,8 @@ test('sessions: готовность агента приходит виду по
   const hook = (event: Record<string, unknown>) => appendFile(events, `${JSON.stringify(event)}\n`);
   const ready = () => s.channel(ticket).at(-1)?.ready;
   assert.equal(ready(), false);
-  // Подписка на файл событий начинается с его конца: строка до неё не дойдёт.
-  await new Promise((r) => setTimeout(r, 300));
-  await hook({ hook_event_name: 'Stop' });
-  await waitFor('конец хода сообщён виду', () => ready() === true);
+  // Подписка на файл событий начинается с его конца: строка до неё не дойдёт. Повтор Stop готовность не меняет.
+  await armed(events, `${JSON.stringify({ hook_event_name: 'Stop' })}\n`, () => ready() === true);
   assert.deepEqual(s.channel(ticket).at(-1), { ticket, actions: [], ready: true });
   await hook({ hook_event_name: 'PostToolUse', tool_name: 'Bash' });
   await hook({ hook_event_name: 'Notification', notification_type: 'permission_prompt' });
