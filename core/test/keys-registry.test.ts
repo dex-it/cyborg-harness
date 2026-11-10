@@ -7,6 +7,7 @@ import { load, type JournalEntry, type LoadOptions } from '../src/loader.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { MENU_OWNER, WINDOW_OWNER } from '../src/window-layer.ts';
+import { waitFor } from './wait-for.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 
@@ -299,7 +300,7 @@ test('падение хоста снимает динамические реги
   const k = await start();
   await keys('buttons').register({ key: 'F3', command: 'buttons.plain' });
   handles.get('buttons')?.kill();
-  await new Promise((r) => setTimeout(r, 80));
+  await waitFor('сторож записал падение хоста', () => k.journal.some((e) => e.kind === 'host-down'));
   await k.idle();
   assert.ok(k.active.includes('buttons'), 'сторож вернул плагин');
   assert.equal(k.keybinding('F3'), undefined, 'хост мёртв - слушать некому');

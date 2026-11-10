@@ -10,6 +10,7 @@ import { memorySecrets } from '../../testing/src/memory.ts';
 import { describeEntry, entryLevel, pluginStatuses } from '../src/status.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
+import { waitFor } from './wait-for.ts';
 
 // K-10: Kernel.uninstall стирает всё, что привязано к id плагина, чтобы новый плагин с тем же id не унаследовал чужое.
 
@@ -293,10 +294,14 @@ test('uninstall: документ типа, у которого владелец
 
 test('uninstall: выбор в диалоге, начатый до disable и законченный после uninstall, не достаётся новому плагину с тем же id', async () => {
   let choose: (paths: readonly string[]) => void = () => undefined;
-  await using w = await world(() => new Promise((resolve) => (choose = resolve)));
+  let asking = false;
+  await using w = await world(() => new Promise((resolve) => {
+    asking = true;
+    choose = resolve;
+  }));
   const first = await w.start(['jira']);
   const asked = first.ctx('jira').os.dialog.open({ directory: true }).catch(() => undefined);
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await waitFor('диалог открыт', () => asking);
   await first.k.disable('jira');
   await first.k.uninstall('jira');
   choose([w.picked]);

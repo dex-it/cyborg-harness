@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { PtyExit, PtyInfo } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
 import { LIMITS, type ResourceLimits } from './limits.ts';
+import { InputBudget, inputBytes } from './pty-budget.ts';
 import { BACKLOG_LIMIT } from './pty-tail.ts';
 import { PtyLink, type PtyWatchdog, type SpawnPtyHost } from './pty-link.ts';
 import type { PtyProcess, PtyWire } from './pty-types.ts';
@@ -21,6 +22,8 @@ export interface TerminalChannel {
 
 /** Терминал, открытый видом по билету: описание и хвост; ввод и размер вид шлёт сам в порт. */
 export interface TerminalView extends PtyWire {
+  /** Предел одного ввода, байт: вид отклоняет большее до порта (дальше то же самое проверит pty-хост). */
+  readonly input: number;
   close(): void;
 }
 
@@ -44,6 +47,8 @@ interface Entry {
   /** `attach` в пути: пока он есть, pty-хосту о потере владельца не напоминают - ответ решит сам. */
   attaching: number;
   readonly views: Set<string>;
+  /** Запас ввода из хоста плагина: сразу `Invalid` в вызове; ввод вида проверяет свой запас pty-хост. */
+  readonly budget: InputBudget;
   exit?: PtyExit;
   orphaned?: ReturnType<typeof setTimeout>;
   /** Оставлен человеком при выключении плагина; снимается, когда плагин вернулся. */
@@ -65,7 +70,7 @@ export interface KeptPty extends PtyInfo {
   readonly keptAt: number;
 }
 
-export type PtyLimits = Pick<ResourceLimits, 'ptyInput' | 'ptys' | 'ptyFlushMs' | 'ptyFlushChars'>;
+export type PtyLimits = Pick<ResourceLimits, 'ptyInput' | 'ptyInputBurst' | 'ptyInputRate' | 'ptys' | 'ptyFlushMs' | 'ptyFlushChars'>;
 
 /** Льготный срок pty без владельца и уведомления приложению: срок вышел, список оставленных поменялся. */
 export interface PtyOrphan {
@@ -122,7 +127,7 @@ export class PtyTable {
     this.#expired = options.expired ?? (() => undefined);
     this.#keptChanged = options.kept ?? (() => undefined);
     this.#host = options;
-    this.#max = { ptyInput: options.ptyInput ?? LIMITS.ptyInput, ptys: options.ptys ?? LIMITS.ptys, ptyFlushMs: options.ptyFlushMs ?? LIMITS.ptyFlushMs, ptyFlushChars: options.ptyFlushChars ?? LIMITS.ptyFlushChars };
+    this.#max = { ptyInput: options.ptyInput ?? LIMITS.ptyInput, ptyInputBurst: options.ptyInputBurst ?? LIMITS.ptyInputBurst, ptyInputRate: options.ptyInputRate ?? LIMITS.ptyInputRate, ptys: options.ptys ?? LIMITS.ptys, ptyFlushMs: options.ptyFlushMs ?? LIMITS.ptyFlushMs, ptyFlushChars: options.ptyFlushChars ?? LIMITS.ptyFlushChars };
     this.#link = new PtyLink(spawnHost, {
       init: { ...this.#max, backlog: options.backlog ?? BACKLOG_LIMIT },
       watchdog: options.watchdog,
@@ -145,7 +150,7 @@ export class PtyTable {
     // Терминал на той стороне - xterm.js вида: TERM и COLORTERM описывают его, а не окно, из которого запустили приложение.
     const env = { COLORTERM: 'truecolor', ...o.env };
     // Запись встаёт в таблицу до ответа хоста: предел живых pty и падение владельца видят и запуск, который ещё в пути.
-    const e: Entry = { id: `pty-${String(++this.#next)}`, pluginId, pid: undefined, program: o.program, args: o.args, persist: o.persist, attached: true, lost: false, turn: 0, attaching: 0, views: new Set(), keptAt: undefined };
+    const e: Entry = { id: `pty-${String(++this.#next)}`, pluginId, pid: undefined, program: o.program, args: o.args, persist: o.persist, attached: true, lost: false, turn: 0, attaching: 0, views: new Set(), budget: new InputBudget(this.#max.ptyInputBurst, this.#max.ptyInputRate), keptAt: undefined };
     this.#entries.set(e.id, e);
     try {
       e.pid = await this.#link.spawn({ key: e.id, file: o.program, args: o.args, options: { name: 'xterm-256color', ...(o.cwd !== undefined && { cwd: o.cwd }), env, cols: o.cols, rows: o.rows } });
@@ -228,7 +233,7 @@ export class PtyTable {
       this.#forgetView(viewId);
       throw error;
     }
-    return { ...info(e), backlog, close: () => {
+    return { ...info(e), backlog, input: this.#max.ptyInput, close: () => {
         if (this.#forgetView(viewId)) this.#link.note('closeView', { viewId });
       },
     };
@@ -236,7 +241,7 @@ export class PtyTable {
 
   write(pluginId: string, id: string, data: string): void {
     const e = this.#live(pluginId, id);
-    this.#input(data);
+    e.budget.take(inputBytes(data, this.#max.ptyInput));
     this.#link.note('write', { key: e.id, data });
   }
 
@@ -405,14 +410,6 @@ export class PtyTable {
     }, this.#grace);
     // Ждущий срока pty не держит процесс приложения: выход из него и так завершит все.
     e.orphaned.unref();
-  }
-
-  #input(data: string): void {
-    const max = this.#max.ptyInput;
-    // Байт UTF-8 не меньше длины строки и не больше утроенной: подсчёт нужен только между границами.
-    if (data.length > max || (data.length * 3 > max && Buffer.byteLength(data, 'utf8') > max)) {
-      throw new CoreError('Invalid', `pty: ввод больше ${String(max)} байт - разбейте его на части`);
-    }
   }
 
   #of(pluginId: string): Entry[] {
