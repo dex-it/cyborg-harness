@@ -39,6 +39,7 @@
     "build:contracts": "node contracts/scripts/build.ts",
     "check:contracts": "node contracts/scripts/check-api.ts",
     "snapshot:contracts": "node contracts/scripts/check-api.ts --update",
+    "snapshot:api": "node core/scripts/api-surface.ts --update",
     "lint": "eslint --max-warnings 0 .",
     "postinstall": "electron-rebuild -f -w node-pty"
   },
