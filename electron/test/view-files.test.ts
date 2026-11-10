@@ -132,6 +132,8 @@ test('CSP вида: начинается с default-src \'none\' и несёт �
     'connect-src': ["'self'"],
     'img-src': ["'self'", 'data:'],
     'font-src': ["'self'"],
+    'base-uri': ["'none'"],
+    'form-action': ["'none'"],
   });
   assert.equal(VIEW_CSP, csp, 'VIEW_CSP - политика без флага');
   for (const bad of ['*', 'http:', 'https:', 'blob:', "'unsafe-eval'", "'unsafe-inline'", 'ws:']) assert.ok(!csp.includes(bad), `в строгой CSP есть ${bad}`);
@@ -145,6 +147,15 @@ test('CSP вида зависит от флага: \'unsafe-inline\' тольк�
   assert.deepEqual({ ...on, 'style-src': off['style-src'] }, off, 'флаг меняет одну директиву');
   assert.ok(!viewCsp(true).replace("style-src 'self' 'unsafe-inline'", '').includes('unsafe-inline'), "'unsafe-inline' не попал в другую директиву");
   assert.equal(viewCsp(true).split("'unsafe-inline'").length, 2, "'unsafe-inline' один раз");
+});
+
+// #161: default-src не покрывает base-uri и form-action: <base href> менял бы разрешение относительных адресов вида, <form action> отправлял бы данные.
+test('CSP вида: base-uri и form-action закрыты в обоих вариантах флага', () => {
+  for (const inlineStyles of [false, true]) {
+    const d = directives(viewCsp(inlineStyles));
+    assert.deepEqual(d['base-uri'], ["'none'"], `inlineStyles=${inlineStyles}`);
+    assert.deepEqual(d['form-action'], ["'none'"], `inlineStyles=${inlineStyles}`);
+  }
 });
 
 test('CSP вида: фреймы закрыты (frame-src берётся из default-src \'none\'), сосед по группе в <iframe> не встраивается', () => {

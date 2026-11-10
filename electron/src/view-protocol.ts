@@ -3,7 +3,16 @@
 import type { ViewDrop } from '@cyborg-harness/contracts';
 import type { TerminalEvent, ViewBridge } from '@cyborg-harness/core/ui-shell';
 
-export type { TerminalEvent, ViewBridge, ViewDrop };
+export type { TerminalEvent, ViewDrop };
+
+/**
+ * Мост оболочки вида: мост плагина (`ViewBridge`) и односторонний отчёт об отказе CSP на странице вида (#160).
+ * Отчёт нужен оболочке, плагину он не нужен: главный процесс пишет его в журнал плагина-владельца, плагин берётся из адреса фрейма.
+ */
+export interface ShellBridge extends ViewBridge {
+  cspViolation(directive: string, blocked: string): void;
+}
+export type { ViewBridge };
 
 export const VIEW_SCHEME = 'cyborg-plugin';
 
