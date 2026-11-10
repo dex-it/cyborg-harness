@@ -713,6 +713,12 @@ body[data-locked='true'] main {
   padding: 4px 0;
 }
 
+.document-row[aria-current='true'] {
+  border-left: 3px solid var(--accent);
+  padding-left: 6px;
+  font-weight: 600;
+}
+
 .document-title {
   flex: 1;
 }

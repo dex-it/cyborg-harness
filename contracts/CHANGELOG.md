@@ -27,6 +27,9 @@
 - `Contracts['cyborg.git']`, `Git`, `GitStatus`, `GitChange`, `GitCode` [minor]: черновик контракта `cyborg.git` v1 - `status(repo)` и `onChange(repo, listener)`; остальные члены SAD (`headContent`, `branches`, `switch`, `remotes`, `files`) придут необязательными (PL-04).
 - `Contracts['cyborg.tree-decoration']`, `TreeDecoration`, `TreeMark`, `TreeMarkKind` [minor]: черновик контракта `cyborg.tree-decoration` v1, кратность many - `marks(root)` и `onChange(listener)` (PL-04).
 - `cyborg.sessions` v1, `Sessions`, `SessionEvent`, `SessionChange` [minor]: черновик пилота PL-02 - события сессий `onChange` (`cwd`, `activity`, `waiting`, `exit`); остальные члены реестра (`create`, `send`, `reveal`, метки) придут минорными версиями.
+- `PluginWindow.focused` [minor]: `ctx.window.focused()` - окно в фокусе сейчас (последнее событие приложения; до него - ответ приложения `LoadOptions.windowFocused`; без источника - «активно»); `onFocusChange` по-прежнему сообщает только перемены, плагин, поднятый при окне без фокуса, больше не пропускает первое событие (#193; принято по поручению владельца 2026-11-10).
+- `PluginDocuments.reveal` [minor]: `ctx.documents.reveal(id)` - просьба сделать вкладку своего документа активной; чужой и закрытый - `NotFound`, под чужим замком окна - `Unavailable`, окно из фона сама не поднимает; приложение получает её в `LoadOptions.onDocumentReveal` (#194; принято по поручению владельца 2026-11-10).
+- `Sessions.reveal` (`cyborg.sessions` v1, поставщик объявляет `1.1`) [minor]: необязательный член `reveal?(sessionId)` - открыть вкладку сессии; поставщик 1.0 его не даёт, потребитель проверяет, что он есть (#194).
 
 ## 1.0.0-dev - не выпущена
 

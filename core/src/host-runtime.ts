@@ -757,6 +757,7 @@ function context(
     secrets: { resolve: (ref) => endpoint.request<SecretValue>('os', { pluginId, method: 'secrets.resolve', args: [ref] }) },
     window: Object.freeze({
       onFocusChange: (listener: (focused: boolean) => void) => track(system.on(pluginId, 'focus', (focused) => listener(focused === true))),
+      focused: () => endpoint.request<boolean>('os', { pluginId, method: 'window.focused', args: [] }),
       setTitle: (segment: string | undefined) => endpoint.request<undefined>('os', { pluginId, method: 'window.title', args: segment === undefined ? [] : [segment] }),
     }),
     documents: Object.freeze({
@@ -764,6 +765,7 @@ function context(
       open: (type: string, init: DocumentInit) => endpoint.request<string>('documents', { pluginId, method: 'open', args: [type, init] }),
       save: (id: string, change: DocumentChange) => endpoint.request<undefined>('documents', { pluginId, method: 'save', args: [id, change] }),
       close: (id: string) => endpoint.request<undefined>('documents', { pluginId, method: 'close', args: [id] }),
+      reveal: (id: string) => endpoint.request<undefined>('documents', { pluginId, method: 'reveal', args: [id] }),
       onClose: (listener: (id: string) => void) => track(system.on(pluginId, 'document-closed', (id) => listener(String(id)))),
     }),
     views: Object.freeze({

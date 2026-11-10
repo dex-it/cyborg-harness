@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { waitFor } from '../../core/test/wait-for.ts';
-import { chainRig, forkedRig, type Heard, type Rig } from './chain-rig.ts';
+import path from 'node:path';
+import type { PluginContext } from '@cyborg-harness/contracts';
+import { sandbox, startKernel, type InlinePlugin } from '@cyborg-harness/testing';
+import { agentEnv, chainRig, fakeNotify, forkedRig, PLUGINS, type Heard, type Rig } from './chain-rig.ts';
 
 // PL-02 (#18): хук claude -> agent-claude-code (fs.watch, readSlice) -> sessions (cyborg.sessions) -> session-notifications -> уведомление ядра.
 // Хук - настоящая команда из --settings плагина; уведомление - подставная среда ядра; claude в PATH - заглушка.
@@ -90,16 +93,80 @@ test('сессия снова занята или вышла - уведомле�
   await waitFor('выход сессии b снял её уведомление', () => of(b).closed);
 });
 
-test('клик по уведомлению поднимает окно и запускает команду плагина с id сессии', async () => {
+/** Документ вкладки сессии: заголовок вкладки несёт id сессии (`Claude Code s…`). */
+const tabOf = (s: Rig, sessionId: string) => s.k.documents.find((d) => d.pluginId === 'sessions' && d.title.endsWith(sessionId));
+
+test('клик по уведомлению поднимает окно, открывает вкладку именно этой сессии и запускает команду плагина с id сессии', async () => {
   await using s = await chainRig();
+  const first = await s.newSession();
   const session = await s.newSession();
   s.k.emit({ kind: 'focus', focused: false });
+  await s.hook(first, waiting('чужая'));
   await s.hook(session, waiting('клик'));
-  await waitFor('уведомление показано', () => s.notices.shown.length === 1);
-  s.notices.shown[0]!.events.click();
+  await waitFor('два уведомления', () => s.notices.shown.length === 2);
+  s.notices.shown.find((n) => n.title.endsWith(session.sessionId))!.events.click();
   await waitFor('команда клика выполнена', () => s.logs.some(([id, line]) => id === 'session-notifications' && line.includes(session.sessionId) && line.includes('открыта')));
   assert.equal(s.notices.raised(), 1, 'клик просит приложение поднять и сфокусировать окно');
-  assert.equal(s.notices.shown[0]!.closed, true, 'клик закрывает уведомление');
+  assert.equal(s.notices.shown.find((n) => n.title.endsWith(session.sessionId))!.closed, true, 'клик закрывает уведомление');
+  const tab = tabOf(s, session.sessionId);
+  assert.ok(tab, 'у сессии есть вкладка');
+  assert.deepEqual(s.revealed, [tab.id], 'окно получило просьбу активировать вкладку кликнутой сессии, а не соседней');
+});
+
+test('cyborg.sessions.reveal: вкладка вышедшей сессии активируется, закрытая человеком и незнакомая сессия - отказ, окно не тронуто', async () => {
+  await using s = await chainRig({ notifier: false });
+  const session = await s.newSession();
+  const reveal = (id: string) => s.k.callAs('probe', 'cyborg.sessions', 1, 'reveal', [id]);
+  const tab = tabOf(s, session.sessionId);
+  assert.ok(tab);
+  await reveal(session.sessionId);
+  assert.deepEqual(s.revealed, [tab.id]);
+  s.k.pty.procs.at(-1)!.exit(0);
+  await heardCount(s, s.heard.length + 1);
+  await reveal(session.sessionId);
+  assert.deepEqual(s.revealed, [tab.id, tab.id], 'вкладка осталась после выхода процесса и ждёт restore: показывать её можно');
+  await assert.rejects(reveal('нет-такой'), /нет сессии нет-такой/);
+  await s.k.closeDocument(tab.id);
+  await s.k.idle();
+  await assert.rejects(reveal(session.sessionId), /нет сессии/, 'вкладку закрыл человек');
+  assert.equal(s.revealed.length, 2);
+});
+
+test('sessions без reveal (поставщик прежней минорной версии): клик поднимает окно, плагин пишет в журнал, что открыть вкладку нечем', async () => {
+  const heardLogs: (readonly [string, string])[] = [];
+  const old: InlinePlugin = {
+    manifest: { id: 'old-sessions', version: '1.0.0', engines: { cyborg: '^1' }, provides: { 'cyborg.sessions': '1.0' } },
+    module: {
+      activate(ctx: PluginContext) {
+        ctx.contracts.provide('cyborg.sessions', '1.0', { onChange: () => ({ dispose: () => undefined }) });
+      },
+    },
+  };
+  const notices = fakeNotify();
+  await using box = await sandbox('cyborg-old-sessions-');
+  await using k = await startKernel({
+    plugins: [old, path.join(PLUGINS, 'session-notifications')],
+    os: { ...(await agentEnv(box)), ...notices.os },
+    load: { onLog: (pluginId, message) => void heardLogs.push([pluginId, message]) },
+  });
+  await waitFor('подписка встала', () => heardLogs.some(([id, line]) => id === 'session-notifications' && line.includes('подписан')));
+  await k.run('session-notifications.open', 's1');
+  assert.ok(heardLogs.some(([id, line]) => id === 'session-notifications' && line.includes('s1') && line.includes('вкладку открыть нечем')), JSON.stringify(heardLogs));
+});
+
+// #193: окно могло потерять фокус до запуска плагина; перемены в этом случае не будет, пока человек не вернётся.
+test('окно без фокуса к запуску плагина: первое «ждёт» показывается без единого события фокуса, возврат фокуса снова глушит', async () => {
+  let appFocus = false;
+  await using s = await chainRig({ windowFocused: () => appFocus });
+  const session = await s.newSession();
+  await s.hook(session, waiting('окно уже было в фоне'));
+  await waitFor('уведомление показано без события фокуса', () => s.notices.shown.length === 1);
+  assert.equal(s.notices.shown[0]!.body, 'Просит разрешение');
+  appFocus = true;
+  s.k.emit({ kind: 'focus', focused: true });
+  await s.hook(session, waiting('в фокусе'));
+  await waitFor('в фокусе уведомление не нужно', () => s.logs.some(([id, line]) => id === 'session-notifications' && line.includes('окно в фокусе')));
+  assert.equal(s.notices.shown.length, 1);
 });
 
 test('без права notify у плагина нет ctx.os.notify: он говорит об этом в журнале и ничего не показывает, цепочка событий работает', async () => {
@@ -124,5 +191,8 @@ test('те же плагины в разных процессах ОС (forkHost
   s.notices.shown[0]!.events.click();
   await waitFor('команда клика выполнена в процессе плагина', () => s.logs.some(([id, line]) => id === 'session-notifications' && line.includes('открыта сессия')));
   assert.equal(s.notices.raised(), 1);
+  const tab = s.k.documents.find((d) => d.pluginId === 'sessions');
+  assert.ok(tab);
+  assert.deepEqual(s.revealed, [tab.id], 'просьба активировать вкладку прошла две границы процессов: плагин - контракт - плагин - ядро');
   assert.deepEqual(s.k.journal.filter((e) => e.kind === 'denied' || e.kind === 'failed' || e.kind === 'host-down'), []);
 });

@@ -61,6 +61,10 @@ export function windowEvents(getWindow: () => BrowserWindow | undefined): Plugin
       const win = getWindow();
       if (alive(win)) win.setTitle(title);
     },
+    revealDocument: (id) => {
+      const win = getWindow();
+      if (alive(win)) win.webContents.send('documents:reveal', id);
+    },
   };
 }
 

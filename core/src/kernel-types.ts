@@ -180,12 +180,19 @@ export interface LoadOptions {
   readonly onTrace?: ((record: TraceRecord) => void) | undefined;
   /** Из чего ядро собирает заголовок окна вокруг фрагментов плагинов. */
   readonly windowTitle?: WindowTitle | undefined;
+  /**
+   * Окно в фокусе сейчас: ядро спрашивает, пока приложение не прислало первое событие `focus` (окно могло потерять фокус, пока ядро запускалось),
+   * и отдаёт ответ плагину в `ctx.window.focused()`. Без источника окно считается активным.
+   */
+  readonly windowFocused?: (() => boolean) | undefined;
   /** Диалог на экране, очередь и замки поменялись: приложение перерисовывает слой окна. */
   readonly onWindow?: ((snapshot: WindowSnapshot) => void) | undefined;
   /** Главная часть плагина послала сообщение виду `view` (`ctx.views.channel(view).post`): приложение отдаёт его открытым видам этого плагина с этим именем и никому больше. */
   readonly onViewMessage?: ((pluginId: string, view: string, message: unknown) => void) | undefined;
   /** Документ открыт, переименован или закрыт: приложение перерисовывает вкладки по `kernel.documents`. */
   readonly onDocuments?: (() => void) | undefined;
+  /** Плагин просит активировать вкладку своего документа (`ctx.documents.reveal`): приложение выбирает её и показывает. Каждая просьба доходит, повтор не схлопывается; id проверен ядром. */
+  readonly onDocumentReveal?: ((id: string) => void) | undefined;
   /** Снимок `Kernel.menus` поменялся после чтения источников состояния или смены состояния плагинов: приложение пересобирает меню ОС. */
   readonly onMenus?: (() => void) | undefined;
   /** Оставленные процессы выключенных плагинов поменялись: приложение перечитывает `kernel.keptPty()`. */

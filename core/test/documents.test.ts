@@ -15,6 +15,7 @@ async function start(saved: unknown[]) {
   const store: LayerStore = { load: async () => structuredClone(doc), save: async (_layer, next) => void (doc = structuredClone(next)) };
   let ctx: PluginContext | undefined;
   let changes = 0;
+  const revealed: string[] = [];
   const k = await load({
     apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async () => ({
@@ -27,9 +28,10 @@ async function start(saved: unknown[]) {
     manifests: [ED],
     state: await SectionStore.open(store, ['workspace']),
     onDocuments: () => changes++,
+    onDocumentReveal: (id) => revealed.push(id),
   });
   assert.ok(ctx);
-  return { k, ctx, disk: () => (doc.$documents as { list: { id: string; type: string }[] }).list, changes: () => changes };
+  return { k, ctx, revealed, disk: () => (doc.$documents as { list: { id: string; type: string }[] }).list, changes: () => changes };
 }
 
 test('документы: тип с restorable переживает перезапуск, без владельца вкладка недоступна, убранный тип отсеян', async () => {
@@ -69,6 +71,42 @@ test('документы: отказы - чужой и незнакомый до
   await assert.rejects(ctx.documents.save('g1', { title: 'Моё' }), { code: 'NotFound' }, 'чужой документ для плагина не существует');
   await assert.rejects(ctx.documents.close('нет'), { code: 'NotFound' });
   assert.deepEqual(await ctx.documents.list(), []);
+  await k.unload();
+});
+
+// #194: у плагина не было способа сделать вкладку активной, клик по уведомлению открывал окно, но не сессию.
+test('документы: reveal просит окно активировать вкладку своего документа; чужой, закрытый и незнакомый - NotFound, окно не тронуто', async () => {
+  const { k, ctx, revealed } = await start([{ id: 'g1', pluginId: 'ghost', type: 'x', title: 'Чужой' }]);
+  const a = await ctx.documents.open('note', { title: 'A' });
+  const b = await ctx.documents.open('scratch', { title: 'B' });
+  await ctx.documents.reveal(a);
+  await ctx.documents.reveal(b);
+  await ctx.documents.reveal(a);
+  assert.deepEqual(revealed, [a, b, a], 'каждая просьба доходит до окна: человек мог уйти на другую вкладку, поэтому повтор не схлопывается');
+  await assert.rejects(ctx.documents.reveal('g1'), { code: 'NotFound' }, 'чужой документ для плагина не существует');
+  await assert.rejects(ctx.documents.reveal('нет'), { code: 'NotFound' });
+  await assert.rejects(ctx.documents.reveal(undefined as never), { code: 'NotFound' });
+  await ctx.documents.close(a);
+  await assert.rejects(ctx.documents.reveal(a), { code: 'NotFound' }, 'закрытый документ');
+  assert.deepEqual(revealed, [a, b, a]);
+  await k.unload();
+});
+
+test('документы: приложение без обработчика reveal - просьба принята и ничего не делает', async () => {
+  let ctx: PluginContext | undefined;
+  const k = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    spawnHost: inlineHosts(async () => ({
+      activate: (c) => {
+        ctx = c;
+        return undefined;
+      },
+    })),
+    enabled: ['ed'],
+    manifests: [ED],
+  });
+  const id = await ctx?.documents.open('note', { title: 'A' });
+  assert.equal(await ctx?.documents.reveal(id ?? ''), undefined);
   await k.unload();
 });
 

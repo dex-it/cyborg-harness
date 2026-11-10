@@ -139,6 +139,8 @@ export interface WindowApi {
   runCommand(command: string): Promise<Reply>;
   onPluginsChanged(listener: () => void): void;
   onWindowCommand(listener: (command: string) => void): void;
+  /** Плагин просит сделать вкладку документа активной: окно выбирает её, как если бы её выбрал человек. */
+  onRevealDocument(listener: (id: string) => void): void;
   setViewVisible(id: string, view: string, visible: boolean): Promise<void>;
   answerDialog(id: number, choice: string | undefined): Promise<Reply>;
   /** Человек закрыл модальное окно плагина в самом окне. */

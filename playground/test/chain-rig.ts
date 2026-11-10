@@ -82,6 +82,8 @@ export interface Rig {
   readonly heard: Heard[];
   /** Строки `ctx.log` всех плагинов: `[pluginId, сообщение]`. */
   readonly logs: (readonly [string, string])[];
+  /** Вкладки, которые плагины просили сделать активными (`ctx.documents.reveal`), в порядке просьб: id документов. */
+  readonly revealed: string[];
   /** Запускает сессию `agent-claude-code`, ждёт, пока `watch` встанет на конец файла событий, и называет сессию. */
   newSession(): Promise<{ readonly sessionId: string; readonly file: string }>;
   /** Хук claude: `Notification` с `permission_prompt` и так далее. */
@@ -92,6 +94,8 @@ export interface Rig {
 export interface RigOptions {
   /** Манифест `session-notifications` с поправкой (например, без права `notify`); по умолчанию настоящий. */
   readonly notifier?: ((manifest: Record<string, unknown>) => Record<string, unknown>) | false;
+  /** Что приложение отвечает про фокус окна до первого события (`LoadOptions.windowFocused`); без него окно активно. */
+  readonly windowFocused?: () => boolean;
 }
 
 /** Настоящие `sessions`, `agent-claude-code` и `session-notifications` на хостах-в-процессе; claude - скрипт в PATH, хуки - настоящая команда из `--settings`. */
@@ -100,6 +104,7 @@ export async function chainRig(options: RigOptions = {}): Promise<Rig> {
   const notices = fakeNotify();
   const heard: Heard[] = [];
   const logs: (readonly [string, string])[] = [];
+  const revealed: string[] = [];
   const probe: InlinePlugin = {
     manifest: { id: 'probe', version: '1.0.0', engines: { cyborg: '^1' }, optional: { 'cyborg.sessions': '^1' } },
     module: {
@@ -130,7 +135,7 @@ export async function chainRig(options: RigOptions = {}): Promise<Rig> {
     k = await startKernel({
       plugins: [path.join(PLUGINS, 'agent-claude-code'), path.join(PLUGINS, 'sessions'), ...notifier, probe],
       os: { ...os, ...notices.os },
-      load: { onLog: (pluginId, message) => void logs.push([pluginId, message]) },
+      load: { onLog: (pluginId, message) => void logs.push([pluginId, message]), onDocumentReveal: (id) => void revealed.push(id), ...(options.windowFocused !== undefined && { windowFocused: options.windowFocused }) },
     });
   } catch (error) {
     await box[Symbol.asyncDispose]();
@@ -142,6 +147,7 @@ export async function chainRig(options: RigOptions = {}): Promise<Rig> {
     notices,
     heard,
     logs,
+    revealed,
     async newSession() {
       const before = k.pty.procs.length;
       await k.run('sessions.new', 'agent-claude-code');
@@ -173,6 +179,8 @@ export interface ForkedRig {
   readonly k: Kernel;
   readonly notices: ReturnType<typeof fakeNotify>;
   readonly logs: (readonly [string, string])[];
+  /** Вкладки, которые плагины просили сделать активными, в порядке просьб: id документов. */
+  readonly revealed: string[];
   readonly pty: FakePty;
   /** Файл событий запущенной сессии. */
   readonly file: string;
@@ -189,6 +197,7 @@ export async function forkedRig(): Promise<ForkedRig> {
   const box = await sandbox('cyborg-chain-fork-');
   const notices = fakeNotify();
   const logs: (readonly [string, string])[] = [];
+  const revealed: string[] = [];
   const ids = ['agent-claude-code', 'sessions', 'session-notifications'];
   const pty = fakePty();
   let k: Kernel;
@@ -205,6 +214,7 @@ export async function forkedRig(): Promise<ForkedRig> {
       // Зависание хоста определяет сторож; на занятом раннере холодный старт трёх процессов Node не должен сойти за него.
       watchdog: { interval: 200, timeout: 30_000, strikes: 3 },
       onLog: (pluginId, message) => void logs.push([pluginId, message]),
+      onDocumentReveal: (id) => void revealed.push(id),
     });
   } catch (error) {
     await box[Symbol.asyncDispose]();
@@ -227,7 +237,7 @@ export async function forkedRig(): Promise<ForkedRig> {
       await runHook(settings, file, { hook_event_name: 'PostToolUse', tool_name: 'ReadyProbe' });
       return logs.some(([id, line]) => id === 'sessions' && line.includes('ReadyProbe'));
     }, { interval: 100 });
-    return { k, notices, logs, pty, file, hook: (hook) => runHook(settings, file, hook), [Symbol.asyncDispose]: dispose };
+    return { k, notices, logs, revealed, pty, file, hook: (hook) => runHook(settings, file, hook), [Symbol.asyncDispose]: dispose };
   } catch (error) {
     await dispose();
     throw error;
