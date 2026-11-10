@@ -34,6 +34,7 @@ export function crashReportsOf(pid, since) {
 
 /** Отчёт появляется через секунды после падения: ждём до `timeout` мс. Чистый выход стоит всего ожидания, поэтому на нём ждать мало. */
 export async function waitCrashReports(pid, since, timeout = 4000) {
+  if (process.platform !== 'darwin') return [];
   const deadline = Date.now() + timeout;
   for (;;) {
     const found = crashReportsOf(pid, since);
