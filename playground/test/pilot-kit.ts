@@ -78,8 +78,8 @@ export interface Pilot {
   gitRuns(): Promise<string[]>;
   /** Все запуски git по порядку (перекрытие фильтров добавляет к каждому status `config` и `ls-files`). */
   gitCalls(): Promise<string[]>;
-  /** fs.watch шлюза: открытые за всё время, закрытые, события до склейки. */
-  readonly watches: { readonly opened: string[]; closed: number; raw: number; peak: number; readonly live: () => number };
+  /** fs.watch шлюза: открытые за всё время (из них рекурсивные - `recursive`), закрытые, события до склейки (всего - `raw`, по каталогу слежения - `rawBy`). */
+  readonly watches: { readonly opened: string[]; readonly recursive: string[]; readonly rawBy: Record<string, number>; closed: number; raw: number; peak: number; readonly live: () => number };
   [Symbol.asyncDispose](): Promise<void>;
 }
 
@@ -125,16 +125,26 @@ export async function startPilot(options: PilotOptions): Promise<Pilot> {
     entries.set(probe.id, pathToFileURL(path.join(dir, 'index.ts')).href);
   }
 
-  const watches = { opened: [] as string[], closed: 0, raw: 0, peak: 0, live: () => watches.opened.length - watches.closed };
-  type Watch = (target: string, listener: (event: string, name: string | null) => void) => FSWatcher;
+  const watches = { opened: [] as string[], recursive: [] as string[], rawBy: {} as Record<string, number>, closed: 0, raw: 0, peak: 0, live: () => watches.opened.length - watches.closed };
+  type Listener = (event: string, name: string | null) => void;
+  interface WatchOptions {
+    readonly recursive?: boolean;
+  }
+  type Watch = (target: string, ...rest: [Listener] | [WatchOptions, Listener]) => FSWatcher;
   const inner = (options.watch ?? watchFs) as unknown as Watch;
-  const counted = ((target: string, listener: (event: string, name: string | null) => void) => {
+  // Шлюз зовёт `watch(путь, слушатель)` или, с рекурсией, `watch(путь, { recursive: true }, слушатель)`.
+  const counted = ((target: string, ...rest: [Listener] | [WatchOptions, Listener]) => {
+    const given = rest.length === 1 ? undefined : rest[0];
+    const listener = rest.length === 1 ? rest[0] : rest[1];
     watches.opened.push(target);
+    if (given?.recursive === true) watches.recursive.push(target);
     watches.peak = Math.max(watches.peak, watches.live());
-    const w = inner(target, (event, name) => {
+    const count: Listener = (event, name) => {
       watches.raw++;
+      watches.rawBy[target] = (watches.rawBy[target] ?? 0) + 1;
       listener(event, name);
-    });
+    };
+    const w = given === undefined ? inner(target, count) : inner(target, given, count);
     const close = w.close.bind(w);
     let closed = false;
     w.close = () => {

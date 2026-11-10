@@ -2,11 +2,9 @@ import type { Disposable, PluginContext, PluginModule, TreeMarkKind } from '@cyb
 
 // Пилот PL-04: модель дерева файлов без окна. Дерево строится по ctx.os.fs.list, обновляется по именам из fs.watch (stat на каждое известное имя, list каталога - когда появилось незнакомое
 // или имён слишком много) и не опрашивает ничего: без событий плагин не делает ни одного вызова. Отметки состояния даёт любой плагин контракта cyborg.tree-decoration (git и другие).
-// Предел шлюза - 64 слежения на плагин, и слежение за каталогом не рекурсивное: следим за корнем и раскрытыми каталогами, при нехватке вытесняется давнее раскрытый
-// (его узел помечается устаревшим и перечитывается при следующем раскрытии).
+// Слежение одно: рекурсивное за корнем (`{ recursive: true }`, #182, #205), одна запись лимита шлюза на всё дерево. Имя в событии - путь от корня через `/`; его разбирает ближайший раскрытый
+// узел, а правка в нераскрытом каталоге узла не имеет и тянет только отметки (git status), поэтому отметка вглубь появляется сама, без опроса и без другого повода.
 
-/** `MAX_WATCHES` шлюза (файл os-gateway.ts ядра): считается здесь, чтобы не упираться в отказ шлюза. */
-const MAX_WATCHES = 64;
 /** Имён в одном событии больше - дешевле прочитать каталог, чем звать stat на каждое. */
 const RELIST_AT = 64;
 /**
@@ -16,8 +14,9 @@ const RELIST_AT = 64;
  */
 const STORM_NAMES = 16;
 const RESYNC_QUIET_MS = 300;
-/** Каталог git не часть дерева: его изменения - дело плагина git. */
+/** Каталог git не часть дерева: его изменения - дело плагина git (он следит за индексом и головой сам). Событие с таким сегментом в пути дереву и отметкам не нужно. */
 const HIDDEN = new Set(['.git']);
+const hidden = (name: string): boolean => name.split('/').some((segment) => HIDDEN.has(segment));
 
 type Kind = 'file' | 'dir' | 'link' | 'other';
 type Mark = TreeMarkKind | 'changed';
@@ -25,11 +24,6 @@ type Mark = TreeMarkKind | 'changed';
 interface Node {
   readonly dir: string;
   readonly entries: Map<string, Kind>;
-  watch: Disposable | undefined;
-  /** Слежения нет: изменения каталога плагин не видит, перечитать при раскрытии. */
-  stale: boolean;
-  /** Порядок раскрытия: вытесняется самый давний. */
-  seq: number;
   /** События одного каталога обрабатываются по очереди. */
   work: Promise<unknown>;
 }
@@ -41,11 +35,12 @@ const files: PluginModule = {
   activate(ctx: PluginContext) {
     const { fs } = ctx.os;
     const nodes = new Map<string, Node>();
-    const counters = { list: 0, stat: 0, batches: 0, relists: 0, markRuns: 0, evicted: 0, resyncs: 0 };
+    const counters = { list: 0, stat: 0, batches: 0, relists: 0, markRuns: 0, resyncs: 0 };
     let root: string | undefined;
     let rootLost: string | undefined;
     let version = 0;
-    let seq = 0;
+    /** Слежение за корнем: одно, рекурсивное. */
+    let rootWatch: Disposable | undefined;
     /** Путь отметки (без хвостового `/`, у корня) -> вид; каталоги с изменениями внутри. */
     let marks = new Map<string, TreeMarkKind>();
     let changedDirs = new Set<string>();
@@ -68,8 +63,6 @@ const files: PluginModule = {
     function view(node: Node) {
       return {
         dir: node.dir,
-        watched: node.watch !== undefined,
-        stale: node.stale,
         entries: [...node.entries].map(([name, kind]) => [name, kind, markOf(join(node.dir, name), kind)] as const),
       };
     }
@@ -83,12 +76,7 @@ const files: PluginModule = {
     }
 
     function dropSubtree(dir: string): void {
-      for (const [path, node] of nodes) {
-        if (path !== dir && !path.startsWith(`${dir}/`)) continue;
-        node.watch?.dispose();
-        node.watch = undefined;
-        nodes.delete(path);
-      }
+      for (const path of [...nodes.keys()]) if (path === dir || path.startsWith(`${dir}/`)) nodes.delete(path);
     }
 
     /** Каталог перечитан целиком; ушедшие каталоги забывают свои узлы. Да - состав изменился. */
@@ -131,22 +119,53 @@ const files: PluginModule = {
       }
     }
 
-    async function onNames(node: Node, names: readonly string[]): Promise<void> {
-      counters.batches++;
-      const shown = [...new Set(names)].filter((n) => !HIDDEN.has(n));
-      if (shown.length === 0 || nodes.get(node.dir) !== node) return;
-      noteBurst(shown.length);
+    /** Имена одного узла: незнакомое имя или пачка больше RELIST_AT - перечитать каталог, иначе stat на каждое известное. */
+    async function onNames(node: Node, shown: readonly string[]): Promise<void> {
+      if (nodes.get(node.dir) !== node) return;
       let changed = false;
       try {
         if (shown.length > RELIST_AT || shown.some((n) => !node.entries.has(n))) changed = await relist(node);
         else for (const name of shown) changed = (await restat(node, name)) || changed;
       } catch (error) {
-        // Удалён сам наблюдаемый каталог: шлюз слежение не закрывает (каталог на месте, пока проверка пути не провалилась), и о потере говорит только событие с его именем.
+        // Каталог узла исчез раньше, чем дошло событие о его имени у родителя: родитель перечитает и забудет узел.
         if (isCode(error, 'NotFound') && (await fs.stat(node.dir).then(() => false, () => true))) return onClosed(node, 'каталог удалён');
         throw error;
       }
       if (changed) version++;
-      scheduleMarks();
+    }
+
+    /**
+     * Имя из события рекурсивного слежения (путь от корня через `/`) -> узел, который его разбирает, и имя в нём. Идём от корня вниз по раскрытым узлам:
+     * имя прямого ребёнка узла разбирает узел; глубже последнего раскрытого узла дерево ничего не показывает, но если узел не знает первого каталога на пути,
+     * он перечитывается (ОС могла не назвать сам новый каталог). Всё остальное - только повод обновить отметки.
+     */
+    function route(name: string): { readonly node: Node; readonly entry: string } | undefined {
+      let node = root === undefined ? undefined : nodes.get(root);
+      const segments = name.split('/');
+      for (const [i, entry] of segments.entries()) {
+        if (node === undefined) return undefined;
+        if (i === segments.length - 1) return { node, entry };
+        const next = nodes.get(join(node.dir, entry));
+        if (next === undefined) return node.entries.has(entry) ? undefined : { node, entry };
+        node = next;
+      }
+      return undefined;
+    }
+
+    /** Событие слежения за корнем: имена внутри `.git` отбрасываются, остальные расходятся по узлам; отметки запрашиваются на любую пачку, кроме лавины (правка могла быть и в нераскрытом каталоге). */
+    function onBatch(names: readonly string[]): void {
+      const shown = [...new Set(names)].filter((n) => n !== '' && !hidden(n));
+      if (shown.length === 0) return;
+      counters.batches++;
+      noteBurst(shown.length);
+      const byNode = new Map<Node, string[]>();
+      for (const name of shown) {
+        const target = route(name);
+        if (target !== undefined) byNode.set(target.node, [...(byNode.get(target.node) ?? []), target.entry]);
+      }
+      for (const [node, entries] of byNode) void enqueue(node, () => onNames(node, entries));
+      // В лавине (checkout) слежение за корнем шлёт события со всего дерева, и git status на каждую пачку не успевает за ходом checkout: отметки придут после тишины, вместе с перечитыванием.
+      if (burst.names < STORM_NAMES) scheduleMarks();
     }
 
     // --- перечитывание после лавины и смены ветки ---
@@ -176,6 +195,8 @@ const files: PluginModule = {
         burst.timer = undefined;
         // Родители раньше детей: ушедший каталог забирает свои узлы с собой.
         for (const node of [...nodes.values()].sort((a, b) => a.dir.length - b.dir.length)) void enqueue(node, () => resync(node));
+        // Отметки лавины запрашиваются один раз после тишины (в лавине их не просит ни одна пачка, см. `onBatch`): потерянное событие не оставляет следа и в них.
+        scheduleMarks();
       }, RESYNC_QUIET_MS);
     }
 
@@ -192,43 +213,14 @@ const files: PluginModule = {
       }, RESYNC_QUIET_MS);
     }
 
-    // --- слежение: не больше MAX_WATCHES, самый давний раскрытый уступает место ---
+    // --- слежение: одно, рекурсивное, за корнем ---
 
-    let attachQueue: Promise<unknown> = Promise.resolve();
-    const watched = (): Node[] => [...nodes.values()].filter((n) => n.watch !== undefined);
-
-    function evict(except: Node): boolean {
-      const victim = watched()
-        .filter((n) => n.dir !== root && n !== except)
-        .sort((a, b) => a.seq - b.seq)[0];
-      if (victim === undefined) return false;
-      victim.watch?.dispose();
-      victim.watch = undefined;
-      victim.stale = true;
-      counters.evicted++;
-      return true;
-    }
-
-    function attach(node: Node): Promise<void> {
-      const run = async (): Promise<void> => {
-        if (nodes.get(node.dir) !== node || node.watch !== undefined) return;
-        while (watched().length >= MAX_WATCHES) if (!evict(node)) break;
-        try {
-          node.watch = await fs.watch(
-            node.dir,
-            (names) => void enqueue(node, () => onNames(node, names)),
-            (reason) => void enqueue(node, () => onClosed(node, reason)),
-          );
-          node.stale = false;
-        } catch (error) {
-          // Слежение недоступно (предел шлюза иной, чем мы считаем): узел живёт без него и перечитывается при раскрытии.
-          node.stale = true;
-          ctx.log(`слежение за ${node.dir} не открыто: ${message(error)}`, 'warn');
-        }
-      };
-      const next = attachQueue.then(run, run);
-      attachQueue = next;
-      return next;
+    /**
+     * Слежение раньше чтения корня: правка между ними даст событие, а не потеряется. Отказ шлюза (на Linux - `fs.inotify.max_user_watches`, рекурсия ставит слежение ОС на каждый каталог)
+     * доходит до `files.root` как есть: дерево без слежения молча устаревало бы, а запасного пути с опросом у плагина нет.
+     */
+    async function watchRoot(node: Node): Promise<void> {
+      rootWatch = await fs.watch(node.dir, onBatch, (reason) => void enqueue(node, () => onClosed(node, reason)), { recursive: true });
     }
 
     function enqueue(node: Node, job: () => Promise<void>): Promise<void> {
@@ -236,11 +228,11 @@ const files: PluginModule = {
       return node.work as Promise<void>;
     }
 
-    /** Ядро закрыло слежение (каталог удалён, права ушли): узел и всё под ним забыто, родитель перечитан. */
+    /** Корень потерян (шлюз закрыл слежение: каталог удалён, права ушли) или каталог узла исчез: узел и всё под ним забыто, родитель перечитан. */
     async function onClosed(node: Node, reason: string): Promise<void> {
       if (nodes.get(node.dir) !== node) return;
-      node.watch = undefined;
       if (node.dir === root) {
+        rootWatch = undefined;
         rootLost = reason;
         dropSubtree(node.dir);
         version++;
@@ -340,12 +332,10 @@ const files: PluginModule = {
 
     async function open(dir: string, kind: 'root' | 'node'): Promise<Node> {
       const known = nodes.get(dir);
-      const node: Node = known ?? { dir, entries: new Map(), watch: undefined, stale: true, seq: 0, work: Promise.resolve() };
-      node.seq = ++seq;
+      const node: Node = known ?? { dir, entries: new Map(), work: Promise.resolve() };
       nodes.set(dir, node);
       try {
-        // Слежение раньше чтения: правка между ними даст событие, а не потеряется.
-        await attach(node);
+        if (kind === 'root') await watchRoot(node);
         node.entries.clear();
         for (const [name, k] of await list(dir)) node.entries.set(name, k);
         version++;
@@ -360,7 +350,8 @@ const files: PluginModule = {
       clearTimeout(burst.timer);
       burst.timer = undefined;
       burst.names = 0;
-      for (const node of nodes.values()) node.watch?.dispose();
+      rootWatch?.dispose();
+      rootWatch = undefined;
       nodes.clear();
       marks = new Map();
       changedDirs = new Set();
@@ -372,6 +363,8 @@ const files: PluginModule = {
       reset();
       root = path.replace(/\/+$/, '');
       const node = await open(root, 'root').catch((error: unknown) => {
+        rootWatch?.dispose();
+        rootWatch = undefined;
         root = undefined;
         throw error;
       });
@@ -406,7 +399,7 @@ const files: PluginModule = {
         root: root ?? null,
         version,
         rootLost: rootLost ?? null,
-        watches: watched().length,
+        watches: rootWatch === undefined ? 0 : 1,
         counters: { ...counters },
         pending: marksQueue.running,
         marks: Object.fromEntries(marks),
