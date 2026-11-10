@@ -1,4 +1,4 @@
-import type { FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot, PluginState, Reply } from '@cyborg-harness/electron/window';
+import type { DiagnosticsStatus, FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot, PluginState, Reply } from '@cyborg-harness/electron/window';
 
 export const STATE_LABEL: Record<PluginState, string> = {
   active: 'Работает',
@@ -123,6 +123,33 @@ export function summary(snapshot: PluginsSnapshot): string {
   if (count('restarting')) parts.push(`ждут перезапуска: ${count('restarting')}`);
   if (count('stopped')) parts.push(`выключено: ${count('stopped')}`);
   return parts.join(', ');
+}
+
+/** Причина сбоя плагина в прошлом запуске (FR-CH-4013): отдельно от причины текущего состояния, которая говорит о этом запуске. */
+export function previousNote(row: PluginRow): string | undefined {
+  return row.previousFailure === undefined ? undefined : `В прошлом запуске, ${stamp(row.previousFailure.at)}: ${row.previousFailure.text}`;
+}
+
+/** Строка о хранении диагностики: сколько на диске, с какого времени, прошлый запуск, отказ записи. Нет хранения - строки нет. */
+export function diagnosticsLine(status: DiagnosticsStatus | undefined): string | undefined {
+  if (status === undefined) return undefined;
+  const kib = Math.max(1, Math.round(status.bytes / 1024));
+  const parts = [`Диагностика: файлов ${String(status.files)}, ${String(kib)} КиБ`];
+  if (status.since !== undefined) parts.push(`записи с ${stamp(status.since)}`);
+  parts.push(status.previousRunAt === undefined ? 'прошлого запуска в файлах нет' : `прошлый запуск с ${stamp(status.previousRunAt)}`);
+  if (status.problem !== undefined) parts.push(`запись в файл не удаётся (${status.problem}), записи держатся в памяти`);
+  return parts.join('; ');
+}
+
+/** Итог кнопки «Выгрузить диагностику»: куда лёг файл либо причина отказа; отмена диалога - пустая строка. */
+export function exportMessage(reply: Reply): string {
+  if (reply.error !== undefined) return reply.error;
+  const done = reply.value as { file?: unknown; bytes?: unknown } | undefined;
+  return done === undefined || typeof done.file !== 'string' ? '' : `Выгрузка сохранена: ${done.file} (${String(done.bytes)} Б). Файл остаётся на этом компьютере, приложение его никуда не отправляет.`;
+}
+
+export function stamp(at: number): string {
+  return new Date(at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 export function clock(at: number): string {

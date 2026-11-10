@@ -9,7 +9,7 @@ import { safeStorage } from 'electron';
 import { load, OsGateway, parseManifest, PLUGIN_API_VERSION, type JournalEntry, type OsEnvironment, type PluginManifest, type TraceRecord } from '@cyborg-harness/core';
 import { closePools, guardedLookup, isLocalAddress, transport, type Lookup } from '../../../core/src/net-transport.ts';
 import { measure, PTY_SCRIPT, SAMPLES, WARMUP, type ProbeOs, type ProbePath, type Sampled } from '../../bench/gateway-probe.ts';
-import { electronOs, utilityHosts } from '@cyborg-harness/electron';
+import { electronOs, fileDiagnostics, utilityHosts } from '@cyborg-harness/electron';
 
 export interface GatewaySpikeOptions {
   readonly out: string;
@@ -186,8 +186,8 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'cyborg-spike-gateway-'));
   const server = await serve();
   const journal: JournalEntry[] = [];
-  // Приёмник как у приложения: запись кладётся в кольцо (K-30 заменит его своим), содержимого в ней нет.
-  const ring: (TraceRecord | undefined)[] = new Array<TraceRecord | undefined>(4096);
+  // Приёмник как у приложения (K-30): запись идёт в кольцо в памяти и пакетом в файл в каталоге замера, содержимого в ней нет.
+  const diagnostics = fileDiagnostics(path.join(base, 'app'), path.join(base, 'workspace.cyborg.json'));
   let traced = 0;
   /** Процессы pty замера живут в главном процессе: выход приложения с недоставленным выходом роняет Electron SIGABRT (#185), поэтому их дожидаются до выхода. */
   let drainPtys: () => Promise<void> = () => Promise.resolve();
@@ -224,7 +224,12 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
       os: env,
       limits: BENCH_LIMITS,
       onJournal: (entry) => journal.push(entry),
-      ...(options.trace !== false && { onTrace: (record: TraceRecord) => void (ring[traced++ % ring.length] = record) }),
+      ...(options.trace !== false && {
+        onTrace: (record: TraceRecord) => {
+          traced++;
+          diagnostics.sinks.onTrace(record);
+        },
+      }),
     });
     await kernel.idle();
     if (!journal.some((e) => e.kind === 'activated') || journal.some((e) => e.kind !== 'activated')) throw new Error(`загрузка не чистая: ${JSON.stringify(journal)}`);
@@ -255,6 +260,7 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
     closePools(ID);
     report.rows = rows;
     await kernel.unload();
+    diagnostics.close();
     report.traceRecords = traced;
     if (options.trace !== false && traced === 0) throw new Error('трасса включена, а записей нет');
     if (denied.length > 0) throw new Error(`шлюз отказал: ${denied.join('; ')}`);

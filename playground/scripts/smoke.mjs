@@ -1098,6 +1098,7 @@ async function main() {
   await bareWindow();
   await safeWindow();
   await userPluginsWindow();
+  await diagnosticsWindow();
   await ptyExitWindow();
 }
 
@@ -1323,6 +1324,74 @@ async function ptyExitWindow() {
     log('выход с pty в главном процессе: drain бэкенда дождался выходов, процесс вышел без сигнала и без отчёта о падении macOS');
   } finally {
     probe.kill('SIGKILL');
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * K-30: хранение диагностики между запусками. Первый процесс роняет хост плагина и убивается без закрытия (SIGKILL); второй на том же userData показывает причину
+ * сбоя прошлого запуска у плагина, не меняя его состояния, и выгружает диагностику одним файлом по кнопке окна (диалог «Сохранить как» подменён).
+ */
+async function diagnosticsWindow() {
+  const dir = mkdtempSync(join(tmpdir(), 'cyborg-playground-diag-'));
+  writeFileSync(join(dir, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['echo'], hosts: { a: ['echo'] } } }));
+  const file = join(dir, 'workspace.cyborg.json');
+  const launch = () => {
+    // Своя группа процессов: убитое без закрытия приложение уносит и хосты плагинов, иначе они держат адрес экземпляра, и второй запуск считал бы воркспейс занятым.
+    const child = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${dir}`, '--remote-debugging-port=0', ...electronArgs], { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
+    child.out = '';
+    child.stderr.on('data', (d) => (child.out += d));
+    return child;
+  };
+  const pageOf = async (child) => {
+    const port = await waitFor('порт DevTools окна диагностики', () => /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//.exec(child.out)?.[1]);
+    const page = await waitFor('окно диагностики', async () => (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page'));
+    return connect(page.webSocketDebuggerUrl);
+  };
+  const stateOf = (ev) => ev("document.querySelector('#plugins-list [data-plugin=\"echo\"]')?.dataset.state ?? ''");
+  const first = launch();
+  let second;
+  try {
+    const ev1 = await pageOf(first);
+    await waitFor('echo работает в первом запуске', async () => (await stateOf(ev1)) === 'active');
+    assert.equal(await ev1("document.querySelector('#plugins-list [data-plugin=\"echo\"] .plugin-previous')"), null, 'в первом запуске прошлого сбоя нет');
+    await ev1("(window.playground.crashHost('echo'), 0)");
+    await waitFor('падение хоста в журнале', () => /"kind":"host-down"/.test(first.out));
+    const stored = join(dir, 'diagnostics', workspaceKey(file), 'diagnostics.log');
+    await waitFor('запись о падении хоста уже в файле (срочная запись)', () => existsSync(stored) && readFileSync(stored, 'utf8').includes('"kind":"host-down"'));
+    process.kill(-first.pid, 'SIGKILL');
+    await new Promise((r) => first.once('exit', r));
+
+    second = launch();
+    const ev2 = await pageOf(second);
+    const main2 = await connect(await waitFor('инспектор главного процесса второго запуска', () => /Debugger listening on (ws:\/\/\S+)/.exec(second.out)?.[1]));
+    await waitFor('echo работает во втором запуске', async () => (await stateOf(ev2)) === 'active');
+    const previous = await waitFor('причина сбоя прошлого запуска', () => ev2("document.querySelector('#plugins-list [data-plugin=\"echo\"] .plugin-previous')?.textContent"));
+    assert.match(previous, /^В прошлом запуске, .*: хост a упал/);
+    assert.equal(await ev2("document.querySelector('#plugins-list [data-plugin=\"echo\"] .plugin-reason')"), null, 'прошлый сбой стал причиной текущего состояния');
+    assert.equal(await ev2("document.getElementById('diagnostics').hidden"), false);
+    assert.match(await ev2("document.getElementById('diagnostics-status').textContent"), /^Диагностика: файлов \d+, \d+ КиБ; записи с .*; прошлый запуск с /);
+
+    const out = join(dir, 'выгрузка.txt');
+    await main2(`(() => { const { dialog } = process.mainModule.require('electron'); dialog.showSaveDialog = async () => ({ canceled: false, filePath: ${JSON.stringify(out)} }); })()`);
+    await ev2("document.getElementById('diagnostics-export').click()");
+    const done = await waitFor('итог выгрузки в окне', () => ev2("document.getElementById('diagnostics-result').textContent"));
+    assert.match(done, /^Выгрузка сохранена: .*выгрузка\.txt/);
+    const text = readFileSync(out, 'utf8');
+    assert.ok(text.startsWith('Диагностика Cyborg Harness\n'), 'выгрузка не текстовая');
+    assert.ok(text.includes('Приложение: Cyborg Playground'), 'нет приложения');
+    assert.match(text, /\n {2}echo \S+ - работает, хост a\n/, 'нет версии и состояния плагина');
+    assert.match(text, /журнал warn хост a: хост a упал/, 'нет записи о падении хоста прошлого запуска');
+    assert.match(text, /Запуски: з1 с .*; з2 с .* \(этот\)/, 'нет двух запусков');
+    log('диагностика: падение хоста записано сразу и пережило убитый процесс, второй запуск показывает причину у плагина без смены состояния, выгрузка из окна - один текстовый файл');
+  } finally {
+    for (const child of [first, second]) {
+      try {
+        if (child) process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // группа уже ушла
+      }
+    }
     rmSync(dir, { recursive: true, force: true });
   }
 }

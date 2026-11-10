@@ -6,6 +6,7 @@ export type { Discovered, DiscoverOptions, PluginsEvents, ServiceOptions, StartO
 export { utilityHosts, utilityPtyHost } from './plugin-hosts.ts';
 export type { UtilityHosts, UtilityPtyHost } from './plugin-hosts.ts';
 export { electronOs } from './os-env.ts';
+export { fileDiagnostics } from './diagnostics-file.ts';
 export { framesOf, registerViewScheme, serveViews } from './views.ts';
 export { resolveStaticFile, resolveViewRequest, VIEW_CSP, viewCsp } from './view-files.ts';
 export type { PluginUi, ViewCsp, ViewRequest } from './view-files.ts';
