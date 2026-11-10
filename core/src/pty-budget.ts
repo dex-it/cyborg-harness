@@ -5,17 +5,25 @@ import { CoreError } from './errors.ts';
  * и `proc.write` у программы, которая не читает (`tail -f`, `sleep`), копит данные в памяти без предела. Поэтому ограничены сами байты:
  * сразу можно отдать до `burst` (вставка вдвое больше предела одного ввода, набор текста), дальше - не быстрее `rate` байт в секунду.
  * Принятое сверх запаса не списывается и не принимается частью: ввод целиком или `Invalid`.
+ *
+ * Потолок невычитанного (#167): ведро ограничивает скорость, а не размер, и программа, молчащая и не читающая stdin, копила бы очередь без предела (до 900 МиБ в час).
+ * node-pty 1.1 очередь записи и события дренажа не отдаёт, и приватное `_writeStream._writeQueue` не читается, поэтому признаком чтения служит вывод программы:
+ * принятое без единого байта её вывода (`heard()`) считается непрочитанным, а сверх `queue` ввод отклоняется. Программа, которая печатает и не читает, потолок обнуляет.
  */
 export class InputBudget {
   readonly #burst: number;
   readonly #rate: number;
   readonly #now: () => number;
+  readonly #queue: number;
   #left: number;
   #at: number;
+  /** Принято после последнего вывода программы. */
+  #queued = 0;
 
-  constructor(burst: number, rate: number, now: () => number = () => Date.now()) {
+  constructor(burst: number, rate: number, queue = Infinity, now: () => number = () => Date.now()) {
     this.#burst = burst;
     this.#rate = rate;
+    this.#queue = queue;
     this.#now = now;
     this.#left = burst;
     this.#at = now();
@@ -30,7 +38,16 @@ export class InputBudget {
     if (bytes > this.#left) {
       throw new CoreError('Invalid', `pty: ввод быстрее ${String(this.#rate)} Б/с и сверх запаса ${String(this.#burst)} Б - программа не успевает читать, повторите позже`);
     }
+    if (this.#queued + bytes > this.#queue) {
+      throw new CoreError('Invalid', `pty: программа не читает ввод - принято ${String(this.#queued)} Б без её вывода, предел ${String(this.#queue)} Б; повторите, когда программа ответит`);
+    }
     this.#left -= bytes;
+    this.#queued += bytes;
+  }
+
+  /** Программа вывела байты: она жива и обрабатывает ввод, счёт непрочитанного начинается заново. */
+  heard(): void {
+    this.#queued = 0;
   }
 }
 

@@ -27,7 +27,7 @@ jobs:
       - uses: ./.github/actions/install
       # Бинарник Electron скачивается лениво, при первом `require('electron')` в тесте (core/test/package.test.ts, playground/test/host-electron.test.ts),
       # и сбой сети (504 с GitHub Releases) красил тест, а не шаг. Кэш по lock-файлу (в нём версия Electron) и скачивание с повтором - до тестов.
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/Library/Caches/electron
@@ -113,7 +113,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/install
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/Library/Caches/electron
@@ -161,9 +161,9 @@ jobs:
       - run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-docs-trace.ts
 
   # Уязвимости в продакшен-зависимостях (P-10). Дерево берётся из lock-файла, установка не нужна.
-  # Пакеты, которые получает потребитель (контракты, ядро, адаптер, тест-кит, cyborg-plugin), блокируют при high и выше;
-  # стенд playground (monaco-editor, xterm, node-pty в корне) не поставляется и только предупреждает: сейчас monaco-editor 0.57 тянет dompurify
-  # с критической уязвимостью, а `npm audit fix` предлагает лишь откат на 0.56.0. Когда у monaco-editor выйдет исправление - перевести шаг в блокирующий.
+  # Пакеты, которые получает потребитель (контракты, ядро, адаптер, тест-кит, cyborg-plugin), и стенд playground (monaco-editor, xterm, node-pty в корне)
+  # блокируют при high и выше. monaco-editor 0.57 приносил dompurify с критической уязвимостью, и шаг стенда был только предупреждением (#172): исправление
+  # вышло в 0.58.0-dev-20261109 (внутри DOMPurify 3.4.17), стенд закреплён на нём; на стабильный 0.58 перейти, когда он выйдет.
   audit:
     name: npm audit
     runs-on: ubuntu-24.04
@@ -182,6 +182,5 @@ jobs:
             echo "::endgroup::"
           done
           exit $failed
-      - name: стенд playground (предупреждение)
-        run: |
-          npm audit --omit=dev --audit-level=high || echo "::warning::npm audit стенда нашёл уязвимости в продакшен-зависимостях корня; пакеты для потребителя чисты"
+      - name: стенд playground (блокирует)
+        run: npm audit --omit=dev --audit-level=high

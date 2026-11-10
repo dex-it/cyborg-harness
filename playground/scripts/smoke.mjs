@@ -583,6 +583,30 @@ async function main() {
   await type('echo до-$((6*7))');
   await waitFor('терминал вида ответил', async () => /до-42/.test(await screen()));
 
+  // Г2 (FR-CH-4001): вызов моста из вида в окне попадает в трассу и в файл диагностики; сам вид (`ctx.commands.run('echo.terminal')` и `ctx.terminal.open`) вызывает мост при подключении терминала.
+  const bridgeOps = () =>
+    existsSync(join(userData, 'diagnostics'))
+      ? readdirSync(join(userData, 'diagnostics')).flatMap((dir) => {
+          const file = join(userData, 'diagnostics', dir, 'diagnostics.log');
+          if (!existsSync(file)) return [];
+          return readFileSync(file, 'utf8')
+            .split('\n')
+            .flatMap((line) => {
+              try {
+                const stored = JSON.parse(line);
+                return stored.src === 'trace' && stored.record.kind === 'operation' && stored.record.caller === 'view:echo' && stored.record.boundaries.includes('bridge') ? [stored.record] : [];
+              } catch {
+                return [];
+              }
+            });
+        })
+      : [];
+  const viaBridge = await waitFor('запись трассы с границей bridge от вида echo в файле диагностики', () => bridgeOps().find((r) => r.target === 'command:echo.terminal'));
+  assert.equal(viaBridge.outcome, 'ok');
+  assert.ok(viaBridge.boundaries.includes('bridge') && viaBridge.chain > 0, `границы: ${viaBridge.boundaries.join(',')}`);
+  assert.ok(bridgeOps().some((r) => r.target === 'bridge:view.terminal'), 'открытие терминала видом - тоже запись Г2');
+  log('трасса Г2: вызов моста из вида echo в окне записан с границей bridge в файл диагностики');
+
   const windows = () => main("process.mainModule.require('electron').BrowserWindow.getAllWindows().length");
   assert.equal(await inView('echo', "window.open('https://example.com/login') === null"), true, 'window.open вида вернул окно');
   await sleep(500);
@@ -1063,6 +1087,39 @@ async function main() {
   assert.deepEqual(await ev('window.__form'), {}, 'Escape не вернул владельцу undefined');
   await waitFor('Escape закрыл окно', async () => !(await modalOpen()));
   assert.ok(lines().some((l) => l.includes('panels: форма вернула: ничего')), 'владелец не узнал об отмене');
+
+  // #163: размер окна от автора и Escape, оставленный виду. Окно 700 x 300; Escape доходит до вида и окно не закрывает, закрывает кнопка вида.
+  await ev("(window.__own = window.playground.runCommand('panels.form-own'), 0)");
+  await waitFor('окно с размером автора показано', modalOpen);
+  assert.equal(await ev("document.querySelector('dialog.layer-modal').style.width"), 'min(700px, 90vw)', 'размер окна не от автора');
+  assert.equal(await ev("document.querySelector('dialog.layer-modal').dataset.escape"), 'view', 'слой не знает, что Escape у вида');
+  const ownBox = await ev("(() => { const r = document.querySelector('dialog.layer-modal').getBoundingClientRect(); return { width: r.width, height: r.height, vw: window.innerWidth, vh: window.innerHeight }; })()");
+  assert.ok(Math.abs(ownBox.width - Math.min(700, ownBox.vw * 0.9)) <= 2 && Math.abs(ownBox.height - Math.min(300, ownBox.vh * 0.8)) <= 2, `размер окна на экране не 700 x 300: ${JSON.stringify(ownBox)}`);
+  await waitFor('вид окна смонтирован', async () => (await inForm("document.getElementById('escaped') !== null")) === true);
+  // Две половины одного пути. Главный процесс видит настоящее нажатие Escape (sendInputEvent, тот же вход, что у `press` выше) и не гасит его: окно остаётся.
+  await main(`(() => {
+    const { webContents } = process.mainModule.require('electron');
+    const page = webContents.getAllWebContents().find((w) => w.getType() === 'window');
+    globalThis.__escapeSeen = [];
+    // Слушатель добавлен после слушателя bindWindow: к его вызову нажатие уже погашено, если ядро решило его взять.
+    page.on('before-input-event', (event, input) => {
+      if (input.type === 'keyDown' && input.key === 'Escape') globalThis.__escapeSeen.push({ kind: typeof event.defaultPrevented, prevented: event.defaultPrevented });
+    });
+  })()`);
+  await press('Escape');
+  await waitFor('главный процесс получил Escape', async () => (await main('globalThis.__escapeSeen.length')) === 1);
+  assert.deepEqual(await main('globalThis.__escapeSeen'), [{ kind: 'boolean', prevented: false }], 'главный процесс погасил Escape, который окно оставило виду');
+  assert.equal(await modalOpen(), true, 'Escape закрыл окно, которое оставило его виду');
+  // Вторая половина: клавиша, пришедшая во фрейм вида, доходит до его обработчика (как для Monaco, через протокол DevTools и программный фокус).
+  await ev("document.querySelector('dialog.layer-modal iframe').focus()");
+  await main("process.mainModule.require('electron').webContents.getAllWebContents().find((w) => w.getType() === 'window').focus()");
+  await inForm("document.getElementById('name').focus()");
+  for (const type of ['rawKeyDown', 'keyUp']) await ev.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await waitFor('Escape дошёл до вида', async () => (await inForm("document.getElementById('escaped')?.textContent ?? null")) === 'Escape получил вид');
+  assert.equal(await modalOpen(), true, 'вид получил Escape, но окно закрылось само');
+  await inForm("document.getElementById('cancel').click()");
+  await waitFor('окно снято кнопкой вида', async () => !(await modalOpen()));
+  assert.deepEqual(await ev('window.__own'), {}, 'владелец не получил undefined');
 
   // Диалог из главной части без вида (ctx.dialogs.show): очередь окна та же, что у диалогов видов.
   await ev("(window.__confirm = window.playground.runCommand('panels.confirm'), 0)");

@@ -265,13 +265,16 @@ export interface HttpServer {
     readonly url: string;
     dispose(): void;
 }
+export interface WatchOptions {
+    readonly recursive?: boolean;
+}
 export interface OsFs {
     readText(path: string): Promise<string>;
     list(dir: string): Promise<DirEntry[]>;
     stat(path: string): Promise<FileStat>;
     realpath(path: string): Promise<string>;
     readSlice(path: string, offset: number, maxBytes: number): Promise<FileSlice>;
-    watch(path: string, listener: (names: readonly string[]) => void, onClose?: (reason: string) => void): Promise<Disposable>;
+    watch(path: string, listener: (names: readonly string[]) => void, onClose?: (reason: string) => void, options?: WatchOptions): Promise<Disposable>;
     writeText(path: string, text: string): Promise<void>;
     mkdir(path: string): Promise<void>;
     remove(path: string): Promise<void>;
@@ -510,9 +513,15 @@ export interface ViewChannel {
     post(message: unknown): Promise<void>;
     onMessage(listener: (message: unknown) => void): Disposable;
 }
+export interface ModalSize {
+    readonly width?: number;
+    readonly height?: number;
+}
 export interface ModalInit {
     readonly title?: string;
     readonly data?: unknown;
+    readonly size?: ModalSize;
+    readonly escape?: 'close' | 'view';
 }
 export interface PluginViews {
     channel(view: string): ViewChannel;

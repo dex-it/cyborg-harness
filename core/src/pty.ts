@@ -70,7 +70,7 @@ export interface KeptPty extends PtyInfo {
   readonly keptAt: number;
 }
 
-export type PtyLimits = Pick<ResourceLimits, 'ptyInput' | 'ptyInputBurst' | 'ptyInputRate' | 'ptys' | 'ptyFlushMs' | 'ptyFlushChars'>;
+export type PtyLimits = Pick<ResourceLimits, 'ptyInput' | 'ptyInputBurst' | 'ptyInputRate' | 'ptyQueue' | 'ptys' | 'ptyFlushMs' | 'ptyFlushChars'>;
 
 /** Льготный срок pty без владельца и уведомления приложению: срок вышел, список оставленных поменялся. */
 export interface PtyOrphan {
@@ -127,13 +127,15 @@ export class PtyTable {
     this.#expired = options.expired ?? (() => undefined);
     this.#keptChanged = options.kept ?? (() => undefined);
     this.#host = options;
-    this.#max = { ptyInput: options.ptyInput ?? LIMITS.ptyInput, ptyInputBurst: options.ptyInputBurst ?? LIMITS.ptyInputBurst, ptyInputRate: options.ptyInputRate ?? LIMITS.ptyInputRate, ptys: options.ptys ?? LIMITS.ptys, ptyFlushMs: options.ptyFlushMs ?? LIMITS.ptyFlushMs, ptyFlushChars: options.ptyFlushChars ?? LIMITS.ptyFlushChars };
+    this.#max = { ptyInput: options.ptyInput ?? LIMITS.ptyInput, ptyInputBurst: options.ptyInputBurst ?? LIMITS.ptyInputBurst, ptyInputRate: options.ptyInputRate ?? LIMITS.ptyInputRate, ptyQueue: options.ptyQueue ?? LIMITS.ptyQueue, ptys: options.ptys ?? LIMITS.ptys, ptyFlushMs: options.ptyFlushMs ?? LIMITS.ptyFlushMs, ptyFlushChars: options.ptyFlushChars ?? LIMITS.ptyFlushChars };
     this.#link = new PtyLink(spawnHost, {
       init: { ...this.#max, backlog: options.backlog ?? BACKLOG_LIMIT },
       watchdog: options.watchdog,
       events: {
         data: (key, data) => {
           const e = this.#entries.get(key);
+          // Вывод - признак, что программа жива и читает: счёт непрочитанного ввода начинается заново (#167), кому бы вывод ни шёл.
+          e?.budget.heard();
           if (e?.attached) this.#push(e.pluginId, 'pty.data', { pluginId: e.pluginId, id: e.id, data });
         },
         exit: (key, exit) => this.#exited(key, exit),
@@ -150,7 +152,7 @@ export class PtyTable {
     // Терминал на той стороне - xterm.js вида: TERM и COLORTERM описывают его, а не окно, из которого запустили приложение.
     const env = { COLORTERM: 'truecolor', ...o.env };
     // Запись встаёт в таблицу до ответа хоста: предел живых pty и падение владельца видят и запуск, который ещё в пути.
-    const e: Entry = { id: `pty-${String(++this.#next)}`, pluginId, pid: undefined, program: o.program, args: o.args, persist: o.persist, attached: true, lost: false, turn: 0, attaching: 0, views: new Set(), budget: new InputBudget(this.#max.ptyInputBurst, this.#max.ptyInputRate), keptAt: undefined };
+    const e: Entry = { id: `pty-${String(++this.#next)}`, pluginId, pid: undefined, program: o.program, args: o.args, persist: o.persist, attached: true, lost: false, turn: 0, attaching: 0, views: new Set(), budget: new InputBudget(this.#max.ptyInputBurst, this.#max.ptyInputRate, this.#max.ptyQueue), keptAt: undefined };
     this.#entries.set(e.id, e);
     try {
       e.pid = await this.#link.spawn({ key: e.id, file: o.program, args: o.args, options: { name: 'xterm-256color', ...(o.cwd !== undefined && { cwd: o.cwd }), env, cols: o.cols, rows: o.rows } });
