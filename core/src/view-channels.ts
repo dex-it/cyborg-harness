@@ -1,10 +1,28 @@
 import { serialize } from 'node:v8';
+import type { ModalSize } from '@cyborg-harness/contracts';
 import { CoreError, errorMessage } from './errors.ts';
 import type { BridgeEnd, KernelContext, ViewChannels } from './kernel-context.ts';
 import type { PluginManifest } from './manifest.ts';
 import { isRecord } from './wire.ts';
 
 const MAX_TITLE = 200;
+const MODAL_SIDE = { min: 100, max: 4096 } as const;
+
+/** Размер окна от автора - недоверенные данные: целые пиксели в пределах, лишних полей нет. */
+function parseModalSize(pluginId: string, raw: unknown): ModalSize | undefined {
+  if (raw === undefined) return undefined;
+  const bad = (): never => {
+    throw new CoreError('Invalid', `${pluginId}: size окна - { width?, height? }, целые пиксели от ${String(MODAL_SIDE.min)} до ${String(MODAL_SIDE.max)}`);
+  };
+  if (!isRecord(raw) || Array.isArray(raw)) return bad();
+  const out: { width?: number; height?: number } = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (key !== 'width' && key !== 'height') return bad();
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < MODAL_SIDE.min || value > MODAL_SIDE.max) return bad();
+    out[key] = value;
+  }
+  return out;
+}
 
 /**
  * Канал «главная часть - вид» (SAD 3.8, FR-CH-2027). Ядро только связывает: плагин и имя вида берёт из канала хоста и из origin фрейма,
@@ -31,12 +49,15 @@ export function createViewChannels(ctx: KernelContext): ViewChannels {
     ctx.parts.views.viewKey(m.id, view);
     const place = m.ui?.placement?.[view];
     if (place?.area !== 'modal') throw new CoreError('Invalid', `${m.id}: вид ${view} не объявлен модальным (ui.views.${view}.area: "modal")`);
-    if (init !== undefined && !isRecord(init)) throw new CoreError('Invalid', `${m.id}: модальное окно - { title?, data? }`);
+    if (init !== undefined && !isRecord(init)) throw new CoreError('Invalid', `${m.id}: модальное окно - { title?, data?, size?, escape? }`);
     const title = init?.title ?? place.title ?? m.id;
     if (typeof title !== 'string' || title.length === 0 || title.length > MAX_TITLE) throw new CoreError('Invalid', `${m.id}: название окна - строка от 1 до ${String(MAX_TITLE)} символов`);
     checkSize(m.id, view, init?.data);
+    const size = parseModalSize(m.id, init?.size);
+    const escape = init?.escape;
+    if (escape !== undefined && escape !== 'close' && escape !== 'view') throw new CoreError('Invalid', `${m.id}: escape окна - "close" или "view"`);
     if (ctx.unloading) throw new CoreError('Unavailable', 'ядро выгружается');
-    return layer.showModal(m.id, view, title, init?.data).result;
+    return layer.showModal(m.id, view, title, init?.data, { ...(size && { size }), ...(escape && { escape }) }).result;
   }
 
   function attach({ live, onRequest }: BridgeEnd): void {

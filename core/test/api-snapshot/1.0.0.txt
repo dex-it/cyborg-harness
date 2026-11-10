@@ -40,6 +40,7 @@ interface KeyWhen
 interface KeybindingSpec
 interface ListItem
 interface ModalInit
+interface ModalSize
 interface NotifyClick
 interface NotifyOptions
 interface OpenDialogOptions
@@ -157,7 +158,11 @@ member ListItem.detail :: readonly optional prop string
 member ListItem.id :: readonly prop string
 member ListItem.label :: readonly prop string
 member ModalInit.data :: readonly optional prop unknown
+member ModalInit.escape :: readonly optional union
+member ModalInit.size :: readonly optional prop ModalSize
 member ModalInit.title :: readonly optional prop string
+member ModalSize.height :: readonly optional prop number
+member ModalSize.width :: readonly optional prop number
 member NotifyClick.args :: readonly optional prop readonly unknown[]
 member NotifyClick.command :: readonly prop string
 member NotifyOptions.onClick :: readonly optional prop NotifyClick
@@ -491,6 +496,8 @@ variant KeyWhen.input | 'not-text'
 variant LogLevel | 'error'
 variant LogLevel | 'info'
 variant LogLevel | 'warn'
+variant ModalInit.escape | 'close'
+variant ModalInit.escape | 'view'
 variant ProcessResult.code | null
 variant ProcessResult.code | number
 variant ProcessResult.signal | null
