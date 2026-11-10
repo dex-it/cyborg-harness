@@ -6,6 +6,7 @@ import type { MessagePortMain } from 'electron';
 import type { PtyExit } from '@cyborg-harness/contracts';
 import { inlinePtyHost, PtyTable, type PtyProcess, type TerminalChannel, type TerminalView } from '@cyborg-harness/core';
 import { ViewTerminals, type PortPair, type TerminalFrame } from '../src/view-terminals.ts';
+import { waitFor } from './wait-for.ts';
 
 function frame(routingId: number) {
   const sent: unknown[] = [];
@@ -37,7 +38,7 @@ test('терминалы вида: порт уходит фрейму и pty-х�
     (_pluginId, ticket, ch) => {
       if (ticket !== 'билет') return Promise.reject(new Error('билет терминала не найден'));
       channel = ch;
-      const view: TerminalView = { id: 'pty-1', pid: 7, program: '/bin/sh', args: [], persist: true, backlog: '$ ', close: () => void done.push('close') };
+      const view: TerminalView = { id: 'pty-1', pid: 7, program: '/bin/sh', args: [], persist: true, backlog: '$ ', input: 1024, close: () => void done.push('close') };
       return Promise.resolve(view);
     },
     () => {
@@ -54,7 +55,7 @@ test('терминалы вида: порт уходит фрейму и pty-х�
   assert.deepEqual(pairs[0]?.closed, ['host', 'view'], 'после отказа порты остались открытыми');
 
   const opened = await terminals.open(own, 'echo', 'билет');
-  assert.deepEqual(opened, { value: { id: 'pty-1', pid: 7, program: '/bin/sh', args: [], persist: true, backlog: '$ ', tid: 2 } });
+  assert.deepEqual(opened, { value: { id: 'pty-1', pid: 7, program: '/bin/sh', args: [], persist: true, backlog: '$ ', input: 1024, tid: 2 } });
   assert.equal(channel?.hostEnd, pairs[1]?.pair.port1, 'ядру ушёл не тот конец порта');
   assert.deepEqual(own.posted.map((p) => [p.channel, p.message]), [['view:terminal:port', { tid: 2 }]]);
   assert.deepEqual(own.posted[0]?.transfer, [pairs[1]?.pair.port2], 'фрейм получил не свой конец порта');
@@ -73,7 +74,7 @@ test('терминалы вида: pty-хост потерян - вид узна
   const terminals = new ViewTerminals(
     (_p, _t, ch) => {
       channels.push(ch);
-      return Promise.resolve({ id: 'pty-1', pid: 7, program: 'sh', args: [], persist: false, backlog: '', close: () => undefined });
+      return Promise.resolve({ id: 'pty-1', pid: 7, program: 'sh', args: [], persist: false, backlog: '', input: 1024, close: () => undefined });
     },
     () => fakePair().pair,
   );
@@ -98,7 +99,7 @@ test('терминалы вида: фрейм ушёл, пока термина�
   const done: string[] = [];
   const pairs: ReturnType<typeof fakePair>[] = [];
   const terminals = new ViewTerminals(
-    () => Promise.resolve({ id: 'pty-1', pid: 7, program: 'sh', args: [], persist: false, backlog: '', close: () => void done.push('close') }),
+    () => Promise.resolve({ id: 'pty-1', pid: 7, program: 'sh', args: [], persist: false, backlog: '', input: 1024, close: () => void done.push('close') }),
     () => {
       const p = fakePair();
       pairs.push(p);
@@ -145,7 +146,7 @@ test('терминалы вида на таблице ядра: тысяча к�
 
   channel.port2.postMessage({ id: 1, op: 'write', data: 'много' });
   channel.port2.postMessage({ id: 2, op: 'write', data: 'ls\r' });
-  await sleep(30);
+  await waitFor('pty-хост ответил на оба ввода', () => events.some((e) => e.id === 1) && events.some((e) => e.id === 2));
   assert.match(events.find((e) => e.id === 1)?.error ?? '', /больше 4 байт/);
   assert.equal(events.find((e) => e.id === 2)?.ok, true);
   assert.deepEqual(writes, ['ls\r']);
@@ -157,7 +158,7 @@ test('терминалы вида на таблице ядра: тысяча к�
     if (i === 499) await sleep(10);
   }
   for (const l of exits) l({ exitCode: 0 });
-  await sleep(50);
+  await waitFor('выход дошёл до порта вида', () => events.at(-1)?.exit !== undefined);
   const output = events.filter((e) => e.data !== undefined);
   assert.equal(output.map((e) => e.data).join(''), all);
   assert.ok(output.length < 10, `в порт ушло ${String(output.length)} сообщений на 1000 кусков`);
@@ -174,7 +175,7 @@ test('терминалы вида: канал закрыт, пока шёл open
   const terminals = new ViewTerminals(
     (_p, _t, ch) => {
       ch.closed(state.lost);
-      return Promise.resolve({ id: 'pty-1', pid: 7, program: 'sh', args: [], persist: false, backlog: '', close: () => void done.push('close') });
+      return Promise.resolve({ id: 'pty-1', pid: 7, program: 'sh', args: [], persist: false, backlog: '', input: 1024, close: () => void done.push('close') });
     },
     () => {
       const p = fakePair();

@@ -14,14 +14,16 @@ export interface PortLike {
 interface Open {
   readonly port: PortLike;
   readonly pending: Map<number, (reply: Reply) => void>;
+  /** Предел одного ввода, байт, который назвало ядро при открытии; без него размер ввода проверяет только pty-хост. */
+  readonly maxInput: number | undefined;
   next: number;
 }
 
 export interface TerminalPorts {
   /** Порт терминала пришёл от главного процесса (может обогнать ответ на `view:terminal:open`). */
   arrived(tid: number, port: PortLike): void;
-  /** Ждёт порт терминала и включает приём; `false` - порт не пришёл за отведённое время, опоздавший будет закрыт. */
-  connect(tid: number): Promise<boolean>;
+  /** Ждёт порт терминала и включает приём; `maxInput` - предел одного ввода (в ответе ядра на открытие); `false` - порт не пришёл за отведённое время, опоздавший будет закрыт. */
+  connect(tid: number, maxInput?: number): Promise<boolean>;
   /** Ввод или размер: запрос в порт с номером, ответ pty-хоста с тем же номером. */
   request(tid: number, message: Record<string, unknown>): Promise<Reply>;
   close(tid: number): void;
@@ -74,7 +76,7 @@ export function terminalPorts(waitMs = 5000): TerminalPorts {
         wait(port);
       } else arrivedPorts.set(tid, port);
     },
-    async connect(tid) {
+    async connect(tid, maxInput) {
       let port = arrivedPorts.get(tid);
       arrivedPorts.delete(tid);
       port ??= await new Promise<PortLike | undefined>((resolve) => {
@@ -89,7 +91,7 @@ export function terminalPorts(waitMs = 5000): TerminalPorts {
         });
       });
       if (!port) return false;
-      const entry: Open = { port, pending: new Map(), next: 0 };
+      const entry: Open = { port, pending: new Map(), maxInput, next: 0 };
       open.set(tid, entry);
       port.onmessage = (event) => received(tid, entry, event.data);
       return true;
@@ -97,6 +99,10 @@ export function terminalPorts(waitMs = 5000): TerminalPorts {
     request(tid, message) {
       const entry = open.get(tid);
       if (!entry) return Promise.resolve(closed(tid));
+      // Огромная строка не дойдёт до pty-хоста, чтобы быть отвергнутой там: структурное копирование в порт стоит памяти обеих сторон.
+      if (message.op === 'write' && entry.maxInput !== undefined && typeof message.data === 'string' && message.data.length > entry.maxInput) {
+        return Promise.resolve({ error: `terminal.write: ввод больше ${String(entry.maxInput)} байт - разбейте его на части` });
+      }
       const id = ++entry.next;
       return new Promise<Reply>((resolve) => {
         entry.pending.set(id, resolve);

@@ -82,7 +82,7 @@ export class ViewTerminals {
     }
     // Обычный выход порт доставит сам: фрейм получает его и читает выход оттуда.
     if (ended === undefined) this.#open.set(tid, { frame, view });
-    return { value: { id: view.id, pid: view.pid, program: view.program, args: view.args, persist: view.persist, backlog: view.backlog, tid } };
+    return { value: { id: view.id, pid: view.pid, program: view.program, args: view.args, persist: view.persist, backlog: view.backlog, input: view.input, tid } };
   }
 
   close(frame: TerminalFrame, tid: unknown): void {

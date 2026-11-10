@@ -12,6 +12,7 @@ import { inlineHosts } from '../src/transports.ts';
 import { keepFocus } from '../src/ui-shell.ts';
 import { KERNEL_OWNER, parseDialog, reservedId, WINDOW_OWNER, WindowLayer, type WindowSnapshot } from '../src/window-layer.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
+import { waitFor } from './wait-for.ts';
 
 const shown = (layer: WindowLayer) => layer.snapshot.dialog;
 const shownId = (layer: WindowLayer): number => {
@@ -177,7 +178,7 @@ test('замок окна: только с правом, сочетания и �
   assert.deepEqual(notes, ['Cyborg: новое событие']);
 
   handles.get('p')?.kill();
-  await new Promise((r) => setTimeout(r, 50));
+  await waitFor('сторож записал падение хоста', () => k.journal.some((e) => e.kind === 'host-down'));
   await k.idle();
   assert.deepEqual(k.window.locks, [{ pluginId: 'pin', hideNotifications: true }], 'хост владельца упал - окно закрыто');
   assert.ok(k.active.includes('pin'), 'сторож вернул плагин замка');
