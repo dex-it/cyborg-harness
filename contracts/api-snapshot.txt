@@ -475,9 +475,15 @@ export interface ViewChannel {
     post(message: unknown): Promise<void>;
     onMessage(listener: (message: unknown) => void): Disposable;
 }
+export interface ModalSize {
+    readonly width?: number;
+    readonly height?: number;
+}
 export interface ModalInit {
     readonly title?: string;
     readonly data?: unknown;
+    readonly size?: ModalSize;
+    readonly escape?: 'close' | 'view';
 }
 export interface PluginViews {
     channel(view: string): ViewChannel;

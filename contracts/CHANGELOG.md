@@ -20,6 +20,7 @@
 - `OsFs.realpath` [minor]: настоящий путь с проверкой области; ссылка наружу - `PermissionDenied`, нет пути - `NotFound` (K-12).
 - `PluginContext.views`, `PluginViews`, `ViewChannel`, `UiContext.channel` [minor]: канал «главная часть - вид» по имени вида, `post` и `onMessage` в обе стороны, сообщение до 64 КиБ (K-13).
 - `PluginViews.modal`, `ModalInit`, `UiContext.modal`, `ViewModal`, область `modal` в `ui.views` [minor]: модальное окно плагина - вид с `area: "modal"`, главная часть открывает его `ctx.views.modal(view, { title?, data? })` и получает результат из `ctx.modal.close(result)` вида; Escape и выгрузка плагина дают `undefined` (K-13).
+- `ModalInit.size`, `ModalSize`, `ModalInit.escape` [minor]: размер модального окна задаёт автор (`{ width?, height? }`, целые пиксели от 100 до 4096), а `escape: "view"` оставляет Escape виду окна вместо закрытия окна ядром (#163).
 - `PluginContext.dialogs`, `PluginDialogs`, `AskDialog` [minor]: `ctx.dialogs.show(ask)` - вопрос человеку из главной части без вида, в той же очереди окна, что диалоги видов; `menu` у главной части нет (K-13).
 - `PluginContext.log`, `LogLevel` [minor]: второй необязательный параметр `level` (`info`, `warn`, `error`; по умолчанию `info`), существующие плагины с одним аргументом работают как прежде; ядро обрезает строку длиннее предела и не кладёт в журнал по одной строки сверх предела частоты (K-29).
 
