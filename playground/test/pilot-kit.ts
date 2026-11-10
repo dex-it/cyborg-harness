@@ -60,6 +60,7 @@ const probe = {
       ctx.subscriptions.add({ dispose: () => void Promise.resolve(sub).then((s) => s.dispose(), () => undefined) });
     });
     ctx.commands.register(ctx.pluginId + '.events', () => events.splice(0));
+    ctx.commands.register(ctx.pluginId + '.run', (command, ...args) => ctx.commands.run(command, ...args));
     return undefined;
   },
 };
@@ -73,7 +74,7 @@ export interface Pilot {
   /** Запуски git: по строке на запуск, как их видит программа-обёртка в PATH. */
   gitRuns(): Promise<string[]>;
   /** fs.watch шлюза: открытые за всё время, закрытые, события до склейки. */
-  readonly watches: { readonly opened: string[]; closed: number; raw: number; readonly live: () => number };
+  readonly watches: { readonly opened: string[]; closed: number; raw: number; peak: number; readonly live: () => number };
   [Symbol.asyncDispose](): Promise<void>;
 }
 
@@ -109,17 +110,18 @@ export async function startPilot(options: PilotOptions): Promise<Pilot> {
   for (const probe of options.probes ?? []) {
     const dir = box.path('probes', probe.id);
     await mkdir(dir, { recursive: true });
-    const commands = Object.fromEntries([['call', { args: ['string', 'string'], rest: 'any' }], ['watch', { args: ['string', 'string'], rest: 'any' }], ['events', {}]].map(([n, s]) => [`${probe.id}.${n as string}`, s]));
+    const commands = Object.fromEntries([['call', { args: ['string', 'string'], rest: 'any' }], ['watch', { args: ['string', 'string'], rest: 'any' }], ['events', {}], ['run', { args: ['string'], rest: 'any' }]].map(([n, s]) => [`${probe.id}.${n as string}`, s]));
     manifests.push({ id: probe.id, version: '1.0.0', engines: { cyborg: '^1' }, commands, ...(probe.permissions && { permissions: probe.permissions }), ...(probe.requires && { requires: probe.requires }), ...(probe.consumes && { consumes: probe.consumes }) });
     await writeFile(path.join(dir, 'index.ts'), PROBE_CODE);
     entries.set(probe.id, pathToFileURL(path.join(dir, 'index.ts')).href);
   }
 
-  const watches = { opened: [] as string[], closed: 0, raw: 0, live: () => watches.opened.length - watches.closed };
+  const watches = { opened: [] as string[], closed: 0, raw: 0, peak: 0, live: () => watches.opened.length - watches.closed };
   type Watch = (target: string, listener: (event: string, name: string | null) => void) => FSWatcher;
   const inner = (options.watch ?? watchFs) as unknown as Watch;
   const counted = ((target: string, listener: (event: string, name: string | null) => void) => {
     watches.opened.push(target);
+    watches.peak = Math.max(watches.peak, watches.live());
     const w = inner(target, (event, name) => {
       watches.raw++;
       listener(event, name);
