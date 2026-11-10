@@ -322,7 +322,7 @@ test('files: ОС потеряла события каталогов при chec
   assert.ok(st.counters.resyncs >= 1);
 });
 
-test('files: лавина событий, из которых ОС доставила только начало - после тишины узлы, где были события, перечитываются целиком', async () => {
+test('files: лавина событий, из которых ОС доставила только начало - после тишины перечитываются все узлы', async () => {
   const many = Object.fromEntries(Array.from({ length: 150 }, (_, i) => [`bulk/f${String(i).padStart(3, '0')}.txt`, 'x']));
   const gate = { left: Infinity };
   const drop = (target: string): boolean => {
