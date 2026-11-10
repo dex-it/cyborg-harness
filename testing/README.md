@@ -8,7 +8,7 @@
 
 | Имя | Что делает |
 |---|---|
-| `startKernel({ plugins, os, enabled, config, state, load })` | Собирает манифесты и точки входа, вызывает `load()` на хостах внутри процесса теста (`inlineHosts`). Возвращает ядро (`Kernel`) с `waitForJournal`, `dataDir`, `sandbox`, `pty`, `secrets` и снятием через `Symbol.asyncDispose` |
+| `startKernel({ plugins, os, enabled, config, state, load })` | Собирает манифесты и точки входа, вызывает `load()` на хостах внутри процесса теста (`inlineHosts`). Схемы `config.schema` и `state.schema` читает из каталога плагина сам (свой `load.schema` заменяет чтение). Возвращает ядро (`Kernel`) с `waitForJournal`, `dataDir`, `sandbox`, `pty`, `secrets` и снятием через `Symbol.asyncDispose` |
 | `fakePty()` | Поддельный pty: тест видит запущенные процессы (`procs`), сам пишет вывод (`emit`) и завершает процесс (`exit`) |
 | `memoryStore(initial?)` | Слои `config` и `state` в памяти (`LayerStore`), список записанных слоёв |
 | `memorySecrets(available?)` | Хранилище секретов в памяти; `false` изображает систему без хранилища |
