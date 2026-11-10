@@ -1,6 +1,7 @@
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import { setImmediate as tick } from 'node:timers/promises';
 import assert from 'node:assert/strict';
+import type { PluginContext } from '@cyborg-harness/contracts';
 import { memoryStore as memory } from '../../testing/src/memory.ts';
 import { SectionStore } from '../src/config.ts';
 import { toDisposable } from '../src/disposable.ts';
@@ -12,6 +13,7 @@ import { describeEntry, entryLevel, pluginStatuses } from '../src/status.ts';
 import { startCancel } from './fixtures/cancel.ts';
 import './fixtures/contracts.ts';
 import { MENU_OWNER } from '../src/window-layer.ts';
+import { waitFor } from './wait-for.ts';
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 
@@ -330,6 +332,104 @@ test('пространство поставки: отказ стороннему
   await open.unload();
 });
 
+// K-04: группы рендера - origin и процесс рендера на группу; граница доверия видов - группа, поэтому сторонний не делит её ни с кем.
+test('группы рендера: ui.group - рекомендация, plugins.uiGroups её перекрывает, без группы - id плагина, без ui группы нет', async () => {
+  const noop: PluginModule = { activate: () => undefined };
+  const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
+  const ids = ['a', 'b', 'c', 'd', 'e', 'logic'];
+  const k = await kernel(Object.fromEntries(ids.map((id) => [id, noop])), {
+    enabled: ids,
+    manifests: [manifest('a', view('panels')), manifest('b', view('panels')), manifest('c', view('panels')), manifest('d', view()), manifest('e', view('panels')), manifest('logic')],
+    bundled: ids,
+    uiGroups: { solo: ['c'], tools: ['d', 'e'] },
+  });
+  assert.deepEqual(
+    ids.map((id) => [id, k.groupOf(id)]),
+    [
+      ['a', 'panels'],
+      ['b', 'panels'],
+      ['c', 'solo'],
+      ['d', 'tools'],
+      ['e', 'tools'],
+      ['logic', undefined],
+    ],
+  );
+  assert.equal(k.groupOf('nobody'), undefined);
+  assert.deepEqual(
+    k.journal.filter((e) => e.kind === 'group-isolated'),
+    [],
+  );
+  await k.unload();
+  const plain = await kernel({ a: noop, b: noop }, { enabled: ['a', 'b'], manifests: [manifest('a', view()), manifest('b', view())], bundled: ['a', 'b'] });
+  assert.deepEqual([plain.groupOf('a'), plain.groupOf('b')], ['a', 'b'], 'без группы - своя, по id плагина');
+  await plain.unload();
+});
+
+test('группы рендера: сторонний всегда один в своей группе, запись group-isolated только если ему было с кем делить', async () => {
+  const noop: PluginModule = { activate: () => undefined };
+  const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
+  const ids = ['files', 'tree', 'x', 'y', 'z', 'w'];
+  const k = await kernel(Object.fromEntries(ids.map((id) => [id, noop])), {
+    enabled: ids,
+    // x просит группу tools из конфига пользователя, y - из своего манифеста, z называет id плагина поставки, а не группу, w просит группу, где он один: делить обоим нечего.
+    manifests: [manifest('files', view('panels')), manifest('tree', view('panels')), manifest('x', view()), manifest('y', view('panels')), manifest('z', view('files')), manifest('w', view('mine'))],
+    bundled: ['files', 'tree'],
+    uiGroups: { panels: ['x'] },
+  });
+  assert.deepEqual(
+    ids.map((id) => [id, k.groupOf(id)]),
+    [
+      ['files', 'panels'],
+      ['tree', 'panels'],
+      ['x', 'solo_x'],
+      ['y', 'solo_y'],
+      ['z', 'solo_z'],
+      ['w', 'solo_w'],
+    ],
+  );
+  assert.deepEqual(
+    k.journal.filter((e) => e.kind === 'group-isolated'),
+    [
+      { pluginId: 'x', kind: 'group-isolated', group: 'panels', renderGroup: 'x', reason: 'third-party' },
+      { pluginId: 'y', kind: 'group-isolated', group: 'panels', renderGroup: 'y', reason: 'third-party' },
+    ],
+  );
+  assert.equal(pluginStatuses(k.journal.filter((e) => e.kind === 'group-isolated')).length, 0, 'запись о группе состояния плагину не даёт');
+  const entry = k.journal.find((e) => e.kind === 'group-isolated');
+  assert.ok(entry);
+  assert.match(describeEntry(entry), /сторонний плагин не делит группу рендера: группа panels не действует, работает в своей x/);
+  assert.equal(entryLevel(entry), 'warn');
+  await k.unload();
+
+  const open = await kernel({ x: noop, y: noop }, { enabled: ['x', 'y'], manifests: [manifest('x', view('shared')), manifest('y', view('shared'))] });
+  assert.deepEqual([open.groupOf('x'), open.groupOf('y')], ['solo_x', 'solo_y'], 'без bundled все сторонние');
+  assert.equal(open.journal.filter((e) => e.kind === 'group-isolated').length, 2);
+  await open.unload();
+});
+
+test('группы рендера: origin стороннего в своём пространстве имён - группа поставки с тем же именем его хранилище не делит, ни в одной загрузке, ни в следующей', async () => {
+  const noop: PluginModule = { activate: () => undefined };
+  const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
+  // Загрузка 1: alice и bob (поставка) в группе tp2, имя пришло от человека или манифеста; загрузка 2: человек включил сторонний плагин с id tp2.
+  const first = await kernel({ alice: noop, bob: noop }, { enabled: ['alice', 'bob'], manifests: [manifest('alice', view('tp2')), manifest('bob', view('tp2'))], bundled: ['alice', 'bob'] });
+  const second = await kernel({ tp2: noop, alice: noop }, { enabled: ['tp2', 'alice'], manifests: [manifest('tp2', view()), manifest('alice', view('tp2'))], bundled: ['alice'] });
+  const before = new Set(['alice', 'bob'].map((id) => first.groupOf(id)));
+  assert.deepEqual([...before], ['tp2']);
+  assert.ok(!before.has(second.groupOf('tp2')), `сторонний tp2 получил группу ${String(second.groupOf('tp2'))}, где в прошлой загрузке жила поставка`);
+  assert.notEqual(second.groupOf('tp2'), second.groupOf('alice'), 'и в одной загрузке они не делят origin');
+  assert.equal(second.groupOf('alice'), 'tp2', 'плагин поставки садится в группу, как просил: отказывать ему незачем');
+  assert.deepEqual(
+    second.journal.filter((e) => e.kind === 'group-isolated'),
+    [],
+  );
+  // В обратную сторону то же: что оставил сторонний tp2, не читают виды поставки в группе tp2.
+  const alone = await kernel({ tp2: noop }, { enabled: ['tp2'], manifests: [manifest('tp2', view())] });
+  assert.notEqual(alone.groupOf('tp2'), first.groupOf('alice'));
+  // Группа не может быть записана как id плагина: пространства имён не пересекаются по синтаксису.
+  assert.match(alone.groupOf('tp2') ?? '', /^[a-z]+_/, 'сторонний одиночка помечен знаком, которого нет в id плагина и имени группы');
+  for (const k of [first, second, alone]) await k.unload();
+});
+
 test('хосты: из поставки - по группам, сторонний всегда один в своём хосте', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const ids = ['a', 'b', 'x', 'y', 'z', 'w'];
@@ -459,21 +559,22 @@ test('схема раздела из манифеста: значение не �
 });
 
 // Отмена запросов между плагинами (K-09): стенд - core/test/fixtures/cancel.ts.
+// Пауза - только для проверки «ничего не произошло»; то, что должно произойти, ждётся по условию (`waitFor`), а не срокам в 60 мс.
 const pause = (ms = 60) => new Promise((r) => setTimeout(r, ms));
 
 test('отмена вызова контракта: поставщик получает сигнал, вызывающий - Cancelled, вызовы без сигнала целы', async () => {
   const { kernel, api, log } = await startCancel();
   const abort = new AbortController();
   const call = api.slow('a', abort.signal);
-  await pause();
+  await waitFor('поставщик начал вызов a', () => log.length >= 1);
   assert.deepEqual(log, ['a:start']);
   abort.abort();
   await assert.rejects(call, { code: 'Cancelled' });
-  await pause();
+  await waitFor('поставщик получил отмену вызова a', () => log.length >= 2);
   assert.deepEqual(log, ['a:start', 'a:abort:Cancelled']);
   const plain = api.slow('b');
   plain.catch(() => undefined);
-  await pause();
+  await waitFor('поставщик начал вызов b', () => log.length >= 3);
   assert.deepEqual(log.slice(2), ['b:start']);
   await kernel.unload();
 });
@@ -487,6 +588,7 @@ test('отмена: уже отменённый сигнал - вызов до �
   held.slowMs = 10;
   const abort = new AbortController();
   assert.equal(await api.slow('fast', abort.signal), 'fast');
+  await waitFor('поставщик записал завершение fast', () => log.length >= 2);
   abort.abort();
   abort.abort();
   await pause();
@@ -499,7 +601,7 @@ test('callTimeout отменяет вызов у поставщика, а не �
   const { kernel, api, log } = await startCancel({ callTimeout: 80 });
   const never = new AbortController();
   await assert.rejects(api.slow('t', never.signal), { code: 'Timeout' });
-  await pause();
+  await waitFor('поставщик получил отмену по сроку', () => log.length >= 2);
   assert.deepEqual(log, ['t:start', 't:abort:Timeout']);
   await kernel.unload();
 });
@@ -508,15 +610,15 @@ test('отмена команды: commands.run с сигналом доводи
   const { kernel, ctx, log } = await startCancel();
   const abort = new AbortController();
   const run = ctx.commands.run('provider.slow', 'one', abort.signal);
-  await pause();
+  await waitFor('обработчик получил команду one с сигналом', () => log.length >= 1);
   assert.deepEqual(log, ['cmd:one:signal']);
   abort.abort();
   await assert.rejects(run, { code: 'Cancelled' });
-  await pause();
+  await waitFor('обработчик получил отмену команды one', () => log.length >= 2);
   assert.deepEqual(log, ['cmd:one:signal', 'cmd:abort:Cancelled']);
   const app = new AbortController();
   const fromApp = kernel.run('provider.slow', 'two', app.signal);
-  await pause();
+  await waitFor('обработчик получил команду two', () => log.length >= 3);
   app.abort();
   await assert.rejects(fromApp, { code: 'Cancelled' });
   await assert.rejects(ctx.commands.run('provider.slow', 'one', 'extra'), { code: 'Invalid' });
@@ -803,5 +905,66 @@ test('меню: два пункта на одно сочетание - перв�
   const ignored = k.journal.filter((e) => e.kind === 'key-ignored');
   assert.equal(ignored.length, 1);
   assert.match(describeEntry(ignored[0]!), /сочетание меню занято пунктом меню a\/run/);
+  await k.unload();
+});
+
+// Склеенные записи пишутся по таймеру, уже после снятия зависимого: последней записью зависимого оказывается не unloaded.
+async function enableAfterLateEntry(t: TestContext, lateKind: string, call: (ctx: PluginContext) => Promise<unknown>, providerFields: Record<string, unknown> = {}) {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let editor: PluginContext | undefined;
+  const k = await kernel(
+    {
+      files: { activate: (ctx) => void ctx.contracts.provide('test.files', '1.0', { read: async () => 'data' }) },
+      editor: { activate: (ctx) => void (editor = ctx) },
+    },
+    {
+      enabled: ['files', 'editor'],
+      manifests: [manifest('files', { provides: { 'test.files': { version: '1.0', ...providerFields } } }), manifest('editor', { requires: { 'test.files': '^1' } })],
+    },
+  );
+  assert.ok(editor);
+  await call(editor);
+  await k.disable('files');
+  assert.deepEqual(k.active, []);
+  t.mock.timers.tick(5500);
+  const of = (kind: string) => k.journal.findLastIndex((e) => e.pluginId === 'editor' && e.kind === kind);
+  assert.ok(of(lateKind) > of('unloaded'), `${lateKind} должна лечь после unloaded зависимого: ${kinds(k).join(' ')}`);
+  await k.enable('files');
+  assert.deepEqual(k.active, ['files', 'editor']);
+  await k.unload();
+}
+
+test('enable поставщика поднимает зависимого, если после его снятия в журнал легла склеенная denied (FR-CH-1007)', async (t) => {
+  await enableAfterLateEntry(t, 'denied', async (ctx) => {
+    for (let i = 0; i < 3; i++) await ctx.os.fs.readText('/etc/hostname').catch(() => undefined);
+  });
+});
+
+test('enable поставщика поднимает зависимого, если после его снятия легла запись вызова устаревшего члена', async (t) => {
+  await enableAfterLateEntry(
+    t,
+    'deprecated-call',
+    async (ctx) => {
+      const files = ctx.contracts.get('test.files', 1);
+      for (let i = 0; i < 3; i++) await files?.read?.('a');
+    },
+    { deprecated: ['read'] },
+  );
+});
+
+test('enable поставщика поднимает зависимого, если перезагрузка раздела, шедшая при disable, отказала после его снятия', async () => {
+  const { store } = memory({});
+  const config = await SectionStore.open(store, ['user', 'workspace']);
+  const section = { config: { version: 1 } };
+  const k = await kernel(
+    { files: { activate: (ctx) => void ctx.contracts.provide('test.files', '1.0', {}) }, editor: { activate: () => {} } },
+    { enabled: ['files', 'editor'], manifests: [manifest('files', { ...section, provides: { 'test.files': '1.0' } }), manifest('editor', { ...section, requires: { 'test.files': '^1' } })], config },
+  );
+  void k.reloadSections('config', ['files', 'editor']);
+  await k.disable('files');
+  const of = (kind: string) => k.journal.findLastIndex((e) => e.pluginId === 'editor' && e.kind === kind);
+  assert.ok(of('config') < of('unloaded'), `после снятия плагина запись о перезагрузке его раздела не пишется: ${kinds(k).join(' ')}`);
+  await k.enable('files');
+  assert.deepEqual(k.active, ['files', 'editor']);
   await k.unload();
 });

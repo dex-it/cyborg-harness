@@ -12,6 +12,7 @@ import { createLifecycle } from './lifecycle.ts';
 import { createMenus } from './menus.ts';
 import { createKeyRegistry } from './keybindings.ts';
 import { createOsRequests } from './os-requests.ts';
+import { createPluginLog } from './plugin-log.ts';
 import { createSections } from './sections.ts';
 import { createViewsState } from './views-state.ts';
 
@@ -30,6 +31,7 @@ const createParts = (ctx: KernelContext): Parts => ({
   sections: createSections(ctx),
   osRequests: createOsRequests(ctx),
   views: createViewsState(ctx),
+  logs: createPluginLog(ctx),
   bridge: createBridge(ctx),
 });
 

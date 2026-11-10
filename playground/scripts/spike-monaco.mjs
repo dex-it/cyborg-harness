@@ -124,7 +124,7 @@ async function runSandbox() {
     for (const [plugin, sandbox, allow] of [['editor', 'allow-scripts'], ['sessions', 'allow-scripts'], ['editor', 'allow-scripts allow-same-origin'], ['sessions', 'allow-scripts allow-same-origin'], ['sessions', '', 'clipboard-read; clipboard-write'], ['sessions', '', '']]) {
       const tag = `sbx${String(results.length)}`;
       const before = (await h.main('globalThis.pilotLog.length')) ?? 0;
-      await h.ev(`(() => { const f = document.createElement('iframe'); if (${JSON.stringify(sandbox)}) f.sandbox = ${JSON.stringify(sandbox)}; if (${JSON.stringify(allow ?? '')}) f.allow = ${JSON.stringify(allow ?? '')}; f.src = 'cyborg-plugin://${plugin}/?${tag}=1'; f.style.cssText = 'position:fixed;left:0;top:0;width:700px;height:500px;z-index:99'; f.id = ${JSON.stringify(tag)}; document.body.append(f); })()`);
+      await h.ev(`(() => { const f = document.createElement('iframe'); if (${JSON.stringify(sandbox)}) f.sandbox = ${JSON.stringify(sandbox)}; if (${JSON.stringify(allow ?? '')}) f.allow = ${JSON.stringify(allow ?? '')}; f.src = 'cyborg-plugin://${plugin}/${plugin}/?${tag}=1'; f.style.cssText = 'position:fixed;left:0;top:0;width:700px;height:500px;z-index:99'; f.id = ${JSON.stringify(tag)}; document.body.append(f); })()`);
       await sleep(7000);
       // navigator.clipboard без фокуса документа отвечает NotAllowedError независимо от политики: фокус ставится программно, как в smoke.
       await h.ev.send('Emulation.setFocusEmulationEnabled', { enabled: true });

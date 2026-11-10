@@ -15,6 +15,49 @@ export interface PluginStatus {
   readonly revivable: boolean;
 }
 
+/**
+ * Какие виды записей журнала - события жизненного цикла плагина (загружен, пропущен, снят, упал), а какие о его работе ничего не говорят: конфликт сочетаний, отказ шлюза,
+ * вызов устаревшего члена, удержанное хостом отклонение, завершённый по сроку pty, выбор хоста и группы. Вторые приходят в любой момент, в том числе после снятия плагина, и не должны
+ * перекрывать запись жизненного цикла: по последней из них `pluginStatuses` показывает состояние, а `enable` поставщика решает, поднимать ли зависимого.
+ * Таблица полная по типу: новый вид записи без пометки компилятор не пропустит.
+ */
+const LIFECYCLE: Record<JournalEntry['kind'], boolean> = {
+  invalid: true,
+  disabled: true,
+  'not-found': true,
+  rejected: true,
+  'safe-mode': true,
+  skipped: true,
+  config: true,
+  state: true,
+  failed: true,
+  activated: true,
+  deactivated: true,
+  revived: true,
+  waiting: true,
+  unloaded: true,
+  uninstalled: true,
+  'switched-off': true,
+  'host-down': true,
+  'host-restart': true,
+  'host-abandoned': true,
+  'key-conflict': false,
+  'key-ignored': false,
+  'menu-source': false,
+  denied: false,
+  'deprecated-call': false,
+  'unhandled-rejection': false,
+  'pty-expired': false,
+  'host-isolated': false,
+  'group-isolated': false,
+  'host-own-grouped': false,
+  'third-party': false,
+  'log-summary': false,
+};
+
+/** Запись о жизненном цикле плагина (таблица `LIFECYCLE`). */
+export const isLifecycleEntry = (entry: JournalEntry): boolean => LIFECYCLE[entry.kind];
+
 const REVIVABLE = new Set<JournalEntry['kind']>(['switched-off', 'failed', 'skipped', 'host-abandoned']);
 
 /** Плагины, которых касается запись: свой id или перечень у записей хоста; у вызова устаревшего члена ещё и поставщик, чтобы он видел своих вызывающих. */
@@ -31,6 +74,7 @@ export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[]
   const revivable = (id: string, cause: JournalEntry) => REVIVABLE.has(cause.kind) || (cause.kind === 'unloaded' && cause.by === id);
   const set = (id: string, state: PluginState, cause: JournalEntry) => states.set(id, { id, state, cause, revivable: state === 'stopped' && revivable(id, cause) });
   for (const entry of journal) {
+    if (!isLifecycleEntry(entry)) continue;
     for (const id of entryPlugins(entry)) {
       switch (entry.kind) {
         case 'activated':
@@ -45,18 +89,6 @@ export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[]
         case 'host-down':
         case 'revived':
           set(id, 'restarting', entry);
-          break;
-        case 'key-conflict':
-        case 'key-ignored':
-        case 'menu-source':
-        case 'denied':
-        case 'deprecated-call':
-        case 'unhandled-rejection':
-        case 'pty-expired':
-        case 'host-isolated':
-        case 'host-own-grouped':
-        case 'third-party':
-          // Ни конфликт сочетаний, ни отказ шлюза, ни вызов устаревшего члена, ни удержанное хостом отклонение, ни завершённый по сроку pty, ни выбор хоста о работе плагина ничего не говорят: плагин работает как обычно.
           break;
         case 'host-restart':
           // Причиной остаётся падение: «перезапуск» без «почему» человеку ничего не говорит.
@@ -161,13 +193,18 @@ export function describeEntry(e: JournalEntry): string {
       return `пункт меню ${e.item}: ${e.field} не прочитан, пункт недоступен: ${e.error}`;
     case 'host-isolated':
       return `сторонний плагин не делит хост: группа ${e.group} из plugins.hosts не действует, работает в своём хосте ${e.hostId}`;
+    case 'group-isolated':
+      return `сторонний плагин не делит группу рендера: группа ${e.group} не действует, работает в своей ${e.renderGroup}`;
     case 'third-party':
       return 'сторонний плагин: код не из поставки, не проверен; на этапе 1 хост - обычный процесс Node, и плагин может обойти шлюз ctx.os';
     case 'unhandled-rejection':
       return `необработанное отклонение промиса: ${e.error}`;
     case 'host-own-grouped':
       return `манифест просит свой хост, но группа ${e.group} из plugins.hosts сажает его к ${list(e.neighbours)}: его зависание перезапустит и их`;
+    case 'log-summary':
+      return `строк сверх предела за интервал: ${String(e.skipped)}, из них error: ${String(e.errors)}` + (e.lastError === undefined ? '' : `; последняя error: ${e.lastError}`);
     case 'switched-off':
+      if (e.reason === 'log-flood') return 'выключен: поток строк ctx.log и вывода хоста выше предела не стихает' + (e.affects.length ? `; его контракты брали: ${list(e.affects)}` : '');
       return `выключен, сбоев подряд: ${e.strikes}` + (e.affects.length ? `; его контракты брали: ${list(e.affects)}` : '');
     case 'host-down': {
       const what = e.reason === 'hang' ? 'завис' : 'упал';
@@ -202,6 +239,7 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
     case 'denied':
     case 'deprecated-call':
     case 'pty-expired':
+    case 'log-summary':
       return 'warn';
     case 'deactivated':
       return e.error ? 'warn' : 'info';
@@ -213,6 +251,7 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
     case 'unhandled-rejection':
     case 'host-down':
     case 'host-isolated':
+    case 'group-isolated':
     case 'host-own-grouped':
     case 'third-party':
       return 'warn';

@@ -172,6 +172,25 @@ test('вид: у объекта module обязателен, лишнее пол
   assert.deepEqual(uiErrors({ views: { a: 7 } }), [`ui.views.a: ${entry} или объект { module, area?, order?, title? }, получено 7`]);
 });
 
+// K-04: ui.group - рекомендация автора о группе рендера (один origin и процесс на группу); решает ядро с plugins.uiGroups.
+test('ui.group: имя группы в манифесте разбирается, без поля его нет, ошибка называет поле', () => {
+  const ok = parseManifest({ ...base, ui: { views: { main: './ui.js' }, group: 'cyborg.panels' } });
+  assert.ok(ok.ok);
+  assert.equal(ok.manifest.ui?.group, 'cyborg.panels');
+  const overlayOnly = parseManifest({ ...base, permissions: { 'ui.lock': true }, ui: { overlay: './lock.js', group: 'locks' } });
+  assert.ok(overlayOnly.ok && overlayOnly.manifest.ui?.group === 'locks');
+  const without = parseManifest({ ...base, ui: { views: { main: './ui.js' } } });
+  assert.ok(without.ok);
+  assert.equal(without.manifest.ui?.group, undefined, 'старая форма манифеста не получает новых полей');
+  const group = 'ожидается имя группы: строчные латинские буквы, цифры и дефис, части через точку';
+  for (const bad of ['Panels', '', 'a b', 'a/b', '.a', 'a..b', '1a', 'a:80', '../x'])
+    assert.deepEqual(uiErrors({ views: { a: './a.js' }, group: bad }), [`ui.group: ${group}, получено ${JSON.stringify(bad)}`], bad);
+  assert.deepEqual(uiErrors({ views: { a: './a.js' }, group: 7 }), [`ui.group: ${group}, получено 7`]);
+  assert.deepEqual(uiErrors({ views: { a: './a.js' }, group: null }), [`ui.group: ${group}, получено null`]);
+  assert.match(uiErrors({ group: 'panels' }).join(), /^ui: ожидается/, 'группа без видов и экрана замка - не ui');
+  assert.deepEqual(uiErrors({ views: { a: './a.js' }, groups: 'x' }), ['ui.groups: ядро знает только ui.views, ui.overlay и ui.group']);
+});
+
 test('документ: area и order типа; короткая запись прежняя, ошибка называет поле', () => {
   const ok = parseManifest({ ...base, documents: { note: { restorable: true, area: 'main', order: 200 }, plain: {} } });
   assert.ok(ok.ok);

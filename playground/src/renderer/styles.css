@@ -403,7 +403,13 @@ button:focus-visible {
   font-size: 11px;
 }
 
-.plugin-origin-note {
+.plugin-group {
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
+.plugin-origin-note,
+.plugin-group-note {
   margin: 6px 0 0;
   padding-left: 8px;
   border-left: 3px solid var(--modified);

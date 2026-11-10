@@ -26,6 +26,7 @@ export function buildKernel(ctx: KernelContext): Kernel {
     refreshMenus: () => menus.refresh(),
     runMenuItem: (pluginId, id) => menus.run(pluginId, id),
     hostOf: ctx.hostOf,
+    groupOf: ctx.groupOf,
     get keybindings() {
       return keyRegistry.rows();
     },

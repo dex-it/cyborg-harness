@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { checkDeclarations, importProblems } from '../src/plugin-check.ts';
+import { checkDeclarations, importProblems, isTestPath } from '../src/plugin-check.ts';
 
 // SAD §6.1, дисциплина: плагин импортирует только @cyborg-harness/contracts и свои модули. Без Compartment хост не мешает обойти шлюз, поэтому правило держит статика.
 // Правило живёт в core/src/plugin-check.ts (P-09), чтобы его мог запустить автор вне репозитория; здесь - проверка плагинов репозитория и отрицательный тест правила.
@@ -11,11 +11,17 @@ const repo = path.resolve(import.meta.dirname, '..', '..');
 const PLUGIN_ROOTS: Readonly<Record<string, string>> = {
   'core/examples/plugins': 'core/examples/contracts.ts',
   'playground/plugins': 'playground/plugins/contracts.ts',
+  // Шаблон автора (P-05): пакет объявлений лежит в самом плагине, как у автора, который не выносит один контракт в отдельный пакет.
+  templates: 'templates/plugin/contracts.ts',
 };
 const CONTRACTS = '@cyborg-harness/contracts';
 
+/** Исходники плагина без тестов (`test/`, `*.test.ts`: им нужны `node:test` и тест-кит, в поставку они не входят), `node_modules` и результата сборки. */
 function sources(dir: string): string[] {
-  return fs.readdirSync(dir, { recursive: true, encoding: 'utf8' }).filter((f) => /\.(m|c)?[tj]s$/.test(f) && !f.endsWith('.d.ts')).map((f) => path.join(dir, f));
+  return fs
+    .readdirSync(dir, { recursive: true, encoding: 'utf8' })
+    .filter((f) => /\.(m|c)?[tj]s$/.test(f) && !f.endsWith('.d.ts') && !isTestPath(f) && !/(^|\/)(node_modules|dist)\//.test(f))
+    .map((f) => path.join(dir, f));
 }
 
 const lines = (found: readonly { readonly line?: number | undefined }[]) => found.map((p) => p.line);

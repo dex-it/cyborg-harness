@@ -404,6 +404,7 @@ export interface Provider<T> {
     readonly impl: T;
 }
 export type CoreErrorCode = 'NotDeclared' | 'AlreadyProvided' | 'Unavailable' | 'NotCloneable' | 'Invalid' | 'CommandNotFound' | 'CommandConflict' | 'HostGone' | 'Timeout' | 'Cancelled' | 'Remote' | 'PermissionDenied' | 'NotFound';
+export type LogLevel = 'info' | 'warn' | 'error';
 export interface PluginContext {
     readonly pluginId: string;
     readonly subscriptions: DisposableStore;
@@ -425,7 +426,7 @@ export interface PluginContext {
     readonly window: PluginWindow;
     readonly system: PluginSystem;
     readonly documents: PluginDocuments;
-    log(message: string): void;
+    log(message: string, level?: LogLevel): void;
 }
 export interface KeyWhen {
     readonly repeat?: boolean;

@@ -13,7 +13,7 @@
 | `@cyborg-harness/electron` | служба плагинов (`PluginsService`, `startPlugins`, `discoverPlugins`), хосты (`utilityHosts`), среда ОС (`electronOs`), схема видов (`registerViewScheme`, `serveViews`, `resolveViewRequest`, `guardNavigation`), каналы (`registerWindowChannels`, `registerViewChannels`, `windowChannel`, `viewChannel`), окно и приложение (`windowEvents`, `bindWindow`, `bindAppMenu`, `appMenuTemplate`, `watchPower`, `watchTheme`, `singleInstance`, `quitAfterPlugins`, `showWindow`), перезапуски (`restarts`, `workspaceInfo`) | главный процесс Electron |
 | `@cyborg-harness/electron/host-entry` | точка входа файла для `utilityProcess`: `process.parentPort` -> `runHost` ядра; имён не экспортирует | процесс хоста (`utilityProcess`) |
 | `@cyborg-harness/electron/preload` | мосты: `windowApi()` (окно просит у главного процесса), `exposeViewBridge()` (`window.cyborgView` во фрейме вида), `inViewFrame`, `inWindowDocument` | preload (песочница) |
-| `@cyborg-harness/electron/window` | общее главного процесса и окна: снимок `PluginsSnapshot` и строки `PluginRow`, `WindowLayerView` (слой окна: диалоги видов и замки), протокол видов (`VIEW_SCHEME`, `viewOrigin`, `pluginOfOrigin`, `PATH_MIME`) | окно (браузер), без `node:*` и Electron |
+| `@cyborg-harness/electron/window` | общее главного процесса и окна: снимок `PluginsSnapshot` и строки `PluginRow`, `WindowLayerView` (слой окна: диалоги видов и замки), протокол видов (`VIEW_SCHEME`, `viewOrigin`, `groupOfOrigin`, `PATH_MIME`) | окно (браузер), без `node:*` и Electron |
 | `@cyborg-harness/electron/shell/shell.js`, `.../shell.css` | оболочка вида плагина одним скриптом (на `@cyborg-harness/core/ui-shell` и `/elements`) | фрейм вида |
 
 Точный перечень имён каждого входа - `electron/test/public-api.test.ts` (`ENTRIES`): тест падает, если имя добавлено или убрано без правки перечня, если вход написан через `export *` и если JS входа окна достаёт до `node:*`. Имя в перечень добавляют осознанно: оно обещает совместимость. Всё остальное в пакете (`dist/src/*`) внутреннее.
@@ -29,8 +29,8 @@ Peer-зависимости: `@cyborg-harness/core`, `@cyborg-harness/contracts`
 - хосты плагинов процессами `utilityProcess` со сторожем ядра: `utilityHosts(entry)` и файл `host-entry`;
 - среду `ctx.os` на Electron: секреты в файле под `safeStorage`, pty через `node-pty` с убийством группы, `shell`, `dialog`, `clipboard`, уведомления ОС;
 - службу плагинов для окна: поиск плагинов в каталогах, старт ядра, снимок (`PluginsSnapshot`: плагины, раскладка видов, клавиши, лента, журнал, слой окна, документы), команды, выключение и включение;
-- схему `cyborg-plugin://<плагин>/`: свой origin на плагин, оболочка и файлы вида, строгая CSP, защита от выхода за каталог плагина и от симлинков, запрет новых окон и ухода окна со своих адресов (`guardNavigation`);
-- каналы IPC: окно -> служба плагинов и вид -> служба плагинов (плагин всегда берётся из origin фрейма, не из аргументов), терминалы видов, перетаскивание файлов между видами, тема видов;
+- схему `cyborg-plugin://<группа>/<плагин>/`: origin на группу рендера (виды плагинов группы делят процесс рендера, сторонний плагин всегда один в своей группе), плагин в пути адреса, оболочка и файлы вида, строгая CSP, защита от выхода за каталог плагина и от симлинков, запрет новых окон и ухода окна со своих адресов (`guardNavigation`);
+- каналы IPC: окно -> служба плагинов и вид -> служба плагинов (плагин всегда берётся из адреса фрейма внутри его группы, не из аргументов), терминалы видов, перетаскивание файлов между видами, тема видов;
 - перехват клавиш ядром раньше страницы, события фокуса окна, сна, пробуждения и блокировки экрана, выход с ожиданием `onBeforeQuit` плагинов, одиночный экземпляр;
 - перезапуск приложения при смене воркспейса и безопасного режима с вопросом о живых pty;
 - слой окна: диалоги видов и экраны замков из снимка ядра (`WindowLayerView`);
@@ -87,12 +87,12 @@ quitAfterPlugins(plugins);
 
 void app.whenReady().then(async () => {
   const userData = app.getPath('userData');
-  serveViews((url) => resolveViewRequest(url, (id) => plugins.uiOf(id, true)), path.join(__dirname, 'shell'));
+  serveViews((url) => resolveViewRequest(url, (id) => plugins.uiOf(id), (id) => plugins.wake(id)), path.join(__dirname, 'shell'));
   win = new BrowserWindow({
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegrationInSubFrames: true },
   });
   const page = path.join(__dirname, 'index.html');
-  guardNavigation(win.webContents, pathToFileURL(page).href, (pluginId, url) => plugins.viewDenied(pluginId, url));
+  guardNavigation(win.webContents, pathToFileURL(page).href, (pluginId, url) => plugins.viewDenied(pluginId, url), plugins);
   bindWindow(win, plugins);
   watchPower(plugins);
   void win.loadFile(page);
@@ -185,9 +185,9 @@ cp node_modules/@cyborg-harness/electron/dist/shell/shell.{js,js.map,css} dist/s
 | Задача | Точка |
 |---|---|
 | K-01, pty-хост отдельным процессом ядра | сделано: `electronOs({ ptyHost: utilityPtyHost('dist/pty-host.js').spawn })`, точка входа процесса - `@cyborg-harness/electron/pty-host-entry`; без `ptyHost` pty остаются в главном процессе (`pty` или `node-pty`). `ViewTerminals` раздаёт виду порт `MessageChannelMain`, preload принимает его сам |
-| K-04, группы рендера (origin по группе) | origin вида строится в одном месте - `viewOrigin` и `pluginOfOrigin` в `view-protocol.ts`; адрес вида в `LayoutRow.url` |
+| K-04, группы рендера (origin по группе) | сделано: origin вида - группа (`viewOrigin`, `groupOfOrigin` в `view-protocol.ts`), плагин - первый сегмент пути, адрес вида в `LayoutRow.url`; плагин вида мост берёт из пути адреса кадра и только если он состоит в группе кадра (`ViewGroups`, его реализует `PluginsService`); `guardNavigation(..., groups)` и `viewChannel(groups, ...)` получают её же |
 | K-05, строгая CSP вида | `serveViews(resolve, shellDir, { csp })`: строка или функция от плагина из адреса запроса; по умолчанию `VIEW_CSP` |
-| K-09, K-13, каналы «главная часть - вид», отмена запросов | `viewChannel(channel, handler)`: канал, который принимает только вид плагина, плагин берётся из origin фрейма; `windowChannel` - то же для документа окна. Имена каналов приложения не пересекаются с `plugins:`, `view:`, `window:`, `documents:`, `views:` |
+| K-09, K-13, каналы «главная часть - вид», отмена запросов | `viewChannel(plugins, channel, handler)`: канал, который принимает только вид плагина, плагин берётся из адреса фрейма в группе его origin; `windowChannel` - то же для документа окна. Имена каналов приложения не пересекаются с `plugins:`, `view:`, `window:`, `documents:`, `views:` |
 | K-11, переключатель безопасного режима | `restarts({ flags })` и канал `app:safe-mode` приложения; флаг и вопрос о живых pty - в пакете |
 
 Проверка каналов: `electron/test/channels.test.ts` сверяет имена в `preload.ts` и в главном процессе.

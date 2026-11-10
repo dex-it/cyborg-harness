@@ -1,4 +1,4 @@
-import type { NotifyClick } from '@cyborg-harness/contracts';
+import type { LogLevel, NotifyClick } from '@cyborg-harness/contracts';
 import type { SectionResult } from './config.ts';
 import type { DocumentTable } from './documents.ts';
 import type { CoreError } from './errors.ts';
@@ -101,6 +101,10 @@ export interface Lifecycle {
   idle(): Promise<void>;
   /** Сбой плагина; череда подряд выключает его, а снять выключенного с хоста - дело вызывающего. */
   strike(id: string): boolean;
+  /** Выключает плагин, чей поток строк не стихает (FR-CH-4018): запись `switched-off` с `reason: 'log-flood'`, снятие с живого хоста. */
+  switchOffFlood(id: string): void;
+  /** Выключенного сторожем плагина снимает с живого хоста в очереди операций; соседи по хосту не перезапускаются. */
+  unloadSwitchedOff(id: string): void;
   affected(gone: readonly string[]): string[];
   dropPlugin(pluginId: string, pty?: PtyDrop): number;
   forgetOs(pluginId: string, pty?: PtyDrop): number;
@@ -199,6 +203,17 @@ export interface ViewsState {
   forget(pluginId: string): Promise<number>;
 }
 
+/** Строки плагинов и вывод хостов: уровень, предел длины и частоты, вычёркивание секретов, дальше - `LoadOptions.onLog`. */
+export interface PluginLog {
+  attach(end: BridgeEnd): void;
+  /** Строка самого ядра о хосте (отказ по заметке, сбой перезапуска): с меткой `хост <id>` и под теми же пределами, что вывод хоста, - в ней может быть текст с провода. */
+  hostLine(hostId: string, text: string, level: LogLevel): void;
+  /** Плагин снят: начатый интервал дописывается сводной записью, счёт строк начинается заново. */
+  drop(pluginId: string): void;
+  /** Выгрузка ядра: то же для всех источников. */
+  flush(): void;
+}
+
 /** Обработчики сообщений хоста. */
 export interface Bridge {
   attach(host: Host): void;
@@ -216,6 +231,7 @@ export interface Parts {
   readonly sections: Sections;
   readonly osRequests: OsRequests;
   readonly views: ViewsState;
+  readonly logs: PluginLog;
   readonly bridge: Bridge;
 }
 
@@ -247,6 +263,7 @@ export interface KernelContext {
   readonly wire: { readonly manifests: readonly PluginManifest[]; readonly bindings: readonly (readonly [string, readonly (readonly [string, string])[]])[] };
   readonly manifestOf: (pluginId: string) => PluginManifest;
   readonly hostOf: (pluginId: string) => string | undefined;
+  readonly groupOf: (pluginId: string) => string | undefined;
   readonly keys: ReadonlyMap<string, Keybinding>;
   /** Активные сейчас, в порядке активации. */
   readonly active: string[];
