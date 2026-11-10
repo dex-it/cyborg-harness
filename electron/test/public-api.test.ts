@@ -48,6 +48,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'utilityHosts',
       'utilityPtyHost',
       'viewChannel',
+      'viewCsp',
       'watchPower',
       'watchTheme',
       'windowChannel',

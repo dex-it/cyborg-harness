@@ -7,6 +7,7 @@ import { inlineHosts } from '@cyborg-harness/core';
 import type { PluginModule } from '@cyborg-harness/core';
 import { WINDOW_OWNER } from '@cyborg-harness/core';
 import type { KeyRow } from '../src/snapshot.ts';
+import { resolveViewRequest, viewCsp, viewHeaders } from '../src/view-files.ts';
 import { discoverPlugins, PluginsService, readSchemaFile, startPlugins } from '../src/plugins.ts';
 import { waitFor } from './wait-for.ts';
 
@@ -368,6 +369,34 @@ test('служба окна: динамическое сочетание кно�
       ['F3', true],
     ],
   );
+});
+
+test('виды: ui.inlineStyles манифеста доходит до PluginUi (CSP вида считается по нему), без флага поля нет', async () => {
+  const userData = tmp();
+  const dir = path.join(userData, 'plugins');
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['styled', 'plain', 'off'] } }));
+  plugin(dir, 'styled', { ui: { views: { main: './ui/ui.js' }, inlineStyles: true } }, 'export default {}');
+  plugin(dir, 'plain', { ui: { views: { main: './ui/ui.js' } } }, 'export default {}');
+  plugin(dir, 'off', { ui: { views: { main: './ui/ui.js' }, inlineStyles: false } }, 'export default {}');
+  const service = new PluginsService({ changed: () => {}, alert: () => {}, log: () => {} }, () => 7);
+  await service.start({
+    userData,
+    builtinDir: path.join(userData, 'нет'),
+    userPlugins: true,
+    spawnHost: inlineHosts(async () => ({ activate() {} })),
+    log: () => {},
+  });
+  try {
+    assert.equal(service.uiOf('styled')?.inlineStyles, true);
+    assert.ok(!('inlineStyles' in (service.uiOf('plain') ?? {})), 'без флага поля нет');
+    assert.ok(!('inlineStyles' in (service.uiOf('off') ?? {})), 'false - то же, что без флага');
+    const found = resolveViewRequest('cyborg-plugin://solo_styled/styled/', (id) => service.uiOf(id));
+    assert.equal(found && viewHeaders(found, 'cyborg-plugin://solo_styled/styled/')['content-security-policy'], viewCsp(true), 'ответ вида с флагом: инлайн-стили разрешены');
+    const strict = resolveViewRequest('cyborg-plugin://solo_plain/plain/', (id) => service.uiOf(id));
+    assert.equal(strict && viewHeaders(strict, 'cyborg-plugin://solo_plain/plain/')['content-security-policy'], viewCsp(false), 'ответ вида без флага: строгая CSP');
+  } finally {
+    await service.unload();
+  }
 });
 
 test('виды: адрес у плагина с ui в манифесте и у снятого, лента вида - только свои строки, команда и контракт из вида - только свои', async () => {
