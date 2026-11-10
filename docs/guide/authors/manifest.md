@@ -94,7 +94,7 @@ description: "Поля manifest.json, их ограничения и то, ка�
 
 ## Точка входа
 
-Главная часть - файл `index.mjs`, `index.js` или `index.ts` рядом с `manifest.json`. Его `default`-экспорт - `PluginModule`.
+Главная часть - файл `index.mjs`, `index.js` или `index.ts` рядом с `manifest.json`. Его `default`-экспорт - `PluginModule`. Это порядок поиска для плагина из каталога пользователя и для разработки; поставка приложения (`cyborg-plugin delivery`) грузит только `index.mjs`, который кладёт `cyborg-plugin build`.
 
 ## Как ядро сообщает об ошибках
 
