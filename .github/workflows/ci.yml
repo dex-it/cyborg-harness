@@ -159,9 +159,9 @@ jobs:
       - run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-docs-links.ts docs README.md
 
   # Уязвимости в продакшен-зависимостях (P-10). Дерево берётся из lock-файла, установка не нужна.
-  # Пакеты, которые получает потребитель (контракты, ядро, адаптер, тест-кит, cyborg-plugin), блокируют при high и выше;
-  # стенд playground (monaco-editor, xterm, node-pty в корне) не поставляется и только предупреждает: сейчас monaco-editor 0.57 тянет dompurify
-  # с критической уязвимостью, а `npm audit fix` предлагает лишь откат на 0.56.0. Когда у monaco-editor выйдет исправление - перевести шаг в блокирующий.
+  # Пакеты, которые получает потребитель (контракты, ядро, адаптер, тест-кит, cyborg-plugin), и стенд playground (monaco-editor, xterm, node-pty в корне)
+  # блокируют при high и выше. monaco-editor 0.57 приносил dompurify с критической уязвимостью, и шаг стенда был только предупреждением (#172): исправление
+  # вышло в 0.58.0-dev-20261109 (внутри DOMPurify 3.4.17), стенд закреплён на нём; на стабильный 0.58 перейти, когда он выйдет.
   audit:
     name: npm audit
     runs-on: ubuntu-24.04
@@ -180,6 +180,5 @@ jobs:
             echo "::endgroup::"
           done
           exit $failed
-      - name: стенд playground (предупреждение)
-        run: |
-          npm audit --omit=dev --audit-level=high || echo "::warning::npm audit стенда нашёл уязвимости в продакшен-зависимостях корня; пакеты для потребителя чисты"
+      - name: стенд playground (блокирует)
+        run: npm audit --omit=dev --audit-level=high
