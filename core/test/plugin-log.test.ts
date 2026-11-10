@@ -214,7 +214,7 @@ function pour(write: (i: number) => void, perTick: number, every: number): () =>
 }
 
 test('поток: плагин выше предела частоты дольше срока выключается (switched-off, log-flood), строки после этого не идут, сосед пишет как прежде', async () => {
-  const { k, ctx, lines, journal } = await rig(['a', 'b'], { limits: { logRate: 1, logWindowMs: 80, logFloodMs: 320 } });
+  const { k, ctx, lines, journal } = await rig(['a', 'b'], { limits: { logRate: 2, logWindowMs: 100, logFloodMs: 400 } });
   const stopA = pour((i) => ctx.a?.log(`поток ${String(i)}`), 10, 5);
   const stopB = pour((i) => ctx.b?.log(`сосед ${String(i)}`), 1, 60);
   try {
@@ -254,7 +254,7 @@ test('поток: всплески выше предела с паузами д�
 });
 
 test('поток: после «Включить снова» плагин пишет в журнал, счёт потока начат заново', async () => {
-  const { k, ctx, lines, journal } = await rig(['a'], { limits: { logRate: 1, logWindowMs: 80, logFloodMs: 240 } });
+  const { k, ctx, lines, journal } = await rig(['a'], { limits: { logRate: 2, logWindowMs: 100, logFloodMs: 300 } });
   const stop = pour((i) => ctx.a?.log(`поток ${String(i)}`), 10, 5);
   try {
     await until('выключение', () => switchedOff(journal, 'a').length === 1, 5000);
