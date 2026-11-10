@@ -15,6 +15,12 @@ export interface PtyProcess {
 /** Откуда pty-хост берёт процессы (в нём живёт `node-pty`). Запуск может быть асинхронным: за границей процессов `pid` приходит позже. */
 export interface PtyBackend {
   spawn(file: string, args: string[], options: { name: string; cwd?: string; env: Record<string, string>; cols: number; rows: number }): PtyProcess | Promise<PtyProcess>;
+  /**
+   * Дождаться выхода всех запущенных этим бэкендом процессов (не вышедших по сроку добивает сам). Хост зовёт его при выгрузке после `kill` каждому процессу:
+   * `node-pty` доставляет выход из своего потока, а процесс, вошедший в очистку окружения с недоставленным выходом, падает с `SIGABRT` (#185).
+   * Нет метода - бэкенду нечего ждать (подделка в тестах).
+   */
+  drain?(): Promise<void>;
 }
 
 /** Что уходит в хост плагина на spawn и attach: описание плюс хвост вывода. */
