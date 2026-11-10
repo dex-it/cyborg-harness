@@ -1,10 +1,9 @@
 ---
 id: ADR-CH-0005
 status: review
-date: 2026-11-08
-relates_to: product, cyborg-harness, ADR-CH-0001, ADR-CH-0002
+date: 2026-11-10
+relates_to: 01-plugin-host, 02-extension-contracts
 origin: derived
-quality-checks: входных записей нет
 ---
 
 # ADR-CH-0005 Связь плагинов: контракты и команды в манифесте, граф до запуска кода, кратность у потребителя; без шины событий и реестра сервисов

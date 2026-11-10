@@ -1,0 +1,10 @@
+root: docs/03-requirements/
+product: docs/01-product/
+domain: docs/01-product/
+strategy: docs/00-strategy/
+usecases: docs/02-use-cases/
+specs: docs/04-architecture/design/
+adr: docs/04-architecture/adr/
+verification: docs/05-verification/
+plans: docs/06-plans/
+counter: docs/.req_counter

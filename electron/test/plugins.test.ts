@@ -518,6 +518,30 @@ test('виды: ui.inlineStyles манифеста доходит до PluginUi 
   }
 });
 
+// #160: отказ CSP вида доходит до журнала плагина-владельца (плагин берётся из адреса фрейма), с подсказкой про ui.inlineStyles; чужой id и мусор в аргументах не пишутся.
+test('виды: отказ CSP из оболочки - запись в журнале плагина с подсказкой про ui.inlineStyles, мусор и чужой id не пишутся', async () => {
+  const userData = tmp();
+  const dir = path.join(userData, 'plugins');
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['plain'] } }));
+  plugin(dir, 'plain', { ui: { views: { main: './ui/ui.js' } } }, 'export default {}');
+  const service = new PluginsService({ changed: () => {}, alert: () => {}, log: () => {} }, () => 7);
+  await service.start({ userData, builtinDir: path.join(userData, 'нет'), userPlugins: true, spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {} });
+  try {
+    const denied = () => service.snapshot().journal.filter((l) => l.text.startsWith('отказ CSP'));
+    service.cspDeniedFrom('plain', 'style-src-elem', 'inline');
+    service.cspDeniedFrom('plain', 'connect-src', 'https://evil.example/');
+    service.cspDeniedFrom('plain', 42, { не: 'строка' });
+    service.cspDeniedFrom('ghost', 'style-src-elem', 'inline');
+    const lines = denied();
+    assert.equal(lines.length, 2, lines.map((l) => l.text).join('\n'));
+    assert.deepEqual(lines.map((l) => l.plugins), [['plain'], ['plain']]);
+    assert.match(lines[0]?.text ?? '', /^отказ CSP: инлайн-стиль \(style-src-elem\): .*"inlineStyles": true/, 'подсказка называет флаг манифеста');
+    assert.match(lines[1]?.text ?? '', /^отказ CSP: https:\/\/evil\.example\/ \(connect-src\)/);
+  } finally {
+    await service.unload();
+  }
+});
+
 test('виды: адрес у плагина с ui в манифесте и у снятого, лента вида - только свои строки, команда и контракт из вида - только свои', async () => {
   const userData = tmp();
   const dir = path.join(userData, 'plugins');

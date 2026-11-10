@@ -35,6 +35,7 @@ import {
 import { readDelivery, verifyDelivery } from '@cyborg-harness/core/delivery';
 import { errorMessage, isRecord } from './guards.ts';
 import type { DiagnosticsExport, DiagnosticsStatus, FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginOrigin, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from './snapshot.ts';
+import { violationDetail } from './shell/csp-note.ts';
 import { viewUrl } from './view-protocol.ts';
 import type { ViewGroups } from './view-frames.ts';
 import type { PluginUi } from './view-files.ts';
@@ -644,6 +645,12 @@ export class PluginsService implements ViewGroups {
   /** Окно не пустило вид на чужой адрес. */
   viewDenied(pluginId: string, url: string): void {
     this.kernel?.viewDenied(pluginId, url);
+  }
+
+  /** CSP отклонила запрос или стиль на странице вида: запись в журнал плагина (#160); плагин - из адреса фрейма, аргументы от вида - не строки игнорируются. */
+  cspDeniedFrom(pluginId: string, directive: unknown, blocked: unknown): void {
+    if (typeof directive !== 'string' || typeof blocked !== 'string') return;
+    this.kernel?.viewCspDenied(pluginId, violationDetail({ violatedDirective: directive, blockedURI: blocked }));
   }
 
   /** Есть ли у плагина вида поставщик контракта; права те же, что у главной части: только requires и optional манифеста. */

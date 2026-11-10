@@ -2,7 +2,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { ThemeTokens } from '@cyborg-harness/contracts';
 import type { FeedLine, PluginsSnapshot, Reply, WindowApi } from './snapshot.ts';
-import { VIEW_SCHEME, type TerminalEvent, type ViewBridge } from './view-protocol.ts';
+import { VIEW_SCHEME, type ShellBridge, type TerminalEvent } from './view-protocol.ts';
 import { terminalPorts } from './terminal-ports.ts';
 
 /** Мост окна к службе плагинов: приложение кладёт его в окно под своим именем (`contextBridge.exposeInMainWorld`). */
@@ -30,7 +30,7 @@ export function windowApi(): WindowApi {
 }
 
 /** Мост вида к главному процессу (`window.cyborgView`). */
-export function viewBridge(): ViewBridge {
+export function viewBridge(): ShellBridge {
   // Вывод терминала идёт из pty-хоста прямо в порт, ввод и размер - обратно по нему же; главный процесс отдаёт порт и в потоке не стоит.
   const terminals = terminalPorts();
   ipcRenderer.on('view:terminal:port', (event, message: { tid?: unknown }) => {
@@ -63,6 +63,7 @@ export function viewBridge(): ViewBridge {
       terminals.close(tid);
       ipcRenderer.send('view:terminal:close', tid);
     },
+    cspViolation: (directive, blocked) => ipcRenderer.send('view:csp', directive, blocked),
     state: (viewName) => ipcRenderer.invoke('view:state', viewName),
     setState: (viewName, value) => ipcRenderer.invoke('view:state:set', viewName, value),
     dialog: (viewName, spec) => ipcRenderer.invoke('view:dialog', viewName, spec),

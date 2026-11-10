@@ -104,6 +104,11 @@ export function registerViewChannels({ plugins, dragRoot }: ViewChannelsOptions)
   viewChannel(plugins, 'view:call', (pluginId, contract, major, method, args) => plugins.callFor(pluginId, contract, major, method, args));
   viewChannel(plugins, 'view:state', (pluginId, view) => plugins.viewStateFor(pluginId, view));
   viewChannel(plugins, 'view:state:set', (pluginId, view, value) => plugins.setViewStateFor(pluginId, view, value));
+  // Отказ CSP на странице вида (#160): односторонний, без ответа; плагин - из адреса фрейма, остальное от вида проверяет служба.
+  ipcMain.on('view:csp', (event, directive: unknown, blocked: unknown) => {
+    const pluginId = senderPlugin(event, plugins);
+    if (pluginId !== undefined) plugins.cspDeniedFrom(pluginId, directive, blocked);
+  });
   const terminals = new ViewTerminals((pluginId, ticket, channel) => plugins.openTerminal(pluginId, ticket, channel), () => new MessageChannelMain());
   const terminalChannel = (channel: string, handler: (frame: TerminalFrame, pluginId: string, ...args: unknown[]) => unknown): void => {
     ipcMain.handle(channel, (event: IpcMainInvokeEvent, ...args: unknown[]) => {

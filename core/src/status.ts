@@ -168,7 +168,7 @@ export function describeEntry(e: JournalEntry): string {
     case 'revived':
       return 'включён снова';
     case 'denied': {
-      const source = e.reason === 'window' ? 'отказ окна' : e.reason === 'command-callers' ? 'отказ команды' : 'отказ ctx.os';
+      const source = e.reason === 'window' ? 'отказ окна' : e.reason === 'command-callers' ? 'отказ команды' : e.reason === 'csp' ? 'отказ CSP' : 'отказ ctx.os';
       const what = `${source}: ${e.detail}`;
       return e.repeats ? `${what} - ещё ${String(e.repeats)} раз за ${String(DENIED_WINDOW_MS / 1000)} с` : what;
     }

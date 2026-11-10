@@ -15,12 +15,13 @@ const TYPES: Record<string, string> = {
 /**
  * Закрытая CSP вида (SAD 3.8, ADR-CH-0007 п. 2): `default-src 'none'` и явные источники, то есть только файлы origin группы и `data:` для картинок.
  * Сети нет (`connect-src 'self'` - свой origin), фреймов нет (`frame-src` берётся из `default-src`: сосед по группе в `<iframe>` не встраивается), встроенный скрипт и `eval` не выполняются.
+ * `base-uri` и `form-action` `default-src` не покрывает, поэтому они закрыты явно: `<base href>` не меняет разрешение адресов вида, `<form action>` ничего не отправляет (#161; навигацию из формы отклонил бы и `will-frame-navigate`, K-26, CSP - второй рубеж).
  * Воркеры - файлы того же origin, им хватает `script-src 'self'` (пилот PL-05); `font-src 'self'` нужен шрифту значков Monaco.
  * Инлайн-стили (`<style>`, атрибут `style`: xterm, Monaco) - только при `inlineStyles` из манифеста плагина (`ui.inlineStyles`); элементы ядра берут стили через `adoptedStyleSheets` и флага не требуют.
  */
 export function viewCsp(inlineStyles: boolean): string {
   const style = inlineStyles ? "'self' 'unsafe-inline'" : "'self'";
-  return `default-src 'none'; script-src 'self'; style-src ${style}; connect-src 'self'; img-src 'self' data:; font-src 'self'`;
+  return `default-src 'none'; script-src 'self'; style-src ${style}; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'`;
 }
 
 /** CSP вида без флага: политика по умолчанию для видов, которые инлайн-стилей не объявили. */
