@@ -36,7 +36,8 @@ import { viewUrl } from './view-protocol.ts';
 import type { ViewGroups } from './view-frames.ts';
 import type { PluginUi } from './view-files.ts';
 
-const ENTRY_FILES = ['index.mjs', 'index.js', 'index.ts'];
+/** Имена точки входа главной части по порядку; тот же набор у `check` и `build` (`ENTRY_FILES` в `@cyborg-harness/core/plugin-check`, их равенство держит electron/test/plugins.test.ts). */
+export const ENTRY_FILES: readonly string[] = ['index.mjs', 'index.js', 'index.ts'];
 
 /** Флаг запуска, включающий каталог плагинов пользователя (политика этапа 1, SAD 6.1). */
 export const USER_PLUGINS_FLAG = '--user-plugins';
@@ -51,7 +52,7 @@ function countDirs(dir: string): number {
 
 export interface Discovered {
   readonly manifests: unknown[];
-  /** id -> file URL точки входа; при повторе id остаётся первый, второй манифест пропущен с записью в `problems`. */
+  /** id -> file URL точки входа (первая найденная по порядку `ENTRY_FILES`; файла нет - путь первого кандидата, причина в `problems`); при повторе id остаётся первый, второй манифест пропущен с записью в `problems`. */
   readonly entries: Map<string, string>;
   /** id -> каталог, где найден первым. */
   readonly origins: Map<string, string>;
@@ -89,8 +90,11 @@ export function discoverPlugins(dirs: readonly string[]): Discovered {
         continue;
       }
       found.manifests.push(raw);
-      const entry = ENTRY_FILES.map((f) => path.join(home, f)).find((f) => fs.existsSync(f));
-      if (id && entry) found.entries.set(id, pathToFileURL(entry).href);
+      const present = ENTRY_FILES.filter((f) => fs.statSync(path.join(home, f), { throwIfNoEntry: false })?.isFile() === true);
+      if (present.length > 1) found.problems.push(`${home}: точек входа несколько (${present.join(', ')}), загружается ${present[0] ?? ''}`);
+      if (present.length === 0) found.problems.push(`${home}: нет точки входа (ищутся ${ENTRY_FILES.join(', ')})${id === undefined ? '' : `, плагин ${id} не запустится`}`);
+      // Без файла ядро получает путь первого кандидата, а не id: отказ загрузки в журнале назовёт файл, которого нет.
+      if (id) found.entries.set(id, pathToFileURL(path.join(home, present[0] ?? ENTRY_FILES[0] ?? '')).href);
       if (id) {
         found.origins.set(id, dir);
         found.homes.set(id, home);
