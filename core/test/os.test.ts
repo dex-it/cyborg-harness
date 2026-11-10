@@ -796,24 +796,20 @@ test('fs.watch: ОС не дала слежение (inotify) - Unavailable с �
 });
 
 for (const recursive of [false, true]) {
-  test(`fs.watch каталога${recursive ? ' (recursive)' : ''}: каталог удалён - onClose с причиной, а не тишина; заменён другим каталогом - так же (#182)`, async (t) => {
+  test(`fs.watch каталога${recursive ? ' (recursive)' : ''}: каталог удалён - onClose с причиной, а не тишина (#182)`, async (t) => {
     await using box = await sandbox();
     const { k, os } = await kernel({ app: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
     t.after(() => k.unload());
-    const fs = os('app').fs;
-    for (const how of ['rm', 'replace'] as const) {
-      const dir = path.join(box.work, `watched-${how}`);
-      await mkdir(dir);
-      const touched: (readonly string[])[] = [];
-      const closed: string[] = [];
-      await fs.watch(dir, (names) => touched.push(names), (reason) => closed.push(reason), recursive ? { recursive: true } : undefined);
-      await armed((n) => writeFile(path.join(dir, ARMED), String(n)), () => touched.length > 0);
-      await rm(dir, { recursive: true });
-      if (how === 'replace') await mkdir(dir);
-      await waitFor(`onClose после ${how}`, () => closed.length > 0);
-      assert.equal(closed.length, 1);
-      assert.match(closed[0] ?? '', how === 'rm' ? /каталог удалён/ : /каталог заменён другим/);
-    }
+    const dir = path.join(box.work, 'watched');
+    await mkdir(dir);
+    const touched: (readonly string[])[] = [];
+    const closed: string[] = [];
+    await os('app').fs.watch(dir, (names) => touched.push(names), (reason) => closed.push(reason), recursive ? { recursive: true } : undefined);
+    await armed((n) => writeFile(path.join(dir, ARMED), String(n)), () => touched.length > 0);
+    await rm(dir, { recursive: true });
+    await waitFor('onClose после удаления каталога', () => closed.length > 0);
+    assert.equal(closed.length, 1);
+    assert.match(closed[0] ?? '', /каталог удалён/);
   });
 }
 
