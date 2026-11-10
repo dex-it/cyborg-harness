@@ -94,6 +94,11 @@ try {
       const where = await main('JSON.stringify({ main: process.mainModule.filename, resources: process.resourcesPath, packed: process.mainModule.filename.includes("app.asar") })');
       log(`главный процесс: ${where}`);
       assert.ok(JSON.parse(where).packed, 'приложение запущено не из asar');
+      // node-pty лежит в asarUnpack: модуль грузится из asar, а нативный .node ядро берёт из app.asar.unpacked; загрузка падает, если распаковки нет.
+      const unpacked = JSON.parse(await main(`(() => { const m = process.mainModule; const fs = m.require('node:fs'); const path = m.require('node:path'); const real = path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'node-pty', 'build', 'Release', 'pty.node'); return JSON.stringify({ real, there: fs.existsSync(real), load: typeof m.require('node-pty').spawn }); })()`));
+      log(`node-pty: ${unpacked.real} (на диске: ${String(unpacked.there)}, spawn: ${unpacked.load})`);
+      assert.ok(unpacked.there, 'нет app.asar.unpacked/.../pty.node');
+      assert.equal(unpacked.load, 'function', 'node-pty не загрузился из упакованного приложения');
       // Ожидаемое состояние стенда (smoke.mjs): ленивый «later» ждёт первого обращения, демо «flaky» всегда падает при запуске (его причина - код плагина, а значит код исполнен из asar).
       const wanted = (x) => (x.id === 'flaky' ? x.state === 'stopped' : x.id === 'later' ? x.state === 'waiting' || x.state === 'active' : x.state === 'active');
       const list = await waitFor('все плагины поставки в ожидаемом состоянии', async () => {
