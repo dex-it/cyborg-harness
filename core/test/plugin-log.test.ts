@@ -317,9 +317,13 @@ test('секреты: значение из хранилища (set, get, resolv
     const read = `read-${randomUUID()}`;
     await ctx.b!.os.secrets.set('k', read);
     await ctx.b!.os.secrets.delete('k');
-    ctx.b?.log(`после delete ${read}`);
+    const rotated = `rot-${randomUUID()}`;
+    await ctx.b!.os.secrets.set('t', read);
+    await ctx.b!.os.secrets.set('t', rotated);
+    ctx.b?.log(`после delete ${read} и ротации ${rotated}`);
     await until('четвёртая строка', () => lines.length === 4);
-    assert.equal(lines[3]?.[1], `после delete ${read}`, 'удалённое из хранилища значение больше не секрет');
+    // Плагин ещё держит значение в памяти, а на сервере старый токен может действовать: забывать его после delete и перезаписи нельзя.
+    assert.equal(lines[3]?.[1], 'после delete [секрет] и ротации [секрет]');
   } finally {
     await k.unload();
   }
@@ -354,14 +358,29 @@ test('секреты: значение, разрезанное границей 
   try {
     const secret = `s3cr3t-${randomUUID()}`;
     await ctx.a!.os.secrets.set('token', secret);
-    await ctx.a!.os.secrets.set('short', 'q');
+    await ctx.a!.os.secrets.set('short', 'qqqq');
     ctx.a?.log(`${'x'.repeat(28)}${secret}`);
-    ctx.a?.log('q'.repeat(10));
+    ctx.a?.log('q'.repeat(20));
     await until('две строки', () => lines.length === 2);
     // 28 Б чистого текста и 14 Б метки: на границе в 32 Б от секрета не осталось ни символа, кроме начала самой метки.
     assert.equal(lines[0]?.[1], `${'x'.repeat(28)}[с [обрезано: всего 42 Б]`);
-    // Десять замен по 14 Б - 140 Б; в 32 Б помещаются две и начало третьей.
-    assert.equal(lines[1]?.[1], '[секрет][секрет][с [обрезано: всего 140 Б]');
+    // Пять замен по 14 Б - 70 Б; в 32 Б помещаются две и начало третьей.
+    assert.equal(lines[1]?.[1], '[секрет][секрет][с [обрезано: всего 70 Б]');
+  } finally {
+    await k.unload();
+  }
+});
+
+test('секреты: значение короче 4 символов не вычёркивается - замена испортила бы строку, а скрыть такое значение нельзя', async () => {
+  const { os } = withSecrets();
+  const { k, ctx, lines } = await rig(['a'], { os });
+  try {
+    await ctx.a!.os.secrets.set('pin', '123');
+    await ctx.a!.os.secrets.set('flag', 'e');
+    await ctx.a!.os.secrets.set('edge', '1234');
+    ctx.a?.log('Error: heap exhausted, пин 123, 1234');
+    await until('строка', () => lines.length === 1);
+    assert.equal(lines[0]?.[1], 'Error: heap exhausted, пин 123, [секрет]');
   } finally {
     await k.unload();
   }

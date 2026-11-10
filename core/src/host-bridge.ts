@@ -5,8 +5,6 @@ import { parseWire, type Parsed, type WireSpec } from './wire.ts';
 
 /** Канал хоста с ядром: каждая часть сама регистрирует свои сообщения, здесь - проверка отправителя и сообщения о состоянии хоста. */
 export function createBridge(ctx: KernelContext): Bridge {
-  const { options } = ctx;
-
   function attach(host: Host): void {
     const { endpoint } = host;
     const mine = (pluginId: string): PluginManifest => {
@@ -29,7 +27,7 @@ export function createBridge(ctx: KernelContext): Bridge {
         try {
           handler(parseWire(method, raw, spec));
         } catch (error) {
-          options.onLog?.(`хост ${host.id}`, `ядро отказало: ${errorMessage(error)}`, 'warn');
+          ctx.parts.logs.hostLine(host.id, `ядро отказало: ${errorMessage(error)}`, 'warn');
         }
       });
     };

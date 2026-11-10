@@ -1,4 +1,4 @@
-import type { NotifyClick } from '@cyborg-harness/contracts';
+import type { LogLevel, NotifyClick } from '@cyborg-harness/contracts';
 import type { SectionResult } from './config.ts';
 import type { DocumentTable } from './documents.ts';
 import type { CoreError } from './errors.ts';
@@ -191,6 +191,8 @@ export interface ViewsState {
 /** Строки плагинов и вывод хостов: уровень, предел длины и частоты, вычёркивание секретов, дальше - `LoadOptions.onLog`. */
 export interface PluginLog {
   attach(end: BridgeEnd): void;
+  /** Строка самого ядра о хосте (отказ по заметке, сбой перезапуска): с меткой `хост <id>` и под теми же пределами, что вывод хоста, - в ней может быть текст с провода. */
+  hostLine(hostId: string, text: string, level: LogLevel): void;
   /** Плагин снят: начатый интервал дописывается сводной записью, счёт строк начинается заново. */
   drop(pluginId: string): void;
   /** Выгрузка ядра: то же для всех источников. */
