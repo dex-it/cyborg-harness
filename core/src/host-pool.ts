@@ -90,7 +90,7 @@ export function createHostPool(ctx: KernelContext): HostPool {
 
   function start(hostId: string): Host {
     const handle = options.spawnHost(hostId);
-    const host: Host = { id: hostId, handle, endpoint: new Endpoint(handle.port), inflight: new Map(), seq: 0, answered: 0, notes: 0, down: false };
+    const host: Host = { id: hostId, handle, endpoint: new Endpoint(handle.port, ctx.trace.owner), inflight: new Map(), seq: 0, answered: 0, notes: 0, down: false };
     hosts.set(hostId, host);
     const { endpoint } = host;
     ctx.parts.bridge.attach(host);

@@ -3,6 +3,7 @@ import { CoreError } from './errors.ts';
 import type { BridgeEnd, Commands, KernelContext } from './kernel-context.ts';
 import { checkArgs, type CommandSpec } from './manifest.ts';
 import { guardedValue } from './via-contract.ts';
+import type { OpHandle } from './trace.ts';
 import { KERNEL_COMMANDS } from './window-layer.ts';
 
 const isKernelCommand = (name: string): boolean => (Object.values(KERNEL_COMMANDS) as string[]).includes(name);
@@ -31,8 +32,10 @@ export function createCommands(ctx: KernelContext): Commands {
   }
 
   /** `caller` - плагин, чья главная часть зовёт команду, его назвал канал хоста; без него зовёт пользователь: палитра, клавиши, меню. `only` - плагин, от имени которого зовёт его вид. */
-  async function execute(command: string, given: unknown[], caller?: string, only?: string): Promise<unknown> {
+  async function execute(command: string, given: unknown[], op: OpHandle, caller?: string, only?: string): Promise<unknown> {
     const { activation, pool } = ctx.parts;
+    // Команда - Г3; к хосту исполнителя операция выходит (Г1 ещё раз), когда проверки пройдены.
+    op.enter('contract');
     // Сигнал отмены - последний аргумент: схема манифеста его не видит, владельцу он едет меткой (cancel.ts).
     const { args: wire, signal } = splitSignal(given);
     const args = signal ? wire.slice(0, -1) : wire;
@@ -50,6 +53,7 @@ export function createCommands(ctx: KernelContext): Commands {
     }
     const owner = owners.get(command);
     if (!owner) throw new CoreError('CommandNotFound', `команды ${command} нет`);
+    op.target(`command:${command}`, `plugin:${owner}`);
     const spec = ctx.manifestOf(owner).commands[command];
     if (!spec) throw new CoreError('CommandNotFound', `команда ${command} не объявлена у ${owner}`);
     onlyOwner(only, owner, command);
@@ -57,11 +61,20 @@ export function createCommands(ctx: KernelContext): Commands {
     checkArgs(command, spec, args);
     if (caller !== undefined && caller !== owner) await guard(caller, command, spec, args);
     // Команда плагина могла изменить состояние, которое читает пункт меню.
+    op.enter('host');
     return pool.call(pool.live(owner), owner, 'command', { pluginId: owner, name: command, args: wire }, undefined, signal).finally(() => ctx.parts.menus.touch(owner));
   }
 
-  const run = (command: string, ...args: unknown[]) => execute(command, args);
-  const runOwn = (pluginId: string, command: string, args: unknown[]) => execute(command, args, undefined, pluginId);
+  // Человек (палитра, сочетание, меню, клик по уведомлению) начинает цепочку сам; вид плагина - через мост вида (Г2).
+  const run = (command: string, ...args: unknown[]) => ctx.trace.run({ caller: 'user', target: `command:${command}`, boundaries: [] }, (op) => {
+    op.args(args);
+    return execute(command, args, op);
+  });
+  const runOwn = (pluginId: string, command: string, args: unknown[], from: 'view' | 'user' = 'view') =>
+    ctx.trace.run({ caller: from === 'view' ? `view:${pluginId}` : 'user', target: `command:${command}`, boundaries: from === 'view' ? ['bridge'] : [] }, (op) => {
+      op.args(args);
+      return execute(command, args, op, undefined, pluginId);
+    });
 
   function attach({ mine, onRequest, onNote }: BridgeEnd): void {
     onNote('register', { pluginId: 'string', name: 'string' }, (p) => {
@@ -74,10 +87,11 @@ export function createCommands(ctx: KernelContext): Commands {
       mine(p.pluginId);
       if (owners.get(p.name) === p.pluginId) owners.delete(p.name);
     });
-    onRequest('run', { caller: 'string', name: 'string', args: 'array' }, (p, signal) => {
+    onRequest('run', { caller: 'string', name: 'string', args: 'array' }, (p, signal, op) => {
       const caller = mine(p.caller).id;
+      op.target(`command:${p.name}`);
       if (isKernelCommand(p.name)) throw new CoreError('PermissionDenied', `${p.name}: команду ядра зовёт приложение, а не плагин`);
-      return execute(p.name, withSignal(p.args, signal), caller);
+      return execute(p.name, withSignal(p.args, signal), op, caller);
     });
   }
 

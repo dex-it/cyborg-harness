@@ -74,6 +74,7 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     const { idleWatch, contracts, commands, keyRegistry, logs } = ctx.parts;
     idleWatch.drop(pluginId);
     logs.drop(pluginId);
+    ctx.trace.drop(pluginId);
     contracts.dropFor(pluginId);
     commands.dropFor(pluginId);
     keyRegistry.dropFor(pluginId);
@@ -251,6 +252,7 @@ export function createLifecycle(ctx: KernelContext): Lifecycle {
     layer.clear();
     pool.stopAll();
     ctx.parts.logs.flush();
+    ctx.trace.flush();
     ctx.flushRepeats();
   }
 

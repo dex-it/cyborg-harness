@@ -10,6 +10,7 @@ import type { PluginManifest } from './manifest.ts';
 import type { OsEnvironment } from './os-gateway.ts';
 import type { KeptPty, TerminalChannel, TerminalView } from './pty.ts';
 import type { ContractRegistry } from './registry.ts';
+import type { TraceRecord } from './trace-record.ts';
 import type { SpawnHost } from './transports.ts';
 import type { WindowSnapshot, WindowTitle } from './window-layer.ts';
 
@@ -172,6 +173,11 @@ export interface LoadOptions {
   readonly onJournal?: ((entry: JournalEntry) => void) | undefined;
   /** Строка плагина (`ctx.log`) или хоста, с уровнем; `pluginId` у строки хоста, чей плагин определить нельзя, - `хост <id>`. */
   readonly onLog?: ((pluginId: string, message: string, level: LogLevel) => void) | undefined;
+  /**
+   * Запись трассы операций на границах Г1 - Г5 (FR-CH-4001…4008): операция, счётчик частого потока или выход запущенной программы. Содержимого аргументов и результатов в записях нет.
+   * Без обработчика трасса выключена и ничего не стоит. Записи читает окно ядра; плагину они не отдаются ни через `ctx`, ни через контракт. Хранит их приложение или K-30.
+   */
+  readonly onTrace?: ((record: TraceRecord) => void) | undefined;
   /** Из чего ядро собирает заголовок окна вокруг фрагментов плагинов. */
   readonly windowTitle?: WindowTitle | undefined;
   /** Диалог на экране, очередь и замки поменялись: приложение перерисовывает слой окна. */

@@ -1,7 +1,15 @@
 import { CoreError, errorMessage } from './errors.ts';
 import type { Bridge, BridgeEnd, Host, KernelContext } from './kernel-context.ts';
 import type { PluginManifest } from './manifest.ts';
-import { parseWire, type Parsed, type WireSpec } from './wire.ts';
+import type { OpHandle, OpStart } from './trace.ts';
+import { isRecord, parseWire, type Parsed, type WireSpec } from './wire.ts';
+
+/** Плагин, которого называет сообщение хоста (`caller`, иначе `pluginId`): его слова, не проверенные каналом, - запись сохраняет и поддельное имя. */
+function claimed(params: unknown): string | undefined {
+  if (!isRecord(params)) return undefined;
+  const name = typeof params.caller === 'string' ? params.caller : params.pluginId;
+  return typeof name === 'string' ? name : undefined;
+}
 
 /** Канал хоста с ядром: каждая часть сама регистрирует свои сообщения, здесь - проверка отправителя и сообщения о состоянии хоста. */
 export function createBridge(ctx: KernelContext): Bridge {
@@ -18,14 +26,25 @@ export function createBridge(ctx: KernelContext): Bridge {
       if (!ctx.active.includes(m.id) && !ctx.parts.activation.activating.has(m.id)) throw new CoreError('Unavailable', `${pluginId} не активен`);
       return m;
     };
-    const onRequest = <const S extends WireSpec>(method: string, spec: S, handler: (p: Parsed<S>, signal: AbortSignal) => unknown) => {
-      endpoint.handle(method, (raw: unknown, signal: AbortSignal) => handler(parseWire(method, raw, spec), signal));
+    // Сообщение хоста - операция трассы на границе Г1 (FR-CH-4001): запись одна, обработчик дописывает в неё адресата и пройденные границы.
+    const start = (method: string, raw: unknown): OpStart => {
+      const name = claimed(raw);
+      return { caller: name === undefined ? `host:${host.id}` : `plugin:${name}`, hostId: host.id, target: `host:${method}`, boundaries: ['host'] };
+    };
+    const onRequest = <const S extends WireSpec>(method: string, spec: S, handler: (p: Parsed<S>, signal: AbortSignal, op: OpHandle) => unknown) => {
+      endpoint.handle(method, (raw: unknown, signal: AbortSignal) =>
+        ctx.trace.run(start(method, raw), (op) => {
+          const params = parseWire(method, raw, spec);
+          op.args(isRecord(params) && 'args' in params ? params.args : params);
+          return handler(params, signal, op);
+        }),
+      );
     };
     // У уведомления нет отправителя, которому вернуть отказ: без записи в лог подделка прошла бы молча.
     const onNote = <const S extends WireSpec>(method: string, spec: S, handler: (p: Parsed<S>) => void) => {
       endpoint.handle(method, (raw: unknown) => {
         try {
-          handler(parseWire(method, raw, spec));
+          ctx.trace.note(start(method, raw), () => handler(parseWire(method, raw, spec)));
         } catch (error) {
           ctx.parts.logs.hostLine(host.id, `ядро отказало: ${errorMessage(error)}`, 'warn');
         }

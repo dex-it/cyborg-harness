@@ -25,6 +25,7 @@ import {
   type SystemEvent,
   type TerminalChannel,
   type TerminalView,
+  type TraceRecord,
   type WatchdogOptions,
   type WindowSnapshot,
   MENU_OWNER,
@@ -139,6 +140,8 @@ export interface StartOptions {
   readonly idleSeconds?: () => number;
   readonly onJournal?: (entry: JournalEntry) => void;
   readonly onLog?: (pluginId: string, message: string, level: LogLevel) => void;
+  /** Запись трассы операций ядра (FR-CH-4001…4008); без обработчика трасса выключена. */
+  readonly onTrace?: (record: TraceRecord) => void;
   /** Что не дошло до ядра; по умолчанию - в log. */
   readonly onProblem?: (problem: string) => void;
   readonly onDiscovered?: (found: Discovered) => void;
@@ -207,6 +210,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
       options.log(`[plugins] ${id}${level === 'info' ? '' : ` [${level}]`}: ${message}`);
       options.onLog?.(id, message, level);
     },
+    onTrace: options.onTrace,
   }).catch((error: unknown) => {
     ws.close();
     throw error;
