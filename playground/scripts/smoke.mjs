@@ -239,6 +239,68 @@ async function main() {
       return (await Promise.all(frames.map((f) => f.executeJavaScript("document.getElementById('which')?.textContent ?? ''")))).sort().join('|');
     })()`);
   await waitFor('оба вида panels показаны, каждый со своим именем', async () => (await panelsText()) === 'panels/bar: панель инструментов|panels/panel: боковая колонка');
+  // T-14: два вида одного плагина - два фрейма со своими адресами ?view=<имя>; фрейм вида находим по адресу, а не по порядку в окне.
+  const inPanels = (view, expression) =>
+    main(`(async () => {
+      const { webContents } = process.mainModule.require('electron');
+      const page = webContents.getAllWebContents().find((w) => w.getType() === 'window');
+      const frame = page.mainFrame.framesInSubtree.find((f) => f.origin === 'cyborg-plugin://panels' && new URL(f.url).searchParams.get('view') === ${JSON.stringify(view)});
+      return frame ? frame.executeJavaScript(${JSON.stringify(expression)}) : null;
+    })()`);
+  const panelsUrls = () =>
+    main(`(() => {
+      const { webContents } = process.mainModule.require('electron');
+      const page = webContents.getAllWebContents().find((w) => w.getType() === 'window');
+      return page.mainFrame.framesInSubtree.filter((f) => f.origin === 'cyborg-plugin://panels').map((f) => f.url).sort().join('|');
+    })()`);
+  assert.equal(await panelsUrls(), 'cyborg-plugin://panels/?view=bar|cyborg-plugin://panels/?view=panel', 'у видов panels нет своих адресов ?view=<имя>');
+  assert.equal(await inPanels('bar', 'document.getElementById("which").textContent'), 'panels/bar: панель инструментов', 'во фрейме ?view=bar не вид bar');
+  assert.equal(await inPanels('panel', 'document.getElementById("which").textContent'), 'panels/panel: боковая колонка', 'во фрейме ?view=panel не вид panel');
+  // Свёртка одного вида не прячет другой: кнопка в подписи своей обёртки, документ свёрнутого жив и получает onVisibilityChange.
+  const panelsBody = (view) => ev(`document.querySelector('[data-plugin="panels"][data-view="${view}"] .view-body').hidden`);
+  const panelsToggle = (view) => ev(`document.querySelector('[data-plugin="panels"][data-view="${view}"] .view-toggle').click()`);
+  const visibility = (view) => inPanels(view, 'document.getElementById("visibility").textContent');
+  assert.deepEqual([await panelsBody('bar'), await panelsBody('panel')], [false, false], 'виды panels свёрнуты до свёртки');
+  await panelsToggle('bar');
+  await waitFor('свёрнутый bar получил onVisibilityChange', async () => (await visibility('bar')) === 'скрыт');
+  assert.deepEqual([await panelsBody('bar'), await panelsBody('panel')], [true, false], 'свёртка bar спрятала panel или не спрятала bar');
+  assert.equal(await visibility('panel'), 'показан', 'свёртка bar дошла до panel');
+  await panelsToggle('bar');
+  await waitFor('развёрнутый bar снова показан', async () => (await visibility('bar')) === 'показан');
+  await panelsToggle('panel');
+  await waitFor('свёрнутый panel получил onVisibilityChange', async () => (await visibility('panel')) === 'скрыт');
+  assert.deepEqual([await panelsBody('bar'), await panelsBody('panel')], [false, true], 'свёртка panel спрятала bar или не спрятала panel');
+  assert.equal(await visibility('bar'), 'показан', 'свёртка panel дошла до bar');
+  await panelsToggle('panel');
+  await waitFor('развёрнутый panel снова показан', async () => (await visibility('panel')) === 'показан');
+  // Диалог из второго вида встаёт у фрейма своего вида: меню bar отвечает bar, а положение считается от его фрейма (первый по порядку вид тут - bar, поэтому panel проверяем отдельно).
+  const menuAt = () =>
+    ev(`(() => {
+      const d = document.querySelector('dialog.layer-menu[open]');
+      return d ? { plugin: d.dataset.plugin, left: parseFloat(d.style.left), top: parseFloat(d.style.top), width: d.getBoundingClientRect().width, height: d.getBoundingClientRect().height } : null;
+    })()`);
+  const frameBox = (view) => ev(`(() => { const r = document.querySelector('[data-plugin="panels"][data-view="${view}"] iframe').getBoundingClientRect(); return { left: r.left, top: r.top }; })()`);
+  const innerSize = () => ev('({ width: window.innerWidth, height: window.innerHeight })');
+  // Вкладка «Виды» закрыта по умолчанию: у скрытого фрейма положение нулевое, и привязку к нему не отличить от отсутствия. Открываем её на время проверки.
+  await ev("document.getElementById('tab-views').click()");
+  for (const view of ['panel', 'bar']) {
+    await inPanels(view, 'document.getElementById("menu").click()');
+    const shown = await waitFor(`меню вида ${view} в слое окна`, async () => (await menuAt())?.plugin === 'panels' && (await menuAt()));
+    const base = await frameBox(view);
+    const inner = await innerSize();
+    // Как в слое окна: точка (4, 4) вида плюс положение фрейма именно этого вида, не дальше края окна.
+    const wantLeft = Math.max(0, Math.min(base.left + 4, inner.width - shown.width));
+    const wantTop = Math.max(0, Math.min(base.top + 4, inner.height - shown.height));
+    assert.ok(Math.abs(shown.left - wantLeft) < 1 && Math.abs(shown.top - wantTop) < 1, `меню вида ${view} встало не у его фрейма: ${JSON.stringify(shown)}, ждали ${wantLeft},${wantTop}`);
+    await ev("document.querySelector('dialog.layer-menu[open] button[data-choice=\"copy\"]').click()");
+    await waitFor(`ответ меню дошёл до вида ${view}, а не до соседа`, async () => (await inPanels(view, 'document.getElementById("answer").textContent')) === 'copy');
+  }
+  const barBox = await frameBox('bar');
+  const panelBox = await frameBox('panel');
+  assert.ok(barBox.left !== panelBox.left || barBox.top !== panelBox.top, 'фреймы bar и panel стоят в одной точке: привязку диалога к фрейму вида не отличить');
+  assert.ok(panelBox.left > 0 || panelBox.top > 0, 'фрейм panel скрыт (положение 0, 0): привязку диалога к нему не отличить');
+  await ev("document.getElementById('tab-plugins').click()");
+  log('panels: два вида во фреймах со своими ?view=, независимая свёртка, меню у фрейма своего вида');
   assert.equal(await inView('alice', 'typeof window.playground'), 'undefined', 'вид получил мост окна');
   await inView('alice', "document.getElementById('hello').click()");
   await waitFor('вид alice → чат → вид bob', async () => /→ привет, bob/.test(await viewLog('alice')) && /← alice: привет, bob/.test(await viewLog('bob')));
