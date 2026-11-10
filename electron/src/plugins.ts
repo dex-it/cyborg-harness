@@ -463,7 +463,7 @@ export class PluginsService implements ViewGroups {
     const ui = this.kernel?.manifests.find((m) => m.id === pluginId)?.ui;
     const group = this.groupOf(pluginId);
     if (dir === undefined || ui === undefined || group === undefined) return undefined;
-    return { dir, group, views: ui.views, ...(ui.overlay !== undefined && { overlay: ui.overlay }) };
+    return { dir, group, views: ui.views, ...(ui.overlay !== undefined && { overlay: ui.overlay }), ...(ui.inlineStyles === true && { inlineStyles: true as const }) };
   }
 
   /** Показ вида - вызов ленивого плагина: мосту вида нужна его главная часть. Зовут после сверки группы адреса (`resolveViewRequest`). */
