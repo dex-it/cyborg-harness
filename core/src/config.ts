@@ -68,6 +68,16 @@ export function deepMerge(base: Record<string, unknown>, over: Record<string, un
 export interface LayerStore {
   load(layer: Layer): Promise<Record<string, unknown> | undefined>;
   save(layer: Layer, document: Record<string, unknown>): Promise<void>;
+  /**
+   * Пишет один раздел, не трогая остальные, и читает файл в момент записи: слой, который правят несколько процессов
+   * (слой пользователя в общем `userData`), так не теряет чужие разделы. Без метода - `load` и `save`.
+   */
+  update?(layer: Layer, id: string, section: Record<string, unknown>): Promise<void>;
+  /**
+   * Стирает один раздел так же, как `update` пишет: читает файл в момент записи и не трогает остальные. `false` - раздела там не было,
+   * и файл не тронут. Без метода - `load` и `save`.
+   */
+  remove?(layer: Layer, id: string): Promise<boolean>;
 }
 
 export interface SectionHandle {
@@ -159,9 +169,12 @@ export class SectionStore {
     if (!this.#layers.includes(layer)) throw new Error(`слоя ${layer} нет`);
     const section = { [VERSION_KEY]: version, ...structuredClone(data) };
     await this.#serial(async () => {
-      // Основа - файл, а не память: правка извне, которую слежение ещё не подхватило, не стирается чужим разделом.
-      const fresh = await this.#store.load(layer);
-      await this.#store.save(layer, { ...(isRecord(fresh) ? fresh : this.#documents.get(layer)), [id]: section });
+      if (this.#store.update) await this.#store.update(layer, id, section);
+      else {
+        // Основа - файл, а не память: правка извне, которую слежение ещё не подхватило, не стирается чужим разделом.
+        const fresh = await this.#store.load(layer);
+        await this.#store.save(layer, { ...(isRecord(fresh) ? fresh : this.#documents.get(layer)), [id]: section });
+      }
       // В памяти - только свой раздел: правку извне разделам сообщит reload по слежению.
       this.#documents.set(layer, { ...this.#documents.get(layer), [id]: section });
     });
@@ -171,6 +184,12 @@ export class SectionStore {
   async remove(layer: Layer, id: string): Promise<boolean> {
     if (!this.#layers.includes(layer)) throw new Error(`слоя ${layer} нет`);
     return this.#serial(async () => {
+      if (this.#store.remove) {
+        // Чтение и запись под замком хранилища: раздел, который сосед записал за это время, не теряется.
+        const removed = await this.#store.remove(layer, id);
+        if (removed) this.#documents.set(layer, Object.fromEntries(Object.entries(this.#documents.get(layer) ?? {}).filter(([key]) => key !== id)));
+        return removed;
+      }
       const fresh = await this.#store.load(layer);
       const { [id]: gone, ...rest } = isRecord(fresh) ? fresh : (this.#documents.get(layer) ?? {});
       if (gone === undefined) return false;
