@@ -2,7 +2,7 @@
 id: ADR-CH-0004
 status: review
 date: 2026-11-10
-relates_to: product, cyborg-harness, ADR-0003, ADR-0012, ADR-0016
+relates_to: 02-extension-contracts
 origin: derived
 ---
 
@@ -20,6 +20,8 @@ origin: derived
 ## Context
 
 bb: провайдер - плагин; мост по JSON-RPC (stdio) с рукопожатием, дельтами, типизированными подсказками восстановления; Claude Code подключён через Agent SDK. dsh: `SubagentProvider.start()` даёт один терминальный результат; Claude Code - неинтерактивный субагент через SDK ([bb 5.6](../../research/bb.md), [dsh 8](../../research/deepseek-harness.md)).
+
+Связанные решения Cyborg (корпус [ai-cyborg](https://github.com/dex-it/ai-cyborg/tree/master/docs)): ADR-0003, ADR-0012, ADR-0016.
 
 ## Decision
 

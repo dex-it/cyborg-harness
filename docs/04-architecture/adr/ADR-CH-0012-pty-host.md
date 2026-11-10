@@ -2,7 +2,7 @@
 id: ADR-CH-0012
 status: accepted
 date: 2026-11-10
-relates_to: product, cyborg-harness, ADR-CH-0001, ADR-CH-0003, ADR-CH-0004
+relates_to: 01-plugin-host
 origin: derived
 ---
 

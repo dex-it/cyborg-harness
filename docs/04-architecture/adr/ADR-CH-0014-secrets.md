@@ -2,7 +2,7 @@
 id: ADR-CH-0014
 status: proposed
 date: 2026-11-10
-relates_to: product, cyborg-harness, ADR-CH-0001, ADR-CH-0002, ADR-CH-0005
+relates_to: 03-security-trust
 origin: derived
 ---
 

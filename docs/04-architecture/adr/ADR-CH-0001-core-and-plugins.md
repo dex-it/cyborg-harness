@@ -2,7 +2,7 @@
 id: ADR-CH-0001
 status: review
 date: 2026-11-10
-relates_to: product, cyborg-harness, ADR-0001, ADR-0002
+relates_to: 01-plugin-host, 02-extension-contracts
 origin: derived
 ---
 
@@ -20,6 +20,8 @@ origin: derived
 ## Context
 
 dsh строит всё на форке Cordis (`vendor/cordis`, 2811 строк, 22 действующие локальные правки): плагин - сервис с `inject`, откатом регистраций и событиями с режимами; «привилегированного ядра нет». bb держит ядро как хранилище, состояния и доставку, а видимые функции выносит в плагины с публичным SDK. Оба подтверждают: рабочая модель - минимальное ядро плюс плагины на публичном API ([bb 5.7](../../research/bb.md), [dsh 3](../../research/deepseek-harness.md)).
+
+Связанные решения Cyborg (корпус [ai-cyborg](https://github.com/dex-it/ai-cyborg/tree/master/docs)): ADR-0001, ADR-0002.
 
 ## Decision
 

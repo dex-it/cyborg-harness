@@ -2,7 +2,7 @@
 id: ADR-CH-0007
 status: review
 date: 2026-11-10
-relates_to: product, cyborg-harness, ADR-CH-0005, 10-ui-preferences, 12-command-buttons
+relates_to: 02-extension-contracts, 03-security-trust
 origin: derived
 ---
 
@@ -20,6 +20,8 @@ origin: derived
 ## Context
 
 [Спайк UI](../../05-verification/spike-iframe-ui.md) (Linux): свой origin - свой процесс рендера, +13 МБ PSS на фрейм; граница фрейма не добавляет задержки (p50 0,12 мс); `before-input-event` гасит сочетание при фокусе во фрейме; HTML5-перетаскивание между фреймами разных процессов Chromium блокирует.
+
+Связанные решения Cyborg (корпус [ai-cyborg](https://github.com/dex-it/ai-cyborg/tree/master/docs)): 10-ui-preferences, 12-command-buttons.
 
 ## Decision
 

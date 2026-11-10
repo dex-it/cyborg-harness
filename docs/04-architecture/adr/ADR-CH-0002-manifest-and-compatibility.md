@@ -2,7 +2,7 @@
 id: ADR-CH-0002
 status: review
 date: 2026-11-10
-relates_to: product, cyborg-harness, ADR-CH-0001
+relates_to: 01-plugin-host, 05-compatibility
 origin: derived
 ---
 
