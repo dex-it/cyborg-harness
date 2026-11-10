@@ -8,7 +8,7 @@ origin: derived
 
 # План верификации
 
-Подход и уровни проверки Cyborg Harness. Что именно проверяет каждая команда и какие тесты за ней стоят - в руководстве [«Тесты и CI»](../guide/development/tests-ci.md); здесь только план: что проверяется на каком уровне и чем доказывается норма. Метод проверки каждой нормы записан в её поле `verification` в [SRS фич](../03-requirements/README.md).
+Подход и уровни проверки Cyborg Harness. Что именно проверяет каждая команда и какие тесты за ней стоят - в руководстве [«Тесты и CI»](../guide/development/tests-ci.md); здесь только план: что проверяется на каком уровне и чем доказывается норма. Метод проверки каждой нормы записан в её поле `verification` в [SRS фич](../03-requirements/README.md); критерии приёмки по ветвям сценариев - в историях (`stories/` фичи), полнота с двух сторон - в [таблице покрытия](../03-requirements/coverage.md).
 
 ## Подход
 
@@ -27,6 +27,7 @@ origin: derived
 | Снимок API | эталон `core/test/api-snapshot/<версия>.txt`, `npm run check:contracts` | `core/test/api-snapshot.test.ts`, `contracts/` | каждый PR; правила - `contracts/README.md` |
 | Окно | `npm run smoke`: настоящий Electron под DevTools Protocol, хосты, виды во фреймах, CSP, слой окна, воркспейс, шаблон плагина | `playground/scripts/smoke.mjs` | каждый PR, CI на macOS и Linux |
 | Пакеты | установка собранных архивов в пустой проект; `cyborg-plugin check`, `build`, `pack` на шаблоне | `core/test/consumer.test.ts`, `testing/test`, шаг CI «шаблон плагина» | каждый PR |
+| Покрытие требований | `npm run check:docs-trace`: каждая норма дала критерий приёмки, каждая ветка сценария покрыта критерием или названа открытой; таблица - [coverage.md](../03-requirements/coverage.md) | `scripts/check-docs-trace.ts`, шаг CI «ссылки в docs», `scripts/test/check-docs-trace.test.ts` | каждый PR, CI |
 | Замеры | память хоста и кадра, задержка, шлюз, pty, Monaco и xterm | [спайки и замеры](../README.md#где-что) в этой папке, скрипты `npm run spike*`; бюджет шлюза в CI - `spike:gateway` | при изменении устройства, которое влияет на число |
 | Ручная проверка | клик и настоящая клавиатура на macOS, живой `claude` (`CYBORG_SMOKE_CLAUDE`) | [macos-check.md](macos-check.md) | перед выпуском |
 
@@ -37,4 +38,4 @@ origin: derived
 ## Не входит
 
 - Нагрузочные испытания приложения вне ядра: бюджеты старта и памяти не заданы числами ([дорожная карта](../06-plans/roadmap.md)).
-- Файлы `.feature` и истории с AC: в корпусе их нет ([отступления от раскладки](../README.md#отступления-от-раскладки)); покрытие считается по полю `verification` нормы.
+- Файлы `.feature`: в корпусе их нет, это производная форма критериев приёмки, собираемая по запросу ([отступления от раскладки](../README.md#отступления-от-раскладки)).

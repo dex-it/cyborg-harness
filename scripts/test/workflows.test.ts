@@ -70,6 +70,7 @@ describe('ci.yml: задания P-10', () => {
 
   it('ссылки в docs и npm audit - задания без continue-on-error на блокирующих шагах', () => {
     assert.match(job(ci, 'docs-links'), /scripts\/check-docs-links\.ts docs README\.md/);
+    assert.match(job(ci, 'docs-links'), /scripts\/check-docs-trace\.ts\n/);
     const audit = job(ci, 'audit');
     assert.match(audit, /npm audit --omit=dev --audit-level=high --workspace "\$workspace" \|\| failed=1/);
     for (const workspace of ['contracts', 'core', 'electron', 'testing', 'tools/cyborg-plugin']) assert.match(audit, new RegExp(`for workspace in [^\\n]*${workspace.replace('/', '\\/')}`));
