@@ -79,6 +79,13 @@ jobs:
       - name: smoke (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum node playground/scripts/smoke.mjs --no-sandbox
+      # Проба упакованной поставки (P-07, docs/05-verification/bundled-delivery.md): app.asar с dist/delivery, node-pty распакован; на macOS ещё и codesign ad hoc.
+      - name: упакованная поставка (macOS)
+        if: runner.os == 'macOS'
+        run: node playground/scripts/pack-delivery.mjs
+      - name: упакованная поставка (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum node playground/scripts/pack-delivery.mjs --no-sandbox
       # Пилот PL-05 (docs/05-verification/spike-monaco-xterm.md): память и время Monaco, кадр sandbox; числа смотрят в журнале шага, шаг не гейт.
       - name: пилот Monaco и xterm (macOS)
         if: runner.os == 'macOS'

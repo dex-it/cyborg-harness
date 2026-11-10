@@ -26,6 +26,7 @@
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-force-exit --test-timeout=120000 'core/test/*.test.ts' 'contracts/test/*.test.ts' 'testing/test/*.test.ts' 'electron/test/*.test.ts' 'playground/src/**/*.test.ts' 'playground/test/*.test.ts' 'tools/cyborg-plugin/test/*.test.ts' 'templates/plugin/test/*.test.ts' 'scripts/test/*.test.ts'",
     "demo": "node core/examples/run.ts",
     "smoke": "npm run build && node playground/scripts/smoke.mjs",
+    "pack:delivery": "npm run build && node playground/scripts/pack-delivery.mjs",
     "spike": "npm run build && node playground/scripts/spike-iframe.mjs",
     "spike:hosts": "npm run build && node playground/scripts/spike-hosts.mjs",
     "spike:fsync": "node playground/scripts/spike-fsync.mjs",
@@ -47,6 +48,7 @@
     "postinstall": "electron-rebuild -f -w node-pty"
   },
   "devDependencies": {
+    "@electron/asar": "^4.3.1",
     "@electron/rebuild": "^4.2.1",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.5",

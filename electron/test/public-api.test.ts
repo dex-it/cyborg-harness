@@ -50,6 +50,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'utilityHosts',
       'utilityPtyHost',
       'viewChannel',
+      'viewCsp',
       'watchPower',
       'watchTheme',
       'windowChannel',
@@ -60,6 +61,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
     types: [
       'AppMenuItem',
       'Discovered',
+      'DiscoverOptions',
       'ElectronOsOptions',
       'PluginUi',
       'PluginsEvents',

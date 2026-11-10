@@ -2,7 +2,7 @@
 level: verification
 feature: cyborg-harness
 status: review
-date: 2026-11-08
+date: 2026-11-10
 origin: derived
 quality-checks: входных записей нет
 ---
@@ -94,3 +94,7 @@ default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src
 - `role: copy/paste` и буфер обмена: Linux - закрыто (smoke в CI); macOS - частично: `copy`/`paste` в кадре работают прямым `webContents.copy()/paste()` (локально), сама `role` меню под CDP не сработала, нажатием настоящего пункта меню не проверена.
 - Память и время: macOS и Linux сняты, сопоставлено с ценой фрейма (раздел выше).
 - Вопрос 11 SAD обновлён: закрыт (`sandbox` не годится, воркеры работают под строгой CSP).
+
+## Итог для K-05 (2026-11-10)
+
+K-05 ([#40](https://github.com/dex-it/cyborg-harness/issues/40)) взяла минимальный набор отсюда: `default-src 'none'; script-src 'self'; style-src 'self' ['unsafe-inline']; connect-src 'self'; img-src 'self' data:; font-src 'self'`. `font-src 'self'` стоит у всех видов: он нужен Monaco (шрифт значков), другим видам не вредит, а отдельный набор для вида с шрифтом потребовал бы ещё одного флага. `worker-src` не задан: воркеры Monaco - файлы того же origin, директива берётся из `script-src 'self'`; `blob:` не нужен нигде. `'unsafe-inline'` в `style-src` только у видов с `ui.inlineStyles: true` (`sessions` с xterm и `editor` с Monaco в стенде). Проверено под этим набором: smoke «PL-05…» (Monaco и xterm в одном окне, ноль нарушений CSP, шрифт значков загружен, воркеры json и ts отвечают) и «K-05…» (заголовки видов с флагом и без).
