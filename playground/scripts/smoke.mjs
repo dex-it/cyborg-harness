@@ -129,6 +129,25 @@ async function main() {
     })()`);
   const lines = () => stderr.split('\n').filter((l) => l.startsWith('[plugins]'));
 
+  // K-08: меню приложения собрано из снимка ядра (contributes.menus плагина echo); читаем его и нажимаем пункты тем же путём, что нажал бы человек в меню ОС.
+  const menuItems = async () =>
+    JSON.parse(
+      await main(`(() => {
+        const { Menu } = process.mainModule.require('electron');
+        const flat = (items) => items.flatMap((i) => [i, ...(i.submenu ? flat(i.submenu.items) : [])]);
+        return JSON.stringify(flat(Menu.getApplicationMenu()?.items ?? []).filter((i) => i.label.startsWith('Echo:')).map((i) => ({ label: i.label, enabled: i.enabled, type: i.type, checked: i.checked, accelerator: i.accelerator ?? null })));
+      })()`),
+    );
+  const menuItem = async (label) => (await menuItems()).find((i) => i.label === label);
+  const clickMenu = (label) =>
+    main(`(() => {
+      const { Menu } = process.mainModule.require('electron');
+      const flat = (items) => items.flatMap((i) => [i, ...(i.submenu ? flat(i.submenu.items) : [])]);
+      const item = flat(Menu.getApplicationMenu().items).find((i) => i.label === ${JSON.stringify(label)});
+      item?.click();
+      return !!item;
+    })()`);
+
   // Как в Electron Accelerator: modifiers - control, shift, meta; клавиша - буква или F1-F24.
   const press = (keys) =>
     main(`(() => {
@@ -224,6 +243,20 @@ async function main() {
   await press(combo('Z'));
   await waitFor('свободное сочетание дошло до окна', () => feedHas(re('Z', 'до окна дошло')));
   log('перехват клавиш, конфликт, обмен сообщениями через три хоста');
+
+  // Меню окна из вкладов плагина (K-08): пункты на месте, у «отметки» галочка из контракта echo, нажатие выполняет команду и галочка идёт за состоянием.
+  await waitFor('меню приложения несёт пункты echo', async () => (await menuItems()).length === 2);
+  assert.deepEqual(await menuItem('Echo: пинг'), { label: 'Echo: пинг', enabled: true, type: 'normal', checked: false, accelerator: 'CmdOrCtrl+Alt+E' });
+  assert.deepEqual(await menuItem('Echo: отметка'), { label: 'Echo: отметка', enabled: true, type: 'checkbox', checked: false, accelerator: null });
+  const pings = async () => (await feed()).filter((l) => /echo жив/.test(l)).length;
+  const pinged = await pings();
+  assert.equal(await clickMenu('Echo: пинг'), true);
+  await waitFor('пункт меню выполнил команду echo.ping', async () => (await pings()) > pinged);
+  assert.equal(await clickMenu('Echo: отметка'), true);
+  await waitFor('галочка пункта «отметка» пошла за состоянием echo', async () => (await menuItem('Echo: отметка'))?.checked === true);
+  assert.equal(await clickMenu('Echo: отметка'), true);
+  await waitFor('галочка снята вместе с состоянием', async () => (await menuItem('Echo: отметка'))?.checked === false);
+  log('меню приложения: пункты плагина из снимка ядра, нажатие выполняет команду, галочка следует состоянию');
 
   await waitFor('виды echo, alice и bob во фреймах', async () => (await views()) === 'alice/main,bob/main,built-dep/main,echo/main,editor/main,panels/bar,panels/panel,pin-lock/main,sessions/main' && (await inView('bob', "document.readyState")) === 'complete' && (await inView('alice', "!!document.getElementById('hello')")) === true);
   // Область вида задаёт манифест, окно раскладывает по раскладке ядра: оба вида panels на своих местах, у каждого свой ctx.view.
@@ -359,10 +392,13 @@ async function main() {
     assert.equal(await ev("document.activeElement?.dataset.choice ?? ''"), 'keep', 'фокус вопроса не на безопасном ответе');
     assert.equal(await choose('keep'), true);
     await waitFor('echo выгружен, процесс оставлен', async () => (await state('echo')) === 'stopped' && /оставлено: 1/.test(await text('#plugins-journal')));
+    // Выгруженный плагин: пункты в меню остаются, но недоступны.
+    await waitFor('пункты echo недоступны, но не убраны', async () => (await menuItems()).length === 2 && (await menuItems()).every((i) => !i.enabled));
     assert.equal(await alive(sh), true, 'оставленный процесс завершён');
     const kept = () => text('#plugins-list [data-plugin="echo"] .plugin-kept');
     await waitFor('строка echo показывает оставленный процесс', async () => (await kept()).includes(`/bin/sh - pid ${sh}`));
     assert.equal(await load(), true);
+    await waitFor('пункты echo снова доступны', async () => (await menuItems()).every((i) => i.enabled));
     await waitFor('вернувшийся echo подхватил тот же процесс', async () => (await state('echo')) === 'active' && (await inView('echo', "document.getElementById('term-state').textContent")) === `pty ${sh}` && /после-72/.test(await screen()));
     assert.equal(await kept(), '', 'подхваченный процесс остался в списке оставленных');
     await type('echo снова-$((9*9))');
@@ -573,7 +609,7 @@ async function main() {
       const { Menu, BrowserWindow } = process.mainModule.require('electron');
       const win = BrowserWindow.getAllWindows()[0];
       const find = (items) => items.flatMap((i) => (i.role === ${JSON.stringify(role)} ? [i] : i.submenu ? find(i.submenu.items) : []));
-      const item = find(Menu.buildFromTemplate([{ role: 'editMenu' }]).items)[0];
+      const item = find(Menu.getApplicationMenu()?.items ?? [])[0];
       item?.click(undefined, win, win.webContents);
       return !!item;
     })()`);

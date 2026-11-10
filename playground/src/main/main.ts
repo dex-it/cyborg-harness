@@ -8,6 +8,7 @@ import { app, BrowserWindow, Notification, powerMonitor } from 'electron';
 import { RecentWorkspaces } from '@cyborg-harness/core';
 import {
   alertNotification,
+  bindAppMenu,
   bindWindow,
   electronOs,
   guardNavigation,
@@ -29,6 +30,7 @@ import {
   windowChannel,
   windowEvents,
   workspaceInfo,
+  type AppMenuItem,
 } from '@cyborg-harness/electron';
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
 import { quietPipes } from './quiet-pipes.ts';
@@ -63,6 +65,18 @@ const safeMode = process.argv.includes('--safe-mode');
 const userPlugins = process.argv.includes(USER_PLUGINS_FLAG);
 
 let win: BrowserWindow | undefined;
+
+/**
+ * Меню приложения (K-08): свои меню и пункты здесь, пункты плагинов (`contributes.menus`) встают в меню с `menu` и в меню ядра, которых тут нет («Инструменты»).
+ * Правка нужна и для буфера обмена: role copy и paste меню Edit действуют на сфокусированный кадр, вложенный тоже (issue #2).
+ */
+const menuBase: AppMenuItem[] = [
+  ...(process.platform === 'darwin' ? [{ role: 'appMenu' } as const] : []),
+  { label: 'Воркспейс', menu: 'workspace', submenu: [{ role: process.platform === 'darwin' ? 'close' : 'quit' }] },
+  { role: 'editMenu' },
+  { label: 'Вид', menu: 'view', submenu: [{ role: 'toggleDevTools' }] },
+  { label: 'Окно', menu: 'window', submenu: [{ role: 'minimize' }] },
+];
 
 // Один экземпляр - один воркспейс - одно окно: второй запуск с любым воркспейсом поднимает открытое окно, а не второе ядро.
 const sole =
@@ -152,6 +166,7 @@ void app.whenReady().then(() => {
     fs.writeFileSync(config, JSON.stringify(DEFAULT_CONFIG, null, 2));
   }
   createWindow();
+  bindAppMenu(plugins, menuBase);
   watchPower(plugins);
   showWorkspace();
   if (workspaceFile === undefined) {

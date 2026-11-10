@@ -16,3 +16,6 @@ export type { ViewChannelsOptions, WindowChannelsOptions } from './channels.ts';
 export { alertNotification, bindWindow, quitAfterPlugins, showWindow, singleInstance, watchPower, watchTheme, windowEvents } from './window.ts';
 export { restarts, workspaceInfo } from './restarts.ts';
 export type { RestartFlags, RestartOptions, Restarts } from './restarts.ts';
+export { bindAppMenu } from './app-menu.ts';
+export { appMenuTemplate } from './app-menu-template.ts';
+export type { AppMenuItem } from './app-menu-template.ts';
