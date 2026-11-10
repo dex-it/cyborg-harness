@@ -4,6 +4,7 @@ import type { DocumentRow } from './documents.ts';
 import type { ContractGraph, Rejection } from './graph.ts';
 import type { SystemEvent } from './host-runtime.ts';
 import type { LayoutEntry } from './layout.ts';
+import type { MenuEntry } from './menus.ts';
 import type { ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { OsEnvironment } from './os-gateway.ts';
@@ -55,6 +56,8 @@ export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'uninstalled'; readonly erased: readonly string[]; readonly left: readonly string[]; readonly error?: string }
   /** pty без владельца не взят через `attach` за льготное время после падения хоста или активации плагина и завершён. */
   | { readonly pluginId: string; readonly kind: 'pty-expired'; readonly id: string; readonly program: string; readonly graceMs: number }
+  /** Источник `enabled` или `checked` пункта меню не отдал boolean: пункт недоступен, пока чтение не удастся. Та же ошибка подряд пишется один раз; выгруженный владелец состояния ошибкой не считается. */
+  | { readonly pluginId: string; readonly kind: 'menu-source'; readonly item: string; readonly field: 'enabled' | 'checked'; readonly error: string }
   /** Сочетание объявлено и другим плагином; нажатие получает `winner`. */
   | { readonly pluginId: string; readonly kind: 'key-conflict'; readonly key: string; readonly command: string; readonly winner: string }
   /** Привязка `plugins.keybindings` не применена: сочетание не разобралось или команды нет ни у одного плагина. */
@@ -162,6 +165,8 @@ export interface LoadOptions {
   readonly onWindow?: ((snapshot: WindowSnapshot) => void) | undefined;
   /** Документ открыт, переименован или закрыт: приложение перерисовывает вкладки по `kernel.documents`. */
   readonly onDocuments?: (() => void) | undefined;
+  /** Снимок `Kernel.menus` поменялся после чтения источников состояния или смены состояния плагинов: приложение пересобирает меню ОС. */
+  readonly onMenus?: (() => void) | undefined;
   /** Оставленные процессы выключенных плагинов поменялись: приложение перечитывает `kernel.keptPty()`. */
   readonly onKeptPty?: (() => void) | undefined;
 }
@@ -197,6 +202,15 @@ export interface Kernel {
   readonly manifests: readonly PluginManifest[];
   /** Раскладка по манифестам: виды и типы документов по `order`, при равенстве по id плагина; не включённые, выключенные и вне графа помечены по-разному (`mark`: `not-enabled`, `disabled`, `out-of-graph`). Каждое чтение собирает снимок заново. */
   readonly layout: readonly LayoutEntry[];
+  /**
+   * Меню окна по вкладам плагинов (`contributes.menus`): пункты по меню из `MENU_NAMES`, `order`, id плагина и пункта; не работающий плагин оставляет пункты недоступными (`enabled: false`, `mark`).
+   * `enabled` и `checked` читаются у владельцев состояния, когда меняется состояние плагинов, после команды и вызова контракта у владельца и по `refreshMenus`; изменение снимка сообщает `onMenus`.
+   */
+  readonly menus: readonly MenuEntry[];
+  /** Перечитывает источники состояния пунктов; ответ - когда снимок свежий. Приложение зовёт, когда знает о перемене, которой ядро не видит. */
+  refreshMenus(): Promise<void>;
+  /** Нажатие пункта меню: исполняет его команду от имени вкладчика (ленивый плагин просыпается). Пункта нет - `NotFound`, пункт недоступен - `Unavailable`. */
+  runMenuItem(pluginId: string, id: string): Promise<unknown>;
   hostOf(pluginId: string): string | undefined;
   /** Все сочетания: окна и меню, манифесты принятых плагинов, выбор человека и динамические `ctx.keys.register`; `key` - под платформу, как его даёт `keyOfInput`. */
   readonly keybindings: readonly Keybinding[];

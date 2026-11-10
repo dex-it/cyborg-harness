@@ -14,6 +14,7 @@ export { inlinePtyHost } from './pty-link.ts';
 export { RecentWorkspaces } from './recent.ts';
 export { describeEntry, entryLevel, entryPlugins, pluginStatuses } from './status.ts';
 export { forkHosts, inlineHosts } from './transports.ts';
+export { MENU_NAMES } from './manifest-menus.ts';
 export { MENU_OWNER, WINDOW_OWNER } from './window-layer.ts';
 export { openWorkspace } from './workspace.ts';
 
@@ -28,6 +29,8 @@ export type { LayoutEntry, LayoutMark } from './layout.ts';
 export type { ResourceLimits } from './limits.ts';
 export type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Kernel, Keybinding, KeyPress, LoadOptions, UninstallReport, UserKeybinding, WatchdogOptions } from './loader.ts';
 export type { Area, DocumentDecl, Placement } from './manifest-layout.ts';
+export type { Contributes, MenuItemDecl, MenuName, StateSource } from './manifest-menus.ts';
+export type { MenuEntry } from './menus.ts';
 export type { ArgSpec, CommandCallers, CommandSpec, KeybindingSpec, ManifestResult, PluginManifest, SectionDecl } from './manifest.ts';
 export type { WireKind } from './wire.ts';
 export type { Guard, GuardRight, MemberGuards } from './via-contract.ts';

@@ -9,6 +9,7 @@ import { buildKernel } from './kernel-api.ts';
 import type { KernelContext, Parts } from './kernel-context.ts';
 import type { Kernel, LoadOptions } from './kernel-types.ts';
 import { createLifecycle } from './lifecycle.ts';
+import { createMenus } from './menus.ts';
 import { createKeyRegistry } from './keybindings.ts';
 import { createOsRequests } from './os-requests.ts';
 import { createSections } from './sections.ts';
@@ -24,6 +25,7 @@ const createParts = (ctx: KernelContext): Parts => ({
   contracts: createContractCalls(ctx),
   commands: createCommands(ctx),
   keyRegistry: createKeyRegistry(ctx),
+  menus: createMenus(ctx),
   idleWatch: createIdleWatch(ctx),
   sections: createSections(ctx),
   osRequests: createOsRequests(ctx),
@@ -34,5 +36,6 @@ const createParts = (ctx: KernelContext): Parts => ({
 export async function load(options: LoadOptions): Promise<Kernel> {
   const ctx = await createContext(options, createParts);
   await ctx.parts.activation.start();
+  await ctx.parts.menus.start();
   return buildKernel(ctx);
 }

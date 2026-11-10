@@ -1,3 +1,4 @@
+import type { KernelContext } from './kernel-context.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { Area } from './manifest-layout.ts';
 
@@ -18,6 +19,12 @@ export const DEFAULT_ORDER = 1000;
  * метки не дают: их причина - в журнале (`pluginStatuses`).
  */
 export type LayoutMark = 'not-enabled' | 'disabled' | 'out-of-graph';
+
+/** Метка плагина сейчас: общая для раскладки и меню окна. Нет метки - плагин не отстранён настройками, человеком, сторожем или графом. */
+export function pluginMark(ctx: KernelContext, pluginId: string): LayoutMark | undefined {
+  const { switchedOff, userOff } = ctx.parts.lifecycle;
+  return ctx.graph.rejected.has(pluginId) ? 'out-of-graph' : !ctx.byId.has(pluginId) ? 'not-enabled' : switchedOff.has(pluginId) || userOff.has(pluginId) ? 'disabled' : undefined;
+}
 
 export interface LayoutEntry {
   readonly pluginId: string;
