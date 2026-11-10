@@ -202,6 +202,7 @@ member PluginManifest.activation :: readonly optional prop 'lazy'
 member PluginManifest.commands :: readonly prop Readonly<Record<string, CommandSpec>>
 member PluginManifest.config :: readonly optional prop SectionDecl
 member PluginManifest.consumes :: readonly prop Readonly<Record<string, string>>
+member PluginManifest.contributes :: readonly optional prop Contributes
 member PluginManifest.deprecated :: readonly optional prop Readonly<Record<string, readonly string[]>>
 member PluginManifest.documents :: readonly optional prop Readonly<Record<string, DocumentDecl>>
 member PluginManifest.engines :: readonly object
@@ -388,6 +389,7 @@ set TOP_LEVEL | activation
 set TOP_LEVEL | commands
 set TOP_LEVEL | config
 set TOP_LEVEL | consumes
+set TOP_LEVEL | contributes
 set TOP_LEVEL | documents
 set TOP_LEVEL | engines
 set TOP_LEVEL | host
