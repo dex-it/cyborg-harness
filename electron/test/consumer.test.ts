@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import { tryCommand } from './run-command.ts';
 
 // P-03: пустой проект вне репозитория ставит три пакета из архивов `npm pack` (реестр не нужен), и `npm ls --all` не находит
 // неудовлетворённых peer-зависимостей на контракты и ядро - в том числе когда контракты вышли предрелизом (`1.0.0-dev`:
@@ -19,16 +19,8 @@ const own = readJson(path.join(pkg, 'package.json'));
 const corePeer = readJson(path.join(root, 'core', 'package.json')).peerDependencies?.['@cyborg-harness/contracts'] ?? '';
 const coreTakesPrerelease = !corePeer.startsWith('^');
 
-/** Команда с пределом времени: зависшая npm не должна держать весь `npm test`; при отказе в сообщение идёт её вывод. */
-function run(cmd: string, args: string[], cwd: string): { code: number; out: string } {
-  try {
-    return { code: 0, out: execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 90_000, killSignal: 'SIGKILL' }) };
-  } catch (error) {
-    const e = error as { status?: number | null; message: string; stdout?: string; stderr?: string };
-    if (typeof e.status === 'number') return { code: e.status, out: `${e.stdout ?? ''}${e.stderr ?? ''}` };
-    throw new Error(`${cmd} ${args.join(' ')} (cwd ${cwd}): ${e.message}`, { cause: error });
-  }
-}
+/** Команда с пределом времени: зависшая npm не должна держать весь `npm test`; при отказе в сообщение идёт её вывод (core/test/run-command.ts). */
+const run = (cmd: string, args: string[], cwd: string): { code: number; out: string } => tryCommand(cmd, args, { cwd });
 
 function pack(dir: string, into: string): string {
   fs.mkdirSync(into, { recursive: true });

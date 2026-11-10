@@ -12,19 +12,11 @@ import { readyAfter } from '../plugins/sessions/index.ts';
 import { collectTools } from '../plugins/sessions/mcp.ts';
 import { projectDirName } from '../plugins/agent-claude-code/history.ts';
 import { ISOLATION_PROMPT } from '../plugins/session-isolation/index.ts';
+import { waitFor } from '../../core/test/wait-for.ts';
 
 const PLUGINS = path.join(import.meta.dirname, '..', 'plugins');
 const PROVIDERS = ['agent-claude-code', 'agent-shell'];
 const manifestOf = (id: string): unknown => JSON.parse(readFileSync(path.join(PLUGINS, id, 'manifest.json'), 'utf8'));
-
-async function waitFor<T>(what: string, probe: () => T | undefined | false | Promise<T | undefined | false>): Promise<T> {
-  for (let i = 0; i < 200; i++) {
-    const v = await probe();
-    if (v !== undefined && v !== false) return v;
-    await new Promise((r) => setTimeout(r, 20));
-  }
-  throw new Error(`не дождались: ${what}`);
-}
 
 /** Среда поставщиков: подставной claude в PATH и оболочка входа без профиля (/etc/profile переписал бы PATH, и тест не нашёл бы свой claude). */
 async function agentEnv(box: Sandbox): Promise<{ home: string; env: Record<string, string> }> {

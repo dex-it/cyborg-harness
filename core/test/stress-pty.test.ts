@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { PluginContext, PtyHandle } from '@cyborg-harness/contracts';
-import { load } from '../src/loader.ts';
+import { load as loadKernel, type Kernel, type LoadOptions } from '../src/loader.ts';
+import { trackKernels } from './kernels.ts';
 import { PtyTable, type PtyBackend, type PtyExpiry, type PtyTableOptions } from '../src/pty.ts';
 import { inlinePtyHost, type SpawnPtyHost } from '../src/pty-link.ts';
 import { isRecord } from '../src/wire.ts';
@@ -13,6 +14,10 @@ import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { fakePty } from '../../testing/src/fake-pty.ts';
 import { fakeView } from './view-channel.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
+
+// Ядро выгружается после каждого теста файла, и упавшим тоже: иначе слежение и программы держат процесс файла (core/test/kernels.ts).
+const track = trackKernels();
+const load = async (options: LoadOptions): Promise<Kernel> => track(await loadKernel(options));
 
 const spawnOpts = { program: 'sh', args: [] as string[], env: {}, cols: 80, rows: 24, persist: true };
 

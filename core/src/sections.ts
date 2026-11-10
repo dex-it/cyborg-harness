@@ -4,6 +4,7 @@ import { CoreError, errorMessage } from './errors.ts';
 import type { SectionInput } from './host-runtime.ts';
 import { compileSchema } from './json-schema.ts';
 import type { BridgeEnd, KernelContext, Sections } from './kernel-context.ts';
+import type { JournalEntry } from './kernel-types.ts';
 import type { PluginManifest } from './manifest.ts';
 import { isRecord } from './wire.ts';
 
@@ -54,6 +55,14 @@ export function createSections(ctx: KernelContext): Sections {
     });
   }
 
+  /**
+   * Перезагрузка идёт мимо очереди жизненного цикла: за время вызова плагин могли снять (`disable`), и запись о ней легла бы после его `unloaded`
+   * и перекрыла бы её: по последней записи жизненного цикла `enable` поставщика решает, поднимать ли зависимого. Снятому плагину запись не пишется.
+   */
+  const note = (entry: Extract<JournalEntry, { kind: 'config' | 'state' }>) => {
+    if (ctx.active.includes(entry.pluginId)) ctx.record(entry);
+  };
+
   /** Раздел поменялся извне: активные владельцы получают `onChange`, не прошедший проверку - запись в журнал. */
   async function reload(kind: 'config' | 'state', ids: readonly string[]): Promise<void> {
     const { pool } = ctx.parts;
@@ -65,9 +74,9 @@ export function createSections(ctx: KernelContext): Sections {
       if (!m[kind] || !store) continue;
       try {
         const result = await pool.call<SectionResult>(pool.live(pluginId), pluginId, 'section.reload', { pluginId, kind, layers: store.raw(pluginId) });
-        if (result.status !== 'ok') ctx.record({ pluginId, kind, result });
+        if (result.status !== 'ok') note({ pluginId, kind, result });
       } catch (error) {
-        ctx.record({ pluginId, kind, result: { status: 'invalid', errors: [errorMessage(error)] } });
+        note({ pluginId, kind, result: { status: 'invalid', errors: [errorMessage(error)] } });
       }
     }
   }

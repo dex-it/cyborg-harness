@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { satisfies } from '../../core/src/semver.ts';
 import { COMPUTED, usesOf } from '../../core/test/imports.ts';
+import { runCommand } from '../../core/test/run-command.ts';
 
 // P-08: пакет @cyborg-harness/testing. Состав и форма пакета, граница зависимостей (T-04: в пакете нет импортов из playground) и отсутствие копий подделок в тестах репозитория.
 const pkg = path.resolve(import.meta.dirname, '..');
@@ -160,7 +160,7 @@ describe('собранный пакет (testing/dist)', () => {
   });
 
   it('npm pack: в архиве dist, package.json и README, без исходников и тестов', () => {
-    const out = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: pkg, encoding: 'utf8', timeout: 90_000, killSignal: 'SIGKILL' });
+    const out = runCommand('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: pkg });
     const [pack] = JSON.parse(out) as [{ files: { path: string }[] }];
     const names = pack.files.map((f) => f.path);
     assert.ok(names.includes('package.json') && names.includes('README.md'), 'нет package.json или README.md');

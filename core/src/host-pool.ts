@@ -167,7 +167,7 @@ export function createHostPool(ctx: KernelContext): HostPool {
         }
         await activation.activate(id);
       }
-    }).catch((error: unknown) => options.onLog?.(`хост ${host.id}`, `перезапуск не удался: ${errorMessage(error)}`));
+    }).catch((error: unknown) => ctx.parts.logs.hostLine(host.id, `перезапуск не удался: ${errorMessage(error)}`, 'error'));
   }
 
   return {

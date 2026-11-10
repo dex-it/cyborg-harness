@@ -24,6 +24,7 @@
 | Замер горячего пути pty: задержка вывода и склейка | [05-verification/spike-pty.md](05-verification/spike-pty.md) |
 | Спайк экрана терминала после `attach`: хвост или снимок на настоящем `claude` | [05-verification/spike-pty-restore.md](05-verification/spike-pty-restore.md) |
 | Пилот Monaco и xterm во фреймах: CSP, типы файлов, `sandbox`, буфер обмена, память | [05-verification/spike-monaco-xterm.md](05-verification/spike-monaco-xterm.md) |
+| Замер K-04: группы рендера, память при десяти видах | [05-verification/spike-render-groups.md](05-verification/spike-render-groups.md) |
 | Проверка на macOS: замеры хостов и фреймов, клавиши, терминал | [05-verification/macos-check.md](05-verification/macos-check.md) |
 | Плагины вне репозитория и из упакованной сборки (asar): что грузится, что нет и почему, ограничения автора на `.ts` (T-10) | [05-verification/external-plugins.md](05-verification/external-plugins.md) |
 | База Cyborg: старт, память, терминал, панели, бандлы и записанные сессии S1-S18 для сравнения с ядром | [05-verification/cyborg-baseline.md](05-verification/cyborg-baseline.md) |

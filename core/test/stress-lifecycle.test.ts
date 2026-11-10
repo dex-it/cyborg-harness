@@ -9,6 +9,12 @@ import { load, type JournalEntry, type Kernel, type LoadOptions } from '../src/l
 import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type HostHandle, type SpawnHost } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
+import { waitFor } from './wait-for.ts';
+
+// Срок молчания хоста до «завис». Тесты без зависания берут QUIET_MS: инлайн-хосты живут в процессе теста, и занятый раннер, на миг остановивший цикл событий,
+// иначе записал бы лишнее `hang`. Тесты, которые зависание проверяют, задают HANG_WATCHDOG и ждут записи в журнале, а не срока.
+const QUIET_MS = 5000;
+const HANG_WATCHDOG = { interval: 20, timeout: 600 };
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 
@@ -51,7 +57,7 @@ function rig(table: Record<string, PluginModule>, options: Omit<LoadOptions, 'ap
     handles.push(wrapped);
     return wrapped;
   };
-  return { spawned, handles, hung, killed: () => killed, start: () => load({ apiVersion: PLUGIN_API_VERSION, watchdog: { interval: 20, timeout: 150 }, spawnHost, ...options }) };
+  return { spawned, handles, hung, killed: () => killed, start: () => load({ apiVersion: PLUGIN_API_VERSION, watchdog: { interval: 20, timeout: QUIET_MS }, spawnHost, ...options }) };
 }
 
 const kinds = (k: Kernel, kind: JournalEntry['kind']) => k.journal.filter((e) => e.kind === kind);
@@ -171,7 +177,9 @@ test('stress-lifecycle: поставщики consumes приходят и ухо
   });
   const k = await r.start();
   const names = () => ctxC.contracts.all('test.src', 1).map((p) => p.pluginId).sort();
-  await sleep(20);
+  // Поставщики приходят по каналам разных хостов: ждём, пока `all()` увидит ровно ожидаемых, а не срока, за который они «должны» дойти.
+  const settled = (expected: readonly string[], what: string) => waitFor(what, () => JSON.stringify(names()) === JSON.stringify([...expected].sort()));
+  await settled(providers, 'все восемь поставщиков в all()');
   assert.deepEqual(names(), [...providers].sort());
   const live = new Set(providers);
   for (let i = 0; i < 160; i++) {
@@ -183,11 +191,10 @@ test('stress-lifecycle: поставщики consumes приходят и ухо
       await k.enable(id);
       live.add(id);
     }
-    await sleep(5);
+    await settled([...live], `all() сошёлся с живыми, шаг ${String(i)}`);
     assert.deepEqual(names(), [...live].sort(), `шаг ${String(i)}`);
   }
-  await sleep(20);
-  assert.ok(changes >= 160, `onChange дошёл на каждую смену: ${String(changes)}`);
+  await waitFor('onChange дошёл на каждую смену', () => changes >= 160);
   await k.unload();
 });
 
@@ -225,14 +232,14 @@ test('stress-lifecycle: зависание хоста - сторож назыв�
     manifests: [manifest('bad', { commands: { 'bad.run': {}, 'bad.ok': {} } }), manifest('good', { commands: { 'good.run': {} } })],
     hosts: { b: ['bad'], g: ['good'] },
     bundled: ['bad', 'good'],
+    watchdog: HANG_WATCHDOG,
   });
   const k = await r.start();
   for (let strike = 1; strike <= 3; strike++) {
     r.hung.add('b');
     // Незавершённый вызов в зависшем хосте: он и делает плагин виновником.
     const call = k.run('bad.run').catch((e: unknown) => e);
-    await sleep(0);
-    await sleep(250);
+    await waitFor(`сторож записал зависание ${String(strike)}`, () => kinds(k, 'host-down').length >= strike);
     r.hung.delete('b');
     await call;
     await k.idle();
@@ -323,6 +330,7 @@ test('stress-lifecycle: зависание общего хоста - страй�
     manifests: [manifest('waiter', { commands: { 'waiter.gh': {} } }), manifest('spinner', { commands: { 'spinner.loop': {} } })],
     hosts: { shared: ['waiter', 'spinner'] },
     bundled: ['waiter', 'spinner'],
+    watchdog: HANG_WATCHDOG,
   });
   const k = await r.start();
   // Сосед ждёт долгий внешний вызов: хост за это время отвечает на пинги.
@@ -330,7 +338,7 @@ test('stress-lifecycle: зависание общего хоста - страй�
   await sleep(100);
   r.hung.add('shared');
   const spinning = k.run('spinner.loop').catch((e: unknown) => e);
-  await sleep(250);
+  await waitFor('сторож записал зависание общего хоста', () => kinds(k, 'host-down').length >= 1);
   r.hung.delete('shared');
   await Promise.all([waiting, spinning]);
   await k.idle();

@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { memorySecrets } from '../../testing/src/memory.ts';
 import { SectionStore, type LayerStore } from '../src/config.ts';
 import { CoreError } from '../src/errors.ts';
 import { load } from '../src/loader.ts';
@@ -425,4 +428,144 @@ test('keys.register и keys.unregister: хост не занимает соче�
   assert.equal(kernel.keybinding('Ctrl+K')?.pluginId, 'victim', 'регистрацию victim чужой хост не снял');
   assert.equal(logs.filter((l) => l.startsWith('хост m: ядро отказало')).length, 1, logs.join('\n'));
   await kernel.unload();
+});
+
+test('log и output: хост пишет строки только за свои плагины, неизвестный уровень отклоняется, строка без плагина идёт с меткой хоста', async () => {
+  const forger = forging({ victim: { activate: () => undefined }, mallory: { activate: () => undefined } });
+  const logs: string[] = [];
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['victim', 'mallory'],
+    manifests: [manifest('victim'), manifest('mallory')],
+    spawnHost: forger.spawn,
+    hosts: { v: ['victim'], m: ['mallory'] },
+    onLog: (id, message, level) => logs.push(`${id} [${level}]: ${message}`),
+  });
+
+  forger.notify('m', 'log', { pluginId: 'mallory', message: 'свои слова', level: 'warn' });
+  forger.notify('m', 'log', { pluginId: 'victim', message: 'слова от имени victim', level: 'info' });
+  forger.notify('m', 'log', { pluginId: 'mallory', message: 'уровень из головы', level: 'fatal' });
+  forger.notify('m', 'output', { pluginId: 'mallory', level: 'error', text: 'вывод mallory' });
+  forger.notify('m', 'output', { pluginId: '', level: 'info', text: 'вывод хоста' });
+  forger.notify('m', 'output', { pluginId: 'victim', level: 'info', text: 'вывод от имени victim' });
+  forger.notify('m', 'output', { pluginId: '', level: 'trace', text: 'уровень из головы' });
+  await settle();
+
+  const fromM = logs.filter((l) => !l.startsWith('хост m [warn]: ядро отказало'));
+  assert.deepEqual(fromM, ['mallory [warn]: свои слова', 'mallory [error]: вывод mallory', 'хост m [info]: вывод хоста']);
+  assert.equal(logs.length - fromM.length, 4, logs.join('\n'));
+  await kernel.unload();
+});
+
+test('output: поток строк хоста без плагина тоже под пределом частоты - одна сводная строка с меткой хоста, плагины хоста не задеты', async () => {
+  const forger = forging({ mallory: { activate: () => undefined } });
+  const logs: string[] = [];
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['mallory'],
+    manifests: [manifest('mallory')],
+    spawnHost: forger.spawn,
+    hosts: { m: ['mallory'] },
+    limits: { logRate: 2, logWindowMs: 40 },
+    onLog: (id, message, level) => logs.push(`${id} [${level}]: ${message}`),
+  });
+
+  for (let i = 0; i < 6; i++) forger.notify('m', 'output', { pluginId: '', level: i === 4 ? 'error' : 'info', text: `строка ${String(i)}` });
+  await settle();
+  for (const end = Date.now() + 2000; logs.length < 3 && Date.now() < end; ) await new Promise((r) => setTimeout(r, 10));
+
+  assert.deepEqual(logs, [
+    'хост m [info]: строка 0',
+    'хост m [info]: строка 1',
+    'хост m [warn]: строк сверх предела за интервал: 4, из них error: 1; последняя error: строка 4',
+  ]);
+  assert.deepEqual(kernel.journal.filter((e) => e.kind === 'log-summary'), [], 'у хоста нет плагина - сводная не в журнале плагина');
+  assert.deepEqual(kernel.active, ['mallory']);
+  await kernel.unload();
+});
+
+test('output: строка хоста вычёркивает только значения секретов плагинов этого хоста; короткое значение не вычёркивается нигде', async () => {
+  const mine = `mine-${randomUUID()}`;
+  const theirs = `theirs-${randomUUID()}`;
+  const forger = forging({
+    a: {
+      activate: async (ctx) => {
+        await ctx.os.secrets.set('long', theirs);
+        await ctx.os.secrets.set('short', 'e');
+      },
+    },
+    b: {
+      activate: async (ctx) => {
+        await ctx.os.secrets.set('long', mine);
+        await ctx.os.secrets.set('short', 'abc');
+      },
+    },
+  });
+  const logs: string[] = [];
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['a', 'b'],
+    manifests: [manifest('a'), manifest('b')],
+    spawnHost: forger.spawn,
+    hosts: { ha: ['a'], hb: ['b'] },
+    os: { dataDir: tmpdir(), tempDir: tmpdir(), secrets: memorySecrets() },
+    onLog: (id, message, level) => logs.push(`${id} [${level}]: ${message}`),
+  });
+
+  forger.notify('hb', 'output', { pluginId: '', level: 'error', text: `Error: heap exhausted in renderer; ${theirs}; ${mine}; abc` });
+  await settle();
+
+  // Секрет соседнего хоста в чужой строке не секрет, значения короче 4 символов не заменяются вовсе: замена испортила бы строку, а скрыть такое значение нельзя.
+  assert.deepEqual(logs, [`хост hb [error]: Error: heap exhausted in renderer; ${theirs}; [секрет]; abc`]);
+  await kernel.unload();
+});
+
+test('log: отказ ядра по заметке хоста идёт под теми же пределами длины и частоты, что строки плагина, и без секретов', async () => {
+  const secret = `s3cr3t-${randomUUID()}`;
+  const forger = forging({ a: { activate: async (ctx) => { await ctx.os.secrets.set('k', secret); } }, b: { activate: () => undefined } });
+  const logs: string[] = [];
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['a', 'b'],
+    manifests: [manifest('a'), manifest('b')],
+    spawnHost: forger.spawn,
+    hosts: { ha: ['a'], hb: ['b'] },
+    os: { dataDir: tmpdir(), tempDir: tmpdir(), secrets: memorySecrets() },
+    limits: { logRate: 2, logLineBytes: 64, logWindowMs: 10_000 },
+    onLog: (id, message, level) => logs.push(`${id} [${level}]: ${message}`),
+  });
+
+  // Код плагина в хосте пишет в канал напрямую: pluginId в 100 000 символов отказ повторяет в тексте.
+  for (let i = 0; i < 50; i++) forger.notify('hb', 'log', { pluginId: `${secret}${'x'.repeat(100_000)}`, message: 'x', level: 'info' });
+  await settle();
+
+  assert.equal(logs.length, 2, `строк мимо предела частоты: ${String(logs.length)}`);
+  for (const l of logs) {
+    assert.ok(Buffer.byteLength(l) < 200, `строка ${String(Buffer.byteLength(l))} Б`);
+    assert.ok(l.includes('[обрезано: всего'), l);
+  }
+  await kernel.unload();
+  assert.equal(logs.length, 3, 'сводная запись при выгрузке');
+  assert.match(logs[2] ?? '', /^хост hb \[warn\]: строк сверх предела за интервал: 48, из них error: 0$/);
+  assert.ok(!logs.join('\n').includes(secret));
+});
+
+test('output: сводная строка хоста без плагина, не дождавшаяся конца интервала, пишется при выгрузке ядра', async () => {
+  const forger = forging({ m: { activate: () => undefined } });
+  const logs: string[] = [];
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['m'],
+    manifests: [manifest('m')],
+    spawnHost: forger.spawn,
+    hosts: { h: ['m'] },
+    limits: { logRate: 1, logWindowMs: 600_000 },
+    onLog: (id, message, level) => logs.push(`${id} [${level}]: ${message}`),
+  });
+
+  for (let i = 0; i < 4; i++) forger.notify('h', 'output', { pluginId: '', level: i === 3 ? 'error' : 'info', text: `строка ${String(i)}` });
+  await settle();
+  assert.deepEqual(logs, ['хост h [info]: строка 0']);
+  await kernel.unload();
+  assert.deepEqual(logs, ['хост h [info]: строка 0', 'хост h [warn]: строк сверх предела за интервал: 3, из них error: 1; последняя error: строка 3']);
 });

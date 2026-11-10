@@ -10,6 +10,8 @@ import type { PluginManifest } from './manifest.ts';
 import type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';
 import { ContractRegistry, type ContractImpl } from './registry.ts';
 import { Endpoint, type Owner, type Port } from './rpc.ts';
+import { captureOutput } from './host-output.ts';
+import { LOG_LEVELS } from './log-text.ts';
 import { BACKLOG_LIMIT, Tail } from './pty-tail.ts';
 import type { PtyWire } from './pty-types.ts';
 import { isRecord, own } from './wire.ts';
@@ -151,7 +153,7 @@ class HostWatches {
         item.onClose?.(p.closed);
       }
     } catch (error) {
-      endpoint.notify('log', { pluginId: p.pluginId, message: `слушатель fs.watch упал: ${error instanceof Error ? error.message : String(error)}` });
+      endpoint.notify('log', { pluginId: p.pluginId, message: `слушатель fs.watch упал: ${error instanceof Error ? error.message : String(error)}`, level: 'error' });
     }
   }
 
@@ -272,7 +274,7 @@ class HostSystem {
   }
 
   #log(pluginId: string, what: string, error: unknown): void {
-    this.endpoint.notify('log', { pluginId, message: `слушатель ${what} упал: ${error instanceof Error ? error.message : String(error)}` });
+    this.endpoint.notify('log', { pluginId, message: `слушатель ${what} упал: ${error instanceof Error ? error.message : String(error)}`, level: 'error' });
   }
 }
 
@@ -456,6 +458,7 @@ export function runHost(port: Port, importer: Importer, options: HostOptions = {
   if (options.ownsProcess) {
     attributeTimers(running);
     attributeFailures(running, endpoint);
+    captureOutput(process, console, () => running.blame(), (note) => endpoint.notify('output', note));
   }
   let manifests = new Map<string, PluginManifest>();
   let mirror: ContractRegistry | undefined;
@@ -709,7 +712,10 @@ function context(
   return {
     pluginId,
     subscriptions: loaded.store,
-    log: (message) => endpoint.notify('log', { pluginId, message }),
+    log: (message, level = 'info') => {
+      if (!LOG_LEVELS.includes(level)) throw new CoreError('Invalid', `${pluginId}: ctx.log ждёт уровень ${LOG_LEVELS.join(', ')}, получено ${JSON.stringify(level)}`);
+      endpoint.notify('log', { pluginId, message, level });
+    },
     os: osOf(endpoint, pluginId, manifest.permissions, paths, ptys, watches, serves),
     secrets: { resolve: (ref) => endpoint.request<SecretValue>('os', { pluginId, method: 'secrets.resolve', args: [ref] }) },
     window: Object.freeze({
