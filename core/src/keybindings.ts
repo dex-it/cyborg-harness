@@ -148,6 +148,8 @@ export function createKeyRegistry(ctx: KernelContext): KeyRegistry {
 
     const fixed = ctx.keys.get(key);
     if (fixed?.pluginId === WINDOW_OWNER || fixed?.pluginId === MENU_OWNER) {
+      // Сочетание меню (пункт плагина или меню приложения) отказ плагину не исчерпывает: человеку конфликт виден в журнале, как проигрыш манифеста меню. Команды окна по-прежнему только отказ.
+      if (fixed.pluginId === MENU_OWNER) ctx.record({ pluginId: m.id, kind: 'key-conflict', key, command: p.command, winner: MENU_OWNER });
       throw new CoreError('CommandConflict', `${m.id}: сочетание ${key} занято ${fixed.pluginId === WINDOW_OWNER ? 'окном' : 'меню приложения'} (${fixed.command})`);
     }
     const winner = fixed?.pluginId ?? winners.get(key)?.pluginId;

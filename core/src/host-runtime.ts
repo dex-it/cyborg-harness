@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { splitSignal, withSignal } from './cancel.ts';
 import { resolveSection, VERSION_KEY, type SectionResult } from './config.ts';
 import { DisposableStore, toDisposable, type Disposable } from './disposable.ts';
+import { loadEntry } from './entry-load.ts';
 import { compileSchema } from './json-schema.ts';
 import type { AskDialog, ContractName, ContractType, DocumentChange, DocumentInfo, DocumentInit, HttpServer, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue, ServeRequest, ServeResponse, ViewChannel, ModalInit } from '@cyborg-harness/contracts';
 import { CoreError, errorMessage } from './errors.ts';
@@ -518,7 +519,7 @@ export function runHost(port: Port, importer: Importer, options: HostOptions = {
   endpoint.handle('activate', (p: { pluginId: string; entry: string; paths: OsPaths; config?: SectionInput; state?: SectionInput }) => running.run(p.pluginId, async () => {
     const manifest = manifests.get(p.pluginId);
     if (!manifest || !mirror) throw new CoreError('Remote', `хост не знает плагин ${p.pluginId}`);
-    const module = await importer(p.entry);
+    const module = await loadEntry(importer, p.entry);
     running.enter(p.pluginId);
     const loaded: Loaded = { store: new DisposableStore(), provided: new Map(), commands: new Map(), served: new Map() };
     loaded.store.add(toDisposable(() => [...loaded.served.values()].forEach((d) => d.dispose())));

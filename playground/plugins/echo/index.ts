@@ -3,7 +3,10 @@ import type { PluginModule, PtyHandle } from '@cyborg-harness/contracts';
 // Плагин на TypeScript без сборки: хост грузит его как есть, типы снимает Node.
 const echo: PluginModule = {
   activate(ctx) {
-    ctx.contracts.provide('demo.echo', '1.0', { say: async (text: string) => `${text} (эхо из ${process.pid})` });
+    let marked = false;
+    ctx.contracts.provide('demo.echo', '1.0', { say: async (text: string) => `${text} (эхо из ${process.pid})`, marked: async () => marked });
+    // Пункт меню «Echo: отметка» читает marked у контракта: галочка следует состоянию (K-08).
+    ctx.commands.register('echo.mark', () => void (marked = !marked));
     ctx.commands.register('echo.ping', () => ctx.log(`echo жив, процесс ${process.pid}`));
     ctx.commands.register('echo.files', async () => {
       await ctx.os.fs.writeText(`${ctx.os.paths.data}/seen.txt`, new Date().toISOString());

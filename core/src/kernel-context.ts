@@ -6,6 +6,7 @@ import type { ContractGraph } from './graph.ts';
 import type { SectionInput, SystemEvent } from './host-runtime.ts';
 import type { DisableOptions, DisablePreview, EnabledChange, JournalEntry, Keybinding, KeyPress, LoadOptions, UninstallReport } from './kernel-types.ts';
 import type { ResourceLimits } from './limits.ts';
+import type { MenuEntry } from './menu-entry.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { Notices } from './notices.ts';
 import type { OsEnvironment, OsGateway } from './os-gateway.ts';
@@ -158,6 +159,20 @@ export interface KeyRegistry {
   setVisible(pluginId: string, visible: boolean): void;
 }
 
+/** Меню окна по вкладам плагинов: снимок, перечитывание источников состояния и нажатие пункта. */
+export interface Menus {
+  snapshot(): MenuEntry[];
+  /** Запуск ядра окончен: первое чтение источников; дальше перемены снимка идут в `onMenus`. */
+  start(): Promise<void>;
+  /** Источники читаются разом; вызовы, пришедшие во время чтения, склеиваются в один повтор. Ответ - когда снимок свежий. */
+  refresh(): Promise<void>;
+  /** Плагин выполнил команду или принял вызов контракта: его состояние могло измениться, а пункт его читает. */
+  touch(pluginId: string): void;
+  /** Запись журнала: после смены состояния плагинов источники читаются заново. */
+  onJournal(kind: string): void;
+  run(pluginId: string, id: string): Promise<unknown>;
+}
+
 /** Слушатели простоя пользователя. */
 export interface IdleWatch {
   attach(end: BridgeEnd): void;
@@ -220,6 +235,7 @@ export interface Parts {
   readonly contracts: ContractCalls;
   readonly commands: Commands;
   readonly keyRegistry: KeyRegistry;
+  readonly menus: Menus;
   readonly idleWatch: IdleWatch;
   readonly sections: Sections;
   readonly osRequests: OsRequests;

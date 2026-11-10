@@ -231,3 +231,98 @@ test('манифест: deprecated у provides - члены с пометкой 
     'provides.test.old.deprecated[5]: ожидается имя члена контракта строкой, получено "x.y"',
   ]);
 });
+
+// K-08: вклады плагина в меню окна (`contributes.menus`). Ошибки называют поле целиком; команда и источник состояния должны принадлежать плагину.
+const menuBase = {
+  ...base,
+  commands: ['pin-lock.lock', 'pin-lock.status'],
+  provides: { 'cyborg.lock': '1.2' },
+  optional: { 'cyborg.projects': '^1.3' },
+  consumes: { 'cyborg.tools': '^1' },
+};
+const menuItem = { id: 'lock', menu: 'view', title: 'Заблокировать', command: 'pin-lock.lock' };
+const menuErrors = (menus: unknown, extra: Record<string, unknown> = {}) => {
+  const r = parseManifest({ ...menuBase, ...extra, contributes: { menus } });
+  return r.ok ? [] : r.errors;
+};
+
+test('contributes.menus: пункт приводится к полной форме, источники enabled и checked - член контракта', () => {
+  const r = parseManifest({
+    ...menuBase,
+    contributes: {
+      menus: [
+        { ...menuItem, order: 300, accelerator: 'cmd+shift+l', enabled: { contract: 'cyborg.projects', major: 1, member: 'hasCurrent' }, checked: { contract: 'cyborg.lock', major: 1, member: 'isLocked' } },
+        { id: 'status', menu: 'tools', title: 'Состояние', command: 'pin-lock.status' },
+      ],
+    },
+  });
+  assert.ok(r.ok);
+  assert.deepEqual(r.manifest.contributes?.menus, [
+    {
+      id: 'lock',
+      menu: 'view',
+      title: 'Заблокировать',
+      command: 'pin-lock.lock',
+      order: 300,
+      accelerator: 'Shift+Meta+L',
+      enabled: { contract: 'cyborg.projects', major: 1, member: 'hasCurrent' },
+      checked: { contract: 'cyborg.lock', major: 1, member: 'isLocked' },
+    },
+    { id: 'status', menu: 'tools', title: 'Состояние', command: 'pin-lock.status' },
+  ]);
+  const plain = parseManifest(menuBase);
+  assert.ok(plain.ok);
+  assert.equal(plain.manifest.contributes, undefined, 'манифест без вкладов не получает новых полей');
+});
+
+test('contributes: незнакомое поле, не объект и не список - отказ с именем поля', () => {
+  const unknown = parseManifest({ ...menuBase, contributes: { menus: [menuItem], toolbar: [] } });
+  assert.deepEqual(unknown, { ok: false, id: 'pin-lock', errors: ['contributes.toolbar: ядро знает только contributes.menus'] });
+  assert.deepEqual(parseManifest({ ...menuBase, contributes: [] }), { ok: false, id: 'pin-lock', errors: ['contributes: ожидается { "menus": [...] }, получено []'] });
+  assert.deepEqual(menuErrors({ view: [menuItem] }), ['contributes.menus: ожидается список пунктов { id, menu, title, command, ... }, получено {"view":[{"id":"lock","menu":"view","title":"Заблокировать","command":"pin-lock.lock"}]}']);
+  assert.deepEqual(menuErrors([]), ['contributes.menus: нет ни одного пункта']);
+  assert.deepEqual(menuErrors([7]), ['contributes.menus[0]: ожидается объект { id, menu, title, command, ... }, получено 7']);
+});
+
+test('contributes.menus: неизвестное поле пункта, меню не из списка ядра, пустой и длинный заголовок - отказ с именем поля', () => {
+  assert.deepEqual(menuErrors([{ ...menuItem, icon: 'lock' }]), ['contributes.menus.lock.icon: незнакомое поле пункта меню']);
+  assert.deepEqual(menuErrors([{ ...menuItem, menu: 'edit' }]), ['contributes.menus.lock.menu: ожидается workspace, view, tools или window, получено "edit"']);
+  assert.deepEqual(menuErrors([{ ...menuItem, menu: undefined }]), ['contributes.menus.lock.menu: ожидается workspace, view, tools или window, получено ничего']);
+  assert.deepEqual(menuErrors([{ ...menuItem, title: '' }]), ['contributes.menus.lock.title: ожидается непустая строка до 80 символов, получено ""']);
+  assert.equal(menuErrors([{ ...menuItem, title: 'x'.repeat(81) }]).length, 1);
+  assert.deepEqual(menuErrors([{ ...menuItem, order: '1' }]), ['contributes.menus.lock.order: ожидается число, получено "1"']);
+  assert.deepEqual(menuErrors([{ ...menuItem, id: 'Bad Id' }]), ['contributes.menus[0].id: ожидается имя вида "open" (строчные латинские буквы, цифры и дефис), получено "Bad Id"']);
+  assert.deepEqual(menuErrors([menuItem, menuItem]), ['contributes.menus.lock: id повторяется']);
+  const many = Array.from({ length: 33 }, (_, i) => ({ ...menuItem, id: `item-${String(i)}` }));
+  assert.deepEqual(menuErrors(many), ['contributes.menus: не больше 32 пунктов']);
+});
+
+test('contributes.menus: команда должна принадлежать плагину и не требовать аргументов', () => {
+  assert.deepEqual(menuErrors([{ ...menuItem, command: 'other.lock' }]), ['contributes.menus.lock.command: команда "other.lock" не объявлена в commands этого плагина']);
+  assert.deepEqual(menuErrors([{ ...menuItem, command: undefined }]), ['contributes.menus.lock.command: команда ничего не объявлена в commands этого плагина']);
+  assert.deepEqual(menuErrors([menuItem], { commands: { 'pin-lock.lock': { args: ['string'] } } }), ['contributes.menus.lock.command: у pin-lock.lock обязательные аргументы, пункт меню их не даст']);
+  assert.ok(parseManifest({ ...menuBase, commands: { 'pin-lock.lock': { args: ['string?'] } }, contributes: { menus: [menuItem] } }).ok);
+});
+
+test('contributes.menus: сочетание пункта разбирается как в keybindings и не повторяется в плагине', () => {
+  assert.deepEqual(menuErrors([{ ...menuItem, accelerator: 'Ctrl+Hyper+L' }]), ['contributes.menus.lock.accelerator: сочетание "Ctrl+Hyper+L" не разобрано, ожидается вида "CmdOrCtrl+Shift+K" или "F5"']);
+  assert.deepEqual(menuErrors([{ ...menuItem, accelerator: 'L' }]), ['contributes.menus.lock.accelerator: сочетание "L" не разобрано, ожидается вида "CmdOrCtrl+Shift+K" или "F5"']);
+  const twice = menuErrors([
+    { ...menuItem, accelerator: 'CmdOrCtrl+L' },
+    { id: 'status', menu: 'tools', title: 'Состояние', command: 'pin-lock.status', accelerator: 'cmdorctrl+l' },
+  ]);
+  assert.deepEqual(twice, ['contributes.menus.status.accelerator: сочетание CmdOrCtrl+L уже у пункта lock']);
+});
+
+test('contributes.menus: источник состояния - член контракта из requires, optional или provides этого плагина', () => {
+  const at = (field: 'enabled' | 'checked', source: unknown, extra: Record<string, unknown> = {}) => menuErrors([{ ...menuItem, [field]: source }], extra);
+  assert.deepEqual(at('enabled', true), ['contributes.menus.lock.enabled: ожидается { contract, major, member }, получено true']);
+  assert.deepEqual(at('checked', { contract: 'cyborg.projects', major: 1 }), ['contributes.menus.lock.checked.member: ожидается имя члена контракта строкой, получено ничего']);
+  assert.deepEqual(at('enabled', { contract: 'cyborg.projects', major: 1.5, member: 'x' }), ['contributes.menus.lock.enabled.major: ожидается целое >= 0, получено 1.5']);
+  assert.deepEqual(at('enabled', { contract: 'Bad', major: 1, member: 'x' }), ['contributes.menus.lock.enabled.contract: ожидается имя контракта, получено "Bad"']);
+  assert.deepEqual(at('enabled', { contract: 'cyborg.projects', major: 1, member: 'x', extra: 1 }), ['contributes.menus.lock.enabled.extra: незнакомое поле источника']);
+  assert.deepEqual(at('enabled', { contract: 'cyborg.other', major: 1, member: 'x' }), ['contributes.menus.lock.enabled.contract: cyborg.other нет в requires, optional и provides этого плагина (consumes не годится: поставщиков несколько)']);
+  assert.deepEqual(at('enabled', { contract: 'cyborg.tools', major: 1, member: 'x' }), ['contributes.menus.lock.enabled.contract: cyborg.tools нет в requires, optional и provides этого плагина (consumes не годится: поставщиков несколько)']);
+  assert.deepEqual(at('checked', { contract: 'cyborg.projects', major: 2, member: 'x' }), ['contributes.menus.lock.checked.major: у cyborg.projects в optional "^1.3" нет мажорной версии 2']);
+  assert.deepEqual(at('checked', { contract: 'cyborg.lock', major: 2, member: 'x' }), ['contributes.menus.lock.checked.major: плагин отдаёт cyborg.lock только мажорных версий 1']);
+});

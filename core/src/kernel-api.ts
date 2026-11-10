@@ -1,5 +1,6 @@
 import { CoreError } from './errors.ts';
 import { buildLayout } from './layout.ts';
+import { pluginMark } from './plugin-mark.ts';
 import type { KernelContext } from './kernel-context.ts';
 import type { Kernel } from './kernel-types.ts';
 
@@ -9,7 +10,7 @@ const MAX_DENIED_URL = 200;
 /** Публичный `Kernel`: тонкий слой над частями, без своего состояния. */
 export function buildKernel(ctx: KernelContext): Kernel {
   const { parts, keys, active, layer, documents, gateway, known } = ctx;
-  const { pool, lifecycle, activation, contracts, commands, keyRegistry, sections, views, viewChannels } = parts;
+  const { pool, lifecycle, activation, contracts, commands, keyRegistry, sections, views, viewChannels, menus } = parts;
 
   return {
     journal: ctx.journal,
@@ -18,9 +19,13 @@ export function buildKernel(ctx: KernelContext): Kernel {
     callAs: (caller, contract, major, member, args) => contracts.callAs(caller, contract, major, member, args),
     manifests: known,
     get layout() {
-      const { switchedOff, userOff } = lifecycle;
-      return buildLayout(known, (id) => (ctx.graph.rejected.has(id) ? 'out-of-graph' : !ctx.byId.has(id) ? 'not-enabled' : switchedOff.has(id) || userOff.has(id) ? 'disabled' : undefined));
+      return buildLayout(known, (id) => pluginMark(ctx, id));
     },
+    get menus() {
+      return menus.snapshot();
+    },
+    refreshMenus: () => menus.refresh(),
+    runMenuItem: (pluginId, id) => menus.run(pluginId, id),
     hostOf: ctx.hostOf,
     groupOf: ctx.groupOf,
     get keybindings() {

@@ -12,6 +12,7 @@ import type { KernelContext, Parts } from './kernel-context.ts';
 import type { JournalEntry, LoadOptions } from './kernel-types.ts';
 import { applyUserKeys, bindKeys } from './keybindings.ts';
 import { limitsOf } from './limits.ts';
+import { menuAccelerators } from './menus.ts';
 import { parseManifest, type PluginManifest } from './manifest.ts';
 import { Notices } from './notices.ts';
 import { OsGateway, type OsEnvironment } from './os-gateway.ts';
@@ -36,6 +37,7 @@ function defaultOs(): OsEnvironment {
  */
 export async function createContext(options: LoadOptions, build: (ctx: KernelContext) => Parts): Promise<KernelContext> {
   const journal: JournalEntry[] = [];
+  const built: { parts?: Parts } = {};
   const write = (entry: JournalEntry) => {
     appendBounded(journal, entry, (e) => e);
     options.onJournal?.(entry);
@@ -47,6 +49,8 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
     if (entry.kind === 'denied') denials.record(entry);
     else if (entry.kind === 'deprecated-call') deprecations.record(entry);
     else write(entry);
+    // Журнал пишется и до создания частей (разбор манифестов): тогда меню читать нечем и нечего.
+    built.parts?.menus.onJournal(entry.kind);
   };
   const flushRepeats = () => {
     denials.flush();
@@ -152,10 +156,10 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
   // Без `bundled` поставку не от чего отличить: записи нет, как нет и проверки зарезервированных пространств.
   if (options.bundled) for (const pluginId of graph.order) if (!options.bundled.includes(pluginId)) record({ pluginId, kind: 'third-party' });
   const platform = options.platform ?? process.platform;
-  const keys = bindKeys(accepted, new Set(options.bundled ?? []), platform, record, options.menuKeys);
+  // Акселераторы пунктов плагинов стоят в таблице после акселераторов приложения и окна: при споре выигрывают они, затем пункт с меньшим именем.
+  const keys = bindKeys(accepted, new Set(options.bundled ?? []), platform, record, { ...options.menuKeys, ...menuAccelerators(accepted) });
   applyUserKeys(keys, options.keybindings ?? [], accepted, platform, record);
 
-  const built: { parts?: Parts } = {};
   const ctx: KernelContext = {
     options,
     journal,

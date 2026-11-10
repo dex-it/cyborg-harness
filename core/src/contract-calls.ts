@@ -42,6 +42,19 @@ export function createContractCalls(ctx: KernelContext): ContractCalls {
     p: { readonly caller: string; readonly pluginId: string; readonly contract: string; readonly version: string; readonly member: string; readonly args: readonly unknown[] },
     signal?: AbortSignal,
   ): Promise<unknown> {
+    try {
+      return await invokeChecked(host, p, signal);
+    } finally {
+      // Вызов мог изменить состояние поставщика, которое читает пункт меню.
+      ctx.parts.menus.touch(p.pluginId);
+    }
+  }
+
+  async function invokeChecked(
+    host: Host,
+    p: { readonly caller: string; readonly pluginId: string; readonly contract: string; readonly version: string; readonly member: string; readonly args: readonly unknown[] },
+    signal?: AbortSignal,
+  ): Promise<unknown> {
     const { pool } = ctx.parts;
     const d = descriptors.get(p.contract)?.find((x) => x.pluginId === p.pluginId && x.version === p.version);
     if (!d?.methods.includes(p.member)) throw new CoreError('Unavailable', `${p.contract}@${p.version}.${p.member} у ${p.pluginId} нет`);
