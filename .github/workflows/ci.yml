@@ -47,7 +47,8 @@ jobs:
           exit 1
       - run: npm run build
       - run: npm run typecheck
-      # ESLint со strictTypeChecked подбирается к 2 ГиБ кучи Node на раннере macOS и падает «JavaScript heap out of memory» - даём 4 ГиБ.
+      # ESLint со strictTypeChecked в одном процессе подбирался к 2 ГиБ кучи Node на раннере macOS и падал «JavaScript heap out of memory» (#153).
+      # Теперь линт идёт по процессу на пакет (scripts/lint.mjs), пик около 1 ГиБ; 4 ГиБ оставлены запасом на рост самого большого пакета.
       - run: npm run lint
         env:
           NODE_OPTIONS: --max-old-space-size=4096

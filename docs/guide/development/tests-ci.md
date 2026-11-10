@@ -9,7 +9,7 @@ description: "Какие проверки гоняет репозиторий, �
 |---|---|
 | `npm run build` | собирает стенд playground в `playground/dist`; перед ним, `typecheck`, `lint` и `test` сами идут `build:core` (пакет ядра) и `build:electron` (адаптер Electron) |
 | `npm run typecheck` | строгие типы ядра, браузерной части элементов `cy-*`, адаптера Electron, шаблона плагина (`templates/plugin`) и стенда; в том числе файлы, где строка под `@ts-expect-error` обязана не компилироваться |
-| `npm run lint` | ESLint со `strictTypeChecked`, ноль предупреждений |
+| `npm run lint` | ESLint со `strictTypeChecked`, ноль предупреждений; идёт по процессу на пакет (`scripts/lint.mjs`), чтобы программы TypeScript всех пакетов не копились в одной куче Node: пик около 1 ГиБ вместо 2,1 ГиБ |
 | `npm test` | модульные, сценарные и стресс-тесты на встроенном `node:test` |
 | `npm run smoke` | дымовой тест окна по DevTools Protocol |
 | `npm run demo` | сценарии ядра в консоли с пошаговым режимом `--step` |
