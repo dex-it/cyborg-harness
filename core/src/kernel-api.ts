@@ -67,6 +67,11 @@ export function buildKernel(ctx: KernelContext): Kernel {
       const shown = url.length > MAX_DENIED_URL ? `${url.slice(0, MAX_DENIED_URL)}…` : url;
       ctx.record({ pluginId, kind: 'denied', method: 'navigate', detail: `переход на ${shown}`, reason: 'window' });
     },
+    viewCspDenied(pluginId, detail) {
+      if (!known.some((m) => m.id === pluginId)) return;
+      const shown = detail.length > MAX_DENIED_URL ? `${detail.slice(0, MAX_DENIED_URL)}…` : detail;
+      ctx.record({ pluginId, kind: 'denied', method: 'csp', detail: shown, reason: 'csp' });
+    },
     keysOf: (pluginId) => Object.fromEntries([...keys.values()].filter((k) => k.pluginId === pluginId).map((k) => [k.command, k.key])),
     wake: (pluginId) => activation.wake(pluginId),
     openTerminal: (pluginId, ticket, channel) => bridge(pluginId, 'bridge:view.terminal', ticket, () => gateway.openTerminal(pluginId, ticket, channel)),

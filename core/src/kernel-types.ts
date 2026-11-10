@@ -29,13 +29,13 @@ export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'revived' }
   /** `activation: "lazy"`: ждёт первой команды, сочетания, показа вида или потребителя своего контракта. */
   | { readonly pluginId: string; readonly kind: 'waiting' }
-  /** Шлюз `ctx.os` отказал: вызов вне прав манифеста; `reason: 'window'` - окно не пустило вид на чужой адрес; `reason: 'command-callers'` - команда не открыта главным частям других плагинов. */
+  /** Шлюз `ctx.os` отказал: вызов вне прав манифеста; `reason: 'window'` - окно не пустило вид на чужой адрес; `reason: 'command-callers'` - команда не открыта главным частям других плагинов; `reason: 'csp'` - CSP не пустила на странице вида запрос или стиль. */
   | {
       readonly pluginId: string;
       readonly kind: 'denied';
       readonly method: string;
       readonly detail: string;
-      readonly reason?: 'via-contract' | 'window' | 'command-callers';
+      readonly reason?: 'via-contract' | 'window' | 'command-callers' | 'csp';
       /** Столько таких же отказов склеено за окно после первого. */
       readonly repeats?: number;
     }
@@ -307,6 +307,8 @@ export interface Kernel {
   answerDialog(id: number, choice: string | undefined): void;
   /** Окно не пустило вид плагина на чужой адрес: запись `denied` в журнал плагина, повторы склеиваются. */
   viewDenied(pluginId: string, url: string): void;
+  /** CSP не пустила на странице вида запрос или стиль (оболочка вида видит `securitypolicyviolation`): запись `denied` с `reason: 'csp'` в журнал плагина; `detail` обрезан, повторы склеиваются, как у `viewDenied`. */
+  viewCspDenied(pluginId: string, detail: string): void;
   /** Свои команды плагина с сочетаниями, как их ловит `keybinding`. */
   keysOf(pluginId: string): Readonly<Record<string, string>>;
   /** Событие окна или ОС от приложения: ядро раздаёт его активным плагинам. */

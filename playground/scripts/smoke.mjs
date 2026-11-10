@@ -408,6 +408,16 @@ async function main() {
   assert.deepEqual(JSON.parse(await inlineStyle('echo')), { byElement: '0px', byAttribute: '0px', byCssom: '11px' }, 'вид без флага применил инлайн-стиль');
   assert.deepEqual(JSON.parse(await inlineStyle('alice')), { byElement: '0px', byAttribute: '0px', byCssom: '11px' }, 'вид без флага применил инлайн-стиль');
   assert.deepEqual(JSON.parse(await inlineStyle('sessions')), { byElement: '7px', byAttribute: '9px', byCssom: '11px' }, 'вид с флагом не применил инлайн-стиль');
+  // #160: отказ CSP не молчит - строка с подсказкой про ui.inlineStyles в журнале плагина-владельца (echo и alice без флага, sessions с флагом не отказан).
+  // Цикл вставок не раздувает журнал: одинаковые отказы склеиваются в одну запись с repeats.
+  await waitFor(
+    'в журнале echo отказ CSP с подсказкой про ui.inlineStyles',
+    () => lines().some((l) => l.includes('"pluginId":"echo","kind":"denied","method":"csp"') && l.includes('"reason":"csp"') && l.includes('inlineStyles')),
+  );
+  await inView('echo', `(() => { for (let i = 0; i < 200; i++) { const sheet = document.createElement('style'); sheet.textContent = 'div { margin: 1px; }'; document.head.append(sheet); sheet.remove(); } return 1; })()`);
+  await sleep(500);
+  assert.ok(lines().filter((l) => l.includes('"pluginId":"echo","kind":"denied","method":"csp"')).length <= 3, 'поток отказов CSP раздул журнал echo');
+  assert.ok(!lines().some((l) => l.includes('"pluginId":"sessions","kind":"denied","method":"csp"') && l.includes('inlineStyles')), 'sessions с флагом получил отказ на инлайн-стиль');
   // Встроенный скрипт не выполняется ни с флагом, ни без.
   for (const id of ['echo', 'sessions'])
     assert.equal(await inView(id, "(() => { const s = document.createElement('script'); s.textContent = 'window.k05Inline = 1'; document.head.append(s); s.remove(); return typeof window.k05Inline; })()"), 'undefined', `${id}: встроенный скрипт выполнился`);
