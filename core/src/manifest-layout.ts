@@ -7,8 +7,11 @@ import { isRecord } from './wire.ts';
  * его объявляют как `ui.overlay`, и он есть только у плагина с правом `ui.lock`.
  */
 
-/** Род области окна: боковая колонка, основная область с группой документов, панель инструментов основной области, всплывающий слой. */
-export const AREAS = ['sidebar', 'main', 'toolbar', 'popup'] as const;
+/**
+ * Род области окна: боковая колонка, основная область с группой документов, панель инструментов основной области, всплывающий слой
+ * и модальное окно (K-13): вид без места в раскладке, который ядро показывает слоем поверх всего по просьбе главной части (`ctx.views.modal`).
+ */
+export const AREAS = ['sidebar', 'main', 'toolbar', 'popup', 'modal'] as const;
 export type Area = (typeof AREAS)[number];
 
 /** Что вид объявил о своём месте; чего нет, то подставляет снимок раскладки (`layout.ts`). */
@@ -71,6 +74,7 @@ export function readDocuments(raw: unknown, errors: string[]): Record<string, Do
       for (const key of Object.keys(spec)) if (key !== 'restorable' && key !== 'area' && key !== 'order') errors.push(`${where}.${key}: незнакомое поле типа документа`);
       if (spec.restorable !== undefined && typeof spec.restorable !== 'boolean') errors.push(`${where}.restorable: ожидается true или false, получено ${show(spec.restorable)}`);
       const place = readPlace(spec, where, errors);
+      if (place.area === 'modal') errors.push(`${where}.area: модальным бывает вид, а не документ: вкладки у модального окна нет`);
       if (errors.length === before) out[type] = { restorable: spec.restorable === true, ...place };
     }
   }

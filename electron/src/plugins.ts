@@ -25,6 +25,7 @@ import {
   type SystemEvent,
   type TerminalChannel,
   type TerminalView,
+  type TraceRecord,
   type WatchdogOptions,
   type WindowSnapshot,
   MENU_OWNER,
@@ -178,6 +179,10 @@ export interface StartOptions {
   readonly idleSeconds?: () => number;
   readonly onJournal?: (entry: JournalEntry) => void;
   readonly onLog?: (pluginId: string, message: string, level: LogLevel) => void;
+  /** Запись трассы операций ядра (FR-CH-4001…4008); без обработчика трасса выключена. */
+  readonly onTrace?: (record: TraceRecord) => void;
+  /** Главная часть плагина послала сообщение виду: окно отдаёт его фреймам этого плагина с этим именем вида. */
+  readonly onViewMessage?: (pluginId: string, view: string, message: unknown) => void;
   /** Что не дошло до ядра; по умолчанию - в log. */
   readonly onProblem?: (problem: string) => void;
   readonly onDiscovered?: (found: Discovered) => void;
@@ -253,6 +258,8 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
       options.log(`[plugins] ${id}${level === 'info' ? '' : ` [${level}]`}: ${message}`);
       options.onLog?.(id, message, level);
     },
+    onTrace: options.onTrace,
+    onViewMessage: (id, view, message) => options.onViewMessage?.(id, view, message),
   }).catch((error: unknown) => {
     ws.close();
     throw error;
@@ -304,13 +311,15 @@ export interface PluginsEvents {
   alert(title: string, body: string): void;
   /** Сообщение плагина: его вид получает строку сразу, без снимка. `group` - группа рендера плагина: кадры соседей по группе строки не получают. */
   log?(pluginId: string, line: FeedLine, group: string | undefined): void;
+  /** Главная часть плагина послала сообщение виду `view` (`ctx.views.channel`): окно отдаёт его фреймам этого плагина с этим именем и никому больше (`group` - группа рендера плагина). */
+  viewMessage?(pluginId: string, view: string, message: unknown, group: string | undefined): void;
   /** Заголовок окна от ядра: воркспейс, фрагменты плагинов, приложение. */
   title?(title: string): void;
   /** Команда окна (`WINDOW_COMMANDS`): исполняет окно, а не плагин. */
   windowCommand?(command: string): void;
 }
 
-export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProblem' | 'onLog' | 'onDiscovered' | 'onWindow' | 'onDocuments' | 'onKeptPty' | 'onMenus'> {
+export interface ServiceOptions extends Omit<StartOptions, 'onJournal' | 'onProblem' | 'onLog' | 'onViewMessage' | 'onDiscovered' | 'onWindow' | 'onDocuments' | 'onKeptPty' | 'onMenus'> {
   /** Процесс хоста для «Уронить» и «Повесить»; у хостов в том же процессе его нет. */
   readonly pidOf?: (hostId: string) => number | undefined;
 }
@@ -424,6 +433,7 @@ export class PluginsService implements ViewGroups {
           const line = this.say({ kind: 'log', subject: pluginId, text });
           this.events.log?.(pluginId, line, this.groupOf(pluginId));
         },
+        onViewMessage: (pluginId, view, message) => this.events.viewMessage?.(pluginId, view, message, this.groupOf(pluginId)),
       });
       this.phase = 'ready';
       this.showTitle(this.kernel.window.title);
@@ -534,6 +544,55 @@ export class PluginsService implements ViewGroups {
     } catch (error) {
       return { error: errorMessage(error) };
     }
+  }
+
+  /** Сообщение вида своей главной части; плагин - из origin фрейма, имя вида - из слов вида (чужой плагин так недостижим). */
+  async viewPostFrom(pluginId: string, view: unknown, message: unknown): Promise<Reply> {
+    if (!this.kernel) return { error: 'ядро плагинов не запущено' };
+    if (typeof view !== 'string') return { error: 'канал вида: ожидается имя вида' };
+    try {
+      await this.kernel.viewPost(pluginId, view, message);
+      return {};
+    } catch (error) {
+      return { error: errorMessage(error) };
+    }
+  }
+
+  /** Данные модального окна, показанного виду; не в окне - `{}` без значения. Плагин - из origin фрейма, имя вида - из слов вида. */
+  modalFor(pluginId: string, view: unknown): Reply {
+    if (!this.kernel) return { error: 'ядро плагинов не запущено' };
+    if (typeof view !== 'string') return { error: 'модальное окно: ожидается имя вида' };
+    const modal = this.kernel.modalFor(pluginId, view);
+    return modal ? { value: modal } : {};
+  }
+
+  /** Вид закрывает своё модальное окно и отдаёт результат владельцу. */
+  closeModalFor(pluginId: string, view: unknown, result: unknown): Reply {
+    if (!this.kernel) return { error: 'ядро плагинов не запущено' };
+    if (typeof view !== 'string') return { error: 'модальное окно: ожидается имя вида' };
+    try {
+      this.kernel.closeModal(pluginId, view, result);
+      return {};
+    } catch (error) {
+      return { error: errorMessage(error) };
+    }
+  }
+
+  /** Человек закрыл модальное окно в самом окне (крестик, клик мимо): владелец получает undefined. */
+  cancelModal(arg: unknown): Reply {
+    if (!isRecord(arg) || typeof arg.id !== 'number') return { error: 'закрытие окна: { id }' };
+    if (!this.kernel) return { error: 'ядро плагинов не запущено' };
+    try {
+      this.kernel.cancelModal(arg.id);
+      return {};
+    } catch (error) {
+      return { error: errorMessage(error) };
+    }
+  }
+
+  /** Escape из `before-input-event`: `true` - нажатие принадлежит модальному окну, странице его отдавать не надо. */
+  dismissModal(): boolean {
+    return this.kernel?.dismissModal() ?? false;
   }
 
   keysFor(pluginId: string): Readonly<Record<string, string>> {

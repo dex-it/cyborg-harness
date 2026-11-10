@@ -3,6 +3,7 @@ import { app, nativeTheme, Notification, powerMonitor, type BrowserWindow } from
 import { claimWorkspace, sessionDataDir } from './instances.ts';
 import type { PluginsEvents, PluginsService } from './plugins.ts';
 import { themeTokens } from './theme.ts';
+import { viewOfUrl } from './view-protocol.ts';
 import { framesOfPlugin } from './view-frames.ts';
 import { viewFrames } from './views.ts';
 
@@ -34,7 +35,7 @@ export function alertNotification(title: string, body: string, onClick: () => vo
   notification.show();
 }
 
-/** События службы плагинов -> окно приложения: снимок, команда окна, лента вида, заголовок, уведомление о выключении плагина. */
+/** События службы плагинов -> окно приложения: снимок, команда окна, лента вида, сообщение главной части виду, заголовок, уведомление о выключении плагина. */
 export function windowEvents(getWindow: () => BrowserWindow | undefined): PluginsEvents {
   return {
     windowCommand: (command) => {
@@ -51,6 +52,11 @@ export function windowEvents(getWindow: () => BrowserWindow | undefined): Plugin
       // Строку лога получают кадры самого плагина, а не всей группы рендера.
       if (alive(win)) for (const frame of framesOfPlugin(win.webContents, group, pluginId)) frame.send('view:log', line);
     },
+    viewMessage: (pluginId, view, message, group) => {
+      const win = getWindow();
+      // Фрейм вида знает своё имя по ?view= в адресе, плагин - по адресу внутри группы рендера: сосед по группе и чужой вид сообщение не получают.
+      if (alive(win)) for (const frame of framesOfPlugin(win.webContents, group, pluginId)) if (viewOfUrl(frame.url) === view) frame.send('view:channel', message);
+    },
     title: (title) => {
       const win = getWindow();
       if (alive(win)) win.setTitle(title);
@@ -62,6 +68,11 @@ export function windowEvents(getWindow: () => BrowserWindow | undefined): Plugin
 export function bindWindow(win: BrowserWindow, plugins: PluginsService): void {
   // Ядро видит нажатие раньше страницы: сочетание активного плагина до окна не доходит.
   win.webContents.on('before-input-event', (event, input) => {
+    // Escape закрывает модальное окно плагина, где бы ни стоял фокус (в том числе во фрейме его вида); диалог поверх окна забирает Escape себе.
+    if (input.type === 'keyDown' && input.key === 'Escape' && plugins.dismissModal()) {
+      event.preventDefault();
+      return;
+    }
     if (input.type === 'keyDown' && plugins.press(input, input.isAutoRepeat)) event.preventDefault();
   });
   win.on('focus', () => plugins.emit({ kind: 'focus', focused: true }));

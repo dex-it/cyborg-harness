@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { inlineHosts } from '@cyborg-harness/core';
-import type { PluginModule } from '@cyborg-harness/core';
+import type { PluginModule, TraceRecord } from '@cyborg-harness/core';
 import { WINDOW_OWNER } from '@cyborg-harness/core';
 import { DELIVERY_FILE, writeDelivery } from '@cyborg-harness/core/delivery';
 import { ENTRY_FILES as CHECKED_ENTRY_FILES } from '@cyborg-harness/core/plugin-check';
@@ -262,6 +262,27 @@ test('старт: включённый плагин активен, миграц
   assert.deepEqual(levels, ['greeter [info] привет, мир', 'greeter [warn] осторожно']);
   assert.ok(lines.some((l) => l.includes('"pluginId":"idle","kind":"disabled"')));
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { plugins, settings: { greeter: { $version: 2, who: 'мир' } } });
+  await kernel.unload();
+});
+
+test('старт: onTrace доходит до ядра - запись трассы команды приходит приложению (K-28)', async () => {
+  const userData = tmp();
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['greeter'] } }));
+  plugin(path.join(userData, 'plugins'), 'greeter', { commands: ['greeter.hi'] }, 'export default {}');
+  const records: TraceRecord[] = [];
+  const kernel = await startPlugins({
+    userData,
+    builtinDir: path.join(userData, 'нет'),
+    userPlugins: true,
+    spawnHost: inlineHosts(async () => ({ activate: (ctx) => void ctx.commands.register('greeter.hi', () => 'привет') })),
+    log: () => undefined,
+    onTrace: (record) => void records.push(record),
+  });
+  assert.equal(await kernel.run('greeter.hi'), 'привет');
+  assert.deepEqual(
+    records.map((r) => (r.kind === 'operation' ? [r.caller, r.target, r.callee, r.outcome] : r.kind)),
+    [['user', 'command:greeter.hi', 'plugin:greeter', 'ok']],
+  );
   await kernel.unload();
 });
 
@@ -707,6 +728,92 @@ test('заголовок окна: имя приложения задаёт пр
     await kernel.unload();
   }
   assert.deepEqual(titles, ['workspace.cyborg.json - Cyborg', 'workspace.cyborg.json - Мой редактор']);
+});
+
+test('канал вида: сообщение главной части уходит событию с плагином и именем вида, сообщение вида - слушателю главной части, отказ ядра - Reply с текстом', async () => {
+  const userData = tmp();
+  const dir = path.join(userData, 'plugins');
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['face'] } }));
+  plugin(dir, 'face', { commands: { 'face.push': { args: ['string'] } }, ui: { views: { main: './ui/ui.js' } } }, 'export default {}');
+  const heard: unknown[] = [];
+  const modules: Record<string, PluginModule> = {
+    face: {
+      activate(ctx) {
+        const channel = ctx.views.channel('main');
+        channel.onMessage((m) => void heard.push(m));
+        ctx.commands.register('face.push', (text) => channel.post({ text }));
+      },
+    },
+  };
+  const delivered: [string, string, unknown][] = [];
+  const service = new PluginsService({ changed: () => {}, alert: () => {}, viewMessage: (id, view, message) => void delivered.push([id, view, message]) });
+  await service.start({
+    userData,
+    builtinDir: path.join(userData, 'нет'),
+    userPlugins: true,
+    spawnHost: inlineHosts(async (entry) => modules[/\/(\w+)\/index\.mjs$/.exec(entry)?.[1] ?? ''] ?? { activate() {} }),
+    log: () => {},
+  });
+  assert.deepEqual(await service.runFor('face', 'face.push', ['привет']), {});
+  assert.deepEqual(delivered, [['face', 'main', { text: 'привет' }]]);
+  assert.deepEqual(await service.viewPostFrom('face', 'main', { от: 'вида' }), {});
+  assert.deepEqual(heard, [{ от: 'вида' }]);
+  assert.match((await service.viewPostFrom('face', 'чужой', 1)).error ?? '', /вида "чужой" нет в манифесте/);
+  assert.match((await service.viewPostFrom('face', 'main', 'я'.repeat(40_000))).error ?? '', /больше 65536 байт/);
+  assert.deepEqual(await service.viewPostFrom('face', 'main', 'жив'), {});
+  assert.equal(heard.length, 2);
+  assert.deepEqual(await service.disable('face'), {});
+  assert.match((await service.viewPostFrom('face', 'main', 1)).error ?? '', /не активен/);
+  await service.unload();
+});
+
+test('модальное окно плагина: данные видит только его вид, результат вида доходит владельцу, Escape и закрытие окна дают undefined, отказ ядра - Reply с текстом', async () => {
+  const userData = tmp();
+  const dir = path.join(userData, 'plugins');
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['face'] } }));
+  plugin(dir, 'face', { commands: { 'face.form': {} }, ui: { views: { main: './ui/ui.js', form: { module: './ui/form.js', area: 'modal', title: 'Форма' } } } }, 'export default {}');
+  const modules: Record<string, PluginModule> = {
+    face: {
+      activate(ctx) {
+        ctx.commands.register('face.form', () => ctx.views.modal('form', { data: { имя: 'черновик' } }));
+      },
+    },
+  };
+  const service = new PluginsService({ changed: () => {}, alert: () => {} });
+  await service.start({
+    userData,
+    builtinDir: path.join(userData, 'нет'),
+    userPlugins: true,
+    spawnHost: inlineHosts(async (entry) => modules[/\/(\w+)\/index\.mjs$/.exec(entry)?.[1] ?? ''] ?? { activate() {} }),
+    log: () => {},
+  });
+  assert.deepEqual(service.modalFor('face', 'form'), {}, 'окна нет - данных нет');
+  assert.equal(service.dismissModal(), false, 'Escape без окна странице не отнимается');
+  const shown = () => service.snapshot().window.modal;
+
+  const result = service.runFor('face', 'face.form', []);
+  await waitFor('окно показано', () => shown() !== undefined);
+  assert.deepEqual(service.modalFor('face', 'form'), { value: { data: { имя: 'черновик' } } });
+  assert.deepEqual(service.modalFor('face', 'main'), {}, 'чужому виду того же плагина данные не отдаются');
+  assert.deepEqual(service.modalFor('other', 'form'), {}, 'чужому плагину тоже');
+  assert.match(service.closeModalFor('face', 'main', 1).error ?? '', /нет на экране/);
+  assert.match(service.closeModalFor('face', 7, 1).error ?? '', /имя вида/);
+  assert.deepEqual(service.closeModalFor('face', 'form', { имя: 'Проект' }), {});
+  assert.deepEqual(await result, { value: { имя: 'Проект' } });
+  assert.equal(shown(), undefined);
+
+  const escaped = service.runFor('face', 'face.form', []);
+  await waitFor('окно показано', () => shown() !== undefined);
+  assert.equal(service.dismissModal(), true);
+  assert.deepEqual(await escaped, {});
+
+  const closed = service.runFor('face', 'face.form', []);
+  await waitFor('окно показано', () => shown() !== undefined);
+  assert.match(service.cancelModal({ id: -1 }).error ?? '', /нет на экране/);
+  assert.match(service.cancelModal('x').error ?? '', /\{ id \}/);
+  assert.deepEqual(service.cancelModal({ id: shown()?.id }), {});
+  assert.deepEqual(await closed, {});
+  await service.unload();
 });
 
 // P-07: поставка. Точка входа встроенного плагина - index.mjs и только он; угадывание остаётся плагинам каталога пользователя и режиму стенда.

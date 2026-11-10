@@ -16,6 +16,7 @@ alias SectionResult :: union
 alias ThemeTokens :: = Readonly<Record<`--cy-${string}`, string>>
 alias UiRemote :: <T> = { readonly [P in keyof T as NonNullable<T[P]> extends (..._: never[]) => unknown ? P : never]: NonNullable<T[P]> extends (..._: infer A) => infer R ? (..._: A) => Promise<Awaited<R>> : never }
 interface ArgSpec
+interface AskDialog
 interface CommandSpec
 interface DialogChoice
 interface DirEntry
@@ -38,6 +39,7 @@ interface KeyRegistration :: extends Disposable
 interface KeyWhen
 interface KeybindingSpec
 interface ListItem
+interface ModalInit
 interface NotifyClick
 interface NotifyOptions
 interface OpenDialogOptions
@@ -49,6 +51,7 @@ interface OsSecrets
 interface OsUi
 interface Placement
 interface PluginContext
+interface PluginDialogs
 interface PluginDocuments
 interface PluginKeys
 interface PluginManifest
@@ -58,6 +61,7 @@ interface PluginPermissions
 interface PluginSecrets
 interface PluginSection
 interface PluginSystem
+interface PluginViews
 interface PluginWindow
 interface ProcessOptions
 interface ProcessResult
@@ -80,11 +84,17 @@ interface UiContext
 interface UiLock
 interface UiModule :: <Root>
 interface UiTerminal :: extends PtyInfo
+interface ViewChannel
 interface ViewDrop
+interface ViewModal
 map WINDOW_COMMANDS | cyborg.window.focus-next :: F6
 map WINDOW_COMMANDS | cyborg.window.focus-prev :: Shift+F6
 member ArgSpec.kind :: readonly prop WireKind
 member ArgSpec.optional :: readonly prop boolean
+member AskDialog.buttons :: readonly prop readonly DialogChoice[]
+member AskDialog.kind :: readonly prop 'ask'
+member AskDialog.message :: readonly optional prop string
+member AskDialog.title :: readonly prop string
 member CommandSpec.args :: readonly prop readonly ArgSpec[]
 member CommandSpec.callers :: readonly optional prop CommandCallers
 member CommandSpec.guard :: readonly optional prop readonly Guard[]
@@ -145,6 +155,8 @@ member KeybindingSpec.key :: readonly prop string
 member ListItem.detail :: readonly optional prop string
 member ListItem.id :: readonly prop string
 member ListItem.label :: readonly prop string
+member ModalInit.data :: readonly optional prop unknown
+member ModalInit.title :: readonly optional prop string
 member NotifyClick.args :: readonly optional prop readonly unknown[]
 member NotifyClick.command :: readonly prop string
 member NotifyOptions.onClick :: readonly optional prop NotifyClick
@@ -182,6 +194,7 @@ member PluginContext.contracts.all :: method <K extends ContractName, M extends 
 member PluginContext.contracts.get :: method <K extends ContractName, M extends Major<K>>(_: K, _: M) => Remote<ContractType<K, M>> | undefined
 member PluginContext.contracts.onChange :: method (_: ContractName, _: () => void) => Disposable
 member PluginContext.contracts.provide :: method <K extends ContractName, V extends VersionOf<K>>(_: K, _: V, _: ContractType<K, MajorOf<V> & Major<K>>) => Disposable
+member PluginContext.dialogs :: readonly prop PluginDialogs
 member PluginContext.documents :: readonly prop PluginDocuments
 member PluginContext.keys :: readonly prop PluginKeys
 member PluginContext.log :: method (_: string, _?: LogLevel) => void
@@ -191,7 +204,9 @@ member PluginContext.secrets :: readonly prop PluginSecrets
 member PluginContext.state :: readonly optional prop PluginSection
 member PluginContext.subscriptions :: readonly prop DisposableStore
 member PluginContext.system :: readonly prop PluginSystem
+member PluginContext.views :: readonly prop PluginViews
 member PluginContext.window :: readonly prop PluginWindow
+member PluginDialogs.show :: method (_: AskDialog) => Promise<string | undefined>
 member PluginDocuments.close :: method (_: string) => Promise<void>
 member PluginDocuments.list :: method () => Promise<DocumentInfo[]>
 member PluginDocuments.onClose :: method (_: (_: string) => void) => Disposable
@@ -278,6 +293,8 @@ member PluginSystem.onIdle :: method (_: number, _: () => void) => Disposable
 member PluginSystem.onResume :: method (_: () => void) => Disposable
 member PluginSystem.onScreenLock :: method (_: () => void) => Disposable
 member PluginSystem.onSuspend :: method (_: () => void) => Disposable
+member PluginViews.channel :: method (_: string) => ViewChannel
+member PluginViews.modal :: method (_: string, _?: ModalInit) => Promise<unknown>
 member PluginWindow.onFocusChange :: method (_: (_: boolean) => void) => Disposable
 member PluginWindow.setTitle :: method (_: string | undefined) => Promise<void>
 member ProcessOptions.cwd :: readonly optional prop string
@@ -342,6 +359,7 @@ member ToggleEventDetail.id :: readonly prop string
 member TreeItem.children :: readonly optional prop readonly TreeItem[]
 member TreeItem.id :: readonly prop string
 member TreeItem.label :: readonly prop string
+member UiContext.channel :: readonly prop ViewChannel
 member UiContext.commands :: readonly object
 member UiContext.commands.run :: method (_: string, ..._: unknown[]) => Promise<unknown>
 member UiContext.contracts :: readonly object
@@ -354,6 +372,7 @@ member UiContext.drag.start :: method (_: string) => void
 member UiContext.keys :: readonly object
 member UiContext.keys.of :: method (_: string) => string | undefined
 member UiContext.logs :: method () => Promise<readonly FeedLine[]>
+member UiContext.modal :: readonly union
 member UiContext.onLog :: method (_: (_: FeedLine) => void) => Disposable
 member UiContext.onVisibilityChange :: method (_: (_: boolean) => void) => Disposable
 member UiContext.pluginId :: readonly prop string
@@ -375,9 +394,14 @@ member UiTerminal.onData :: method (_: (_: string) => void) => Disposable
 member UiTerminal.onExit :: method (_: (_: PtyExit) => void) => Disposable
 member UiTerminal.resize :: method (_: number, _: number) => Promise<void>
 member UiTerminal.write :: method (_: string) => Promise<void>
+member ViewChannel.onMessage :: method (_: (_: unknown) => void) => Disposable
+member ViewChannel.post :: method (_: unknown) => Promise<void>
 member ViewDrop.from :: readonly prop string
 member ViewDrop.path :: readonly prop string
+member ViewModal.close :: method (_?: unknown) => Promise<void>
+member ViewModal.data :: readonly prop unknown
 set AREAS | main
+set AREAS | modal
 set AREAS | popup
 set AREAS | sidebar
 set AREAS | toolbar
@@ -440,7 +464,7 @@ variant CoreErrorCode | 'PermissionDenied'
 variant CoreErrorCode | 'Remote'
 variant CoreErrorCode | 'Timeout'
 variant CoreErrorCode | 'Unavailable'
-variant DialogSpec | { readonly kind: 'ask'; readonly title: string; readonly message?: string; readonly buttons: readonly DialogChoice[] }
+variant DialogSpec | AskDialog
 variant DialogSpec | { readonly kind: 'menu'; readonly items: readonly DialogChoice[]; readonly at: { readonly x: number; readonly y: number } }
 variant DirEntry.kind | 'dir'
 variant DirEntry.kind | 'file'
@@ -475,3 +499,5 @@ variant SectionResult | { readonly status: 'invalid'; readonly errors: readonly 
 variant SectionResult | { readonly status: 'migrate-error'; readonly layer: Layer; readonly from: number; readonly error: string }
 variant SectionResult | { readonly status: 'newer'; readonly layer: Layer; readonly found: number; readonly expected: number }
 variant SectionResult | { readonly status: 'ok'; readonly value: Record<string, unknown>; readonly migrated: readonly Layer[] }
+variant UiContext.modal | ViewModal
+variant UiContext.modal | undefined

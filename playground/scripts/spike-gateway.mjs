@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const repo = resolve(import.meta.dirname, '..', '..');
-const OWN = /^--(budget|watch-budget|runs)=/;
+const OWN = /^--(budget|watch-budget|runs|trace)=/;
 const own = (a) => a === '--json' || OWN.test(a);
 const json = process.argv.includes('--json');
 const option = (name, fallback) => {
@@ -20,6 +20,9 @@ const budget = option('budget', 1);
 const watchBudget = option('watch-budget', 5);
 /** Одиночный p99 на 300 вызовах прыгает между прогонами вдвое - бюджет сверяется с медианой. */
 const runs = option('runs', 3);
+/** Трасса операций ядра (K-28, NFR-CH-4001): по умолчанию включена, бюджет держится с ней; `--trace=off` даёт базу для сравнения. */
+const trace = process.argv.find((a) => a.startsWith('--trace='))?.slice('--trace='.length) ?? 'on';
+if (trace !== 'on' && trace !== 'off') throw new Error('--trace: on или off');
 if (!Number.isInteger(runs)) throw new Error('--runs: целое число прогонов');
 /** Склейка событий fs.watch в шлюзе (WATCH_COALESCE_MS): задержка по замыслу, в цену шлюза не входит. */
 const WATCH_COALESCE_MS = 50;
@@ -30,7 +33,7 @@ async function measureOnce() {
   const dir = mkdtempSync(join(tmpdir(), 'cyborg-spike-gateway-'));
   const out = join(dir, 'gateway.json');
   try {
-    const app = spawn(join(repo, 'node_modules', '.bin', 'electron'), [repo, `--spike-gateway=${out}`, `--user-data-dir=${join(dir, 'data')}`, ...process.argv.slice(2).filter((a) => !own(a))], { stdio: ['ignore', 'inherit', 'inherit'] });
+    const app = spawn(join(repo, 'node_modules', '.bin', 'electron'), [repo, `--spike-gateway=${out}`, `--user-data-dir=${join(dir, 'data')}`, `--gateway-trace=${trace}`, ...process.argv.slice(2).filter((a) => !own(a))], { stdio: ['ignore', 'inherit', 'inherit'] });
     const code = await new Promise((r) => app.once('exit', r));
     return { code, ...JSON.parse(readFileSync(out, 'utf8')) };
   } finally {
@@ -80,9 +83,9 @@ const costs = perRun[0].map((c) => {
 const failed = costs.filter((c) => c.over);
 const errors = results.flatMap((r, i) => (r.code !== 0 || r.error ? [`прогон ${String(i + 1)}: ${r.error ?? `код ${String(r.code)}`}`] : []));
 
-if (json) console.log(JSON.stringify({ budgetMs: budget, watchBudgetMs: watchBudget, runs: results, costs }, null, 2));
+if (json) console.log(JSON.stringify({ budgetMs: budget, watchBudgetMs: watchBudget, trace, runs: results, costs }, null, 2));
 else {
-  console.log(`Electron ${last.electron}, Node ${last.node}, ${last.platform} ${last.arch}, ${last.cpus}; safeStorage ${last.secretsBackend}; ${String(runs)} прогонов по ${last.samples} вызовов после ${last.warmup} разогревочных\n`);
+  console.log(`Electron ${last.electron}, Node ${last.node}, ${last.platform} ${last.arch}, ${last.cpus}; safeStorage ${last.secretsBackend}; трасса ${trace === 'on' ? `включена (записей в последнем прогоне: ${String(last.traceRecords)})` : 'выключена'}; ${String(runs)} прогонов по ${last.samples} вызовов после ${last.warmup} разогревочных\n`);
   console.log('Последний прогон: путь | вариант | байт | первый | p50 | p95 | p99, мс');
   for (const x of last.rows ?? []) console.log(`  ${x.path} | ${x.variant} | ${x.sizeBytes} | ${x.first} | ${x.p50} | ${x.p95} | ${x.p99}`);
   console.log(`\nЦена шлюза на p99, медиана прогонов, мс (вызов - ${budget}, fs.watch сверх склейки - ${watchBudget}): путь | байт | проверки (шлюз - голое) | из плагина (плагин - голое) | по прогонам`);
