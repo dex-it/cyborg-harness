@@ -266,7 +266,7 @@ async function main() {
       const page = webContents.getAllWebContents().find((w) => w.getType() === 'window');
       return page.mainFrame.framesInSubtree.filter((f) => f.origin === 'cyborg-plugin://panels').map((f) => f.url).sort().join('|');
     })()`);
-  assert.equal(await panelsUrls(), 'cyborg-plugin://panels/?view=bar|cyborg-plugin://panels/?view=panel', 'у видов panels нет своих адресов ?view=<имя>');
+  assert.equal(await panelsUrls(), 'cyborg-plugin://panels/panels/?view=bar|cyborg-plugin://panels/panels/?view=panel', 'у видов panels нет своих адресов ?view=<имя>');
   assert.equal(await inPanels('bar', 'document.getElementById("which").textContent'), 'panels/bar: панель инструментов', 'во фрейме ?view=bar не вид bar');
   assert.equal(await inPanels('panel', 'document.getElementById("which").textContent'), 'panels/panel: боковая колонка', 'во фрейме ?view=panel не вид panel');
   // Свёртка одного вида не прячет другой: кнопка в подписи своей обёртки, документ свёрнутого жив и получает onVisibilityChange.
