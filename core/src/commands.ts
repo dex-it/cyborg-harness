@@ -56,7 +56,8 @@ export function createCommands(ctx: KernelContext): Commands {
     if (caller !== undefined) open(caller, owner, command);
     checkArgs(command, spec, args);
     if (caller !== undefined && caller !== owner) await guard(caller, command, spec, args);
-    return pool.call(pool.live(owner), owner, 'command', { pluginId: owner, name: command, args: wire }, undefined, signal);
+    // Команда плагина могла изменить состояние, которое читает пункт меню.
+    return pool.call(pool.live(owner), owner, 'command', { pluginId: owner, name: command, args: wire }, undefined, signal).finally(() => ctx.parts.menus.touch(owner));
   }
 
   const run = (command: string, ...args: unknown[]) => execute(command, args);

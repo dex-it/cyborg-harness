@@ -10,6 +10,7 @@ declare module '@cyborg-harness/contracts' {
     'test.ticker': { 1: Ticker };
     'test.guarded': { 1: Guarded };
     'test.cancel': { 1: Cancellable };
+    'test.state': { 1: TestState };
   }
 }
 
@@ -18,6 +19,12 @@ export interface Cancellable {
   slow(label: string, signal?: AbortSignal): Promise<string>;
   watch(listener: (n: number) => void, signal?: AbortSignal): Promise<Subscription>;
   listeners(): number;
+}
+
+/** Состояние владельца, которое читают пункты меню (K-08): булевы члены без аргументов. */
+export interface TestState {
+  isOpen(): Promise<boolean>;
+  hasProject(): Promise<boolean>;
 }
 
 export interface Ticker {

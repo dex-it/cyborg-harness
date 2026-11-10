@@ -26,6 +26,7 @@
 | Пилот Monaco и xterm во фреймах: CSP, типы файлов, `sandbox`, буфер обмена, память | [05-verification/spike-monaco-xterm.md](05-verification/spike-monaco-xterm.md) |
 | Замер K-04: группы рендера, память при десяти видах | [05-verification/spike-render-groups.md](05-verification/spike-render-groups.md) |
 | Проверка на macOS: замеры хостов и фреймов, клавиши, терминал | [05-verification/macos-check.md](05-verification/macos-check.md) |
+| Плагины вне репозитория и из упакованной сборки (asar): что грузится, что нет и почему, ограничения автора на `.ts` (T-10) | [05-verification/external-plugins.md](05-verification/external-plugins.md) |
 | База Cyborg: старт, память, терминал, панели, бандлы и записанные сессии S1-S18 для сравнения с ядром | [05-verification/cyborg-baseline.md](05-verification/cyborg-baseline.md) |
 | Эпик «Микроядро»: цель, карта, итерации, реестр задач | [06-plans/epic-microkernel.md](06-plans/epic-microkernel.md) |
 | Анализ готовности ядра и инвентарь Cyborg | [research/microkernel-readiness.md](research/microkernel-readiness.md), [research/cyborg-migration-inventory.md](research/cyborg-migration-inventory.md) |
