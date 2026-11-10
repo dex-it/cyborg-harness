@@ -909,9 +909,12 @@ async function main() {
   assert.equal(await ev("document.getElementById('playground').inert"), true, 'виды под окном не inert');
   assert.equal(await ev("document.activeElement?.closest('dialog.layer-modal') !== null"), true, 'фокус не в модальном окне');
   await waitFor('вид окна получил данные главной части', async () => (await inForm("document.getElementById('name')?.value ?? null")) === 'черновик');
-  // Tab не уходит из окна: фокус остаётся внутри диалога и после нескольких нажатий.
-  for (let i = 0; i < 6; i++) await tap('Tab');
-  assert.equal(await ev("document.activeElement?.closest('dialog.layer-modal') !== null"), true, 'Tab вывел фокус из модального окна');
+  // Tab не уходит из окна: фокус остаётся внутри диалога после каждого нажатия, в том числе на выходе из фрейма вида (раннер macOS не держит фокус окна сам).
+  await ev("window.focus(), document.querySelector('dialog.layer-modal iframe').focus()");
+  for (const key of ['Tab', 'Tab', 'Tab', 'Tab', 'Tab', 'Tab', 'Tab', 'Tab']) {
+    await tap(key);
+    await waitFor(`после ${key} фокус в модальном окне`, () => ev("document.activeElement?.closest('dialog.layer-modal') !== null && !document.activeElement.classList.contains('layer-modal-trap')"));
+  }
   await inForm("(document.getElementById('name').value = 'Проект', document.getElementById('create').click())");
   assert.deepEqual(await ev('window.__form'), { value: { name: 'Проект' } }, 'результат вида не дошёл до владельца');
   await waitFor('окно снято после результата', async () => !(await modalOpen()));

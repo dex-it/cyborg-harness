@@ -773,6 +773,14 @@ body[data-locked='true'] main {
   border: 0;
 }
 
+.layer-modal-trap {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  outline: none;
+}
+
 .layer-modal-missing {
   padding: 12px;
 }

@@ -82,12 +82,22 @@ export class WindowLayerView {
     close.addEventListener('click', () => dialog.close());
     const head = el('div', 'layer-modal-head');
     head.append(el('h3', '', m.title), el('span', 'layer-from', m.pluginId), close);
-    dialog.append(head);
+    // Фокус не уходит из окна: showModal() запирает его только в пределах документа, а Tab с последнего элемента фрейма (или Shift+Tab с первого)
+    // выводит фокус за страницу (на macOS activeElement становится body). Краевые ловушки возвращают его внутрь.
+    const edge = (toFirst: boolean): HTMLElement => {
+      const trap = el('span', 'layer-modal-trap');
+      trap.tabIndex = 0;
+      trap.setAttribute('aria-hidden', 'true');
+      trap.addEventListener('focus', () => (toFirst ? close : (frame ?? close)).focus());
+      return trap;
+    };
+    dialog.append(edge(false), head);
     if (frame && url !== undefined) {
       frame.src = url;
       frame.title = `${m.pluginId}/${m.view}`;
       dialog.append(frame);
     } else dialog.append(el('p', 'layer-modal-missing', 'Вид окна недоступен'));
+    dialog.append(edge(true));
     // Закрытие (кнопка, Escape в документе окна) - отмена: владелец получает undefined. Результат отдаёт сам вид через ctx.modal.close.
     dialog.addEventListener('close', () => {
       if (open.done) return;
