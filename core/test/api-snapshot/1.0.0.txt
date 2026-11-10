@@ -40,6 +40,7 @@ interface KeyWhen
 interface KeybindingSpec
 interface ListItem
 interface ModalInit
+interface ModalResize
 interface ModalSize
 interface NotifyClick
 interface NotifyOptions
@@ -161,6 +162,7 @@ member ModalInit.data :: readonly optional prop unknown
 member ModalInit.escape :: readonly optional union
 member ModalInit.size :: readonly optional prop ModalSize
 member ModalInit.title :: readonly optional prop string
+member ModalResize.height :: readonly prop number
 member ModalSize.height :: readonly optional prop number
 member ModalSize.width :: readonly optional prop number
 member NotifyClick.args :: readonly optional prop readonly unknown[]
@@ -406,6 +408,7 @@ member ViewDrop.from :: readonly prop string
 member ViewDrop.path :: readonly prop string
 member ViewModal.close :: method (_?: unknown) => Promise<void>
 member ViewModal.data :: readonly prop unknown
+member ViewModal.resize :: method (_: ModalResize) => Promise<void>
 member WatchOptions.recursive :: readonly optional prop boolean
 set AREAS | main
 set AREAS | modal

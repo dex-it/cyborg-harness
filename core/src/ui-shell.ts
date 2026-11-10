@@ -1,6 +1,6 @@
 // Оболочка вида в его <iframe> (SAD §3.8) идёт в браузер: здесь нет node-модулей.
 
-import type { DialogSpec, Disposable, FeedLine, PtyExit, PtyInfo, Reply, ThemeTokens, UiContext, UiTerminal, ViewDrop } from '@cyborg-harness/contracts';
+import type { DialogSpec, Disposable, FeedLine, ModalResize, PtyExit, PtyInfo, Reply, ThemeTokens, UiContext, UiTerminal, ViewDrop } from '@cyborg-harness/contracts';
 import { toDisposable } from './disposable.ts';
 
 /** Мост вида к главному процессу, его выдаёт preload приложения; плагин работает с `UiContext`, а не с ним. */
@@ -35,6 +35,8 @@ export interface ViewBridge {
   onChannel(listener: (message: unknown) => void): void;
   /** `value` - `{ data }` модального окна, показанного этому виду, или undefined, если вид не в окне. */
   modal(view: string): Promise<Reply>;
+  /** Вид просит окно подогнать высоту области вида (`{ height }`); отказ - `error` с текстом ядра. */
+  modalResize(view: string, size: ModalResize): Promise<Reply>;
   /** Вид закрывает своё модальное окно и отдаёт результат владельцу. */
   modalClose(view: string, result: unknown): Promise<Reply>;
 }
@@ -233,6 +235,7 @@ export async function connectView(bridge: ViewBridge, target: ViewTarget): Promi
         ? undefined
         : Object.freeze({
             data: (modalData as { data?: unknown }).data,
+            resize: async (size: ModalResize) => void unwrap(await bridge.modalResize(target.view, size)),
             close: async (result?: unknown) => void unwrap(await bridge.modalClose(target.view, result)),
           }),
     channel: Object.freeze({
