@@ -23,6 +23,8 @@
 - `ModalInit.size`, `ModalSize`, `ModalInit.escape` [minor]: размер модального окна задаёт автор (`{ width?, height? }`, целые пиксели от 100 до 4096), а `escape: "view"` оставляет Escape виду окна вместо закрытия окна ядром (#163).
 - `PluginContext.dialogs`, `PluginDialogs`, `AskDialog` [minor]: `ctx.dialogs.show(ask)` - вопрос человеку из главной части без вида, в той же очереди окна, что диалоги видов; `menu` у главной части нет (K-13).
 - `PluginContext.log`, `LogLevel` [minor]: второй необязательный параметр `level` (`info`, `warn`, `error`; по умолчанию `info`), существующие плагины с одним аргументом работают как прежде; ядро обрезает строку длиннее предела и не кладёт в журнал по одной строки сверх предела частоты (K-29).
+- `Contracts['cyborg.git']`, `Git`, `GitStatus`, `GitChange`, `GitCode` [minor]: черновик контракта `cyborg.git` v1 - `status(repo)` и `onChange(repo, listener)`; остальные члены SAD (`headContent`, `branches`, `switch`, `remotes`, `files`) придут необязательными (PL-04).
+- `Contracts['cyborg.tree-decoration']`, `TreeDecoration`, `TreeMark`, `TreeMarkKind` [minor]: черновик контракта `cyborg.tree-decoration` v1, кратность many - `marks(root)` и `onChange(listener)` (PL-04).
 
 ## 1.0.0-dev - не выпущена
 

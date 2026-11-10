@@ -1,6 +1,6 @@
 # База Cyborg: метрики и записанные сессии
 
-Результат задачи [#37](https://github.com/dex-it/cyborg-harness/issues/37) (PL-09). Бюджет «вывод терминала не более 16 мс» ([пункт 16 SAD2](../04-architecture/design/sad2-disputed-points.md#16-бюджеты-и-база-замеров), NFR-CH-1001) и предложенное для старта и памяти правило «не хуже базы на 10%» нельзя проверить без чисел самого Cyborg; ниже - они, и записи сессий для сравнения поведения. Код замеров и записи лежат в [dex-it/ai-cyborg#79](https://github.com/dex-it/ai-cyborg/pull/79) (`scripts/bench.mjs`, `scripts/measure.mjs`, `scripts/parity.mjs`, `fixtures/`, `test/parity/`). Колонка «Значение на ядре» пуста: её заполняют пилоты PL-01 и PL-04.
+Результат задачи [#37](https://github.com/dex-it/cyborg-harness/issues/37) (PL-09). Бюджет «вывод терминала не более 16 мс» ([пункт 16 SAD2](../04-architecture/design/sad2-disputed-points.md#16-бюджеты-и-база-замеров), NFR-CH-1001) и предложенное для старта и памяти правило «не хуже базы на 10%» нельзя проверить без чисел самого Cyborg; ниже - они, и записи сессий для сравнения поведения. Код замеров и записи лежат в [dex-it/ai-cyborg#79](https://github.com/dex-it/ai-cyborg/pull/79) (`scripts/bench.mjs`, `scripts/measure.mjs`, `scripts/parity.mjs`, `fixtures/`, `test/parity/`). Колонка «Значение на ядре» пуста: её заполняют пилоты PL-01 и PL-04. Дерево файлов и простой PL-04 сравнивает с этой базой в [pilot-files-git.md](pilot-files-git.md): строк «время панели дерева» и «процессор в простое» в базе нет, сравнение снято на тех же командах Cyborg.
 
 ## Среда
 
