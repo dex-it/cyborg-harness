@@ -1,0 +1,7 @@
+{
+  "id": "consumer",
+  "version": "1.0.0",
+  "engines": { "cyborg": "^1" },
+  "requires": { "example.greeting": "^1" },
+  "commands": { "consumer.ask": { "args": ["string"] } }
+}

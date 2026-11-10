@@ -1,5 +1,6 @@
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
+import type { PluginContext } from '@cyborg-harness/contracts';
 import { memoryStore as memory } from '../../testing/src/memory.ts';
 import { SectionStore } from '../src/config.ts';
 import { toDisposable } from '../src/disposable.ts';
@@ -589,5 +590,66 @@ test('раскладка: невключённые, выключенные и п
 test('раскладка: плагин без видов и документов в снимок не попадает, манифест с ошибкой - тоже', async () => {
   const k = await kernel({ bare: quiet, bad: quiet }, { enabled: ['bare', 'bad'], manifests: [manifest('bare'), manifest('bad', { ui: { views: { x: view('./x.js', 'cellar') } } })] });
   assert.deepEqual(k.layout, []);
+  await k.unload();
+});
+
+// Склеенные записи пишутся по таймеру, уже после снятия зависимого: последней записью зависимого оказывается не unloaded.
+async function enableAfterLateEntry(t: TestContext, lateKind: string, call: (ctx: PluginContext) => Promise<unknown>, providerFields: Record<string, unknown> = {}) {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let editor: PluginContext | undefined;
+  const k = await kernel(
+    {
+      files: { activate: (ctx) => void ctx.contracts.provide('test.files', '1.0', { read: async () => 'data' }) },
+      editor: { activate: (ctx) => void (editor = ctx) },
+    },
+    {
+      enabled: ['files', 'editor'],
+      manifests: [manifest('files', { provides: { 'test.files': { version: '1.0', ...providerFields } } }), manifest('editor', { requires: { 'test.files': '^1' } })],
+    },
+  );
+  assert.ok(editor);
+  await call(editor);
+  await k.disable('files');
+  assert.deepEqual(k.active, []);
+  t.mock.timers.tick(5500);
+  const of = (kind: string) => k.journal.findLastIndex((e) => e.pluginId === 'editor' && e.kind === kind);
+  assert.ok(of(lateKind) > of('unloaded'), `${lateKind} должна лечь после unloaded зависимого: ${kinds(k).join(' ')}`);
+  await k.enable('files');
+  assert.deepEqual(k.active, ['files', 'editor']);
+  await k.unload();
+}
+
+test('enable поставщика поднимает зависимого, если после его снятия в журнал легла склеенная denied (FR-CH-1007)', async (t) => {
+  await enableAfterLateEntry(t, 'denied', async (ctx) => {
+    for (let i = 0; i < 3; i++) await ctx.os.fs.readText('/etc/hostname').catch(() => undefined);
+  });
+});
+
+test('enable поставщика поднимает зависимого, если после его снятия легла запись вызова устаревшего члена', async (t) => {
+  await enableAfterLateEntry(
+    t,
+    'deprecated-call',
+    async (ctx) => {
+      const files = ctx.contracts.get('test.files', 1);
+      for (let i = 0; i < 3; i++) await files?.read?.('a');
+    },
+    { deprecated: ['read'] },
+  );
+});
+
+test('enable поставщика поднимает зависимого, если перезагрузка раздела, шедшая при disable, отказала после его снятия', async () => {
+  const { store } = memory({});
+  const config = await SectionStore.open(store, ['user', 'workspace']);
+  const section = { config: { version: 1 } };
+  const k = await kernel(
+    { files: { activate: (ctx) => void ctx.contracts.provide('test.files', '1.0', {}) }, editor: { activate: () => {} } },
+    { enabled: ['files', 'editor'], manifests: [manifest('files', { ...section, provides: { 'test.files': '1.0' } }), manifest('editor', { ...section, requires: { 'test.files': '^1' } })], config },
+  );
+  void k.reloadSections('config', ['files', 'editor']);
+  await k.disable('files');
+  const of = (kind: string) => k.journal.findLastIndex((e) => e.pluginId === 'editor' && e.kind === kind);
+  assert.ok(of('config') < of('unloaded'), `после снятия плагина запись о перезагрузке его раздела не пишется: ${kinds(k).join(' ')}`);
+  await k.enable('files');
+  assert.deepEqual(k.active, ['files', 'editor']);
   await k.unload();
 });

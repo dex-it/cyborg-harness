@@ -1,0 +1,21 @@
+{
+  "name": "example-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "check": "cyborg-plugin check",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts",
+    "build": "cyborg-plugin build"
+  },
+  "devDependencies": {
+    "@cyborg-harness/contracts": ">=1.0.0-0 <2.0.0",
+    "@cyborg-harness/core": "^0.1.0",
+    "@cyborg-harness/testing": "^0.1.0",
+    "@types/node": "^26.6.5",
+    "cyborg-plugin": "^0.1.0",
+    "typescript": "^7.0.2"
+  }
+}

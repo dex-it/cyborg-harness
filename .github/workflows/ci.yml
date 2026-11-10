@@ -47,7 +47,10 @@ jobs:
           exit 1
       - run: npm run build
       - run: npm run typecheck
+      # ESLint со strictTypeChecked подбирается к 2 ГиБ кучи Node на раннере macOS и падает «JavaScript heap out of memory» - даём 4 ГиБ.
       - run: npm run lint
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       # Обычный прогон - около минуты; 8 минут - запас, а не срок. Зависший тест падает под своим именем по `--test-timeout` в `npm test`,
       # выше этого предела обрывается шаг, а не вся задача на 15 минут (docs/guide/development/tests-ci.md).
       - name: npm test
@@ -64,6 +67,12 @@ jobs:
       - name: contracts (снимок API)
         if: github.event_name != 'pull_request'
         run: npm run check:contracts
+      # Шаблон плагина (P-05, templates/plugin): lint, typecheck и test идут в общих шагах выше; здесь - настоящий исполняемый файл автора на шаблоне.
+      - name: шаблон плагина (check, build, pack)
+        run: |
+          node tools/cyborg-plugin/dist/src/cli-bin.js check templates/plugin
+          node tools/cyborg-plugin/dist/src/cli-bin.js build templates/plugin --out "$RUNNER_TEMP/template-build"
+          node tools/cyborg-plugin/dist/src/cli-bin.js pack "$RUNNER_TEMP/template-build" --out "$RUNNER_TEMP/example.tgz"
       - name: пример адаптера Electron собирается (README, electron/test/example.test.ts)
         run: node --test electron/test/example.test.ts
       - name: smoke (macOS)
