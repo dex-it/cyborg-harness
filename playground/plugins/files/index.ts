@@ -9,6 +9,13 @@ import type { Disposable, PluginContext, PluginModule, TreeMarkKind } from '@cyb
 const MAX_WATCHES = 64;
 /** Имён в одном событии больше - дешевле прочитать каталог, чем звать stat на каждое. */
 const RELIST_AT = 64;
+/**
+ * ОС теряет события при лавине (на macOS корень не назвал три из шести ушедших при checkout каталогов, хвост #147): событиям нельзя верить как единственному источнику.
+ * Лавина - не меньше STORM_NAMES имён подряд без тишины в RESYNC_QUIET_MS; после тишины узлы, где были события, перечитываются целиком. Так же после оповещения git об индексе и голове.
+ * В простое это ни одного вызова.
+ */
+const STORM_NAMES = 16;
+const RESYNC_QUIET_MS = 300;
 /** Каталог git не часть дерева: его изменения - дело плагина git. */
 const HIDDEN = new Set(['.git']);
 
@@ -34,7 +41,7 @@ const files: PluginModule = {
   activate(ctx: PluginContext) {
     const { fs } = ctx.os;
     const nodes = new Map<string, Node>();
-    const counters = { list: 0, stat: 0, batches: 0, relists: 0, markRuns: 0, evicted: 0, closed: 0 };
+    const counters = { list: 0, stat: 0, batches: 0, relists: 0, markRuns: 0, evicted: 0, resyncs: 0 };
     let root: string | undefined;
     let rootLost: string | undefined;
     let version = 0;
@@ -128,6 +135,7 @@ const files: PluginModule = {
       counters.batches++;
       const shown = [...new Set(names)].filter((n) => !HIDDEN.has(n));
       if (shown.length === 0 || nodes.get(node.dir) !== node) return;
+      noteBurst(node, shown.length);
       let changed = false;
       try {
         if (shown.length > RELIST_AT || shown.some((n) => !node.entries.has(n))) changed = await relist(node);
@@ -139,6 +147,50 @@ const files: PluginModule = {
       }
       if (changed) version++;
       scheduleMarks();
+    }
+
+    // --- перечитывание после лавины и смены ветки ---
+
+    const burst = { names: 0, touched: new Set<Node>(), timer: undefined as NodeJS.Timeout | undefined, all: false };
+
+    /** Узел перечитан целиком; исчезнувший каталог закрывается как при ошибке слежения. */
+    async function resync(node: Node): Promise<void> {
+      if (nodes.get(node.dir) !== node) return;
+      counters.resyncs++;
+      try {
+        if (await relist(node)) version++;
+      } catch (error) {
+        if (isCode(error, 'NotFound')) await onClosed(node, 'каталог исчез');
+        else throw error;
+      }
+    }
+
+    function armResync(): void {
+      clearTimeout(burst.timer);
+      burst.timer = setTimeout(() => {
+        const targets = burst.all ? [...nodes.values()] : [...burst.touched];
+        burst.names = 0;
+        burst.all = false;
+        burst.touched.clear();
+        burst.timer = undefined;
+        // Родители раньше детей: ушедший каталог забирает свои узлы с собой.
+        for (const node of targets.sort((a, b) => a.dir.length - b.dir.length)) void enqueue(node, () => resync(node));
+      }, RESYNC_QUIET_MS);
+    }
+
+    function noteBurst(node: Node, count: number): void {
+      burst.names += count;
+      burst.touched.add(node);
+      if (burst.names >= STORM_NAMES) {
+        armResync();
+        return;
+      }
+      // Редкие мелкие события лавины не делают: счёт сбрасывается, если за RESYNC_QUIET_MS новых не было.
+      burst.timer ??= setTimeout(() => {
+        burst.names = 0;
+        burst.touched.clear();
+        burst.timer = undefined;
+      }, RESYNC_QUIET_MS);
     }
 
     // --- слежение: не больше MAX_WATCHES, самый давний раскрытый уступает место ---
@@ -263,7 +315,13 @@ const files: PluginModule = {
         if (subscribed.has(provider.pluginId)) continue;
         subscribed.set(
           provider.pluginId,
-          provider.impl.onChange((at) => (at === root ? scheduleMarks() : undefined)).then(
+          provider.impl.onChange((at) => {
+            if (at !== root) return;
+            // Индекс или голова поменялись (commit, checkout, pull): каталоги могли смениться так, что событий не хватит.
+            scheduleMarks();
+            burst.all = true;
+            armResync();
+          }).then(
             (sub) => sub,
             (error: unknown) => {
               ctx.log(`подписка на ${provider.pluginId}: ${message(error)}`, 'warn');
@@ -301,6 +359,11 @@ const files: PluginModule = {
     }
 
     function reset(): void {
+      clearTimeout(burst.timer);
+      burst.timer = undefined;
+      burst.names = 0;
+      burst.all = false;
+      burst.touched.clear();
       for (const node of nodes.values()) node.watch?.dispose();
       nodes.clear();
       marks = new Map();
@@ -361,6 +424,7 @@ const files: PluginModule = {
       }),
       {
         dispose() {
+          clearTimeout(burst.timer);
           reset();
           for (const sub of subscribed.values()) void sub.then((s) => s?.dispose());
         },

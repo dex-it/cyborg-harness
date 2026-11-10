@@ -37,6 +37,9 @@ export async function writeFiles(dir: string, files: Readonly<Record<string, str
 /** Проба: плагин-потребитель с заданными правами и кодом, который вызывает контракты и копит события подписок. */
 export interface Probe {
   readonly id: string;
+  /** Свой код главной части вместо общего (замеры); команды тогда объявляет `commands`. */
+  readonly source?: string;
+  readonly commands?: Record<string, unknown>;
   readonly permissions?: Record<string, unknown>;
   readonly requires?: Record<string, string>;
   readonly consumes?: Record<string, string>;
@@ -85,8 +88,12 @@ export interface PilotOptions {
   readonly probes?: readonly Probe[];
   /** Корни воркспейса; по умолчанию репозиторий. */
   readonly roots?: readonly string[];
-  /** Своя обёртка над fs.watch (замеры подмешивают задержку и счёт). */
+  /** Своя обёртка над fs.watch. */
   readonly watch?: OsEnvironment['watch'];
+  /** Сторож хостов; по умолчанию частый, чтобы тесты быстро видели падения. */
+  readonly watchdog?: { interval: number; timeout: number; strikes: number };
+  /** Записи окружения шлюза поверх тестовых. */
+  readonly os?: Partial<OsEnvironment>;
 }
 
 /** Поднимает ядро: каждый плагин пилота в своём хосте-процессе, пробы - тоже. */
@@ -110,9 +117,9 @@ export async function startPilot(options: PilotOptions): Promise<Pilot> {
   for (const probe of options.probes ?? []) {
     const dir = box.path('probes', probe.id);
     await mkdir(dir, { recursive: true });
-    const commands = Object.fromEntries([['call', { args: ['string', 'string'], rest: 'any' }], ['watch', { args: ['string', 'string'], rest: 'any' }], ['events', {}], ['run', { args: ['string'], rest: 'any' }]].map(([n, s]) => [`${probe.id}.${n as string}`, s]));
+    const commands = probe.commands ?? Object.fromEntries([['call', { args: ['string', 'string'], rest: 'any' }], ['watch', { args: ['string', 'string'], rest: 'any' }], ['events', {}], ['run', { args: ['string'], rest: 'any' }]].map(([n, s]) => [`${probe.id}.${n as string}`, s]));
     manifests.push({ id: probe.id, version: '1.0.0', engines: { cyborg: '^1' }, commands, ...(probe.permissions && { permissions: probe.permissions }), ...(probe.requires && { requires: probe.requires }), ...(probe.consumes && { consumes: probe.consumes }) });
-    await writeFile(path.join(dir, 'index.ts'), PROBE_CODE);
+    await writeFile(path.join(dir, 'index.ts'), probe.source ?? PROBE_CODE);
     entries.set(probe.id, pathToFileURL(path.join(dir, 'index.ts')).href);
   }
 
@@ -152,8 +159,9 @@ export async function startPilot(options: PilotOptions): Promise<Pilot> {
       env: { PATH: `${bin}:/usr/bin:/bin`, HOME: box.root },
       roots: () => options.roots ?? [repo],
       watch: counted,
+      ...options.os,
     },
-    watchdog: { interval: 500, timeout: 20_000, strikes: 3 },
+    watchdog: options.watchdog ?? { interval: 500, timeout: 20_000, strikes: 3 },
   });
   return {
     k,

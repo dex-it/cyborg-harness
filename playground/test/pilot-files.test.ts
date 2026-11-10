@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { watch as watchFs } from 'node:fs';
 import { appendFile, mkdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { waitFor } from '../../core/test/wait-for.ts';
@@ -20,7 +21,7 @@ interface State {
   rootLost: string | null;
   watches: number;
   pending: boolean;
-  counters: { list: number; stat: number; batches: number; relists: number; markRuns: number; evicted: number };
+  counters: { list: number; stat: number; batches: number; relists: number; markRuns: number; evicted: number; resyncs: number };
   marks: Record<string, string>;
   nodes: Record<string, NodeView>;
 }
@@ -51,10 +52,10 @@ async function arm(p: Pilot, dirs: readonly string[]): Promise<void> {
   });
 }
 
-async function started(files: Readonly<Record<string, string>> = FILES, ids: Parameters<typeof startPilot>[0]['ids'] = ['files', 'git', 'viewer']) {
+async function started(files: Readonly<Record<string, string>> = FILES, ids: Parameters<typeof startPilot>[0]['ids'] = ['files', 'git', 'viewer'], watch?: Parameters<typeof startPilot>[0]['watch']) {
   const box = await sandbox('cyborg-pl04-');
   const repo = await makeRepo(box, files);
-  const p = await startPilot({ box, repo, ids, probes: [nosy] });
+  const p = await startPilot({ box, repo, ids, probes: [nosy], ...(watch && { watch }) });
   const dispose = async () => {
     await p[Symbol.asyncDispose]();
     await box[Symbol.asyncDispose]();
@@ -260,6 +261,92 @@ test('files: коммит снаружи сбрасывает отметки б�
   git(repo, 'commit', '-q', '-a', '-m', 'second');
   await waitFor('отметка снята после коммита', async () => (Object.keys((await state(p)).marks).length === 0 ? true : undefined));
   assert.ok(((await state(p)).counters.batches) - batches <= 1, 'каталоги дерева при коммите почти не шумят');
+});
+
+test('files: слежение не рекурсивное - правка вглубь нераскрытого каталога не даёт события и отметки, пока что-то другое не запросит состояние (предел, ради которого нужна рекурсия в шлюзе)', async () => {
+  await using s = await started();
+  const { p, repo } = s;
+  await p.k.run('files.root', repo);
+  await arm(p, [repo]);
+  await settled(p);
+  const quiet = await state(p);
+  const rawBefore = p.watches.raw;
+  await appendFile(path.join(repo, 'src', 'deep', 'c.ts'), 'x\n');
+  await new Promise((r) => setTimeout(r, 1500));
+  const later = await state(p);
+  assert.equal(p.watches.raw, rawBefore, 'корень не получил события о правке на два уровня глубже');
+  assert.deepEqual(later.marks, {}, 'отметка правки в нераскрытом каталоге не появилась');
+  assert.equal(later.counters.markRuns, quiet.counters.markRuns);
+
+  // Любое другое событие (файл в корне) тянет свежий git status, и скрытая правка попадает в отметки: git её знает, дерево о ней не узнало само.
+  await writeFile(path.join(repo, 'trigger.txt'), 't');
+  const seen = await waitFor('отметки обновились по другой причине', async () => {
+    const st = await state(p);
+    return st.marks['trigger.txt'] === undefined ? undefined : st;
+  });
+  assert.equal(seen.marks['src/deep/c.ts'], 'modified');
+  assert.equal(seen.nodes[repo]?.entries.find((e) => e[0] === 'src')?.[2], 'changed');
+});
+
+/** Слежение, которое теряет события, как FSEvents при лавине (на checkout большого репозитория корень не назвал три из шести ушедших каталогов). */
+function lossy(drop: (target: string) => boolean): NonNullable<Parameters<typeof startPilot>[0]['watch']> {
+  return ((target: string, listener: (event: string, name: string | null) => void) =>
+    watchFs(target, (event, name) => {
+      if (!drop(target)) listener(event, name);
+    })) as unknown as NonNullable<Parameters<typeof startPilot>[0]['watch']>;
+}
+
+test('files: ОС потеряла события каталогов при checkout - дерево догоняет по оповещению git об индексе и голове', async () => {
+  const drop = { on: false };
+  await using s = await started(FILES, ['files', 'git', 'viewer'], lossy((target) => drop.on && !target.endsWith('.git')));
+  const { p, repo } = s;
+  git(repo, 'checkout', '-q', '-b', 'other');
+  await rm(path.join(repo, 'docs'), { recursive: true });
+  await writeFiles(repo, { 'extra/new.txt': 'n\n', 'src/more.ts': 'm\n' });
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-q', '-m', 'other');
+  git(repo, 'checkout', '-q', 'main');
+  await p.k.run('files.root', repo);
+  await p.k.run('files.expand', path.join(repo, 'src'));
+  await p.k.run('files.expand', path.join(repo, 'docs'));
+  await arm(p, [repo, path.join(repo, 'src'), path.join(repo, 'docs')]);
+  await settled(p);
+
+  drop.on = true;
+  git(repo, 'checkout', '-q', 'other');
+  const st = await waitFor('дерево догнало диск без событий каталогов', async () => {
+    const cur = await state(p);
+    return names(cur.nodes[repo]).includes('extra') && !names(cur.nodes[repo]).includes('docs') && names(cur.nodes[path.join(repo, 'src')]).includes('more.ts') ? cur : undefined;
+  });
+  assert.equal(st.nodes[path.join(repo, 'docs')], undefined, 'узел ушедшего каталога забыт');
+  assert.ok(st.counters.resyncs >= 1);
+});
+
+test('files: лавина событий, из которых ОС доставила только начало - после тишины узлы, где были события, перечитываются целиком', async () => {
+  const many = Object.fromEntries(Array.from({ length: 150 }, (_, i) => [`bulk/f${String(i).padStart(3, '0')}.txt`, 'x']));
+  const gate = { left: Infinity };
+  const drop = (target: string): boolean => {
+    if (!target.endsWith('/bulk')) return false;
+    gate.left--;
+    return gate.left < 0;
+  };
+  await using s = await started({ ...FILES, 'bulk/keep.txt': 'k' }, ['files'], lossy(drop));
+  const { p, repo } = s;
+  await p.k.run('files.root', repo);
+  await p.k.run('files.expand', path.join(repo, 'bulk'));
+  await arm(p, [repo, path.join(repo, 'bulk')]);
+  // Лавина тремя волнами по 50 файлов: слежение доставит события первых файлов первой волны, остальное потеряет; перечитанный по первой пачке каталог дальше не обновится.
+  gate.left = 60;
+  const waves = [0, 1, 2].map((w) => Object.fromEntries(Object.entries(many).slice(w * 50, w * 50 + 50)));
+  for (const wave of waves) {
+    await writeFiles(repo, wave);
+    await new Promise((r) => setTimeout(r, 120));
+  }
+  const st = await waitFor('каталог перечитан после лавины', async () => {
+    const cur = await state(p);
+    return names(cur.nodes[path.join(repo, 'bulk')]).length === 151 ? cur : undefined;
+  });
+  assert.ok(st.counters.resyncs >= 1, 'перечитывание после тишины');
 });
 
 test('files: права - корень вне воркспейса отказан, ссылка наружу не раскрывается и не читается, ссылка внутрь читается; открывает файл только viewer и только по праву вызывающего', async () => {
