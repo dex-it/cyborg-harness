@@ -4,8 +4,8 @@ import { marksOf, parseStatus } from './status.ts';
 // Пилот PL-04: владелец git по SAD (раздел 4, правило 11). Единственный плагин с правом process на git; дереву и просмотру отдаёт состояние и отметки.
 // Правка файлов рабочего дерева сюда не доходит - её видит тот, кто следит за деревом, и просит состояние заново; здесь следят только за .git (индекс, голова).
 
-/** Аргументы закреплены правилом process в манифесте: `fsmonitor=false` - команда из .git/config чужого репозитория при `status` не запускается; `--no-optional-locks` - status не пишет в индекс и не мешает человеку. */
-const STATUS_ARGS = ['--no-optional-locks', '-c', 'core.fsmonitor=false', 'status', '--porcelain=v1', '-z', '--branch'];
+/** Аргументы закреплены правилом process в манифесте: `fsmonitor=false` - команда из .git/config чужого репозитория при `status` не запускается, `hooksPath=/dev/null` - хуки репозитория тоже (как SAFE_CONFIG в ai-cyborg); `--no-optional-locks` - status не пишет в индекс и не мешает человеку. */
+const STATUS_ARGS = ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'status', '--porcelain=v1', '-z', '--branch'];
 /** Имена в .git, по которым меняется то, что показывает дерево: индекс (add, commit, checkout), голова и упакованные ссылки. Ссылки в refs/ каталогом глубже не видны: fetch отметок не меняет. */
 const WATCHED = new Set(['index', 'HEAD', 'packed-refs', 'MERGE_HEAD', 'REBASE_HEAD', 'CHERRY_PICK_HEAD']);
 /** Склейка россыпи событий .git при checkout в одно оповещение. */

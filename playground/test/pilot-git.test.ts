@@ -75,8 +75,8 @@ test('git: status не запускает команду из .git/config чуж
   assert.ok(controlRan, 'контроль: этот git запускает core.fsmonitor без защиты - проверка осмысленна');
 
   const manifest = JSON.parse(readFileSync(path.join(import.meta.dirname, '..', 'plugins', 'git', 'manifest.json'), 'utf8')) as { permissions: { process: { program: string; args: string[] }[] } };
-  assert.deepEqual(manifest.permissions.process, [{ program: 'git', args: ['--no-optional-locks', '-c', 'core.fsmonitor=false', 'status', '--porcelain=v1', '-z', '--branch'] }]);
-  assert.deepEqual((await p.gitRuns())[0], '--no-optional-locks -c core.fsmonitor=false status --porcelain=v1 -z --branch');
+  assert.deepEqual(manifest.permissions.process, [{ program: 'git', args: ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'status', '--porcelain=v1', '-z', '--branch'] }]);
+  assert.deepEqual((await p.gitRuns())[0], '--no-optional-locks -c core.fsmonitor=false -c core.hooksPath=/dev/null status --porcelain=v1 -z --branch');
 });
 
 test('git: параллельные status одного репозитория склеиваются - не больше двух запусков на пачку, и последний видит правку, сделанную во время первого', async () => {

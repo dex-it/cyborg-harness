@@ -24,7 +24,7 @@
     "process": [
       {
         "program": "git",
-        "args": ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v1", "-z", "--branch"]
+        "args": ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "status", "--porcelain=v1", "-z", "--branch"]
       }
     ]
   }
