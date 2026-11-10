@@ -2,9 +2,8 @@
 level: verification
 feature: cyborg-harness
 status: review
-date: 2026-11-09
+date: 2026-11-10
 origin: derived
-quality-checks: входных записей нет
 ---
 
 # Замер K-04: группы рендера, память при десяти видах

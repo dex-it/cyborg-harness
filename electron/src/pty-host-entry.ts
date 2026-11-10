@@ -2,7 +2,8 @@
 // Права, владельцы и билеты остались в ядре главного процесса; здесь процессы pty, хвосты вывода и порты видов.
 import type { MessagePortMain } from 'electron';
 import * as nodePty from 'node-pty';
-import { groupKilled, runPtyHost, type ViewPort } from '@cyborg-harness/core/pty-host';
+import { runPtyHost, type ViewPort } from '@cyborg-harness/core/pty-host';
+import { nodePtyBackend } from './pty-backend.ts';
 
 const parent = process.parentPort;
 
@@ -29,6 +30,7 @@ runPtyHost(
       parent.on('message', (event) => listener(event.data, event.ports));
     },
   },
-  { spawn: (file, args, options) => groupKilled(nodePty.spawn(file, args, options)) },
+  // Модуль грузится сразу, как и прежде: сломанный `node-pty` виден при старте хоста, а не при первом терминале.
+  nodePtyBackend({ load: () => Promise.resolve(nodePty) }),
   { adopt },
 );

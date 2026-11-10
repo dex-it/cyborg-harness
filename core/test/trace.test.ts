@@ -10,6 +10,7 @@ import { sandbox } from '../../testing/src/sandbox.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { load, type Kernel, type LoadOptions } from '../src/loader.ts';
 import type { PluginModule } from '../src/plugin.ts';
+import { waitFor } from './wait-for.ts';
 import type { ExitRecord, OperationRecord, StreamRecord, TraceRecord } from '../src/trace-record.ts';
 import { inlineHosts, type SpawnHost } from '../src/transports.ts';
 import { trackKernels } from './kernels.ts';
@@ -305,7 +306,8 @@ test('поток: 5000 сообщений pty за интервал дают о�
   await sleep(30);
   const proc = pty.procs[0]!;
   for (let i = 0; i < 5000; i++) proc.emit('0123456789');
-  await sleep(100);
+  // Доставка 5000 кусков хосту идёт по каналу; на занятом раннере она дольше любой фиксированной паузы.
+  await waitFor('плагин получил приглашение и 5000 кусков', () => seen.length === 5001);
   assert.equal(seen.length, 5001, 'плагин получил приглашение и 5000 кусков');
   assert.deepEqual(r.records.filter(isStream), [], 'интервал не кончился: счётчик ещё считает');
 

@@ -569,3 +569,36 @@ test('output: сводная строка хоста без плагина, не
   await kernel.unload();
   assert.deepEqual(logs, ['хост h [info]: строка 0', 'хост h [warn]: строк сверх предела за интервал: 3, из них error: 1; последняя error: строка 3']);
 });
+
+test('os: notify.show и notify.close плагина без права notify отклоняет шлюз ядра (PermissionDenied, запись denied), а не только отсутствие ctx.os.notify (PL-02)', async () => {
+  const shown: string[] = [];
+  const forger = forging({
+    mallory: {
+      activate: (ctx) => {
+        if (ctx.os.notify !== undefined) shown.push('у плагина без права есть ctx.os.notify');
+      },
+    },
+    bell: { activate: () => undefined },
+  });
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['mallory', 'bell'],
+    manifests: [manifest('mallory'), manifest('bell', { permissions: { notify: true } })],
+    spawnHost: forger.spawn,
+    hosts: { m: ['mallory'], b: ['bell'] },
+    os: { dataDir: tmpdir(), tempDir: tmpdir(), notify: (title) => void shown.push(title) },
+  });
+  const os = (hostId: string, pluginId: string, method: string, ...args: unknown[]) => forger.request(hostId, 'os', { pluginId, method, args });
+  // Хост подделывает запрос, который ctx.os плагина без права не даст отправить: члена notify у него нет.
+  assert.equal(code(await os('m', 'mallory', 'notify.show', 'фишинг', 'нажми')), 'PermissionDenied');
+  assert.equal(code(await os('m', 'mallory', 'notify.close', 'n1')), 'PermissionDenied');
+  assert.deepEqual(shown, [], 'до среды приложения уведомление не дошло');
+  assert.equal(code(await os('b', 'bell', 'notify.show', 'свой')), 'ok', 'плагин с правом показывает');
+  assert.deepEqual(shown, ['свой']);
+  assert.deepEqual(
+    kernel.journal.flatMap((e) => (e.kind === 'denied' ? [`${e.pluginId}:${e.method}`] : [])),
+    ['mallory:notify.show', 'mallory:notify.close'],
+    'каждый отказ - запись в журнале плагина',
+  );
+  await kernel.unload();
+});

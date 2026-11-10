@@ -1,5 +1,5 @@
 // Каналы IPC главного процесса: окно -> служба плагинов и виды -> служба плагинов. Имена те же, что в preload.ts (test/channels.test.ts).
-import { BrowserWindow, ipcMain, MessageChannelMain, nativeImage, nativeTheme, screen, type IpcMainInvokeEvent, type WebContents } from 'electron';
+import { BrowserWindow, dialog, ipcMain, MessageChannelMain, nativeImage, nativeTheme, screen, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { isRecord } from './guards.ts';
 import type { PluginsService } from './plugins.ts';
 import { themeTokens } from './theme.ts';
@@ -33,10 +33,24 @@ export interface WindowChannelsOptions {
   readonly plugins: PluginsService;
   /** Окно приложения; пока его нет, `views:visibility` ничего не делает. */
   readonly window: () => BrowserWindow | undefined;
+  /** Куда класть выгрузку диагностики: имя файла предлагается, `undefined` - человек отказался. По умолчанию - системный диалог «Сохранить как». */
+  readonly exportTarget?: (suggested: string) => Promise<string | undefined>;
 }
 
 /** Каналы окна: снимок и кнопки службы плагинов, ответ диалога, закрытие документа, видимость видов. */
-export function registerWindowChannels({ plugins, window }: WindowChannelsOptions): void {
+export function registerWindowChannels({ plugins, window, exportTarget }: WindowChannelsOptions): void {
+  const choose =
+    exportTarget ??
+    (async (suggested: string) => {
+      const win = window();
+      const options = { defaultPath: suggested, filters: [{ name: 'Текст', extensions: ['txt'] }] };
+      const { canceled, filePath } = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
+      return canceled ? undefined : filePath;
+    });
+  windowChannel('diagnostics:export', async () => {
+    const file = await choose(`cyborg-diagnostics-${new Date().toISOString().replaceAll(/[:.]/g, '-')}.txt`);
+    return file === undefined ? {} : plugins.exportDiagnostics(file);
+  });
   windowChannel('plugins:snapshot', () => plugins.snapshot());
   windowChannel('plugins:enable', (id) => plugins.enable(id));
   windowChannel('plugins:disable', (arg) => (isRecord(arg) ? plugins.disable(arg.id, arg.keepPty) : plugins.disable(arg)));
@@ -90,6 +104,11 @@ export function registerViewChannels({ plugins, dragRoot }: ViewChannelsOptions)
   viewChannel(plugins, 'view:call', (pluginId, contract, major, method, args) => plugins.callFor(pluginId, contract, major, method, args));
   viewChannel(plugins, 'view:state', (pluginId, view) => plugins.viewStateFor(pluginId, view));
   viewChannel(plugins, 'view:state:set', (pluginId, view, value) => plugins.setViewStateFor(pluginId, view, value));
+  // Отказ CSP на странице вида (#160): односторонний, без ответа; плагин - из адреса фрейма, остальное от вида проверяет служба.
+  ipcMain.on('view:csp', (event, directive: unknown, blocked: unknown) => {
+    const pluginId = senderPlugin(event, plugins);
+    if (pluginId !== undefined) plugins.cspDeniedFrom(pluginId, directive, blocked);
+  });
   const terminals = new ViewTerminals((pluginId, ticket, channel) => plugins.openTerminal(pluginId, ticket, channel), () => new MessageChannelMain());
   const terminalChannel = (channel: string, handler: (frame: TerminalFrame, pluginId: string, ...args: unknown[]) => unknown): void => {
     ipcMain.handle(channel, (event: IpcMainInvokeEvent, ...args: unknown[]) => {

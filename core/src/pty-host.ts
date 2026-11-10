@@ -129,8 +129,10 @@ export class PtyHost {
       this.#live(p.key).proc.kill(p.signal);
       return null;
     });
-    e.handle('endAll', () => {
+    // Ответ уходит, когда процессы вышли: ядро после него убивает хост, а недоставленный выход `node-pty` при очистке окружения роняет процесс (#185).
+    e.handle('endAll', async () => {
       for (const key of [...this.#entries.keys()]) this.#end(key);
+      await this.#backend.drain?.().catch(() => undefined);
       return null;
     });
     // Ввод, размер, смена владельца и конец - уведомления: ответа ждать некому, главный процесс уже проверил то же самое.

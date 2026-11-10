@@ -114,8 +114,31 @@ export interface ToggleEventDetail {
     readonly expanded: boolean;
 }
 export type ElementTag = 'cy-button' | 'cy-field' | 'cy-list' | 'cy-tree' | 'cy-tabs' | 'cy-empty' | 'cy-spinner';
+// ---- git.d.ts
+import type { Subscription } from './index.js';
+export type GitCode = ' ' | 'M' | 'T' | 'A' | 'D' | 'R' | 'C' | 'U' | '?';
+export interface GitChange {
+    readonly path: string;
+    readonly index: GitCode;
+    readonly worktree: GitCode;
+    readonly from?: string;
+}
+export interface GitStatus {
+    readonly branch: string | null;
+    readonly upstream?: string;
+    readonly ahead: number;
+    readonly behind: number;
+    readonly changes: readonly GitChange[];
+}
+export interface Git {
+    status(repo: string): Promise<GitStatus | null>;
+    onChange(repo: string, listener: () => void): Subscription;
+}
 // ---- index.d.ts
 import type { Agent, AgentTool } from './agent.js';
+import type { Git } from './git.js';
+import type { TreeDecoration } from './tree.js';
+import type { Sessions } from './sessions.js';
 export interface Contracts {
     'cyborg.agent': {
         1: Agent;
@@ -126,11 +149,23 @@ export interface Contracts {
     'cyborg.session-prompt': {
         1: SessionPrompt;
     };
+    'cyborg.git': {
+        1: Git;
+    };
+    'cyborg.tree-decoration': {
+        1: TreeDecoration;
+    };
+    'cyborg.sessions': {
+        1: Sessions;
+    };
 }
 export type * from './plugin.js';
 export type * from './view.js';
 export type * from './os.js';
 export type * from './agent.js';
+export type * from './git.js';
+export type * from './tree.js';
+export type * from './sessions.js';
 export type * from './elements.js';
 export interface Subscription {
     dispose(): void;
@@ -475,9 +510,15 @@ export interface ViewChannel {
     post(message: unknown): Promise<void>;
     onMessage(listener: (message: unknown) => void): Disposable;
 }
+export interface ModalSize {
+    readonly width?: number;
+    readonly height?: number;
+}
 export interface ModalInit {
     readonly title?: string;
     readonly data?: unknown;
+    readonly size?: ModalSize;
+    readonly escape?: 'close' | 'view';
 }
 export interface PluginViews {
     channel(view: string): ViewChannel;
@@ -501,6 +542,40 @@ export interface PluginModule {
     readonly config?: Omit<SectionSpec, 'version'>;
     readonly state?: Omit<SectionSpec, 'version'>;
     activate(ctx: PluginContext): Disposable | undefined | Promise<Disposable | undefined>;
+}
+// ---- sessions.d.ts
+import type { Subscription } from './index.js';
+export interface Sessions {
+    onChange(listener: (event: SessionEvent) => void): Subscription;
+}
+export interface SessionEvent {
+    readonly sessionId: string;
+    readonly title: string;
+    readonly change: SessionChange;
+}
+export type SessionChange = {
+    readonly type: 'cwd';
+    readonly cwd: string;
+} | {
+    readonly type: 'activity';
+    readonly tool?: string;
+} | {
+    readonly type: 'waiting';
+    readonly reason: string;
+} | {
+    readonly type: 'exit';
+    readonly code: number;
+};
+// ---- tree.d.ts
+import type { Subscription } from './index.js';
+export type TreeMarkKind = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'conflict';
+export interface TreeMark {
+    readonly path: string;
+    readonly kind: TreeMarkKind;
+}
+export interface TreeDecoration {
+    marks(root: string): Promise<TreeMark[]>;
+    onChange(listener: (root: string) => void): Subscription;
 }
 // ---- view.d.ts
 import type { ContractName, ContractType, Major } from './index.js';
