@@ -101,7 +101,7 @@ test('каталог пользователя при поставке в builtin
   assert.equal(found.missing.size, 0, 'причина «нет index.mjs» только у каталога поставки');
   assert.ok(found.problems.some((p) => p.includes('точек входа несколько (index.js, index.ts)')));
   assert.ok(found.problems.some((p) => p.includes('нет точки входа (ищутся index.mjs, index.js, index.ts), плагин empty не запустится')));
-  const kernel = await startPlugins({ userData, builtinDir, userPlugins: true, spawnHost: inlineHosts((entry) => import(entry).then((m: { default: PluginModule }) => ({ activate() {}, ...m.default }))), log: () => {} });
+  const kernel = await startPlugins({ userData, builtinDir, userPlugins: true, spawnHost: inlineHosts((entry) => import(entry).then((m: { default: PluginModule }) => ({ ...m.default, activate: () => {} }))), log: () => {} });
   t.after(() => kernel.unload());
   assert.deepEqual([...kernel.active].sort(), ['both', 'built']);
   const failed = kernel.journal.find((e) => e.kind === 'failed' && e.pluginId === 'empty');
