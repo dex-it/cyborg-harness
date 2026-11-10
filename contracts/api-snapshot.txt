@@ -518,6 +518,9 @@ export interface ModalSize {
     readonly width?: number;
     readonly height?: number;
 }
+export interface ModalResize {
+    readonly height: number;
+}
 export interface ModalInit {
     readonly title?: string;
     readonly data?: unknown;
@@ -586,7 +589,7 @@ export interface TreeDecoration {
 // ---- view.d.ts
 import type { ContractName, ContractType, Major } from './index.js';
 import type { PtyExit, PtyInfo, PtyTicket } from './os.js';
-import type { Disposable, ViewChannel } from './plugin.js';
+import type { Disposable, ModalResize, ViewChannel } from './plugin.js';
 export interface FeedLine {
     readonly at: number;
     readonly kind: 'log' | 'key' | 'window' | 'error';
@@ -633,6 +636,7 @@ export type DialogSpec = AskDialog | {
 };
 export interface ViewModal {
     readonly data: unknown;
+    resize(size: ModalResize): Promise<void>;
     close(result?: unknown): Promise<void>;
 }
 export interface UiContext {

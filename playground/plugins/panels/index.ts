@@ -1,7 +1,7 @@
 import type { PluginModule } from '@cyborg-harness/contracts';
 
 // Два вида одного плагина в разных областях. Главная часть показывает канал «главная часть - вид» (K-13): толчок идёт только виду panel,
-// а виду bar (то же имя плагина, другое имя вида) не доходит. Модальное окно (вид form с area "modal") и диалог из главной части: команды panels.form, panels.form-own (размер и Escape от автора) и panels.confirm.
+// а виду bar (то же имя плагина, другое имя вида) не доходит. Модальное окно (вид form с area "modal") и диалог из главной части: команды panels.form, panels.form-own (размер и Escape от автора), panels.form-fit (высота по просьбе вида) и panels.confirm.
 const panels: PluginModule = {
   activate(ctx) {
     const channel = ctx.views.channel('panel');
@@ -17,6 +17,12 @@ const panels: PluginModule = {
     ctx.commands.register('panels.form-own', async () => {
       const result = await ctx.views.modal('form', { title: 'Широкая форма', data: { name: 'черновик', ownEscape: true }, size: { width: 700, height: 300 }, escape: 'view' });
       ctx.log(`широкая форма вернула: ${result === undefined ? 'ничего' : JSON.stringify(result)}`);
+      return result;
+    });
+    // Окно «по содержимому» (#197): высоту просит сам вид через ctx.modal.resize.
+    ctx.commands.register('panels.form-fit', async () => {
+      const result = await ctx.views.modal('form', { title: 'Окно по содержимому', data: { name: 'черновик', fit: true } });
+      ctx.log(`форма по содержимому вернула: ${result === undefined ? 'ничего' : JSON.stringify(result)}`);
       return result;
     });
     ctx.commands.register('panels.confirm', async () => {

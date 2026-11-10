@@ -52,6 +52,8 @@ export interface ShownModal {
   readonly size?: ModalSize;
   /** `"view"` - Escape принадлежит виду окна; поля нет - Escape закрывает окно. */
   readonly escape?: 'view';
+  /** Высота области вида (без шапки окна), о которой попросил сам вид (`ctx.modal.resize`); заменяет `size.height`. Пока вид не просил - поля нет. */
+  readonly contentHeight?: number;
 }
 
 export interface WindowLock {
@@ -160,7 +162,7 @@ export class WindowLayer {
     const modal = this.#modal;
     return {
       ...(shown && { dialog: { id: shown.id, pluginId: shown.pluginId, view: shown.view, spec: shown.spec } }),
-      ...(modal && { modal: { id: modal.id, pluginId: modal.pluginId, view: modal.view, title: modal.title, ...(modal.size && { size: modal.size }), ...(modal.escape && { escape: modal.escape }) } }),
+      ...(modal && { modal: { id: modal.id, pluginId: modal.pluginId, view: modal.view, title: modal.title, ...(modal.size && { size: modal.size }), ...(modal.escape && { escape: modal.escape }), ...(modal.contentHeight !== undefined && { contentHeight: modal.contentHeight }) } }),
       title: this.title,
       queued: this.#queue.length + this.#modals.length,
       locks: [...this.#locks.values()],
@@ -229,6 +231,15 @@ export class WindowLayer {
     this.#modal = undefined;
     modal.resolve(result);
     this.#next(true);
+  }
+
+  /** Вид просит высоту своей области; чужой плагин, другой вид или окно, которого нет на экране, - отказ. Высоту проверяет ядро до слоя (`view-channels.ts`). Та же высота окно не тревожит. */
+  resizeModal(pluginId: string, view: string, height: number): void {
+    const modal = this.#modal;
+    if (modal?.pluginId !== pluginId || modal.view !== view) throw new CoreError('NotFound', `${pluginId}: модального окна вида ${JSON.stringify(view)} нет на экране`);
+    if (modal.contentHeight === height) return;
+    this.#modal = { ...modal, contentHeight: height };
+    this.#changed(this.snapshot);
   }
 
   /** Человек закрыл окно в самом окне; id не того окна, что на экране, - отказ. */

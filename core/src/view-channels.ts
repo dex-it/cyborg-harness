@@ -24,6 +24,15 @@ function parseModalSize(pluginId: string, raw: unknown): ModalSize | undefined {
   return out;
 }
 
+/** Просьба вида подогнать окно - недоверенные данные: только `height`, целые пиксели в тех же пределах, что `size`. */
+function parseModalResize(pluginId: string, raw: unknown): number {
+  const height = isRecord(raw) && !Array.isArray(raw) && Object.keys(raw).length === 1 ? raw.height : undefined;
+  if (typeof height !== 'number' || !Number.isInteger(height) || height < MODAL_SIDE.min || height > MODAL_SIDE.max) {
+    throw new CoreError('Invalid', `${pluginId}: resize окна - { height }, целые пиксели от ${String(MODAL_SIDE.min)} до ${String(MODAL_SIDE.max)}`);
+  }
+  return height;
+}
+
 /**
  * Канал «главная часть - вид» (SAD 3.8, FR-CH-2027). Ядро только связывает: плагин и имя вида берёт из канала хоста и из origin фрейма,
  * сверяет вид с манифестом плагина и размер с `limits.viewMessage`, а доставку виду отдаёт приложению (`LoadOptions.onViewMessage`).
@@ -92,6 +101,10 @@ export function createViewChannels(ctx: KernelContext): ViewChannels {
     layer.closeModal(pluginId, view, result);
   }
 
+  function resizeModal(pluginId: string, view: string, size: unknown): void {
+    layer.resizeModal(pluginId, view, parseModalResize(pluginId, size));
+  }
+
   async function fromView(pluginId: string, view: string, message: unknown): Promise<void> {
     const { activation, pool, views } = ctx.parts;
     if (typeof view !== 'string') throw new CoreError('Invalid', `${pluginId}: канал вида - строка с именем из ui.views`);
@@ -104,5 +117,5 @@ export function createViewChannels(ctx: KernelContext): ViewChannels {
     await pool.live(pluginId).endpoint.request('view.message', { pluginId, view, message });
   }
 
-  return { attach, fromView, closeModal };
+  return { attach, fromView, closeModal, resizeModal };
 }

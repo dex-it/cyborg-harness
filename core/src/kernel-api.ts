@@ -63,6 +63,7 @@ export function buildKernel(ctx: KernelContext): Kernel {
     answerDialog: (id, choice) => layer.answer(id, choice),
     modalFor: (pluginId, view) => bridge(pluginId, 'bridge:view.modal', view, () => layer.modalData(pluginId, view)),
     closeModal: (pluginId, view, result) => bridge(pluginId, 'bridge:view.modal.close', result, () => viewChannels.closeModal(pluginId, view, result)),
+    resizeModal: (pluginId, view, size) => bridge(pluginId, 'bridge:view.modal.resize', size, () => viewChannels.resizeModal(pluginId, view, size)),
     cancelModal: (id) => layer.cancelModal(id),
     dismissModal: () => layer.dismissModal(),
     viewDenied(pluginId, url) {

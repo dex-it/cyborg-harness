@@ -25,6 +25,8 @@ interface OpenModal {
   readonly frame: HTMLIFrameElement | undefined;
   /** Закрытие уже ушло ядру или окно снято ядром: закрытие диалога больше не отвечает. */
   done: boolean;
+  /** Высота области вида, которая сейчас на фрейме. */
+  contentHeight?: number | undefined;
 }
 
 export class WindowLayerView {
@@ -66,7 +68,23 @@ export class WindowLayerView {
       this.modal = undefined;
     }
     if (shown && !this.modal) this.showModal(shown, layout.find((e) => e.kind === 'view' && e.pluginId === shown.pluginId && e.name === shown.view)?.url);
+    // Вид попросил высоту у открытого окна: окно то же, вид не перезагружается.
+    if (shown && this.modal?.id === shown.id) this.fitModal(this.modal, shown.contentHeight);
     this.main.inert = document.body.dataset.locked === 'true' || this.modal !== undefined;
+  }
+
+  // «По содержимому»: вид сам просит высоту своей области (`ctx.modal.resize`), потому что окно не видит содержимое чужого по origin фрейма. Высота ложится на фрейм,
+  // окно растёт вокруг него: шапка + область вида, не выше 80% экрана (фрейм при упоре в потолок уступает, область вида прокручивается). Размер автора по высоте заменён.
+  private fitModal(open: OpenModal, height: number | undefined): void {
+    if (open.contentHeight === height) return;
+    open.contentHeight = height;
+    if (!open.frame || height === undefined) return;
+    // `fit-content`, не `auto`: у модального <dialog> заданы обе вертикальные привязки (inset: 0), и `auto` растянул бы его на весь экран.
+    open.dialog.style.height = 'fit-content';
+    open.dialog.style.maxHeight = '80vh';
+    open.frame.style.flex = '0 1 auto';
+    open.frame.style.minHeight = '0';
+    open.frame.style.height = `${String(height)}px`;
   }
 
   private showModal(m: ShownModal, url: string | undefined): void {
@@ -115,6 +133,7 @@ export class WindowLayerView {
     document.body.append(dialog);
     dialog.showModal();
     this.modal = open;
+    this.fitModal(open, m.contentHeight);
     (frame ?? close).focus();
   }
 

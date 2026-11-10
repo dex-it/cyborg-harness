@@ -96,6 +96,7 @@ export function registerViewChannels({ plugins, dragRoot }: ViewChannelsOptions)
   viewChannel(plugins, 'view:dialog', (pluginId, view, spec) => plugins.dialogFor(pluginId, view, spec));
   viewChannel(plugins, 'view:channel:post', (pluginId, view, message) => plugins.viewPostFrom(pluginId, view, message));
   viewChannel(plugins, 'view:modal', (pluginId, view) => plugins.modalFor(pluginId, view), {});
+  viewChannel(plugins, 'view:modal:resize', (pluginId, view, size) => plugins.resizeModalFor(pluginId, view, size));
   viewChannel(plugins, 'view:modal:close', (pluginId, view, result) => plugins.closeModalFor(pluginId, view, result));
   viewChannel(plugins, 'view:keys', (pluginId) => plugins.keysFor(pluginId), {});
   viewChannel(plugins, 'view:logs', (pluginId) => plugins.logsOf(pluginId), []);

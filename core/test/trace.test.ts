@@ -495,7 +495,7 @@ test('onTrace бросил: операция идёт как шла, ядро о
   assert.deepEqual(r.logs.filter((l) => l.includes('onTrace')), ['хост трасса: onTrace бросил, записи трассы могут теряться: приёмник упал']);
 });
 
-test('мост вида (K-13): канал, модальное окно и его данные и закрытие - по записи Г2 от имени вида; обращение главной части к виду выходит на мост (FR-CH-4001)', async () => {
+test('мост вида (K-13): канал, модальное окно, его данные, размер и закрытие - по записи Г2 от имени вида; обращение главной части к виду выходит на мост (FR-CH-4001)', async () => {
   const r = await rig(
     { v: { activate: (ctx) => void ctx.commands.register('v.form', () => ctx.views.modal('form', { title: 'Форма', data: { имя: 'черновик' } })) } },
     [manifest('v', { commands: { 'v.form': {} }, ui: { views: { form: { module: './form.js', area: 'modal', title: 'Форма' }, main: './ui.js' } } })],
@@ -507,6 +507,7 @@ test('мост вида (K-13): канал, модальное окно и ег�
   assert.ok(r.k.window.modal, 'модальное окно показано');
 
   r.k.modalFor('v', 'form');
+  r.k.resizeModal('v', 'form', { height: 320 });
   await r.k.viewPost('v', 'main', 'привет');
   r.k.closeModal('v', 'form', { имя: 'Проект' });
   assert.deepEqual(await result, { имя: 'Проект' });
@@ -514,7 +515,7 @@ test('мост вида (K-13): канал, модальное окно и ег�
 
   const ops = r.take();
   const byTarget = (target: string) => ops.filter((x) => x.target === target);
-  for (const target of ['bridge:view.modal', 'bridge:view.post', 'bridge:view.modal.close']) {
+  for (const target of ['bridge:view.modal', 'bridge:view.post', 'bridge:view.modal.resize', 'bridge:view.modal.close']) {
     const [op, ...rest] = byTarget(target);
     assert.equal(rest.length, 0, `${target}: одна запись`);
     assert.deepEqual([op!.caller, op!.boundaries, op!.outcome], ['view:v', ['bridge'], 'ok'], target);

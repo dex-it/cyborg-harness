@@ -513,6 +513,38 @@ test('модальное окно в слое: размер и Escape задаё
   await half.result;
 });
 
+test('модальное окно в слое: вид просит высоту своей области, снимок её несёт, повтор окно не будит, чужому виду и закрытому окну - NotFound', async () => {
+  const snaps: WindowSnapshot[] = [];
+  const layer = new WindowLayer((s) => snaps.push(s));
+  const shown = layer.showModal('a', 'form', 'Форма', undefined, { size: { width: 600, height: 300 } });
+  assert.equal(modalOf(layer)?.contentHeight, undefined, 'пока вид не просил, высоты области в снимке нет');
+  const before = snaps.length;
+  layer.resizeModal('a', 'form', 420);
+  assert.deepEqual(modalOf(layer), { id: shown.id, pluginId: 'a', view: 'form', title: 'Форма', size: { width: 600, height: 300 }, contentHeight: 420 }, 'просьба вида не стирает размер автора');
+  assert.equal(snaps.length, before + 1, 'окно узнало о новой высоте');
+  assert.equal(snaps.at(-1)?.modal?.contentHeight, 420);
+  layer.resizeModal('a', 'form', 420);
+  assert.equal(snaps.length, before + 1, 'та же высота окно не будит: вид может слать её на каждое изменение содержимого');
+  layer.resizeModal('a', 'form', 180);
+  assert.equal(modalOf(layer)?.contentHeight, 180, 'вид просит снова - берётся последняя');
+
+  assert.throws(() => layer.resizeModal('b', 'form', 300), { code: 'NotFound' }, 'чужой плагин окно не меняет');
+  assert.throws(() => layer.resizeModal('a', 'other', 300), { code: 'NotFound' }, 'другой вид плагина тоже');
+  layer.lock('pin', false);
+  assert.equal(layer.snapshot.modal, undefined, 'под замком чужое окно ждёт');
+  assert.throws(() => layer.resizeModal('a', 'form', 300), { code: 'NotFound' }, 'отложенное окно не показано, менять его вид не может');
+  layer.release('pin');
+  assert.equal(modalOf(layer)?.contentHeight, 180, 'отложенное окно вернулось с той высотой, о которой вид просил');
+
+  layer.cancelModal(shown.id);
+  await shown.result;
+  assert.throws(() => layer.resizeModal('a', 'form', 300), { code: 'NotFound' }, 'окна уже нет');
+  const next = layer.showModal('a', 'form', 'Новая', undefined);
+  assert.equal(modalOf(layer)?.contentHeight, undefined, 'высота прошлого окна новому не достаётся');
+  layer.cancelModal(next.id);
+  await next.result;
+});
+
 const formManifest = (id: string, fields: Record<string, unknown> = {}) =>
   manifest(id, { commands: { [`${id}.form`]: {}, [`${id}.sure`]: {} }, ui: { views: { form: { module: './form.js', area: 'modal', title: 'Форма' }, main: './ui.js' } }, ...fields });
 const formPlugin: PluginModule = {
@@ -584,6 +616,28 @@ test('ctx.views.modal: размер и Escape из просьбы доходят
   assert.equal(modalOf({ snapshot: k.window })?.escape, undefined, '"close" - умолчание, в снимок не идёт');
   assert.equal(k.dismissModal(), true);
   assert.equal(await close, undefined);
+  await k.unload();
+});
+
+test('ctx.modal.resize: высоту проверяет ядро (целые 100..4096, только height), окно её получает, чужой вид и закрытое окно отвергаются', async () => {
+  const { start } = formKernel();
+  const k = await start();
+  const result = k.run('chat.raw', 'form', { size: { width: 600 } });
+  await until(() => k.window.modal !== undefined);
+  for (const size of [undefined, null, 7, 'tall', [], {}, { height: 99 }, { height: 4097 }, { height: 0 }, { height: -1 }, { height: 120.5 }, { height: '300' }, { height: Number.NaN }, { height: Number.POSITIVE_INFINITY }, { width: 300 }, { height: 300, width: 300 }, { depth: 3 }]) {
+    assert.throws(() => k.resizeModal('chat', 'form', size), { code: 'Invalid' }, `просьба ${JSON.stringify(size)} не принята`);
+  }
+  assert.equal(modalOf({ snapshot: k.window })?.contentHeight, undefined, 'отвергнутая просьба окно не меняет');
+  assert.throws(() => k.resizeModal('chat', 'main', { height: 300 }), { code: 'NotFound' }, 'другой вид плагина чужое окно не меняет');
+  assert.throws(() => k.resizeModal('other', 'form', { height: 300 }), { code: 'NotFound' }, 'другой плагин тоже');
+  for (const height of [100, 4096, 333]) {
+    k.resizeModal('chat', 'form', { height });
+    assert.equal(modalOf({ snapshot: k.window })?.contentHeight, height, `высота ${String(height)} не дошла до снимка окна`);
+  }
+  assert.deepEqual(modalOf({ snapshot: k.window })?.size, { width: 600 }, 'размер автора на месте');
+  k.closeModal('chat', 'form', 'ок');
+  assert.equal(await result, 'ок');
+  assert.throws(() => k.resizeModal('chat', 'form', { height: 300 }), { code: 'NotFound' }, 'окно закрыто');
   await k.unload();
 });
 

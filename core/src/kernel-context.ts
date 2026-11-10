@@ -220,6 +220,8 @@ export interface ViewChannels {
   fromView(pluginId: string, view: string, message: unknown): Promise<void>;
   /** Вид закрывает своё модальное окно с результатом. */
   closeModal(pluginId: string, view: string, result: unknown): void;
+  /** Вид просит высоту области своего окна (`{ height }`, недоверенные данные). */
+  resizeModal(pluginId: string, view: string, size: unknown): void;
 }
 
 /** Строки плагинов и вывод хостов: уровень, предел длины и частоты, вычёркивание секретов, дальше - `LoadOptions.onLog`. */

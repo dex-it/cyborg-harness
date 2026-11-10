@@ -853,6 +853,7 @@ test('модальное окно плагина: данные видит тол
   });
   assert.deepEqual(service.modalFor('face', 'form'), {}, 'окна нет - данных нет');
   assert.equal(service.dismissModal(), false, 'Escape без окна странице не отнимается');
+  assert.match(service.resizeModalFor('face', 'form', { height: 300 }).error ?? '', /нет на экране/, 'окна нет - менять нечего');
   const shown = () => service.snapshot().window.modal;
 
   const result = service.runFor('face', 'face.form', []);
@@ -862,6 +863,12 @@ test('модальное окно плагина: данные видит тол
   assert.deepEqual(service.modalFor('other', 'form'), {}, 'чужому плагину тоже');
   assert.match(service.closeModalFor('face', 'main', 1).error ?? '', /нет на экране/);
   assert.match(service.closeModalFor('face', 7, 1).error ?? '', /имя вида/);
+  assert.match(service.resizeModalFor('face', 'main', { height: 300 }).error ?? '', /нет на экране/, 'другому виду окно не принадлежит');
+  assert.match(service.resizeModalFor('face', 7, { height: 300 }).error ?? '', /имя вида/);
+  assert.match(service.resizeModalFor('face', 'form', { height: 99 }).error ?? '', /100/, 'предел проверяет ядро, текст отказа доходит виду');
+  assert.equal(shown()?.contentHeight, undefined);
+  assert.deepEqual(service.resizeModalFor('face', 'form', { height: 340 }), {});
+  assert.equal(shown()?.contentHeight, 340, 'высота области вида дошла до снимка окна');
   assert.deepEqual(service.closeModalFor('face', 'form', { имя: 'Проект' }), {});
   assert.deepEqual(await result, { value: { имя: 'Проект' } });
   assert.equal(shown(), undefined);

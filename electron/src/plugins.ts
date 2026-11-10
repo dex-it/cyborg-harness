@@ -622,6 +622,18 @@ export class PluginsService implements ViewGroups {
     }
   }
 
+  /** Вид просит окно подогнать высоту области вида под содержимое; высоту и принадлежность окна проверяет ядро, отказ доходит виду текстом. */
+  resizeModalFor(pluginId: string, view: unknown, size: unknown): Reply {
+    if (!this.kernel) return { error: 'ядро плагинов не запущено' };
+    if (typeof view !== 'string') return { error: 'модальное окно: ожидается имя вида' };
+    try {
+      this.kernel.resizeModal(pluginId, view, size);
+      return {};
+    } catch (error) {
+      return { error: errorMessage(error) };
+    }
+  }
+
   /** Человек закрыл модальное окно в самом окне (крестик, клик мимо): владелец получает undefined. */
   cancelModal(arg: unknown): Reply {
     if (!isRecord(arg) || typeof arg.id !== 'number') return { error: 'закрытие окна: { id }' };

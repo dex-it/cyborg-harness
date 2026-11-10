@@ -37,6 +37,7 @@ function fakeBridge(tokens: ThemeTokens) {
     dialog: async (view, spec) => (calls.push(['dialog', view, spec.kind]), spec.kind === 'ask' ? { value: spec.buttons[0]?.id } : { error: 'диалог: меню вне вида' }),
     keys: async () => ({ 'own.go': 'Ctrl+G' }),
     modal: async (view) => (view === 'form' ? { value: { data: { имя: 'черновик' } } } : {}),
+    modalResize: async (view, size) => (calls.push(['modal-resize', view, size]), view === 'form' ? {} : { error: 'окна нет' }),
     modalClose: async (view, result) => (calls.push(['modal-close', view, result]), view === 'form' ? {} : { error: 'окна нет' }),
     channelPost: async (view, message) => (calls.push(['channel', view, message]), JSON.stringify(message).length > 20 ? { error: 'сообщение больше предела' } : {}),
     onChannel: (l) => (on.channel = l),
@@ -223,6 +224,8 @@ test('connectView: у вида модального окна есть ctx.modal 
   const modal = form.modal;
   assert.ok(modal, 'у вида модального окна есть ctx.modal');
   assert.deepEqual(modal.data, { имя: 'черновик' });
+  await modal.resize({ height: 320 });
+  assert.deepEqual(calls.at(-1), ['modal-resize', 'form', { height: 320 }]);
   await modal.close({ имя: 'Проект' });
   assert.deepEqual(calls.at(-1), ['modal-close', 'form', { имя: 'Проект' }]);
   assert.throws(() => Object.assign(modal, { data: 1 }), TypeError, 'данные окна не подменить');

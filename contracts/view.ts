@@ -1,6 +1,6 @@
 import type { ContractName, ContractType, Major } from './index.ts';
 import type { PtyExit, PtyInfo, PtyTicket } from './os.ts';
-import type { Disposable, ViewChannel } from './plugin.ts';
+import type { Disposable, ModalResize, ViewChannel } from './plugin.ts';
 
 /** Строка ленты, которую ядро показывает виду его плагина. */
 export interface FeedLine {
@@ -65,6 +65,13 @@ export type DialogSpec =
 export interface ViewModal {
   /** Данные, с которыми главная часть открыла окно (`ctx.views.modal(view, { data })`); не передала - `undefined`. */
   readonly data: unknown;
+  /**
+   * Просит окно подогнать высоту под содержимое вида: вид живёт в чужом по origin фрейме, и окно не знает высоту его содержимого, пока вид не скажет.
+   * `height` - высота области вида в CSS-пикселях (без шапки окна), целое от 100 до 4096; окно не выше 80% высоты экрана, сверх этого область прокручивается.
+   * Вид шлёт просьбу сам, когда содержимое изменилось; та же высота окно не тревожит. Размер автора (`ModalInit.size`) по ширине остаётся; высота области вида его высоту заменяет.
+   * Неверная высота, окно, уже закрытое человеком или выгрузкой плагина, - исключение.
+   */
+  resize(size: ModalResize): Promise<void>;
   /** Закрывает окно и отдаёт результат владельцу: данные до 64 КиБ. Окно, уже закрытое человеком или выгрузкой плагина, - исключение. */
   close(result?: unknown): Promise<void>;
 }

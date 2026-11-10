@@ -330,6 +330,8 @@ export interface Kernel {
   modalFor(pluginId: string, view: string): { readonly data: unknown } | undefined;
   /** Вид закрывает своё модальное окно и отдаёт результат владельцу (`ctx.modal.close`); не его окно или окна нет - `NotFound`, результат больше `limits.viewMessage` - `Invalid`. */
   closeModal(pluginId: string, view: string, result: unknown): void;
+  /** Вид просит высоту области своего модального окна (`ctx.modal.resize`, `{ height }` - целые пиксели 100..4096): не его окно или окна нет - `NotFound`, неверная высота - `Invalid`. */
+  resizeModal(pluginId: string, view: string, size: unknown): void;
   /** Человек закрыл окно в самом окне (крестик, клик мимо): владелец получает undefined; id не того окна, что на экране, - `NotFound`. */
   cancelModal(id: number): void;
   /** Escape в главном процессе: закрывает модальное окно, если поверх него нет диалога; `false` - нажатие окну не принадлежит. */

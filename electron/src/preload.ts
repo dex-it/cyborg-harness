@@ -70,6 +70,7 @@ export function viewBridge(): ShellBridge {
     dialog: (viewName, spec) => ipcRenderer.invoke('view:dialog', viewName, spec),
     keys: () => ipcRenderer.invoke('view:keys'),
     modal: (viewName) => ipcRenderer.invoke('view:modal', viewName),
+    modalResize: (viewName, size) => ipcRenderer.invoke('view:modal:resize', viewName, size),
     modalClose: (viewName, result) => ipcRenderer.invoke('view:modal:close', viewName, result),
     channelPost: (viewName, message) => ipcRenderer.invoke('view:channel:post', viewName, message),
     onChannel: (listener) => void ipcRenderer.on('view:channel', (_event, message: unknown) => listener(message)),
