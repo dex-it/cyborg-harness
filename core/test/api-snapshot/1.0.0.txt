@@ -87,6 +87,7 @@ interface UiTerminal :: extends PtyInfo
 interface ViewChannel
 interface ViewDrop
 interface ViewModal
+interface WatchOptions
 map WINDOW_COMMANDS | cyborg.window.focus-next :: F6
 map WINDOW_COMMANDS | cyborg.window.focus-prev :: Shift+F6
 member ArgSpec.kind :: readonly prop WireKind
@@ -171,7 +172,7 @@ member OsFs.readText :: method (_: string) => Promise<string>
 member OsFs.realpath :: method (_: string) => Promise<string>
 member OsFs.remove :: method (_: string) => Promise<void>
 member OsFs.stat :: method (_: string) => Promise<FileStat>
-member OsFs.watch :: method (_: string, _: (_: readonly string[]) => void, _?: (_: string) => void) => Promise<Disposable>
+member OsFs.watch :: method (_: string, _: (_: readonly string[]) => void, _?: (_: string) => void, _?: WatchOptions) => Promise<Disposable>
 member OsFs.writeText :: method (_: string, _: string) => Promise<void>
 member OsNotify.close :: method (_: string) => Promise<void>
 member OsNotify.show :: method (_: string, _?: string, _?: NotifyOptions) => Promise<string>
@@ -400,6 +401,7 @@ member ViewDrop.from :: readonly prop string
 member ViewDrop.path :: readonly prop string
 member ViewModal.close :: method (_?: unknown) => Promise<void>
 member ViewModal.data :: readonly prop unknown
+member WatchOptions.recursive :: readonly optional prop boolean
 set AREAS | main
 set AREAS | modal
 set AREAS | popup

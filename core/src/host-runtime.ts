@@ -4,7 +4,7 @@ import { resolveSection, VERSION_KEY, type SectionResult } from './config.ts';
 import { DisposableStore, toDisposable, type Disposable } from './disposable.ts';
 import { loadEntry } from './entry-load.ts';
 import { compileSchema } from './json-schema.ts';
-import type { AskDialog, ContractName, ContractType, DocumentChange, DocumentInfo, DocumentInit, HttpServer, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue, ServeRequest, ServeResponse, ViewChannel, ModalInit } from '@cyborg-harness/contracts';
+import type { AskDialog, ContractName, ContractType, DocumentChange, DocumentInfo, DocumentInit, HttpServer, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue, ServeRequest, ServeResponse, ViewChannel, ModalInit, WatchOptions } from '@cyborg-harness/contracts';
 import { CoreError, errorMessage } from './errors.ts';
 import type { PluginManifest } from './manifest.ts';
 import type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';
@@ -126,13 +126,13 @@ class HostWatches {
   readonly #items = new Map<string, { readonly listener: (names: readonly string[]) => void; readonly onClose: ((reason: string) => void) | undefined }>();
   #seq = 0;
 
-  async watch(endpoint: Endpoint, pluginId: string, target: unknown, listener: (names: readonly string[]) => void, onClose?: (reason: string) => void): Promise<Disposable> {
+  async watch(endpoint: Endpoint, pluginId: string, target: unknown, listener: (names: readonly string[]) => void, onClose?: (reason: string) => void, options?: unknown): Promise<Disposable> {
     if (typeof listener !== 'function') throw new CoreError('Invalid', `${pluginId}: fs.watch ждёт слушателя`);
     const id = `w${String(++this.#seq)}`;
     const key = `${pluginId}\0${id}`;
     this.#items.set(key, { listener, onClose: typeof onClose === 'function' ? onClose : undefined });
     try {
-      await endpoint.request('os', { pluginId, method: 'fs.watch', args: [target, id] });
+      await endpoint.request('os', { pluginId, method: 'fs.watch', args: options === undefined ? [target, id] : [target, id, options] });
     } catch (error) {
       this.#items.delete(key);
       throw error;
@@ -322,7 +322,7 @@ function osOf(endpoint: Endpoint, pluginId: string, p: PluginPermissions, paths:
       stat: call('fs.stat'),
       realpath: call('fs.realpath'),
       readSlice: call('fs.readSlice'),
-      watch: (target: string, listener: (names: readonly string[]) => void, onClose?: (reason: string) => void) => watches.watch(endpoint, pluginId, target, listener, onClose),
+      watch: (target: string, listener: (names: readonly string[]) => void, onClose?: (reason: string) => void, options?: WatchOptions) => watches.watch(endpoint, pluginId, target, listener, onClose, options),
       writeText: call('fs.writeText'),
       mkdir: call('fs.mkdir'),
       remove: call('fs.remove'),
