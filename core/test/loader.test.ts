@@ -329,6 +329,104 @@ test('пространство поставки: отказ стороннему
   await open.unload();
 });
 
+// K-04: группы рендера - origin и процесс рендера на группу; граница доверия видов - группа, поэтому сторонний не делит её ни с кем.
+test('группы рендера: ui.group - рекомендация, plugins.uiGroups её перекрывает, без группы - id плагина, без ui группы нет', async () => {
+  const noop: PluginModule = { activate: () => undefined };
+  const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
+  const ids = ['a', 'b', 'c', 'd', 'e', 'logic'];
+  const k = await kernel(Object.fromEntries(ids.map((id) => [id, noop])), {
+    enabled: ids,
+    manifests: [manifest('a', view('panels')), manifest('b', view('panels')), manifest('c', view('panels')), manifest('d', view()), manifest('e', view('panels')), manifest('logic')],
+    bundled: ids,
+    uiGroups: { solo: ['c'], tools: ['d', 'e'] },
+  });
+  assert.deepEqual(
+    ids.map((id) => [id, k.groupOf(id)]),
+    [
+      ['a', 'panels'],
+      ['b', 'panels'],
+      ['c', 'solo'],
+      ['d', 'tools'],
+      ['e', 'tools'],
+      ['logic', undefined],
+    ],
+  );
+  assert.equal(k.groupOf('nobody'), undefined);
+  assert.deepEqual(
+    k.journal.filter((e) => e.kind === 'group-isolated'),
+    [],
+  );
+  await k.unload();
+  const plain = await kernel({ a: noop, b: noop }, { enabled: ['a', 'b'], manifests: [manifest('a', view()), manifest('b', view())], bundled: ['a', 'b'] });
+  assert.deepEqual([plain.groupOf('a'), plain.groupOf('b')], ['a', 'b'], 'без группы - своя, по id плагина');
+  await plain.unload();
+});
+
+test('группы рендера: сторонний всегда один в своей группе, запись group-isolated только если ему было с кем делить', async () => {
+  const noop: PluginModule = { activate: () => undefined };
+  const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
+  const ids = ['files', 'tree', 'x', 'y', 'z', 'w'];
+  const k = await kernel(Object.fromEntries(ids.map((id) => [id, noop])), {
+    enabled: ids,
+    // x просит группу tools из конфига пользователя, y - из своего манифеста, z называет id плагина поставки, а не группу, w просит группу, где он один: делить обоим нечего.
+    manifests: [manifest('files', view('panels')), manifest('tree', view('panels')), manifest('x', view()), manifest('y', view('panels')), manifest('z', view('files')), manifest('w', view('mine'))],
+    bundled: ['files', 'tree'],
+    uiGroups: { panels: ['x'] },
+  });
+  assert.deepEqual(
+    ids.map((id) => [id, k.groupOf(id)]),
+    [
+      ['files', 'panels'],
+      ['tree', 'panels'],
+      ['x', 'solo_x'],
+      ['y', 'solo_y'],
+      ['z', 'solo_z'],
+      ['w', 'solo_w'],
+    ],
+  );
+  assert.deepEqual(
+    k.journal.filter((e) => e.kind === 'group-isolated'),
+    [
+      { pluginId: 'x', kind: 'group-isolated', group: 'panels', renderGroup: 'x', reason: 'third-party' },
+      { pluginId: 'y', kind: 'group-isolated', group: 'panels', renderGroup: 'y', reason: 'third-party' },
+    ],
+  );
+  assert.equal(pluginStatuses(k.journal.filter((e) => e.kind === 'group-isolated')).length, 0, 'запись о группе состояния плагину не даёт');
+  const entry = k.journal.find((e) => e.kind === 'group-isolated');
+  assert.ok(entry);
+  assert.match(describeEntry(entry), /сторонний плагин не делит группу рендера: группа panels не действует, работает в своей x/);
+  assert.equal(entryLevel(entry), 'warn');
+  await k.unload();
+
+  const open = await kernel({ x: noop, y: noop }, { enabled: ['x', 'y'], manifests: [manifest('x', view('shared')), manifest('y', view('shared'))] });
+  assert.deepEqual([open.groupOf('x'), open.groupOf('y')], ['solo_x', 'solo_y'], 'без bundled все сторонние');
+  assert.equal(open.journal.filter((e) => e.kind === 'group-isolated').length, 2);
+  await open.unload();
+});
+
+test('группы рендера: origin стороннего в своём пространстве имён - группа поставки с тем же именем его хранилище не делит, ни в одной загрузке, ни в следующей', async () => {
+  const noop: PluginModule = { activate: () => undefined };
+  const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
+  // Загрузка 1: alice и bob (поставка) в группе tp2, имя пришло от человека или манифеста; загрузка 2: человек включил сторонний плагин с id tp2.
+  const first = await kernel({ alice: noop, bob: noop }, { enabled: ['alice', 'bob'], manifests: [manifest('alice', view('tp2')), manifest('bob', view('tp2'))], bundled: ['alice', 'bob'] });
+  const second = await kernel({ tp2: noop, alice: noop }, { enabled: ['tp2', 'alice'], manifests: [manifest('tp2', view()), manifest('alice', view('tp2'))], bundled: ['alice'] });
+  const before = new Set(['alice', 'bob'].map((id) => first.groupOf(id)));
+  assert.deepEqual([...before], ['tp2']);
+  assert.ok(!before.has(second.groupOf('tp2')), `сторонний tp2 получил группу ${String(second.groupOf('tp2'))}, где в прошлой загрузке жила поставка`);
+  assert.notEqual(second.groupOf('tp2'), second.groupOf('alice'), 'и в одной загрузке они не делят origin');
+  assert.equal(second.groupOf('alice'), 'tp2', 'плагин поставки садится в группу, как просил: отказывать ему незачем');
+  assert.deepEqual(
+    second.journal.filter((e) => e.kind === 'group-isolated'),
+    [],
+  );
+  // В обратную сторону то же: что оставил сторонний tp2, не читают виды поставки в группе tp2.
+  const alone = await kernel({ tp2: noop }, { enabled: ['tp2'], manifests: [manifest('tp2', view())] });
+  assert.notEqual(alone.groupOf('tp2'), first.groupOf('alice'));
+  // Группа не может быть записана как id плагина: пространства имён не пересекаются по синтаксису.
+  assert.match(alone.groupOf('tp2') ?? '', /^[a-z]+_/, 'сторонний одиночка помечен знаком, которого нет в id плагина и имени группы');
+  for (const k of [first, second, alone]) await k.unload();
+});
+
 test('хосты: из поставки - по группам, сторонний всегда один в своём хосте', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const ids = ['a', 'b', 'x', 'y', 'z', 'w'];
