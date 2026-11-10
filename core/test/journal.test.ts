@@ -91,6 +91,45 @@ test('журнал: окно не пустило вид на чужой адре
   assert.match(describeEntry(nav), /^отказ окна: переход на data:text\/html,x+…$/);
 });
 
+// #160: CSP отказала виду (инлайн-стиль без ui.inlineStyles и другое): человек без DevTools видит причину в журнале плагина, поток отказов журнал не раздувает.
+test('журнал: отказ CSP вида - запись denied с reason csp в журнал его плагина, текст обрезан, повторы склеены, чужой id не пишется', async () => {
+  const k = await load({
+    apiVersion: '1.0.0',
+    spawnHost: inlineHosts(async () => ({ activate: () => undefined })),
+    enabled: ['p'],
+    manifests: [{ id: 'p', version: '1.0.0', engines: { cyborg: '^1' } }],
+  });
+  for (let i = 0; i < 5; i++) k.viewCspDenied('p', 'инлайн-стиль (style-src-elem): объявите ui.inlineStyles');
+  k.viewCspDenied('p', `адрес ${'x'.repeat(5000)}`);
+  k.viewCspDenied('ghost', 'инлайн-стиль (style-src-elem)');
+  await k.unload();
+  const denied = k.journal.filter((e) => e.kind === 'denied');
+  assert.deepEqual(
+    denied.map((e) => [e.pluginId, e.method, e.reason, e.repeats]),
+    [
+      ['p', 'csp', 'csp', undefined],
+      ['p', 'csp', 'csp', undefined],
+      ['p', 'csp', 'csp', 4],
+    ],
+  );
+  const [style, long] = denied;
+  assert.ok(style && long);
+  assert.equal(describeEntry(style), 'отказ CSP: инлайн-стиль (style-src-elem): объявите ui.inlineStyles');
+  assert.ok(describeEntry(long).length < 250, 'текст отказа не обрезан');
+});
+
+test('журнал: цикл отказов CSP с разными адресами не раздувает журнал сверх предела отказов', async () => {
+  const k = await load({
+    apiVersion: '1.0.0',
+    spawnHost: inlineHosts(async () => ({ activate: () => undefined })),
+    enabled: ['p'],
+    manifests: [{ id: 'p', version: '1.0.0', engines: { cyborg: '^1' } }],
+  });
+  for (let i = 0; i < 3000; i++) k.viewCspDenied('p', `https://evil.example/${String(i)}.css (style-src-elem)`);
+  assert.ok(k.journal.filter((e) => e.kind === 'denied').length <= 1000, 'отказов CSP в журнале больше предела');
+  await k.unload();
+});
+
 type DeprecatedCall = Extract<JournalEntry, { kind: 'deprecated-call' }>;
 const old = (caller: string, member = 'list', contract = 'test.old', provider = 'prov'): DeprecatedCall => ({ pluginId: caller, kind: 'deprecated-call', provider, contract, member });
 

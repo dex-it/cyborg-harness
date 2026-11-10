@@ -14,6 +14,7 @@ import {
   pluginStatuses,
   openWorkspace,
   PLUGIN_API_VERSION,
+  type Diagnostics,
   type JournalEntry,
   type Kernel,
   type KeyInput,
@@ -33,7 +34,8 @@ import {
 } from '@cyborg-harness/core';
 import { readDelivery, verifyDelivery } from '@cyborg-harness/core/delivery';
 import { errorMessage, isRecord } from './guards.ts';
-import type { FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginOrigin, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from './snapshot.ts';
+import type { DiagnosticsExport, DiagnosticsStatus, FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginOrigin, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from './snapshot.ts';
+import { violationDetail } from './shell/csp-note.ts';
 import { viewUrl } from './view-protocol.ts';
 import type { ViewGroups } from './view-frames.ts';
 import type { PluginUi } from './view-files.ts';
@@ -179,8 +181,15 @@ export interface StartOptions {
   readonly idleSeconds?: () => number;
   readonly onJournal?: (entry: JournalEntry) => void;
   readonly onLog?: (pluginId: string, message: string, level: LogLevel) => void;
-  /** Запись трассы операций ядра (FR-CH-4001…4008); без обработчика трасса выключена. */
+  /** Запись трассы операций ядра (FR-CH-4001…4008); без обработчика (и без `diagnostics`) трасса выключена. */
   readonly onTrace?: (record: TraceRecord) => void;
+  /**
+   * Хранение диагностики (K-30): журнал, строки плагинов и трасса идут в кольцо и в файлы в `userData`, причина сбоя прошлого запуска видна в окне, выгрузка - из окна.
+   * Создаёт приложение (`fileDiagnostics`) до запуска ядра; `unload` закрывает хранилище. С ним трасса включена, а ядро платит за неё по NFR-CH-4001.
+   */
+  readonly diagnostics?: Diagnostics;
+  /** Версии для выгрузки диагностики: приложение и пакет ядра; не названные в выгрузке не показываются. */
+  readonly versions?: { readonly app?: string; readonly core?: string };
   /** Главная часть плагина послала сообщение виду: окно отдаёт его фреймам этого плагина с этим именем вида. */
   readonly onViewMessage?: (pluginId: string, view: string, message: unknown) => void;
   /** Что не дошло до ядра; по умолчанию - в log. */
@@ -242,6 +251,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     schema: (m, file) => readSchemaFile(found.homes.get(m.id), file),
     onJournal: (entry) => {
       options.log(`[plugins] ${JSON.stringify(entry)}`);
+      options.diagnostics?.sinks.onJournal(entry);
       options.onJournal?.(entry);
     },
     watchdog: options.watchdog,
@@ -256,12 +266,22 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     onMenus: () => options.onMenus?.(),
     onLog: (id, message, level) => {
       options.log(`[plugins] ${id}${level === 'info' ? '' : ` [${level}]`}: ${message}`);
+      options.diagnostics?.sinks.onLog(id, message, level);
       options.onLog?.(id, message, level);
     },
-    onTrace: options.onTrace,
+    // Без обработчика ядро трассу не ведёт вовсе: хранилище и приложение получают записи через один приёмник.
+    onTrace:
+      options.diagnostics === undefined
+        ? options.onTrace
+        : (record) => {
+            options.diagnostics?.sinks.onTrace(record);
+            options.onTrace?.(record);
+          },
+    ...(options.diagnostics !== undefined && { onGraph: options.diagnostics.sinks.onGraph }),
     onViewMessage: (id, view, message) => options.onViewMessage?.(id, view, message),
   }).catch((error: unknown) => {
     ws.close();
+    options.diagnostics?.close();
     throw error;
   });
   const watching = ws.watch(
@@ -299,6 +319,8 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
         await kernel.unload();
       } finally {
         ws.close();
+        // После выгрузки ядра: её записи (снятие плагинов, остановка хостов) тоже уходят в файл.
+        options.diagnostics?.close();
       }
     },
   };
@@ -336,6 +358,8 @@ export class PluginsService implements ViewGroups {
   private title: string | undefined;
   private safeMode = false;
   private userPlugins = false;
+  private diagnostics: Diagnostics | undefined;
+  private versions: StartOptions['versions'];
   /** id плагинов не из каталога поставки: происхождение определяет каталог установки, а не манифест. */
   private origins = new Map<string, PluginOrigin>();
   private readonly entries: { at: number; entry: JournalEntry }[] = [];
@@ -410,6 +434,8 @@ export class PluginsService implements ViewGroups {
     this.pidOf = options.pidOf;
     this.safeMode = options.safeMode === true;
     this.userPlugins = options.userPlugins === true;
+    this.diagnostics = options.diagnostics;
+    this.versions = options.versions;
     try {
       this.kernel = await startPlugins({
         ...options,
@@ -621,6 +647,12 @@ export class PluginsService implements ViewGroups {
     this.kernel?.viewDenied(pluginId, url);
   }
 
+  /** CSP отклонила запрос или стиль на странице вида: запись в журнал плагина (#160); плагин - из адреса фрейма, аргументы от вида - не строки игнорируются. */
+  cspDeniedFrom(pluginId: string, directive: unknown, blocked: unknown): void {
+    if (typeof directive !== 'string' || typeof blocked !== 'string') return;
+    this.kernel?.viewCspDenied(pluginId, violationDetail({ violatedDirective: directive, blockedURI: blocked }));
+  }
+
   /** Есть ли у плагина вида поставщик контракта; права те же, что у главной части: только requires и optional манифеста. */
   contractFor(pluginId: string, contract: unknown, major: unknown): Reply {
     if (typeof contract !== 'string' || typeof major !== 'number') return { error: 'контракт: ожидаются имя и мажорная версия' };
@@ -656,6 +688,7 @@ export class PluginsService implements ViewGroups {
         .filter(([, spec]) => spec.args.every((a) => a.optional))
         .map(([name]) => name);
       const origin = this.origins.get(s.id);
+      const previous = this.diagnostics?.previousFailures().get(s.id);
       const group = this.views.has(s.id) ? kernel?.groupOf(s.id) : undefined;
       const isolated = this.entries.findLast(({ entry }) => entry.kind === 'group-isolated' && entry.pluginId === s.id)?.entry;
       return {
@@ -674,6 +707,7 @@ export class PluginsService implements ViewGroups {
         ...(host !== undefined && { host }),
         ...(pid !== undefined && { pid }),
         ...(s.cause && s.state !== 'active' && { reason: describeEntry(s.cause) }),
+        ...(previous !== undefined && { previousFailure: { at: previous.at, text: previous.text } }),
         ...(kept.some((p) => p.pluginId === s.id) && {
           kept: kept
             .filter((p) => p.pluginId === s.id)
@@ -712,11 +746,44 @@ export class PluginsService implements ViewGroups {
       keys,
       feed: [...this.feed],
       journal,
+      ...(this.diagnostics !== undefined && { diagnostics: this.diagnosticsStatus(this.diagnostics) }),
       canHang: process.platform !== 'win32' && this.pidOf !== undefined,
       window: kernel?.window ?? { title: '', queued: 0, locks: [] },
       documents: kernel?.documents ?? [],
       workspace: this.workspace,
     };
+  }
+
+  private diagnosticsStatus(diagnostics: Diagnostics): DiagnosticsStatus {
+    const info = diagnostics.stored();
+    return {
+      files: info.files,
+      bytes: info.bytes,
+      ...(info.since !== undefined && { since: info.since }),
+      ...(info.previousRunAt !== undefined && { previousRunAt: info.previousRunAt }),
+      ...(info.problem !== undefined && { problem: info.problem }),
+    };
+  }
+
+  /**
+   * Выгрузка диагностики одним текстовым файлом (FR-CH-4015): путь называет окно (человек выбрал его в диалоге), файл остаётся там, где его положили, ядро его никуда не отправляет
+   * (FR-CH-4016). Ядро не запустилось - выгрузка всё равно есть: записей запуска и прошлых запусков хватает, чтобы сказать, почему.
+   */
+  async exportDiagnostics(file: unknown): Promise<Reply> {
+    if (typeof file !== 'string' || file === '') return { error: 'выгрузка: нужен путь файла' };
+    if (!this.diagnostics) return { error: 'хранение диагностики не включено' };
+    try {
+      const text = this.diagnostics.export({
+        ...(this.versions?.app !== undefined && { app: this.versions.app }),
+        ...(this.versions?.core !== undefined && { core: this.versions.core }),
+        ...(this.kernel !== undefined && { kernel: this.kernel }),
+      });
+      await fs.promises.writeFile(file, text, { mode: 0o600 });
+      const done: DiagnosticsExport = { file, bytes: Buffer.byteLength(text) };
+      return { value: done };
+    } catch (error) {
+      return { error: `выгрузка не записана: ${errorMessage(error)}` };
+    }
   }
 
   /** Где сейчас фокус ввода, по сообщениям страниц: `before-input-event` DOM не видит, а решать надо синхронно. */
