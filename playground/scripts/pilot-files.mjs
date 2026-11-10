@@ -230,6 +230,20 @@ async function runOnce(source, index) {
   }
   out.firstOpen = { rootListMs: round(rootMs, 1), untilMarksMs: round(performance.now() - t0, 1), marks: Object.keys((await state(p)).marks).length, gitRuns: (await p.gitRuns()).length - gitBefore };
 
+  // 2б. Повторное открытие корня на тёплых хостах: без стоимости первого вызова (загрузка модулей, первый запуск программы).
+  const warmOpen = [];
+  for (let i = 0; i < 5; i++) {
+    const w0 = performance.now();
+    await p.k.run('files.root', repo);
+    for (;;) {
+      const st = await state(p);
+      if (st.counters.markRuns >= 1 && !st.pending) break;
+      await sleep(1);
+    }
+    warmOpen.push(performance.now() - w0);
+  }
+  out.warmOpen = dist(warmOpen);
+
   // 3. Раскрытие каталогов (по одному, как кликами).
   const times = [];
   for (const d of dirs) {
