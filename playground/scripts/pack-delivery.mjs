@@ -55,6 +55,17 @@ if (darwin) {
   log('codesign --verify --deep --strict: подпись ad hoc цела');
 }
 
+// node-pty лежит в asarUnpack: модуль грузится из asar, а нативный .node ядро берёт из app.asar.unpacked. Проверяет отдельный процесс упакованного Electron в режиме Node
+// (ELECTRON_RUN_AS_NODE: asar читается, окна нет): настоящий spawn в pty. В главный процесс приложения проба `node-pty` не грузит - там его нет, pty живёт в pty-хосте.
+{
+  const unpackedModule = join(resources, 'app.asar.unpacked', 'node_modules', 'node-pty', 'build', 'Release', 'pty.node');
+  assert.ok(existsSync(unpackedModule), `нет ${unpackedModule}`);
+  const code = "const pty = require(process.argv[1]).spawn('/bin/echo', ['из-asar'], {}); let out = ''; pty.onData((d) => (out += d)); pty.onExit(() => { process.stdout.write(out); process.exit(0); });";
+  const out = execFileSync(executable, ['-e', code, join(resources, 'app.asar', 'node_modules', 'node-pty')], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 20_000 });
+  assert.match(out, /из-asar/, 'pty из упакованного приложения не отдал вывод');
+  log(`node-pty из app.asar: spawn в pty отдал «${out.trim()}», pty.node распакован: ${unpackedModule.slice(unpackedModule.indexOf('app.asar.unpacked'))}`);
+}
+
 const sockets = [];
 // Исходный Electron (с default_app.asar) принимает путь к приложению первым аргументом; упакованный, с app.asar, этот аргумент игнорирует.
 const plainExecutable = join(electronDist, darwin ? join('Electron.app', 'Contents', 'MacOS', 'Electron') : 'electron');
@@ -73,13 +84,24 @@ async function run(name, { plugins = {}, app: appDir, scenario }) {
     const page = await waitFor('окно', async () => (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page'));
     const ev = await connect(page.webSocketDebuggerUrl, sockets);
     const main = await connect(await waitFor('инспектор главного процесса', () => /Debugger listening on (ws:\/\/\S+)/.exec(stderr)?.[1]), sockets);
+    // Слушатель вместо диалога Electron «Uncaught Exception»: ошибки копятся, и проба их проверяет после сценария (диалог человеку не показывается).
+    await main("globalThis.__packErrors = []; for (const e of ['uncaughtException', 'unhandledRejection']) process.on(e, (x) => globalThis.__packErrors.push(String((x && x.stack) || x))); 0");
     log(`${name}: приложение запущено`);
     await scenario({ ev, main, stderr: () => stderr });
+    // Необработанное исключение главного процесса Electron показывает человеку диалог; проба не должна его вызывать ни своим кодом, ни кодом приложения.
+    const thrown = JSON.parse(await main('JSON.stringify(globalThis.__packErrors)'));
+    assert.deepEqual(thrown, [], `${name}: главный процесс получил необработанное исключение: ${thrown.join(' | ')}`);
   } finally {
     for (const socket of sockets.splice(0)) socket.close();
     app.kill('SIGTERM');
     await Promise.race([new Promise((r) => app.once('exit', r)), sleep(8000)]);
     if (app.exitCode === null) app.kill('SIGKILL');
+    // Остатки (хосты, рендереры) с этим каталогом данных в командной строке: ни одного окна не остаётся.
+    try {
+      execFileSync('pkill', ['-9', '-f', userData], { stdio: 'ignore' });
+    } catch {
+      // pkill возвращает 1, когда убивать некого: это норма
+    }
     rmSync(userData, { recursive: true, force: true });
   }
 }
@@ -94,11 +116,6 @@ try {
       const where = await main('JSON.stringify({ main: process.mainModule.filename, resources: process.resourcesPath, packed: process.mainModule.filename.includes("app.asar") })');
       log(`главный процесс: ${where}`);
       assert.ok(JSON.parse(where).packed, 'приложение запущено не из asar');
-      // node-pty лежит в asarUnpack: модуль грузится из asar, а нативный .node ядро берёт из app.asar.unpacked; загрузка падает, если распаковки нет.
-      const unpacked = JSON.parse(await main(`(() => { const m = process.mainModule; const fs = m.require('node:fs'); const path = m.require('node:path'); const real = path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'node-pty', 'build', 'Release', 'pty.node'); return JSON.stringify({ real, there: fs.existsSync(real), load: typeof m.require('node-pty').spawn }); })()`));
-      log(`node-pty: ${unpacked.real} (на диске: ${String(unpacked.there)}, spawn: ${unpacked.load})`);
-      assert.ok(unpacked.there, 'нет app.asar.unpacked/.../pty.node');
-      assert.equal(unpacked.load, 'function', 'node-pty не загрузился из упакованного приложения');
       // Ожидаемое состояние стенда (smoke.mjs): ленивый «later» ждёт первого обращения, демо «flaky» всегда падает при запуске (его причина - код плагина, а значит код исполнен из asar).
       const wanted = (x) => (x.id === 'flaky' ? x.state === 'stopped' : x.id === 'later' ? x.state === 'waiting' || x.state === 'active' : x.state === 'active');
       const list = await waitFor('все плагины поставки в ожидаемом состоянии', async () => {
