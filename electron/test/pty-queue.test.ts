@@ -15,8 +15,8 @@ function client(backend: PtyBackend) {
   port2.unref();
   const pending = new Map<number, (m: { ok: boolean; v?: unknown; e?: { code?: string; message?: string } }) => void>();
   const notes: { m: string; p: { key?: string; data?: string; exit?: unknown } }[] = [];
-  port2.on('message', (m: { t: string; id?: number; m?: string; p?: never; ok?: boolean; v?: unknown; e?: never }) => {
-    if (m.t === 'res' && m.id !== undefined) pending.get(m.id)?.({ ok: m.ok === true, v: m.v, e: m.e });
+  port2.on('message', (m: { t: string; id?: number; m?: string; p?: { key?: string; data?: string; exit?: unknown }; ok?: boolean; v?: unknown; e?: { code?: string; message?: string } }) => {
+    if (m.t === 'res' && m.id !== undefined) pending.get(m.id)?.({ ok: m.ok === true, v: m.v, ...(m.e !== undefined && { e: m.e }) });
     else if (m.t === 'note') notes.push({ m: m.m ?? '', p: m.p ?? {} });
   });
   port2.unref();
@@ -31,7 +31,12 @@ function client(backend: PtyBackend) {
     { post: (m) => port1.postMessage(m), onMessage: (l) => port1.on('message', (m: unknown) => l(m, undefined)) },
     backend,
   );
-  return { request, notes, host, stop: () => (host.dispose(), port1.close(), port2.close()) };
+  return { request, notes, host, stop: () => {
+      host.dispose();
+      port1.close();
+      port2.close();
+    },
+  };
 }
 
 /** Бэкенд с учётом: сколько байт хост отдал процессу (то, что node-pty держит в своей очереди, пока программа не читает). */

@@ -415,7 +415,7 @@ test('pty-хост: программа не читает stdin и молчит -
       await ep.request('write', { key: 'k', data: chunk });
       replies.push('ok');
     } catch (error) {
-      replies.push(`${(error as { code?: string }).code ?? 'другое'}`);
+      replies.push((error as { code?: string }).code ?? 'другое');
     }
   }
   assert.deepEqual(replies, ['ok', 'ok', 'Invalid', 'Invalid', 'Invalid', 'Invalid'], 'ввод 1000 Б: 2000 принято, третий превысил бы потолок 2500');
