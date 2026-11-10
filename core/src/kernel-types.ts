@@ -190,6 +190,21 @@ export interface LoadOptions {
   readonly onMenus?: (() => void) | undefined;
   /** Оставленные процессы выключенных плагинов поменялись: приложение перечитывает `kernel.keptPty()`. */
   readonly onKeptPty?: (() => void) | undefined;
+  /**
+   * Соседние окна того же `userData` (K-20): другие экземпляры приложения с другими воркспейсами и плагины, которые могут работать у них
+   * (`neighborInstances`, #154). `Kernel.uninstall` отказывает, пока плагин может работать у соседа или сосед не ответил: `plugin-data`,
+   * `plugin-temp` и секреты общие, и стирание из одного окна ушло бы из-под живого плагина другого. Без него ядро соседей не видит, и об этом
+   * говорит `UninstallReport.left`. Бросок - отказ `uninstall` с `Unavailable`, ничего не стёрто.
+   */
+  readonly neighbors?: (() => Promise<readonly NeighborInstance[]>) | undefined;
+}
+
+/** Соседнее окно того же `userData`: его экземпляр держит адрес в каталоге адресов (`neighborInstances`, K-20, #154). */
+export interface NeighborInstance {
+  /** Ключ экземпляра (`workspaceKey` воркспейса). */
+  readonly key: string;
+  /** Плагины, которые могут работать в его окне; `null` - сосед жив, но не назвал их в срок или не умеет отвечать: решать нечем. */
+  readonly plugins: readonly string[] | null;
 }
 
 export interface DisableOptions {
@@ -215,6 +230,11 @@ export interface Kernel {
   readonly journal: readonly JournalEntry[];
   /** Активные сейчас, в порядке активации. */
   readonly active: readonly string[];
+  /**
+   * Плагины, которые могут работать в этом окне: активные, ждущие первого обращения и включённые, не выключенные ни человеком, ни сторожем; в безопасном режиме
+   * никакие. Тот же перечень `uninstall` считает «работает». Приложение отдаёт его соседним окнам (`InstanceOptions.plugins`).
+   */
+  readonly working: readonly string[];
   /** Вид реестра из главного процесса: методы контрактов идут в хост поставщика. Звать метод от имени плагина - через `callAs`, иначе ядро не проверит права вызывающего. */
   readonly contracts: ContractRegistry;
   /** Метод контракта от имени плагина (его вида): те же проверки, что у вызова из главной части, включая `via-contract`. */

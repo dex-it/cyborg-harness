@@ -58,6 +58,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'windowEvents',
       'workspaceInfo',
       'workspaceInstance',
+      'workspaceNeighbors',
     ],
     types: [
       'AppMenuItem',

@@ -19,6 +19,7 @@ import {
   type Kernel,
   type KeyInput,
   type KeyPress,
+  type LoadOptions,
   type MenuEntry,
   type MigrateWorkspace,
   type OsEnvironment,
@@ -204,6 +205,8 @@ export interface StartOptions {
   readonly onEnabled?: () => void;
   /** Безопасный режим: манифесты разобраны, хосты не запускаются, «Включить» отвечает `Unavailable`. */
   readonly safeMode?: boolean;
+  /** Соседние окна того же `userData` (`workspaceNeighbors`): `Kernel.uninstall` не стирает общие данные из-под плагина, который может работать у соседа (#154). */
+  readonly neighbors?: LoadOptions['neighbors'];
 }
 
 export async function startPlugins(options: StartOptions): Promise<Kernel & { readonly workspace: string }> {
@@ -260,6 +263,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     idleSeconds: options.idleSeconds,
     windowTitle: { workspace: path.basename(file), app: options.appName ?? 'Cyborg' },
     safeMode: options.safeMode,
+    neighbors: options.neighbors,
     onWindow: (snapshot) => options.onWindow?.(snapshot),
     onDocuments: () => options.onDocuments?.(),
     onKeptPty: () => options.onKeptPty?.(),
@@ -387,6 +391,11 @@ export class PluginsService implements ViewGroups {
   watch(watcher: () => void): () => void {
     this.watchers.add(watcher);
     return () => void this.watchers.delete(watcher);
+  }
+
+  /** Плагины, которые могут работать в этом окне (`Kernel.working`): их называет приложение соседним окнам (`workspaceInstance`); ядро не запущено - пусто. */
+  working(): readonly string[] {
+    return this.kernel?.working ?? [];
   }
 
   /** Меню окна по вкладам плагинов (`Kernel.menus`); ядро не запущено - пусто. */
