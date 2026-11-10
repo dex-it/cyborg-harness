@@ -583,6 +583,30 @@ async function main() {
   await type('echo до-$((6*7))');
   await waitFor('терминал вида ответил', async () => /до-42/.test(await screen()));
 
+  // Г2 (FR-CH-4001): вызов моста из вида в окне попадает в трассу и в файл диагностики; сам вид (`ctx.commands.run('echo.terminal')` и `ctx.terminal.open`) вызывает мост при подключении терминала.
+  const bridgeOps = () =>
+    existsSync(join(userData, 'diagnostics'))
+      ? readdirSync(join(userData, 'diagnostics')).flatMap((dir) => {
+          const file = join(userData, 'diagnostics', dir, 'diagnostics.log');
+          if (!existsSync(file)) return [];
+          return readFileSync(file, 'utf8')
+            .split('\n')
+            .flatMap((line) => {
+              try {
+                const stored = JSON.parse(line);
+                return stored.src === 'trace' && stored.record.kind === 'operation' && stored.record.caller === 'view:echo' && stored.record.boundaries.includes('bridge') ? [stored.record] : [];
+              } catch {
+                return [];
+              }
+            });
+        })
+      : [];
+  const viaBridge = await waitFor('запись трассы с границей bridge от вида echo в файле диагностики', () => bridgeOps().find((r) => r.target === 'command:echo.terminal'));
+  assert.equal(viaBridge.outcome, 'ok');
+  assert.ok(viaBridge.boundaries.includes('bridge') && viaBridge.chain > 0, `границы: ${viaBridge.boundaries.join(',')}`);
+  assert.ok(bridgeOps().some((r) => r.target === 'bridge:view.terminal'), 'открытие терминала видом - тоже запись Г2');
+  log('трасса Г2: вызов моста из вида echo в окне записан с границей bridge в файл диагностики');
+
   const windows = () => main("process.mainModule.require('electron').BrowserWindow.getAllWindows().length");
   assert.equal(await inView('echo', "window.open('https://example.com/login') === null"), true, 'window.open вида вернул окно');
   await sleep(500);

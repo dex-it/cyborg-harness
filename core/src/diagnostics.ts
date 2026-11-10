@@ -11,6 +11,8 @@ import type { TraceRecord } from './trace-record.ts';
  * Хранение диагностики (K-30, FR-CH-4011…4016): журнал ядра, строки плагинов и трасса держатся кольцом в памяти и пишутся в файлы с ротацией по размеру;
  * после перезапуска хранилище отдаёт причину сбоя прошлого запуска, не трогая состояние плагинов, а по просьбе человека - выгрузку одним текстовым файлом.
  * Файловую систему хранилище получает снаружи (`DiagnosticsFs`): ядро не знает `userData`, а отказ диска проверяется подменой.
+ * Ротация по размеру не отличает шум от причины сбоя, поэтому уходящий файл перед удалением отдаёт записи жизненного цикла журнала (в них `failed`, `switched-off`, `host-down`)
+ * небольшому файлу `diagnostics.keep.log` со своим пределом: поток строк шумного плагина стирает файлы потока, а причину сбоя соседа не стирает (#180, У-49).
  */
 
 /** Каталог файлов хранилища; имена - относительные (`diagnostics.log`, `diagnostics.1.log`…). `remove` отсутствующего файла не бросает. */
@@ -35,8 +37,10 @@ export interface DiagnosticsOptions {
   readonly perPlugin?: number;
   /** Предельный размер одного файла, байт (FR-CH-4012). */
   readonly fileBytes?: number;
-  /** Сколько файлов хранится, включая текущий. Всего на диске не больше `files * fileBytes`. */
+  /** Сколько файлов хранится, включая текущий. Файлов потока на диске не больше `files * fileBytes`. */
   readonly files?: number;
+  /** Предел файла записей жизненного цикла и сбоев, байт: ротация потока отдаёт ему эти записи, свои старые он вытесняет сам. Всего на диске не больше `files * fileBytes + keepBytes`. */
+  readonly keepBytes?: number;
   /** Через сколько мс пакет обычных записей уходит в файл. */
   readonly flushMs?: number;
   /** Не чаще раза в столько мс срочная запись (ошибка, жизненный цикл) пишет файл сразу; частые ошибки трассы иначе превратили бы вызовы в запись на диск. */
@@ -52,6 +56,7 @@ export const DIAGNOSTICS_DEFAULTS = {
   perPlugin: 1250,
   fileBytes: 2 * 1024 * 1024,
   files: 5,
+  keepBytes: 256 * 1024,
   flushMs: 1000,
   urgentGapMs: 20,
 } as const;
@@ -78,6 +83,8 @@ export interface DiagnosticsInfo {
 }
 
 const CURRENT = 'diagnostics.log';
+/** Записи жизненного цикла и сбоев, сохранённые ротацией потока (под `FILE` не подпадает: сдвигу ротации не подлежит). */
+const KEEP = 'diagnostics.keep.log';
 const FILE = /^diagnostics(?:\.(\d+))?\.log$/;
 const fileName = (index: number): string => (index === 0 ? CURRENT : `diagnostics.${String(index)}.log`);
 const SELF = 'диагностика';
@@ -98,7 +105,7 @@ export class Diagnostics {
   readonly #fs: DiagnosticsFs;
   readonly #app: string | undefined;
   readonly #now: () => number;
-  readonly #limits: { readonly fileBytes: number; readonly files: number; readonly flushMs: number; readonly urgentGapMs: number; readonly capacity: number };
+  readonly #limits: { readonly fileBytes: number; readonly files: number; readonly keepBytes: number; readonly flushMs: number; readonly urgentGapMs: number; readonly capacity: number };
   readonly #onProblem: ((text: string) => void) | undefined;
   readonly #ring: DiagnosticsRing<DiagnosticRecord>;
   /** Записи, которых в файле ещё нет: пакет до записи либо то, что не удалось записать. */
@@ -106,6 +113,9 @@ export class Diagnostics {
   /** Размер и самая ранняя запись каждого файла хранилища. */
   readonly #sizes = new Map<string, number>();
   readonly #firsts = new Map<string, number>();
+  #keepSize = 0;
+  /** Сохранение записей сбоев при ротации не удалось, и об этом сказано: до следующей удачи не повторяется. */
+  #keepProblem = false;
   readonly #run: number;
   #previousRun: number | undefined;
   readonly #failures = new Map<string, PreviousFailure>();
@@ -124,6 +134,7 @@ export class Diagnostics {
     this.#limits = {
       fileBytes: options.fileBytes ?? d.fileBytes,
       files: Math.max(1, options.files ?? d.files),
+      keepBytes: options.keepBytes ?? d.keepBytes,
       flushMs: options.flushMs ?? d.flushMs,
       urgentGapMs: options.urgentGapMs ?? d.urgentGapMs,
       capacity: options.capacity ?? d.capacity,
@@ -153,8 +164,8 @@ export class Diagnostics {
   stored(): DiagnosticsInfo {
     const firsts = [...this.#firsts.values(), ...this.#batch.map((r) => r.at)];
     return {
-      files: this.#sizes.size,
-      bytes: [...this.#sizes.values()].reduce((n, size) => n + size, 0),
+      files: this.#sizes.size + (this.#keepSize > 0 ? 1 : 0),
+      bytes: [...this.#sizes.values()].reduce((n, size) => n + size, this.#keepSize),
       since: firsts.length === 0 ? undefined : Math.min(...firsts),
       previousRunAt: this.#previousRun,
       problem: this.#problem,
@@ -193,7 +204,7 @@ export class Diagnostics {
     const records: StoredRecord[] = [];
     let unreadable = 0;
     const files: { name: string; bytes: number }[] = [];
-    for (const name of this.#names()) {
+    for (const name of this.#names(true)) {
       try {
         const text = this.#fs.read(name);
         files.push({ name, bytes: Buffer.byteLength(text) });
@@ -218,7 +229,7 @@ export class Diagnostics {
       unsaved,
       unreadable,
       graph: this.#graph,
-      limits: { files: this.#limits.files, fileBytes: this.#limits.fileBytes },
+      limits: { files: this.#limits.files, fileBytes: this.#limits.fileBytes, keepBytes: this.#limits.keepBytes },
       ...(this.#problem !== undefined && { problem: this.#problem }),
       context,
     });
@@ -247,16 +258,17 @@ export class Diagnostics {
     this.#timer.unref();
   }
 
-  /** Имена файлов хранилища от самого старого к текущему. */
-  #names(): string[] {
-    return this.#fs
-      .list()
+  /** Имена файлов хранилища от самого старого к текущему; `withKeep` - с файлом записей сбоев впереди (он старше любого файла потока). */
+  #names(withKeep = false): string[] {
+    const list = this.#fs.list();
+    const stream = list
       .flatMap((name) => {
         const match = FILE.exec(name);
         return match ? [{ name, index: Number(match[1] ?? 0) }] : [];
       })
       .sort((a, b) => b.index - a.index)
       .map((f) => f.name);
+    return withKeep && list.includes(KEEP) ? [KEEP, ...stream] : stream;
   }
 
   /** Читает файлы прошлых запусков: сбои для окна, самую раннюю запись каждого файла. Нечитаемое пропускается, остальное хранилище работает. */
@@ -281,6 +293,15 @@ export class Diagnostics {
         }
         this.#sizes.set(name, this.#fs.size(name));
         if (first !== Infinity) this.#firsts.set(name, first);
+      }
+      if (this.#fs.list().includes(KEEP)) {
+        for (const line of this.#fs.read(KEEP).split('\n')) {
+          const stored = decodeRecord(line);
+          if (!stored) continue;
+          runs.add(stored.run);
+          if (stored.record.src === 'journal' && isFailure(stored.record.entry)) candidates.push({ run: stored.run, at: stored.record.at, entry: stored.record.entry });
+        }
+        this.#keepSize = this.#fs.size(KEEP);
       }
     } catch (error) {
       this.#report(`файлы диагностики не прочитаны (${codeOf(error)}): причина прошлого сбоя может быть не видна`, messageOf(error));
@@ -329,6 +350,7 @@ export class Diagnostics {
   #rotate(): void {
     const last = this.#limits.files - 1;
     const names = new Set(this.#fs.list());
+    if (names.has(fileName(last))) this.#keep(fileName(last));
     if (last === 0) {
       this.#fs.remove(CURRENT);
     } else {
@@ -341,6 +363,43 @@ export class Diagnostics {
     this.#firsts.clear();
     for (const [name, size] of sizes) this.#moved(name, size, this.#sizes);
     for (const [name, at] of firsts) this.#moved(name, at, this.#firsts);
+  }
+
+  /** Уходящий файл потока отдаёт записи жизненного цикла файлу записей сбоев; отказ чтения или записи ротацию не останавливает: шум уйдёт, а причина названа один раз. */
+  #keep(leaving: string): void {
+    try {
+      const lines = this.#fs
+        .read(leaving)
+        .split('\n')
+        .filter((line) => {
+          const stored = decodeRecord(line);
+          return stored !== undefined && isKept(stored.record);
+        });
+      if (lines.length > 0) this.#append(lines);
+      this.#keepProblem = false;
+    } catch (error) {
+      if (!this.#keepProblem) this.#report(`записи сбоев не сохранены при ротации (${codeOf(error)}): причина старого сбоя может уйти с файлом`, messageOf(error));
+      this.#keepProblem = true;
+    }
+  }
+
+  /** Дописывает строки в файл записей сбоев; не поместились - его старые строки вытесняются с начала, пока файл не уложится в предел. */
+  #append(lines: readonly string[]): void {
+    const text = lines.map((line) => `${line}\n`).join('');
+    const size = this.#keepSize;
+    if (size + Buffer.byteLength(text) <= this.#limits.keepBytes) {
+      this.#fs.append(KEEP, text);
+      this.#keepSize = size + Buffer.byteLength(text);
+      return;
+    }
+    const all = (size > 0 ? this.#fs.read(KEEP).split('\n').filter((line) => line !== '') : []).concat(lines);
+    let total = all.reduce((n, line) => n + Buffer.byteLength(line) + 1, 0);
+    while (all.length > 1 && total > this.#limits.keepBytes) total -= Buffer.byteLength(all.shift() ?? '') + 1;
+    const kept = all.map((line) => `${line}\n`).join('');
+    this.#fs.remove(KEEP);
+    // Новая запись не длиннее строки файла потока, но предел мал: одна запись остаётся всегда, иначе причина сбоя пропала бы именно из-за размера.
+    this.#fs.append(KEEP, kept);
+    this.#keepSize = Buffer.byteLength(kept);
   }
 
   /** Запись о файле после сдвига ротации: `diagnostics.N.log` стал `.N+1`, вышедший за предел исчез. */

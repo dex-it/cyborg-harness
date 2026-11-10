@@ -711,6 +711,108 @@ test('fs.watch файла: файл удалён - onClose с причиной, 
   assert.equal(closed.length, 1, 'удаление файла закрывает наблюдение с причиной');
 });
 
+test('fs.watch recursive: правка на два уровня глубже корня даёт событие с относительным путём; слежение одно, лимит 64 занят одной записью (#182)', async (t) => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ reader: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  t.after(() => k.unload());
+  const fs = os('reader').fs;
+  const deep = path.join(box.work, 'a', 'b');
+  await mkdir(deep, { recursive: true });
+  const batches: (readonly string[])[] = [];
+  const sub = await fs.watch(box.work, (names) => batches.push(names), undefined, { recursive: true });
+  await armed((n) => writeFile(path.join(box.work, ARMED), String(n)), () => batches.length > 0);
+  await writeFile(path.join(deep, 'c.txt'), '1');
+  const heard = () => batches.flat().filter((name) => name !== ARMED);
+  await waitFor('событие о a/b/c.txt', () => heard().includes('a/b/c.txt'));
+  assert.ok(!heard().includes('c.txt'), 'не только имя в каталоге: путь от корня');
+  sub.dispose();
+
+  // Без recursive правка в глубине событий не даёт.
+  const flat: (readonly string[])[] = [];
+  await fs.watch(box.work, (names) => flat.push(names));
+  await armed((n) => writeFile(path.join(box.work, ARMED), String(n)), () => flat.length > 0);
+  await writeFile(path.join(deep, 'd.txt'), '1');
+  await new Promise((r) => setTimeout(r, 300));
+  assert.ok(!flat.flat().some((name) => name.includes('d.txt')), 'обычное слежение глубже ребёнка не видит');
+
+  // Одна запись лимита: 64 recursive-слежения помещаются, 65-е - нет.
+  const many = await Promise.allSettled(Array.from({ length: 70 }, () => fs.watch(box.work, () => undefined, undefined, { recursive: true })));
+  assert.equal(many.filter((r) => r.status === 'fulfilled').length, 63, 'одно обычное слежение уже занято, остальное - recursive');
+});
+
+test('fs.watch recursive: имён мест, закрытых плагину и при обычном чтении, в событиях нет; свой каталог данных виден (#182)', async (t) => {
+  await using box = await sandbox();
+  const protectedFile = path.join(box.root, 'protected.json');
+  const { k, os } = await kernel({ reader: { 'fs.read': [box.root] }, other: undefined }, { dataDir: box.data, tempDir: box.temp, protectedPaths: [protectedFile] });
+  t.after(() => k.unload());
+  const fs = os('reader').fs;
+  const own = os('reader').paths.data;
+  const foreign = path.join(box.data, 'other');
+  await mkdir(own, { recursive: true });
+  await mkdir(foreign, { recursive: true });
+  const batches: (readonly string[])[] = [];
+  await fs.watch(box.root, (names) => batches.push(names), undefined, { recursive: true });
+  await armed((n) => writeFile(path.join(box.work, ARMED), String(n)), () => batches.length > 0);
+  await writeFile(path.join(foreign, 'secret-name.txt'), '1');
+  await writeFile(protectedFile, '1');
+  await writeFile(`${protectedFile}.bak`, '1');
+  await writeFile(path.join(own, 'mine.txt'), '1');
+  await writeFile(path.join(box.work, 'visible.txt'), '1');
+  const heard = () => batches.flat();
+  await waitFor('события о видимых', () => heard().includes('work/visible.txt') && heard().includes('data/reader/mine.txt'));
+  await new Promise((r) => setTimeout(r, 200));
+  const hidden = heard().filter((name) => /secret-name|protected/.test(name));
+  assert.deepEqual(hidden, [], 'имена чужого каталога и защищённого пути не приходят');
+});
+
+test('fs.watch recursive: файл и неверные параметры - Invalid, слежение не занимает место (#182)', async (t) => {
+  await using box = await sandbox();
+  const { k, os } = await kernel({ reader: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+  t.after(() => k.unload());
+  const fs = os('reader').fs;
+  const file = path.join(box.work, 'f.txt');
+  await writeFile(file, '1');
+  await assert.rejects(fs.watch(file, () => undefined, undefined, { recursive: true }), { code: 'Invalid' });
+  await assert.rejects(fs.watch(box.work, () => undefined, undefined, { recursive: 'да' } as never), { code: 'Invalid' });
+  await assert.rejects(fs.watch(box.work, () => undefined, undefined, 5 as never), { code: 'Invalid' });
+  const ok = await Promise.allSettled(Array.from({ length: 64 }, () => fs.watch(box.work, () => undefined)));
+  assert.equal(ok.filter((r) => r.status === 'fulfilled').length, 64, 'отказы места не заняли');
+});
+
+test('fs.watch: ОС не дала слежение (inotify) - Unavailable с названием предела, место не занято; recursive без поддержки платформы - Unavailable (#182)', async (t) => {
+  await using box = await sandbox();
+  let code = 'ENOSPC';
+  const watch = (() => {
+    throw Object.assign(new Error(`${code}: путь`), { code });
+  }) as unknown as NonNullable<OsEnvironment['watch']>;
+  const { k, os } = await kernel({ reader: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp, watch });
+  t.after(() => k.unload());
+  const fs = os('reader').fs;
+  for (let i = 0; i < 70; i++) await assert.rejects(fs.watch(box.work, () => undefined, undefined, { recursive: true }), { code: 'Unavailable', message: /max_user_watches/ });
+  code = 'ERR_FEATURE_UNAVAILABLE_ON_PLATFORM';
+  await assert.rejects(fs.watch(box.work, () => undefined, undefined, { recursive: true }), { code: 'Unavailable', message: /недоступно/ });
+  code = 'EIO';
+  await assert.rejects(fs.watch(box.work, () => undefined), (e: Error & { code?: string }) => e.code !== 'Unavailable');
+});
+
+for (const recursive of [false, true]) {
+  test(`fs.watch каталога${recursive ? ' (recursive)' : ''}: каталог удалён - onClose с причиной, а не тишина (#182)`, async (t) => {
+    await using box = await sandbox();
+    const { k, os } = await kernel({ app: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
+    t.after(() => k.unload());
+    const dir = path.join(box.work, 'watched');
+    await mkdir(dir);
+    const touched: (readonly string[])[] = [];
+    const closed: string[] = [];
+    await os('app').fs.watch(dir, (names) => touched.push(names), (reason) => closed.push(reason), recursive ? { recursive: true } : undefined);
+    await armed((n) => writeFile(path.join(dir, ARMED), String(n)), () => touched.length > 0);
+    await rm(dir, { recursive: true });
+    await waitFor('onClose после удаления каталога', () => closed.length > 0);
+    assert.equal(closed.length, 1);
+    assert.match(closed[0] ?? '', /каталог удалён/);
+  });
+}
+
 /** Наблюдатели, подставленные шлюзу: Linux не присылает `rename`, пока старый inode держит открытым другой процесс (`tail -f`) - приходит только `change`. */
 function fakeWatchers() {
   const list: { w: FSWatcher; closed: boolean; fire: (event: string, name?: string) => void }[] = [];

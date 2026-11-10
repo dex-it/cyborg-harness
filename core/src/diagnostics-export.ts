@@ -30,7 +30,7 @@ export interface ExportInput {
   /** Строк, которые не разобрались, и файлов, которые не прочитались. */
   readonly unreadable: number;
   readonly graph: ContractGraph | undefined;
-  readonly limits: { readonly files: number; readonly fileBytes: number };
+  readonly limits: { readonly files: number; readonly fileBytes: number; readonly keepBytes?: number };
   readonly problem?: string;
   readonly context: ExportContext;
 }
@@ -108,7 +108,7 @@ export function formatExport(input: ExportInput): string {
     ...(context.app === undefined ? [] : [`Приложение: ${context.app}`]),
     `Ядро: ${context.core === undefined ? '' : `пакет ${context.core}, `}API плагинов ${PLUGIN_API_VERSION}`,
     `Записей: ${String(records.length)}; самая ранняя: ${earliest === undefined ? 'нет' : iso(earliest)}; файлов: ${String(input.files.length)} (${kib(input.files.reduce((n, f) => n + f.bytes, 0))}).`,
-    `Хранится не больше ${String(input.limits.files)} файлов по ${kib(input.limits.fileBytes)}: что старше самой ранней записи, ушло при ротации, цепочка без начала оборвана с этой стороны.`,
+    `Хранится не больше ${String(input.limits.files)} файлов по ${kib(input.limits.fileBytes)}${input.limits.keepBytes === undefined ? '' : ` и файл записей сбоев и жизненного цикла до ${kib(input.limits.keepBytes)}`}: что старше самой ранней записи, ушло при ротации (записи сбоев ротация сохраняет), цепочка без начала оборвана с этой стороны.`,
     `Запуски: ${runs.map((run) => `${tag(run)} с ${iso(run)}${run === input.run ? ' (этот)' : ''}`).join('; ')}`,
     ...(input.unsaved > 0 ? [`Не записано в файл: ${String(input.unsaved)} (запись на диск не удаётся${input.problem === undefined ? '' : `: ${input.problem}`}); они в выгрузке ниже.`] : []),
     ...(input.unreadable > 0 ? [`Не разобрано строк или файлов: ${String(input.unreadable)}.`] : []),
