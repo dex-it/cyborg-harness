@@ -6,7 +6,7 @@ import path from 'node:path';
 import type { LookupFunction } from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { safeStorage } from 'electron';
-import { load, OsGateway, parseManifest, PLUGIN_API_VERSION, type JournalEntry, type OsEnvironment, type PluginManifest } from '@cyborg-harness/core';
+import { load, OsGateway, parseManifest, PLUGIN_API_VERSION, type JournalEntry, type OsEnvironment, type PluginManifest, type TraceRecord } from '@cyborg-harness/core';
 import { closePools, guardedLookup, isLocalAddress, transport, type Lookup } from '../../../core/src/net-transport.ts';
 import { measure, PTY_SCRIPT, SAMPLES, WARMUP, type ProbeOs, type ProbePath, type Sampled } from '../../bench/gateway-probe.ts';
 import { electronOs, utilityHosts } from '@cyborg-harness/electron';
@@ -15,6 +15,8 @@ export interface GatewaySpikeOptions {
   readonly out: string;
   readonly hostEntry: string;
   readonly benchDir: string;
+  /** Трасса операций (K-28, NFR-CH-4001) включена: ядро получает приёмник записей, как в приложении. По умолчанию да; `--trace=off` скрипта замера выключает. */
+  readonly trace?: boolean;
 }
 
 export type Variant = 'плагин' | 'шлюз' | 'голое';
@@ -39,6 +41,9 @@ export interface GatewayReport {
   readonly samples: number;
   /** Чем шифрует safeStorage: на Linux без связки ключей - `basic_text`, и `secrets.get` дешевле, чем со связкой. */
   readonly secretsBackend: string;
+  /** Была ли включена трасса в ядре замера и сколько записей она дала. */
+  readonly trace: 'on' | 'off';
+  traceRecords?: number;
   rows?: GatewayRow[];
   error?: string;
 }
@@ -169,11 +174,15 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
     cpus: `${String(os.cpus().length)} x ${os.cpus()[0]?.model ?? '?'}`,
     warmup: WARMUP,
     samples: SAMPLES,
+    trace: options.trace === false ? 'off' : 'on',
     secretsBackend: process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : process.platform === 'darwin' ? 'keychain' : 'dpapi',
   };
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'cyborg-spike-gateway-'));
   const server = await serve();
   const journal: JournalEntry[] = [];
+  // Приёмник как у приложения: запись кладётся в кольцо (K-30 заменит его своим), содержимого в ней нет.
+  const ring: (TraceRecord | undefined)[] = new Array<TraceRecord | undefined>(4096);
+  let traced = 0;
   try {
     const files = path.join(base, 'files');
     const prepare = (dir: string) => {
@@ -203,6 +212,7 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
       hosts: { bench: [ID] },
       os: env,
       onJournal: (entry) => journal.push(entry),
+      ...(options.trace !== false && { onTrace: (record: TraceRecord) => void (ring[traced++ % ring.length] = record) }),
     });
     await kernel.idle();
     if (!journal.some((e) => e.kind === 'activated') || journal.some((e) => e.kind !== 'activated')) throw new Error(`загрузка не чистая: ${JSON.stringify(journal)}`);
@@ -233,6 +243,8 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
     closePools(ID);
     report.rows = rows;
     await kernel.unload();
+    report.traceRecords = traced;
+    if (options.trace !== false && traced === 0) throw new Error('трасса включена, а записей нет');
     if (denied.length > 0) throw new Error(`шлюз отказал: ${denied.join('; ')}`);
   } catch (error) {
     report.error = `${error instanceof Error ? (error.stack ?? error.message) : String(error)}\nжурнал: ${JSON.stringify(journal)}`;

@@ -35,6 +35,8 @@ export interface ResourceLimits {
   readonly logWindowMs: number;
   /** Сколько мс подряд плагин может превышать `logRate`, прежде чем ядро его выключит (запись `switched-off` с `reason: 'log-flood'`). */
   readonly logFloodMs: number;
+  /** Интервал счётчика частого потока в трассе (вывод pty, события `fs.watch`), мс: за него пишется одна запись с числом сообщений и байт (FR-CH-4005). */
+  readonly traceStreamMs: number;
 }
 
 export const LIMITS: ResourceLimits = {
@@ -57,6 +59,8 @@ export const LIMITS: ResourceLimits = {
   logRate: 100,
   logWindowMs: 1000,
   logFloodMs: 10_000,
+  // Предложение нормы (SRS фичи 04, вопрос 10), владелец его не принял.
+  traceStreamMs: 1000,
 };
 
 export function limitsOf(...overrides: (Partial<ResourceLimits> | undefined)[]): ResourceLimits {
