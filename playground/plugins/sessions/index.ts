@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentToolsEndpoint, PluginContext, PluginModule, PtyHandle, SessionAction } from '@cyborg-harness/contracts';
+import type { AgentEvent, AgentToolsEndpoint, PluginContext, PluginModule, PtyHandle, SessionAction, SessionChange, SessionEvent } from '@cyborg-harness/contracts';
 import { MCP_PATH, mcpHandler } from './mcp.ts';
 
 interface Actions {
@@ -41,6 +41,23 @@ const describe = (e: AgentEvent): string => {
       return e.reason;
   }
 };
+
+/** Событие агента глазами `cyborg.sessions`: новый запрос человека тоже «работает», `session` и `turnEnd` контракт пока не отдаёт. */
+export function sessionChange(e: AgentEvent): SessionChange | undefined {
+  switch (e.type) {
+    case 'cwd':
+      return { type: 'cwd', cwd: e.cwd };
+    case 'activity':
+      return { type: 'activity', ...(e.tool !== undefined && { tool: e.tool }) };
+    case 'prompt':
+      return { type: 'activity' };
+    case 'waiting':
+      return { type: 'waiting', reason: e.reason };
+    case 'session':
+    case 'turnEnd':
+      return undefined;
+  }
+}
 
 const field = (data: unknown, key: string): string | undefined => {
   const value: unknown = typeof data === 'object' && data !== null ? (data as Record<string, unknown>)[key] : undefined;
@@ -99,6 +116,23 @@ const plugin: PluginModule = {
       a.ready = ready;
       publish(sessionId);
     };
+    // cyborg.sessions: подписчики других плагинов; слушатель, бросивший исключение или упавший вместе со своим хостом, соседям не мешает.
+    const listeners = new Set<(event: SessionEvent) => void>();
+    const emit = (event: SessionEvent) => {
+      for (const listener of listeners) {
+        try {
+          listener(event);
+        } catch (e) {
+          ctx.log(`слушатель cyborg.sessions: ${String(e)}`, 'warn');
+        }
+      }
+    };
+    ctx.contracts.provide('cyborg.sessions', '1.0', {
+      onChange(listener) {
+        listeners.add(listener);
+        return { dispose: () => void listeners.delete(listener) };
+      },
+    });
     const toolSources = () => ctx.contracts.all('cyborg.agent-tool', 1);
     let server: Promise<string> | undefined;
     // Сервер один на плагин и поднимается с первой сессией, которой есть что предложить агенту.
@@ -156,6 +190,8 @@ const plugin: PluginModule = {
         ? provider.impl.watch(sessionId, (e) => {
             ctx.log(`${facts.id} ${sessionId}: ${describe(e)}`);
             onEvent(sessionId, e);
+            const change = sessionChange(e);
+            if (change) emit({ sessionId, title, change });
             // Человек написал сам или нажал кнопку: прежние предложения к новому ходу не относятся.
             if (e.type === 'prompt') setActions(sessionId, []);
             // Документ закрыт человеком - сохранять некуда.
@@ -165,6 +201,7 @@ const plugin: PluginModule = {
       handle.onExit((exit) => {
         if (live.get(doc) === handle) live.delete(doc);
         forget();
+        emit({ sessionId, title, change: { type: 'exit', code: exit.code } });
         void watch?.then((s) => s.dispose());
         void provider.impl.ended(sessionId, exit).then(
           (hint) => ctx.log(`${facts.id} ${sessionId}: вышла с ${String(exit.code)}${hint ? ` - ${hint.message}` : ''}`),
