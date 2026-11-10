@@ -2,7 +2,8 @@
 import { cpSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildPlugin } from 'cyborg-plugin';
+import { writeDelivery } from '@cyborg-harness/core/delivery';
+import { buildDelivery, buildPlugin } from 'cyborg-plugin';
 import { build } from 'esbuild';
 
 const root = resolve(import.meta.dirname, '..');
@@ -46,3 +47,12 @@ const workers = { editor: 'editor/editor.worker.js', json: 'language/json/json.w
 for (const [name, entry] of Object.entries(workers)) await build({ ...browser, entryPoints: [join(monaco, entry)], outfile: join(dist, 'plugins', 'editor', 'ui', 'workers', `${name}.worker.js`) });
 // Вид грузит стили только со своего origin: таблица xterm кладётся рядом с модулем вида sessions.
 cpSync(join(root, '..', 'node_modules', '@xterm', 'xterm', 'css', 'xterm.css'), join(dist, 'plugins', 'sessions', 'ui', 'xterm.css'));
+// P-07: те же плагины в виде поставки приложения - `dist/delivery`: собраны в index.mjs, рядом delivery.json с хешами. Её грузит запуск с `--delivery` и упакованная проба
+// (pack-delivery.mjs). Файлы, которые стенд кладёт рядом с видами выше (таблица xterm, воркеры Monaco), в поставке нужны тем же видам; хеши считаются после их копирования.
+const delivery = join(dist, 'delivery');
+const built = await buildDelivery(readdirSync(plugins, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => join(plugins, e.name)), { out: delivery, declarations: [join(plugins, 'contracts.ts')] });
+for (const warning of built.warnings) console.warn(`delivery: ${warning}`);
+if (!built.ok) throw new Error(`поставка стенда: ${built.problems.map((p) => `${p.file}${p.line === undefined ? '' : `:${String(p.line)}`}: ${p.message}`).join('; ')}`);
+cpSync(join(dist, 'plugins', 'sessions', 'ui', 'xterm.css'), join(delivery, 'sessions', 'ui', 'xterm.css'));
+cpSync(join(dist, 'plugins', 'editor', 'ui', 'workers'), join(delivery, 'editor', 'ui', 'workers'), { recursive: true });
+await writeDelivery(delivery);

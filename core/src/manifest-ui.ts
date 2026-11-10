@@ -30,13 +30,28 @@ export function readGroup(where: string, value: unknown, errors: string[]): stri
   return undefined;
 }
 
-export function readUi(raw: unknown, errors: string[]): { views: Record<string, string>; placement?: Record<string, Placement>; overlay?: string; group?: string } | undefined {
+/** Флаг осознанного выбора автора: булев, любое другое значение - ошибка, а не молчаливое «нет». */
+function readInlineStyles(value: unknown, errors: string[]): boolean {
+  if (typeof value !== 'boolean') errors.push(`ui.inlineStyles: ожидается true или false, получено ${show(value)}`);
+  return value === true;
+}
+
+/** Результат разбора `ui`: `inlineStyles` есть только при `true`, `false` и отсутствие поля - одно и то же. */
+export interface ParsedUi {
+  views: Record<string, string>;
+  placement?: Record<string, Placement>;
+  overlay?: string;
+  group?: string;
+  inlineStyles?: true;
+}
+
+export function readUi(raw: unknown, errors: string[]): ParsedUi | undefined {
   if (raw === undefined) return undefined;
   if (!isRecord(raw) || (raw.views !== undefined && !isRecord(raw.views)) || (raw.views === undefined && raw.overlay === undefined)) {
     errors.push('ui: ожидается { "views": { "<вид>": "./<модуль>.js" } } и/или { "overlay": "./<модуль>.js" }');
     return undefined;
   }
-  for (const key of Object.keys(raw)) if (key !== 'views' && key !== 'overlay' && key !== 'group') errors.push(`ui.${key}: ядро знает только ui.views, ui.overlay и ui.group`);
+  for (const key of Object.keys(raw)) if (key !== 'views' && key !== 'overlay' && key !== 'group' && key !== 'inlineStyles') errors.push(`ui.${key}: ядро знает только ui.views, ui.overlay, ui.group и ui.inlineStyles`);
   const views: Record<string, string> = {};
   const placement: Record<string, Placement> = {};
   const rawViews = isRecord(raw.views) ? raw.views : {};
@@ -50,7 +65,8 @@ export function readUi(raw: unknown, errors: string[]): { views: Record<string, 
   }
   if (raw.views !== undefined && Object.keys(rawViews).length === 0) errors.push('ui.views: нет ни одного вида');
   const group = Object.hasOwn(raw, 'group') ? readGroup('ui.group', raw.group, errors) : undefined;
-  const base = { views, ...(Object.keys(placement).length > 0 && { placement }), ...(group !== undefined && { group }) };
+  const inlineStyles = Object.hasOwn(raw, 'inlineStyles') ? readInlineStyles(raw.inlineStyles, errors) : false;
+  const base = { views, ...(Object.keys(placement).length > 0 && { placement }), ...(group !== undefined && { group }), ...(inlineStyles && { inlineStyles: true as const }) };
   if (raw.overlay === undefined) return base;
   if (!isEntry(raw.overlay)) {
     errors.push(`ui.overlay: ${ENTRY_HINT}, получено ${show(raw.overlay)}`);

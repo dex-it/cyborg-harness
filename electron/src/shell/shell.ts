@@ -3,6 +3,7 @@
 import { defineElements } from '@cyborg-harness/core/elements';
 import { connectView, keepFocus, mountModule } from '@cyborg-harness/core/ui-shell';
 import type { ViewBridge } from '../view-protocol.ts';
+import { violationNote } from './csp-note.ts';
 
 const script = document.currentScript as HTMLScriptElement;
 const { plugin = '', view = '', entry = '' } = script.dataset;
@@ -18,6 +19,11 @@ function fail(error: unknown): void {
 }
 
 async function start(): Promise<void> {
+  // Отказ CSP не виден ни в разметке, ни в ленте ядра: стиль просто не применился. Консоль фрейма вида называет причину.
+  document.addEventListener('securitypolicyviolation', (event) => {
+    // eslint-disable-next-line no-console -- консоль фрейма плагина: отказ CSP в ленту ядра не идёт
+    console.warn(violationNote(plugin, event));
+  });
   defineElements();
   const ctx = await connectView(bridge, {
     pluginId: plugin,

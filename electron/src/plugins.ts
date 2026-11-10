@@ -30,14 +30,17 @@ import {
   MENU_OWNER,
   WINDOW_OWNER,
 } from '@cyborg-harness/core';
+import { readDelivery, verifyDelivery } from '@cyborg-harness/core/delivery';
 import { errorMessage, isRecord } from './guards.ts';
 import type { FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginOrigin, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from './snapshot.ts';
 import { viewUrl } from './view-protocol.ts';
 import type { ViewGroups } from './view-frames.ts';
 import type { PluginUi } from './view-files.ts';
 
-/** Имена точки входа главной части по порядку; тот же набор у `check` и `build` (`ENTRY_FILES` в `@cyborg-harness/core/plugin-check`, их равенство держит electron/test/plugins.test.ts). */
+/** Имена точки входа главной части по порядку; тот же набор у `check` и `build` (`ENTRY_FILES` в `@cyborg-harness/core/plugin-check`, их равенство держит electron/test/plugins.test.ts). Угадывание по ним - плагины каталога пользователя и режим стенда (SAD 3.2). */
 export const ENTRY_FILES: readonly string[] = ['index.mjs', 'index.js', 'index.ts'];
+/** Точка входа плагина поставки: собранный `cyborg-plugin build` плагин всегда несёт `index.mjs`, и только его грузит поставка (SAD 3.2, «Точка входа»). */
+const DELIVERY_ENTRY = 'index.mjs';
 
 /** Флаг запуска, включающий каталог плагинов пользователя (политика этапа 1, SAD 6.1). */
 export const USER_PLUGINS_FLAG = '--user-plugins';
@@ -60,12 +63,19 @@ export interface Discovered {
   readonly views: Map<string, string>;
   /** id -> каталог плагина: оттуда ядро берёт файлы схем разделов. */
   readonly homes: Map<string, string>;
+  /** id -> причина, по которой точки входа нет: плагин ядру передан, а его активация откажет этой причиной. */
+  readonly missing: Map<string, string>;
   readonly problems: string[];
 }
 
+export interface DiscoverOptions {
+  /** Каталоги поставки: плагин оттуда грузится только по `index.mjs`, без угадывания по именам файлов. */
+  readonly strictEntry?: readonly string[];
+}
+
 /** Каталоги по порядку приоритета: встроенные раньше пользовательских. */
-export function discoverPlugins(dirs: readonly string[]): Discovered {
-  const found: Discovered = { manifests: [], entries: new Map(), origins: new Map(), views: new Map(), homes: new Map(), problems: [] };
+export function discoverPlugins(dirs: readonly string[], options: DiscoverOptions = {}): Discovered {
+  const found: Discovered = { manifests: [], entries: new Map(), origins: new Map(), views: new Map(), homes: new Map(), missing: new Map(), problems: [] };
   for (const dir of dirs) {
     let names: string[];
     try {
@@ -90,11 +100,23 @@ export function discoverPlugins(dirs: readonly string[]): Discovered {
         continue;
       }
       found.manifests.push(raw);
-      const present = ENTRY_FILES.filter((f) => fs.statSync(path.join(home, f), { throwIfNoEntry: false })?.isFile() === true);
-      if (present.length > 1) found.problems.push(`${home}: точек входа несколько (${present.join(', ')}), загружается ${present[0] ?? ''}`);
-      if (present.length === 0) found.problems.push(`${home}: нет точки входа (ищутся ${ENTRY_FILES.join(', ')})${id === undefined ? '' : `, плагин ${id} не запустится`}`);
-      // Без файла ядро получает путь первого кандидата, а не id: отказ загрузки в журнале назовёт файл, которого нет.
-      if (id) found.entries.set(id, pathToFileURL(path.join(home, present[0] ?? ENTRY_FILES[0] ?? '')).href);
+      const isFile = (f: string): boolean => fs.statSync(path.join(home, f), { throwIfNoEntry: false })?.isFile() === true;
+      if (options.strictEntry?.includes(dir) === true) {
+        // Поставка не угадывает: рядом мог оказаться чужой index.js, и встроенный плагин не должен зависеть от того, что положили в его каталог.
+        if (id && isFile(DELIVERY_ENTRY)) found.entries.set(id, pathToFileURL(path.join(home, DELIVERY_ENTRY)).href);
+        else if (id) {
+          const other = ENTRY_FILES.find((f) => f !== DELIVERY_ENTRY && isFile(f));
+          const why = `нет точки входа ${DELIVERY_ENTRY}${other === undefined ? '' : ` (найден ${other}: поставка грузит только ${DELIVERY_ENTRY}, соберите плагин командой cyborg-plugin build)`}`;
+          found.missing.set(id, why);
+          found.problems.push(`плагин ${id} (${home}): ${why}`);
+        }
+      } else {
+        const present = ENTRY_FILES.filter(isFile);
+        if (present.length > 1) found.problems.push(`${home}: точек входа несколько (${present.join(', ')}), загружается ${present[0] ?? ''}`);
+        if (present.length === 0) found.problems.push(`${home}: нет точки входа (ищутся ${ENTRY_FILES.join(', ')})${id === undefined ? '' : `, плагин ${id} не запустится`}`);
+        // Без файла ядро получает путь первого кандидата, а не id: отказ загрузки в журнале назовёт файл, которого нет.
+        if (id) found.entries.set(id, pathToFileURL(path.join(home, present[0] ?? ENTRY_FILES[0] ?? '')).href);
+      }
       if (id) {
         found.origins.set(id, dir);
         found.homes.set(id, home);
@@ -114,6 +136,17 @@ export function readSchemaFile(home: string | undefined, file: string): unknown 
   return JSON.parse(fs.readFileSync(real, 'utf8'));
 }
 
+/** Сверка каталога поставки с `delivery.json`: строки о расхождениях; этап 1 только сообщает, подпись и отказ - этап 2. */
+async function checkDelivery(dir: string): Promise<string[]> {
+  try {
+    const list = await readDelivery(dir);
+    if (list === undefined) return [`в каталоге поставки ${dir} нет delivery.json: контрольные суммы не проверены`];
+    return (await verifyDelivery(dir, list)).map((p) => `контрольная сумма поставки: ${p}`);
+  } catch (error) {
+    return [`контрольные суммы поставки ${dir}: ${errorMessage(error)}`];
+  }
+}
+
 export interface StartOptions {
   readonly userData: string;
   /** Файл воркспейса; по умолчанию `<userData>/workspace.cyborg.json`. */
@@ -123,6 +156,12 @@ export interface StartOptions {
   /** Последний фрагмент заголовка окна: имя приложения; по умолчанию «Cyborg». */
   readonly appName?: string;
   readonly builtinDir: string;
+  /**
+   * Что такое `builtinDir`. `delivery` (по умолчанию) - каталог поставки приложения: точка входа плагина только `index.mjs`, а `delivery.json`
+   * рядом сверяется с файлами при старте (расхождение - в лог и `problems`, не отказ: этап 1). `stand` - режим разработки стенда: точка входа
+   * угадывается по `index.mjs`, `index.js`, `index.ts`, сумм нет (стенд собирает плагины как исходники).
+   */
+  readonly builtinMode?: 'delivery' | 'stand';
   /**
    * Читать ли каталог плагинов пользователя (`<userData>/plugins`). Политика этапа 1 (SAD 6.1): по умолчанию нет.
    * Включает только человек за машиной, флагом запуска: файл воркспейса может лежать в репозитории и включить это от чужого имени.
@@ -167,12 +206,14 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
   for (const p of ws.problems) report(p);
   for (const m of ws.migrated) options.log(`[plugins] ${m}`);
   const userDir = path.join(options.userData, 'plugins');
-  const found = discoverPlugins(options.userPlugins === true ? [options.builtinDir, userDir] : [options.builtinDir]);
+  const delivery = options.builtinMode !== 'stand';
+  const found = discoverPlugins(options.userPlugins === true ? [options.builtinDir, userDir] : [options.builtinDir], { strictEntry: delivery ? [options.builtinDir] : [] });
   if (options.userPlugins !== true) {
     const skipped = countDirs(userDir);
     if (skipped > 0) options.log(`[plugins] каталог плагинов пользователя ${userDir} не читается (плагинов в нём: ${String(skipped)}); сторонний код загружается только запуском с ${USER_PLUGINS_FLAG}`);
   }
   for (const p of found.problems) report(p);
+  if (delivery && countDirs(options.builtinDir) > 0) for (const p of await checkDelivery(options.builtinDir)) report(p);
   options.onDiscovered?.(found);
 
   const kernel = await load({
@@ -187,7 +228,12 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     // ADR-CH-0002 п. 6: cyborg.* - пространство поставки; чужой поставщик cyborg.agent сделал бы встроенного потребителя ambiguous.
     reservedPrefixes: ['cyborg.'],
     spawnHost: options.spawnHost,
-    entry: (m) => found.entries.get(m.id) ?? m.id,
+    entry: (m) => {
+      const entry = found.entries.get(m.id);
+      // Выброшенное здесь ядро записывает в журнал как отказ активации этого плагина, с текстом причины.
+      if (entry === undefined) throw new Error(found.missing.get(m.id) ?? 'нет точки входа');
+      return entry;
+    },
     config: ws.config,
     state: ws.state,
     schema: (m, file) => readSchemaFile(found.homes.get(m.id), file),
@@ -423,7 +469,7 @@ export class PluginsService implements ViewGroups {
     const ui = this.kernel?.manifests.find((m) => m.id === pluginId)?.ui;
     const group = this.groupOf(pluginId);
     if (dir === undefined || ui === undefined || group === undefined) return undefined;
-    return { dir, group, views: ui.views, ...(ui.overlay !== undefined && { overlay: ui.overlay }) };
+    return { dir, group, views: ui.views, ...(ui.overlay !== undefined && { overlay: ui.overlay }), ...(ui.inlineStyles === true && { inlineStyles: true as const }) };
   }
 
   /** Показ вида - вызов ленивого плагина: мосту вида нужна его главная часть. Зовут после сверки группы адреса (`resolveViewRequest`). */

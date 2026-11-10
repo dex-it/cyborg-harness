@@ -52,6 +52,7 @@
   "ui": {
     "views": {
       "main": { "module": "./ui/ui.js", "area": "main", "order": 100 }
-    }
+    },
+    "inlineStyles": true
   }
 }

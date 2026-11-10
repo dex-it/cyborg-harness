@@ -235,6 +235,7 @@ member PluginManifest.requires :: readonly prop Readonly<Record<string, string>>
 member PluginManifest.state :: readonly optional prop SectionDecl
 member PluginManifest.ui :: readonly optional object
 member PluginManifest.ui.group :: readonly optional prop string
+member PluginManifest.ui.inlineStyles :: readonly optional prop true
 member PluginManifest.ui.overlay :: readonly optional prop string
 member PluginManifest.ui.placement :: readonly optional prop Readonly<Record<string, Placement>>
 member PluginManifest.ui.views :: readonly prop Readonly<Record<string, string>>
