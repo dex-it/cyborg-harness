@@ -1,7 +1,8 @@
 ---
 level: strategy
 feature: cyborg-harness
-status: review
+format: one-pager
+status: принято
 date: 2026-11-10
 origin: derived
 ---
