@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { statSync, utimesSync, writeFileSync } from 'node:fs';
+import fs, { statSync, utimesSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -125,6 +125,30 @@ test('withFileLock: забор по сроку не снимает замок, �
   utimesSync(`${file}.write.lock`, old, old);
   await writeFile(`${file}.write.lock.reclaim`, JSON.stringify({ pid: process.ppid }));
   assert.throws(() => withFileLock(file, () => 'не должно', { timeoutMs: 200, staleMs: 30_000 }), /не дождались/);
+});
+
+test('withFileLock: замок, обновлённый держателем за время захвата охраны, не снимается (повторная проверка срока в reclaim)', async (t) => {
+  await using box = await sandbox();
+  const file = path.join(box.root, 'shared.json');
+  const lock = `${file}.write.lock`;
+  // Замок живого pid, просроченный: сосед видит его старым и идёт снимать.
+  await writeFile(lock, JSON.stringify({ pid: process.ppid }));
+  const old = new Date(Date.now() - 60_000);
+  utimesSync(lock, old, old);
+  // Между первым чтением и охраной держатель тем же pid снял старый замок и взял свежий: подменяем его сразу после захвата охраны.
+  const link = fs.linkSync.bind(fs);
+  let refreshed = 0;
+  t.mock.method(fs, 'linkSync', (existing: string, target: string) => {
+    link(existing, target);
+    if (target === `${lock}.reclaim`) {
+      refreshed++;
+      const now = new Date();
+      utimesSync(lock, now, now);
+    }
+  });
+  assert.throws(() => withFileLock(file, () => 'не должно', { timeoutMs: 300, staleMs: 30_000 }), new RegExp(`pid ${String(process.ppid)}`));
+  assert.ok(refreshed > 0, 'охрана снятия брала замок: проверка не пустая');
+  assert.equal(JSON.parse(await readFile(lock, 'utf8')).pid, process.ppid, 'свежий замок держателя цел');
 });
 
 test('writeJsonAtomic: права файла задаются при создании, а не после', async () => {
