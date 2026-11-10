@@ -3,16 +3,25 @@ import type { Disposable, PluginModule, SessionEvent } from '@cyborg-harness/con
 export const OPEN_COMMAND = 'session-notifications.open';
 
 // Пилот PL-02: решение «показывать ли» живёт здесь, а не в ядре. Событие «ждёт» при окне без фокуса - одно уведомление;
-// новая работа сессии или её выход снимают его (unnotify); клик поднимает окно (ядро) и запускает команду плагина.
+// новая работа сессии или её выход снимают его (unnotify); клик поднимает окно (ядро) и запускает команду плагина, а та открывает вкладку сессии (cyborg.sessions.reveal).
 const plugin: PluginModule = {
   activate(ctx) {
     // Права notify нет в манифесте или ядро её не выдало: ctx.os.notify тогда нет совсем, и плагин честно говорит, что показывать нечем.
     if (!ctx.os.notify) ctx.log('нет права notify: уведомления не показываются', 'warn');
-    // onFocusChange сообщает только перемены, начального состояния нет: до первой перемены окно считается активным (иначе запуск был бы шумным).
+    // onFocusChange сообщает только перемены, начальное состояние даёт focused(): сначала подписка, потом вопрос, чтобы перемена между ними не потерялась.
+    // Ответ старше перемены, пришедшей раньше него, не затирает её.
     let focused = true;
+    let changed = false;
     ctx.window.onFocusChange((now) => {
+      changed = true;
       focused = now;
     });
+    void ctx.window
+      .focused()
+      .then((now) => {
+        if (!changed) focused = now;
+      })
+      .catch((e: unknown) => ctx.log(`фокус окна неизвестен, считаю окно активным: ${String(e)}`, 'warn'));
     // id уведомления ядра по сессии; уведомление у сессии одно, новое событие «ждёт» заменяет прежнее.
     const live = new Map<string, string>();
     // События одной очередью: «ждёт» и сразу за ним «работает» не должны разминуться на асинхронном show.
@@ -66,10 +75,18 @@ const plugin: PluginModule = {
     const rejoin = () => void join().catch((e: unknown) => ctx.log(`подписка на cyborg.sessions: ${String(e)}`, 'warn'));
     ctx.contracts.onChange('cyborg.sessions', rejoin);
     rejoin();
-    ctx.commands.register(OPEN_COMMAND, (sessionId) => {
+    ctx.commands.register(OPEN_COMMAND, async (sessionId) => {
+      if (typeof sessionId !== 'string') return;
       // Ядро закрыло уведомление клика само.
-      if (typeof sessionId === 'string') live.delete(sessionId);
-      ctx.log(`открыта сессия ${String(sessionId)}`);
+      live.delete(sessionId);
+      // reveal появился в cyborg.sessions 1.1: поставщик прежней версии члена не даёт, и клик тогда только поднимает окно.
+      const sessions = ctx.contracts.get('cyborg.sessions', 1);
+      if (typeof sessions?.reveal !== 'function') {
+        ctx.log(`сессия ${sessionId}: вкладку открыть нечем (sessions без reveal)`, 'warn');
+        return;
+      }
+      await sessions.reveal(sessionId);
+      ctx.log(`открыта сессия ${sessionId}`);
     });
     return { dispose: () => subscription?.dispose() };
   },
