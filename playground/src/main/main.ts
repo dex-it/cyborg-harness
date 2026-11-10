@@ -64,6 +64,8 @@ const spiking = spikeOut !== undefined || hostsSpikeOut !== undefined || gateway
 const safeMode = process.argv.includes('--safe-mode');
 /** `--user-plugins` (SAD 6.1): читать каталог плагинов пользователя; без флага грузятся только плагины из поставки. Флаг только в командной строке: файл воркспейса может лежать в репозитории. Смена воркспейса и безопасного режима его сохраняет (перезапуск берёт argv). */
 const userPlugins = process.argv.includes(USER_PLUGINS_FLAG);
+/** `--delivery` (P-07): встроенные плагины берутся из `delivery` рядом с приложением - поставки, собранной `cyborg-plugin delivery` (index.mjs и delivery.json); без флага это стенд с исходниками в `plugins` (index.ts). */
+const deliveryMode = process.argv.includes('--delivery');
 
 let win: BrowserWindow | undefined;
 
@@ -213,7 +215,8 @@ const start = () => {
     migrate: migrateLegacyWorkspace,
     safeMode,
     userPlugins,
-    builtinDir: path.join(__dirname, 'plugins'),
+    builtinDir: path.join(__dirname, deliveryMode ? 'delivery' : 'plugins'),
+    builtinMode: deliveryMode ? 'delivery' : 'stand',
     spawnHost: hosts.spawn,
     pidOf: hosts.pidOf,
     idleSeconds: () => powerMonitor.getSystemIdleTime(),

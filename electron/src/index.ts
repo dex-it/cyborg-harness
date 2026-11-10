@@ -2,12 +2,12 @@
 export type { ServeViewsOptions } from './views.ts';
 export type { ElectronOsOptions } from './os-env.ts';
 export { discoverPlugins, PluginsService, startPlugins, USER_PLUGINS_FLAG } from './plugins.ts';
-export type { Discovered, PluginsEvents, ServiceOptions, StartOptions } from './plugins.ts';
+export type { Discovered, DiscoverOptions, PluginsEvents, ServiceOptions, StartOptions } from './plugins.ts';
 export { utilityHosts, utilityPtyHost } from './plugin-hosts.ts';
 export type { UtilityHosts, UtilityPtyHost } from './plugin-hosts.ts';
 export { electronOs } from './os-env.ts';
 export { framesOf, registerViewScheme, serveViews } from './views.ts';
-export { resolveStaticFile, resolveViewRequest, VIEW_CSP } from './view-files.ts';
+export { resolveStaticFile, resolveViewRequest, VIEW_CSP, viewCsp } from './view-files.ts';
 export type { PluginUi, ViewCsp, ViewRequest } from './view-files.ts';
 export { guardNavigation } from './navigation.ts';
 export type { ViewGroups } from './view-frames.ts';

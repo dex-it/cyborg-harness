@@ -27,6 +27,7 @@
   "ui": {
     "views": {
       "main": "./ui/ui.js"
-    }
+    },
+    "inlineStyles": true
   }
 }

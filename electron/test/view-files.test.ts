@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { frameAddress, groupOfOrigin, viewOfUrl, viewOrigin, viewUrl } from '../src/view-protocol.ts';
 import { themeTokens } from '../src/theme.ts';
-import { cspOf, resolveStaticFile, resolveViewRequest, VIEW_CSP, type PluginUi } from '../src/view-files.ts';
+import { cspOf, resolveStaticFile, resolveViewRequest, viewCsp, VIEW_CSP, viewHeaders, type PluginUi } from '../src/view-files.ts';
 
 // Граница каталога считается по настоящим путям: файлы должны существовать, а tmpdir на macOS - симлинк.
 const base = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-view-files-')));
@@ -22,7 +22,7 @@ for (const file of [path.join(root, 'ui', 'ui.js'), path.join(root, 'bob', 'ui',
 const uiOf = (id: string): PluginUi | undefined => {
   if (id === 'alice') return { dir: root, group: 'panels', views: { main: './ui/ui.js', tree: './ui/tree.js' } };
   if (id === 'bob') return { dir: bobDir, group: 'panels', views: { main: './ui/ui.js' } };
-  return id === 'carol' ? { dir: carolDir, group: 'carol', views: { main: './ui/ui.js' } } : undefined;
+  return id === 'carol' ? { dir: carolDir, group: 'carol', views: { main: './ui/ui.js' }, inlineStyles: true } : undefined;
 };
 
 test('вид: origin называет группу, адрес - плагин внутри неё, чужая схема и мусор - не вид', () => {
@@ -118,12 +118,73 @@ test('тема: одинаковый набор токенов у светлой
   assert.notEqual(light['--cy-bg'], dark['--cy-bg']);
 });
 
+/** Заголовок CSP по директивам: имя -> источники. */
+const directives = (csp: string) => Object.fromEntries(csp.split('; ').map((d) => { const [name = '', ...sources] = d.split(' '); return [name, sources]; }));
+
+// K-05: SAD 3.8 и ADR-CH-0007 п. 2 - закрытая CSP с явными источниками; инлайн-стили только по флагу манифеста.
+test('CSP вида: начинается с default-src \'none\' и несёт только перечисленные источники', () => {
+  const csp = viewCsp(false);
+  assert.ok(csp.startsWith("default-src 'none'; "), csp);
+  assert.deepEqual(directives(csp), {
+    'default-src': ["'none'"],
+    'script-src': ["'self'"],
+    'style-src': ["'self'"],
+    'connect-src': ["'self'"],
+    'img-src': ["'self'", 'data:'],
+    'font-src': ["'self'"],
+  });
+  assert.equal(VIEW_CSP, csp, 'VIEW_CSP - политика без флага');
+  for (const bad of ['*', 'http:', 'https:', 'blob:', "'unsafe-eval'", "'unsafe-inline'", 'ws:']) assert.ok(!csp.includes(bad), `в строгой CSP есть ${bad}`);
+});
+
+test('CSP вида зависит от флага: \'unsafe-inline\' только в style-src и только при inlineStyles, остальное то же', () => {
+  const off = directives(viewCsp(false));
+  const on = directives(viewCsp(true));
+  assert.deepEqual(off['style-src'], ["'self'"]);
+  assert.deepEqual(on['style-src'], ["'self'", "'unsafe-inline'"]);
+  assert.deepEqual({ ...on, 'style-src': off['style-src'] }, off, 'флаг меняет одну директиву');
+  assert.ok(!viewCsp(true).replace("style-src 'self' 'unsafe-inline'", '').includes('unsafe-inline'), "'unsafe-inline' не попал в другую директиву");
+  assert.equal(viewCsp(true).split("'unsafe-inline'").length, 2, "'unsafe-inline' один раз");
+});
+
+test('CSP вида: фреймы закрыты (frame-src берётся из default-src \'none\'), сосед по группе в <iframe> не встраивается', () => {
+  const d = directives(viewCsp(true));
+  for (const name of ['frame-src', 'child-src', 'object-src', 'worker-src']) assert.equal(d[name], undefined, `${name} не задана: берётся из default-src или script-src`);
+  assert.deepEqual(d['default-src'], ["'none'"]);
+});
+
+test('заголовки ответа считаются на ответ: флаг плагина из PluginUi доходит до CSP оболочки, файла вида и файла ядра', () => {
+  const header = (url: string, csp?: Parameters<typeof viewHeaders>[2]) => {
+    const found = resolveViewRequest(url, uiOf);
+    assert.ok(found, url);
+    return viewHeaders(found, url, csp)['content-security-policy'];
+  };
+  for (const url of ['cyborg-plugin://carol/carol/', 'cyborg-plugin://carol/carol/ui/ui.js', 'cyborg-plugin://carol/carol/.cyborg/shell.js'])
+    assert.equal(header(url), viewCsp(true), `${url}: у carol флаг`);
+  for (const url of ['cyborg-plugin://panels/alice/', 'cyborg-plugin://panels/alice/ui/ui.js', 'cyborg-plugin://panels/bob/.cyborg/shell.css'])
+    assert.equal(header(url), viewCsp(false), `${url}: у соседей по группе без флага CSP строгая, флаг соседа её не смягчает`);
+  assert.equal(viewHeaders({ kind: 'file', file: '/x/index.html', type: 'text/html; charset=utf-8' }, 'cyborg-plugin://probe/')['content-security-policy'], viewCsp(false), 'статика спайка: без флага');
+  assert.equal(viewHeaders({ kind: 'shell', html: '' }, 'cyborg-plugin://panels/alice/')['content-type'], 'text/html; charset=utf-8');
+  assert.equal(viewHeaders({ kind: 'core', name: 'shell.js', type: 'text/javascript; charset=utf-8' }, 'cyborg-plugin://panels/alice/.cyborg/shell.js')['content-type'], 'text/javascript; charset=utf-8');
+  // Настройка приложения (в playground - --view-csp= спайка PL-05) старше флага; функция получает флаг третьим параметром.
+  assert.equal(header('cyborg-plugin://carol/carol/', "default-src 'none'"), "default-src 'none'");
+  assert.equal(header('cyborg-plugin://carol/carol/', (id, group, inline) => `${String(id)} ${String(group)} ${String(inline)}`), 'carol carol true');
+  assert.equal(header('cyborg-plugin://panels/alice/', (id, group, inline) => `${String(id)} ${String(group)} ${String(inline)}`), 'alice panels false');
+});
+
+test('флаг inlineStyles доходит в PluginUi только как true: без него в ответе resolveViewRequest нет поля', () => {
+  assert.equal(resolveViewRequest('cyborg-plugin://carol/carol/', uiOf)?.inlineStyles, true);
+  assert.equal(resolveViewRequest('cyborg-plugin://panels/alice/', uiOf)?.inlineStyles, undefined);
+  assert.ok(!('inlineStyles' in (resolveViewRequest('cyborg-plugin://panels/alice/', uiOf) ?? {})));
+});
+
 test('CSP ответа: без настройки - строгая по умолчанию, строка - на все виды, функция - по плагину и группе из адреса', () => {
-  assert.equal(cspOf(undefined, 'cyborg-plugin://panels/alice/'), VIEW_CSP);
-  assert.equal(cspOf("default-src 'none'", 'cyborg-plugin://panels/alice/'), "default-src 'none'");
+  assert.equal(cspOf(undefined, 'cyborg-plugin://panels/alice/', false), VIEW_CSP);
+  assert.equal(cspOf(undefined, 'cyborg-plugin://carol/carol/', true), viewCsp(true));
+  assert.equal(cspOf("default-src 'none'", 'cyborg-plugin://panels/alice/', false), "default-src 'none'");
   const seen: (string | undefined)[] = [];
-  const csp = cspOf((id, group) => (seen.push(id, group), id === 'alice' ? 'для alice' : 'для остальных'), 'cyborg-plugin://panels/alice/x.js');
+  const csp = cspOf((id, group) => (seen.push(id, group), id === 'alice' ? 'для alice' : 'для остальных'), 'cyborg-plugin://panels/alice/x.js', false);
   assert.equal(csp, 'для alice');
-  assert.equal(cspOf((id) => String(id), 'file:///etc/passwd'), 'undefined', 'не вид плагина - плагина нет');
+  assert.equal(cspOf((id) => String(id), 'file:///etc/passwd', false), 'undefined', 'не вид плагина - плагина нет');
   assert.deepEqual(seen, ['alice', 'panels']);
 });

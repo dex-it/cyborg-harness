@@ -188,7 +188,25 @@ test('ui.group: имя группы в манифесте разбирается
   assert.deepEqual(uiErrors({ views: { a: './a.js' }, group: 7 }), [`ui.group: ${group}, получено 7`]);
   assert.deepEqual(uiErrors({ views: { a: './a.js' }, group: null }), [`ui.group: ${group}, получено null`]);
   assert.match(uiErrors({ group: 'panels' }).join(), /^ui: ожидается/, 'группа без видов и экрана замка - не ui');
-  assert.deepEqual(uiErrors({ views: { a: './a.js' }, groups: 'x' }), ['ui.groups: ядро знает только ui.views, ui.overlay и ui.group']);
+  assert.deepEqual(uiErrors({ views: { a: './a.js' }, groups: 'x' }), ['ui.groups: ядро знает только ui.views, ui.overlay, ui.group и ui.inlineStyles']);
+});
+
+// K-05: ui.inlineStyles - только true включает инлайн-стили вида; без поля, как и с false, поля в разборе нет.
+test('ui.inlineStyles: только булев true включает инлайн-стили вида, прочее - отказ с именем поля', () => {
+  const ok = parseManifest({ ...base, ui: { views: { main: './ui.js' }, inlineStyles: true } });
+  assert.ok(ok.ok);
+  assert.equal(ok.manifest.ui?.inlineStyles, true);
+  const off = parseManifest({ ...base, ui: { views: { main: './ui.js' }, inlineStyles: false } });
+  assert.ok(off.ok);
+  assert.equal(off.manifest.ui?.inlineStyles, undefined, 'false - то же, что без поля: в разборе его нет');
+  const without = parseManifest({ ...base, ui: { views: { main: './ui.js' } } });
+  assert.ok(without.ok);
+  assert.equal(without.manifest.ui?.inlineStyles, undefined, 'старая форма манифеста не получает новых полей');
+  const overlayOnly = parseManifest({ ...base, permissions: { 'ui.lock': true }, ui: { overlay: './lock.js', inlineStyles: true } });
+  assert.ok(overlayOnly.ok && overlayOnly.manifest.ui?.inlineStyles === true, 'экран замка тоже вид: флаг действует и на него');
+  for (const bad of ['true', 1, null, 'yes', {}])
+    assert.deepEqual(uiErrors({ views: { a: './a.js' }, inlineStyles: bad }), [`ui.inlineStyles: ожидается true или false, получено ${JSON.stringify(bad)}`], JSON.stringify(bad));
+  assert.deepEqual(uiErrors({ views: { a: './a.js' }, inlineStyle: true }), ['ui.inlineStyle: ядро знает только ui.views, ui.overlay, ui.group и ui.inlineStyles']);
 });
 
 test('документ: area и order типа; короткая запись прежняя, ошибка называет поле', () => {

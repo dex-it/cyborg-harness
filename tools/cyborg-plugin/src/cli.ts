@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { checkPlugin, formatProblem, type CheckOptions } from '@cyborg-harness/core/plugin-check';
 import { buildPlugin } from './build.ts';
+import { buildDelivery } from './delivery.ts';
 import { packPlugin } from './pack.ts';
 
 /** Куда команда пишет: итог и права - в `out`, нарушения - в `err`. */
@@ -13,8 +14,10 @@ const USAGE = [
   'Использование:',
   '  cyborg-plugin check [каталог] [--source] [--out <каталог>] [--api-version <x.y.z>] [--declarations <файл>]... [--declarations-package <имя>]...',
   '  cyborg-plugin build [каталог] [--out <каталог>] [--api-version <x.y.z>] [--declarations <файл>]... [--declarations-package <имя>]...',
+  '  cyborg-plugin delivery <каталог плагина>... --out <каталог> [--api-version <x.y.z>] [--declarations <файл>]... [--declarations-package <имя>]...',
   '  cyborg-plugin pack [каталог] [--out <файл>] [--api-version <x.y.z>] [--dry-run]',
   '  каталог                      check и build: каталог плагина с manifest.json (по умолчанию текущий); pack: собранный каталог (по умолчанию ./dist)',
+  '  delivery                     поставка приложения: каждый плагин собирается как build и ложится в <out>/<id>, рядом delivery.json с хешами файлов (P-07); --out обязателен',
   '  --source                     check: главная часть грузится как есть, без сборки, - npm-пакеты в ней нарушение (по умолчанию её соберёт build, и пакеты допустимы)',
   '  --out <каталог>              check и build: каталог результата сборки (по умолчанию <каталог>/dist); check не читает его как исходники',
   '  --out <файл>                 pack: файл архива (по умолчанию <id>-<версия>.tgz в текущем каталоге)',
@@ -25,16 +28,19 @@ const USAGE = [
   'Код возврата: 0 - нарушений нет, 1 - есть, 2 - неверный вызов.',
 ];
 
-type Command = 'check' | 'build' | 'pack';
+type Command = 'check' | 'build' | 'delivery' | 'pack';
 const VALUES: Readonly<Record<Command, readonly string[]>> = {
   check: ['--out', '--api-version', '--declarations', '--declarations-package'],
   build: ['--out', '--api-version', '--declarations', '--declarations-package'],
+  delivery: ['--out', '--api-version', '--declarations', '--declarations-package'],
   pack: ['--out', '--api-version'],
 };
-const SWITCHES: Readonly<Record<Command, readonly string[]>> = { check: ['--source'], build: [], pack: ['--dry-run'] };
+const SWITCHES: Readonly<Record<Command, readonly string[]>> = { check: ['--source'], build: [], delivery: [], pack: ['--dry-run'] };
 
 interface Parsed {
   readonly dir: string | undefined;
+  /** Все позиционные аргументы: у `delivery` их несколько. */
+  readonly dirs: readonly string[];
   readonly values: ReadonlyMap<string, readonly string[]>;
   readonly switches: ReadonlySet<string>;
 }
@@ -61,11 +67,11 @@ function parse(command: Command, args: readonly string[]): Parsed | string {
     if (value === undefined || value === '') return `${name}: нужно значение`;
     values.set(name, [...(values.get(name) ?? []), value]);
   }
-  if (dirs.length > 1) return 'каталог один';
+  if (dirs.length > 1 && command !== 'delivery') return 'каталог один';
   for (const name of ['--out', '--api-version']) {
     if ((values.get(name)?.length ?? 0) > 1) return `${name}: значение одно`;
   }
-  return { dir: dirs[0], values, switches };
+  return { dir: dirs[0], dirs, values, switches };
 }
 
 function checkOptions(parsed: Parsed): CheckOptions & { out?: string } {
@@ -114,6 +120,24 @@ async function runBuild(parsed: Parsed, io: CliIo): Promise<number> {
   return 0;
 }
 
+async function runDelivery(parsed: Parsed, io: CliIo): Promise<number> {
+  const out = parsed.values.get('--out')?.[0];
+  if (out === undefined || parsed.dirs.length === 0) {
+    io.err('cyborg-plugin: delivery: нужны каталоги плагинов и --out');
+    for (const line of USAGE) io.err(line);
+    return 2;
+  }
+  const report = await buildDelivery(parsed.dirs, { ...checkOptions(parsed), out });
+  for (const warning of report.warnings) io.err(`предупреждение: ${warning}`);
+  for (const problem of report.problems) io.err(formatProblem(problem));
+  if (!report.ok) {
+    io.err(`Нарушений: ${String(report.problems.length)}; поставка не собрана`);
+    return 1;
+  }
+  io.out(`Поставка: ${report.out} (плагинов: ${String(report.plugins.length)}) - ${report.plugins.join(', ')}`);
+  return 0;
+}
+
 async function runPack(parsed: Parsed, io: CliIo): Promise<number> {
   const out = parsed.values.get('--out')?.[0];
   const apiVersion = parsed.values.get('--api-version')?.[0];
@@ -129,10 +153,10 @@ async function runPack(parsed: Parsed, io: CliIo): Promise<number> {
   return 0;
 }
 
-/** Командная строка `cyborg-plugin`: `check`, `build`, `pack`. */
+/** Командная строка `cyborg-plugin`: `check`, `build`, `delivery`, `pack`. */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   const [command, ...rest] = argv;
-  const known = command === 'check' || command === 'build' || command === 'pack' ? command : undefined;
+  const known = command === 'check' || command === 'build' || command === 'delivery' || command === 'pack' ? command : undefined;
   const parsed = known === undefined ? (command === undefined ? 'нет команды' : `неизвестная команда ${command}`) : parse(known, rest);
   if (typeof parsed === 'string' || known === undefined) {
     io.err(`cyborg-plugin: ${typeof parsed === 'string' ? parsed : 'неверный вызов'}`);
@@ -141,5 +165,6 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
   if (known === 'check') return runCheck(parsed, io);
   if (known === 'build') return runBuild(parsed, io);
+  if (known === 'delivery') return runDelivery(parsed, io);
   return runPack(parsed, io);
 }

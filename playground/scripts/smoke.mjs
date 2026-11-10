@@ -1,6 +1,7 @@
 // Дымовой тест собранного playground по DevTools Protocol; нужен дисплей (на Linux - xvfb-run ... --no-sandbox).
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -377,6 +378,105 @@ async function main() {
   assert.equal(await ev(`document.querySelector('#plugins-list [data-plugin="echo"] .plugin-group') === null`), true, 'у плагина в своей группе метка группы');
   assert.ok(lines().some((l) => l.includes('"pluginId":"built-dep","kind":"group-isolated","group":"duo","renderGroup":"built-dep"')), 'нет записи group-isolated у built-dep');
   log('группы рендера: alice и bob в одном процессе рендера, echo и built-dep в своих; подмена адреса вне группы отклонена; предупреждение у стороннего');
+
+  // K-05: закрытая CSP вида и флаг ui.inlineStyles. echo, alice и bob флага не объявили, sessions и editor объявили (xterm и Monaco).
+  const viewCspHeader = (id) => inView(id, 'fetch(location.href).then((r) => r.headers.get("content-security-policy"))');
+  const STRICT = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'";
+  const WITH_INLINE = STRICT.replace("style-src 'self'", "style-src 'self' 'unsafe-inline'");
+  for (const id of ['echo', 'alice', 'bob']) assert.equal(await viewCspHeader(id), STRICT, `${id}: CSP вида без флага не строгая`);
+  for (const id of ['sessions', 'editor']) assert.equal(await viewCspHeader(id), WITH_INLINE, `${id}: с флагом CSP не несёт инлайн-стилей`);
+  assert.equal(await viewCspHeader('built-dep'), STRICT, 'сторонний плагин без флага: строгая CSP');
+  // Инлайн-стиль: <style> и атрибут style в разметке без флага не применяются, с флагом - применяются; запись через CSSOM CSP не касается.
+  const inlineStyle = (id) =>
+    inView(id, `(() => {
+      const box = document.createElement('div');
+      document.body.append(box);
+      const sheet = document.createElement('style');
+      sheet.textContent = 'div.k05-probe { margin-left: 7px; }';
+      box.className = 'k05-probe';
+      document.head.append(sheet);
+      const byElement = getComputedStyle(box).marginLeft;
+      sheet.remove();
+      box.setAttribute('style', 'margin-left: 9px');
+      const byAttribute = getComputedStyle(box).marginLeft;
+      box.removeAttribute('style');
+      box.style.marginLeft = '11px';
+      const byCssom = getComputedStyle(box).marginLeft;
+      box.remove();
+      return JSON.stringify({ byElement, byAttribute, byCssom });
+    })()`);
+  assert.deepEqual(JSON.parse(await inlineStyle('echo')), { byElement: '0px', byAttribute: '0px', byCssom: '11px' }, 'вид без флага применил инлайн-стиль');
+  assert.deepEqual(JSON.parse(await inlineStyle('alice')), { byElement: '0px', byAttribute: '0px', byCssom: '11px' }, 'вид без флага применил инлайн-стиль');
+  assert.deepEqual(JSON.parse(await inlineStyle('sessions')), { byElement: '7px', byAttribute: '9px', byCssom: '11px' }, 'вид с флагом не применил инлайн-стиль');
+  // Встроенный скрипт не выполняется ни с флагом, ни без.
+  for (const id of ['echo', 'sessions'])
+    assert.equal(await inView(id, "(() => { const s = document.createElement('script'); s.textContent = 'window.k05Inline = 1'; document.head.append(s); s.remove(); return typeof window.k05Inline; })()"), 'undefined', `${id}: встроенный скрипт выполнился`);
+  // Запросы наружу и на чужой origin блокирует CSP, а не сеть: на стороне сервера ни одного запроса.
+  let outside = 0;
+  const server = createServer((_request, response) => {
+    outside++;
+    response.writeHead(200, { 'access-control-allow-origin': '*' }).end('x');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const outsideUrl = `http://127.0.0.1:${server.address().port}/k05`;
+  const reach = (id, url) =>
+    inView(id, `(async () => {
+      const seen = [];
+      document.addEventListener('securitypolicyviolation', (e) => seen.push(e.effectiveDirective));
+      const result = await fetch(${JSON.stringify(url)}, { mode: 'no-cors' }).then(() => 'ушёл', (e) => e.name);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      return JSON.stringify({ result, seen });
+    })()`);
+  try {
+    for (const id of ['echo', 'sessions']) {
+      assert.deepEqual(JSON.parse(await reach(id, outsideUrl)), { result: 'TypeError', seen: ['connect-src'] }, `${id}: запрос в сеть не заблокирован CSP`);
+      assert.deepEqual(JSON.parse(await reach(id, 'cyborg-plugin://duo/alice/ui/ui.js')), { result: 'TypeError', seen: ['connect-src'] }, `${id}: запрос на origin чужой группы не заблокирован CSP`);
+    }
+    assert.equal(
+      await inView('echo', `new Promise((resolve) => { const i = new Image(); i.onerror = () => resolve('блок'); i.onload = () => resolve('загрузилась'); i.src = ${JSON.stringify(outsideUrl)}; })`),
+      'блок',
+      'картинка из сети загрузилась',
+    );
+    assert.equal(await inView('echo', 'fetch(location.href).then((r) => r.status)'), 200, 'свой origin вид читает');
+    await sleep(300);
+    assert.equal(outside, 0, 'запрос вида дошёл до сервера снаружи');
+  } finally {
+    server.close();
+  }
+  // Сосед по группе в <iframe> не встраивается: frame-src берётся из default-src 'none'. Но CSP по плагину границей внутри группы не является (K-04, #150):
+  // кадры группы делят origin, и вид читает и меняет документ соседа через parent.frames - граница доверия группа, а не CSP плагина.
+  assert.deepEqual(
+    JSON.parse(
+      await inView('alice', `(async () => {
+        const seen = [];
+        document.addEventListener('securitypolicyviolation', (e) => seen.push(e.effectiveDirective));
+        const frame = document.createElement('iframe');
+        frame.src = '/bob/?view=main';
+        document.body.append(frame);
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        const embedded = (() => { try { return frame.contentWindow.location.pathname === '/bob/'; } catch { return false; } })();
+        frame.remove();
+        return JSON.stringify({ seen, embedded });
+      })()`),
+    ),
+    { seen: ['frame-src'], embedded: false },
+    'вид встроил соседа по группе в <iframe>',
+  );
+  const neighbour = JSON.parse(
+    await inView('alice', `(() => {
+      const names = [];
+      for (let i = 0; i < parent.length; i++) {
+        try { names.push(parent.frames[i].location.pathname); } catch { names.push('закрыт'); }
+      }
+      const bob = [...Array(parent.length).keys()].map((i) => parent.frames[i]).find((w) => { try { return w.location.pathname === '/bob/'; } catch { return false; } });
+      const title = bob?.document.title;
+      return JSON.stringify({ names, title, echoHidden: names.includes('/echo/') });
+    })()`),
+  );
+  assert.equal(neighbour.title, 'bob: main', 'вид alice не дотянулся до документа соседа bob: группа не граница?');
+  assert.ok(neighbour.names.includes('/bob/') && neighbour.names.includes('закрыт'), `кадры окна: ${neighbour.names.join(', ')}`);
+  assert.equal(neighbour.echoHidden, false, 'вид группы duo дотянулся до echo из другой группы');
+  log('K-05: CSP вида default-src \'none\' на ответе, инлайн-стили только у sessions и editor, встроенный скрипт и запросы наружу и на чужой origin заблокированы, сосед по группе не встраивается, но его документ из группы доступен');
 
   assert.match(await viewVar('alice', '--cy-scheme'), /^(light|dark)$/, 'токены темы не дошли до вида');
   // Тема рабочего стола бывает тёмной: без шага через светлую смена на dark не случится, и onChange не позовётся.
@@ -768,7 +868,7 @@ async function main() {
   await ev("document.getElementById('tab-plugins').click()");
 
   // Элементы ядра: оболочка определила их до mount; клавиши шлём в тень, как их шлёт браузер с фокусом там.
-  const kit = await inView('sessions', `(() => {
+  const kit = await inView('echo', `(() => {
     const seen = [];
     const box = document.createElement('div');
     document.body.append(box);
@@ -800,7 +900,7 @@ async function main() {
     defined: true,
     selected: ['b', 'x', 'two'],
   });
-  log('элементы ядра: определены до mount, стили под CSP вида, клавиши и события списка, дерева и вкладок, disabled у кнопки');
+  log('элементы ядра (вид echo без флага инлайн-стилей): определены до mount, стили под CSP вида, клавиши и события списка, дерева и вкладок, disabled у кнопки');
 
   const docRows = () => ev("[...document.querySelectorAll('#documents-list .document-row')].map((r) => r.querySelector('.document-owner').textContent + ':' + r.dataset.available).join(',')");
   await waitFor('вкладка сессии в панели «Документы»', async () => (await docRows()) === 'sessions · session:true');
