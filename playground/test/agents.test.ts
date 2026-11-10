@@ -30,9 +30,18 @@ async function agentEnv(box: Sandbox): Promise<{ home: string; env: Record<strin
   return { home: box.root, env: { PATH: `${bin}:/usr/bin:/bin`, HOME: box.root, SHELL: shell } };
 }
 
+interface ChannelMessage {
+  readonly ticket: string;
+  readonly actions: readonly { label: string; text: string; submit?: boolean }[];
+  readonly ready: boolean;
+  readonly ended?: boolean;
+}
+
 /** Настоящие модули плагинов в ядре; probe - потребитель, через которого тест зовёт контракт; claude - скрипт в PATH. */
 async function setup(store?: LayerStore, extra: readonly string[] = [], rogue?: InlinePlugin) {
   const box = await sandbox('cyborg-agents-');
+  // Что главная часть sessions послала своему виду main (K-13): сообщения канала, как их получило бы окно.
+  const sent: { readonly pluginId: string; readonly view: string; readonly message: unknown }[] = [];
   const os = await agentEnv(box);
   let probe: PluginContext | undefined;
   const probePlugin: InlinePlugin = {
@@ -45,7 +54,7 @@ async function setup(store?: LayerStore, extra: readonly string[] = [], rogue?: 
     os,
     ...(store && { state: store }),
     // Как в приложении: поставка - плагины каталога, пространство cyborg.* закрыто всем остальным (K-15).
-    ...(rogue && { load: { bundled: ids, reservedPrefixes: ['cyborg.'] } }),
+    load: { onViewMessage: (pluginId, view, message) => void sent.push({ pluginId, view, message }), ...(rogue && { bundled: ids, reservedPrefixes: ['cyborg.'] }) },
   });
   // С rogue его судьбу проверяет сам тест: упавший здесь setup не дал бы увидеть, что доходит до агента.
   assert.deepEqual(k.active.filter((id) => id !== 'rogue').toSorted(), [...ids, 'probe'].toSorted(), JSON.stringify(k.journal.filter((e) => e.kind === 'failed')));
@@ -56,8 +65,13 @@ async function setup(store?: LayerStore, extra: readonly string[] = [], rogue?: 
     assert.ok(p, `${id} не отдаёт cyborg.agent`);
     return p.impl;
   };
+  /** Сообщения канала sessions -> вид main про один билет, по порядку отправки. */
+  const channel = (ticket: string): ChannelMessage[] =>
+    sent.filter((m) => m.pluginId === 'sessions' && m.view === 'main' && (m.message as ChannelMessage).ticket === ticket).map((m) => m.message as ChannelMessage);
   return {
     k,
+    sent,
+    channel,
     backend: k.pty,
     agent,
     root: box.root,
@@ -286,7 +300,7 @@ interface Rpc {
   body: { result?: Record<string, unknown>; error?: { code: number } } | undefined;
 }
 
-test('sessions + next-actions: агент зовёт инструмент по MCP, вид получает кнопки долгим опросом', async () => {
+test('sessions + next-actions: агент зовёт инструмент по MCP, вид получает кнопки по каналу', async () => {
   await using s = await setup(undefined, ['next-actions']);
   const ticket = (await s.k.run('sessions.new', 'agent-claude-code')) as string;
   const proc = s.backend.procs.at(-1)!;
@@ -316,30 +330,46 @@ test('sessions + next-actions: агент зовёт инструмент по M
   const listed = (await rpc('tools/list', {})).body?.result?.tools as { name: string }[];
   assert.deepEqual(listed.map((t) => t.name), ['suggest_actions']);
 
-  assert.deepEqual(await s.k.run('sessions.actions', ticket, -1), { version: 0, actions: [], ready: false });
-  const waiting = s.k.run('sessions.actions', ticket, 0);
+  // Виду сразу уходит исходное состояние билета: сообщения канала не копятся, а вид мог открыться позже.
+  assert.deepEqual(s.channel(ticket), [{ ticket, actions: [], ready: false }]);
   const call = await rpc('tools/call', {
     name: 'suggest_actions',
     arguments: { actions: [{ label: 'Слей', text: 'слей\u001b[2J', submit: true }, { label: 'x'.repeat(60), text: 'поправь тест' }, { label: '', text: 'без подписи' }] },
   });
   assert.equal(call.body?.result?.isError, false);
-  assert.deepEqual(await waiting, { version: 1, actions: [{ label: 'Слей', text: 'слей [2J', submit: true }, { label: 'x'.repeat(40), text: 'поправь тест' }], ready: false }, 'ожидание проснулось; управляющие символы и длина срезаны');
+  assert.deepEqual(
+    s.channel(ticket).at(-1),
+    { ticket, actions: [{ label: 'Слей', text: 'слей [2J', submit: true }, { label: 'x'.repeat(40), text: 'поправь тест' }], ready: false },
+    'кнопки пришли по каналу без опроса; управляющие символы и длина срезаны',
+  );
+  assert.equal(s.channel(ticket).length, 2);
   assert.equal((await rpc('tools/call', { name: 'nope', arguments: {} })).body?.error?.code, -32602);
   const bad = await rpc('tools/call', { name: 'suggest_actions', arguments: {} });
   assert.equal(bad.body?.result?.isError, true, 'ошибка инструмента - ответ агенту, кнопки прежние');
-  assert.equal(((await s.k.run('sessions.actions', ticket, -1)) as { version: number }).version, 1);
+  assert.equal(s.channel(ticket).length, 2, 'отказ ничего не послал виду');
 
   // Человек ответил сам: хук UserPromptSubmit снимает прежние предложения.
   await new Promise((r) => setTimeout(r, 300));
   await appendFile(proc.options.env.CYBORG_EVENTS!, `${JSON.stringify({ hook_event_name: 'UserPromptSubmit' })}\n`);
-  await waitFor('кнопки сняты новым запросом', async () => ((await s.k.run('sessions.actions', ticket, -1)) as { actions: unknown[] }).actions.length === 0);
+  await waitFor('кнопки сняты', () => s.channel(ticket).at(-1)?.actions.length === 0 && s.channel(ticket).length === 3);
 
-  const last = s.k.run('sessions.actions', ticket, 2);
   proc.exit(0);
-  assert.equal(await last, null, 'выход сессии будит ожидание, и опрос кончается');
-  assert.equal(await s.k.run('sessions.actions', ticket, 2), null);
+  await waitFor('выход сессии сообщён виду', () => s.channel(ticket).at(-1)?.ended === true);
+  assert.deepEqual(s.channel(ticket).at(-1), { ticket, actions: [], ready: false, ended: true });
   assert.equal((await rpc('ping', {})).status, 401, 'токен вышедшей сессии не действует');
   await waitFor('ended убрал конфиг с токеном', () => stat(configFile).then(() => false, () => true));
+  assert.ok(s.sent.every((m) => m.pluginId === 'sessions' && m.view === 'main'), 'канал только к виду main самого sessions');
+});
+
+test('sessions: опроса нет - команды sessions.actions и ACTIONS_WAIT_MS удалены, вид кнопок не опрашивает', async () => {
+  const manifest = manifestOf('sessions') as { commands: Record<string, unknown> };
+  assert.ok(!('sessions.actions' in manifest.commands));
+  for (const file of ['index.ts', 'ui/ui.ts']) {
+    const code = readFileSync(path.join(PLUGINS, 'sessions', file), 'utf8');
+    assert.ok(!code.includes('sessions.actions') && !code.includes('ACTIONS_WAIT_MS'), `${file}: след долгого опроса`);
+  }
+  await using s = await setup();
+  await assert.rejects(s.k.run('sessions.actions', 'билет', -1), { code: 'CommandNotFound' });
 });
 
 test('sessions: агент ждёт новой реплики - после конца хода без фоновой работы и до начала нового; вопрос агента это снимает', () => {
@@ -362,22 +392,21 @@ test('sessions: агент ждёт новой реплики - после ко�
   assert.deepEqual(run([{ type: 'turnEnd', background: true }, asks]), [false, false], 'фоновая работа: агент может спросить сам');
 });
 
-test('sessions: готовность агента приходит виду с кнопками и будит долгий опрос', async () => {
+test('sessions: готовность агента приходит виду по каналу вместе с кнопками', async () => {
   await using s = await setup(undefined, ['next-actions']);
   const ticket = (await s.k.run('sessions.new', 'agent-claude-code')) as string;
   const events = s.backend.procs.at(-1)!.options.env.CYBORG_EVENTS!;
   const hook = (event: Record<string, unknown>) => appendFile(events, `${JSON.stringify(event)}\n`);
-  const ready = async (since: number) => (await s.k.run('sessions.actions', ticket, since)) as { version: number; ready: boolean };
-  const start = await ready(-1);
-  assert.equal(start.ready, false);
+  const ready = () => s.channel(ticket).at(-1)?.ready;
+  assert.equal(ready(), false);
   // Подписка на файл событий начинается с его конца: строка до неё не дойдёт.
   await new Promise((r) => setTimeout(r, 300));
-  const woke = ready(start.version);
   await hook({ hook_event_name: 'Stop' });
-  assert.deepEqual(await woke, { version: start.version + 1, actions: [], ready: true });
+  await waitFor('конец хода сообщён виду', () => ready() === true);
+  assert.deepEqual(s.channel(ticket).at(-1), { ticket, actions: [], ready: true });
   await hook({ hook_event_name: 'PostToolUse', tool_name: 'Bash' });
   await hook({ hook_event_name: 'Notification', notification_type: 'permission_prompt' });
-  await waitFor('вопрос агента снял готовность', async () => !(await ready(-1)).ready);
+  await waitFor('вопрос агента снял готовность', () => ready() === false);
 });
 
 test('сторонний плагин: текст и инструменты агенту (cyborg.session-prompt, cyborg.agent-tool) отклонены, в промпт и tools/list сервера cyborg не попадают', async () => {

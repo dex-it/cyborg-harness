@@ -25,6 +25,8 @@ export interface ResourceLimits {
   readonly subscriptions: number;
   /** Слушателей `onIdle` у плагина. */
   readonly idleWatchers: number;
+  /** Байт одного сообщения канала «главная часть - вид» в любую сторону (размер по `v8.serialize`); больше - `Invalid`. */
+  readonly viewMessage: number;
   /** Байт UTF-8 в строке `ctx.log` и в строке вывода хоста; длиннее обрезается с пометкой (FR-CH-4018). */
   readonly logLineBytes: number;
   /** Строк плагина за интервал `logWindowMs`; сверх этого строки в журнал по одной не идут, а в конце интервала пишется одна сводная запись `log-summary`. */
@@ -51,6 +53,7 @@ export const LIMITS: ResourceLimits = {
   readText: 8 * 1024 * 1024,
   subscriptions: 256,
   idleWatchers: 64,
+  viewMessage: 64 * 1024,
   // Числа предложены нормой (SRS фичи 04, вопрос 10), владелец их не принял: меняются здесь одной строкой.
   logLineBytes: 8 * 1024,
   logRate: 100,

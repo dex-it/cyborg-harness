@@ -119,6 +119,8 @@ export interface WindowApi {
   onWindowCommand(listener: (command: string) => void): void;
   setViewVisible(id: string, view: string, visible: boolean): Promise<void>;
   answerDialog(id: number, choice: string | undefined): Promise<Reply>;
+  /** Человек закрыл модальное окно плагина в самом окне. */
+  cancelModal(id: number): Promise<Reply>;
   closeDocument(id: string): Promise<Reply>;
   openWorkspace(file?: string): Promise<Reply>;
   /** Воркспейс из «Недавних» в отдельном процессе с тем же `userData`; текущее окно остаётся (K-20). */

@@ -11,7 +11,7 @@ const MAX_DENIED_URL = 200;
 /** Публичный `Kernel`: тонкий слой над частями, без своего состояния. */
 export function buildKernel(ctx: KernelContext): Kernel {
   const { parts, keys, active, layer, documents, gateway, known } = ctx;
-  const { pool, lifecycle, activation, contracts, commands, keyRegistry, sections, views, menus } = parts;
+  const { pool, lifecycle, activation, contracts, commands, keyRegistry, sections, views, viewChannels, menus } = parts;
   /** Вызов моста вида (Г2): операция трассы от имени вида плагина `pluginId`; `target` - что вид просит (`bridge:view.state`, `contract:...`). */
   const bridge = <T>(pluginId: string, target: string, args: unknown, fn: (op: OpHandle) => T): T =>
     ctx.trace.run({ caller: `view:${pluginId}`, target, boundaries: ['bridge'] }, (op) => {
@@ -58,6 +58,10 @@ export function buildKernel(ctx: KernelContext): Kernel {
         return layer.show(pluginId, view, spec);
       }),
     answerDialog: (id, choice) => layer.answer(id, choice),
+    modalFor: (pluginId, view) => bridge(pluginId, 'bridge:view.modal', view, () => layer.modalData(pluginId, view)),
+    closeModal: (pluginId, view, result) => bridge(pluginId, 'bridge:view.modal.close', result, () => viewChannels.closeModal(pluginId, view, result)),
+    cancelModal: (id) => layer.cancelModal(id),
+    dismissModal: () => layer.dismissModal(),
     viewDenied(pluginId, url) {
       if (!known.some((m) => m.id === pluginId)) return;
       const shown = url.length > MAX_DENIED_URL ? `${url.slice(0, MAX_DENIED_URL)}…` : url;
@@ -70,6 +74,7 @@ export function buildKernel(ctx: KernelContext): Kernel {
     endKeptPty: (id) => gateway.endKeptPty(id),
     viewState: (pluginId, view) => bridge(pluginId, 'bridge:view.state', view, () => views.viewState(pluginId, view)),
     setViewState: (pluginId, view, value) => bridge(pluginId, 'bridge:view.state.set', value, () => views.setViewState(pluginId, view, value)),
+    viewPost: (pluginId, view, message) => bridge(pluginId, 'bridge:view.post', message, () => viewChannels.fromView(pluginId, view, message)),
     emit: (event) => pool.emit(event),
     beforeQuit: (budget = 3000) => pool.beforeQuit(budget),
     disable: (pluginId, options) => lifecycle.disable(pluginId, options),

@@ -182,6 +182,8 @@ export interface LoadOptions {
   readonly windowTitle?: WindowTitle | undefined;
   /** Диалог на экране, очередь и замки поменялись: приложение перерисовывает слой окна. */
   readonly onWindow?: ((snapshot: WindowSnapshot) => void) | undefined;
+  /** Главная часть плагина послала сообщение виду `view` (`ctx.views.channel(view).post`): приложение отдаёт его открытым видам этого плагина с этим именем и никому больше. */
+  readonly onViewMessage?: ((pluginId: string, view: string, message: unknown) => void) | undefined;
   /** Документ открыт, переименован или закрыт: приложение перерисовывает вкладки по `kernel.documents`. */
   readonly onDocuments?: (() => void) | undefined;
   /** Снимок `Kernel.menus` поменялся после чтения источников состояния или смены состояния плагинов: приложение пересобирает меню ОС. */
@@ -280,6 +282,11 @@ export interface Kernel {
   viewState(pluginId: string, view: string): unknown;
   /** JSON до 64 КБ, undefined - забыть; записи идут по очереди, чтобы параллельные не затёрли друг друга. */
   setViewState(pluginId: string, view: string, value: unknown): Promise<void>;
+  /**
+   * Сообщение вида своей главной части (`ctx.channel.post`): доходит до слушателей `ctx.views.channel(view).onMessage`. Вида нет в манифесте - `Invalid`,
+   * сообщение больше `limits.viewMessage` - `Invalid`, не данные - `NotCloneable`. Ленивая главная часть просыпается; не работающая - `Unavailable`.
+   */
+  viewPost(pluginId: string, view: string, message: unknown): Promise<void>;
   /** Слой окна сейчас: диалог на экране и замки. */
   readonly window: WindowSnapshot;
   /** Открытые документы в порядке окна; `available: false` - владелец не работает, вкладка ждёт его. */
@@ -288,6 +295,14 @@ export interface Kernel {
   closeDocument(id: string): Promise<void>;
   /** Диалог вида; ответ - id пункта или undefined. Описание проверяется здесь, окно получает разобранную копию. */
   showDialog(pluginId: string, view: string, spec: unknown): Promise<string | undefined>;
+  /** Данные модального окна, показанного именно этому виду этого плагина (`ctx.modal.data`); чужому виду, другому плагину и когда окна нет - `undefined`. */
+  modalFor(pluginId: string, view: string): { readonly data: unknown } | undefined;
+  /** Вид закрывает своё модальное окно и отдаёт результат владельцу (`ctx.modal.close`); не его окно или окна нет - `NotFound`, результат больше `limits.viewMessage` - `Invalid`. */
+  closeModal(pluginId: string, view: string, result: unknown): void;
+  /** Человек закрыл окно в самом окне (крестик, клик мимо): владелец получает undefined; id не того окна, что на экране, - `NotFound`. */
+  cancelModal(id: number): void;
+  /** Escape в главном процессе: закрывает модальное окно, если поверх него нет диалога; `false` - нажатие окну не принадлежит. */
+  dismissModal(): boolean;
   /** Ответ человека на диалог `window.dialog`. */
   answerDialog(id: number, choice: string | undefined): void;
   /** Окно не пустило вид плагина на чужой адрес: запись `denied` в журнал плагина, повторы склеиваются. */

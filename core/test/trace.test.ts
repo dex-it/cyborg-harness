@@ -462,3 +462,33 @@ test('onTrace бросил: операция идёт как шла, ядро о
   assert.ok(calls >= 2, 'приёмник звался на каждую запись');
   assert.deepEqual(r.logs.filter((l) => l.includes('onTrace')), ['хост трасса: onTrace бросил, записи трассы могут теряться: приёмник упал']);
 });
+
+test('мост вида (K-13): канал, модальное окно и его данные и закрытие - по записи Г2 от имени вида; обращение главной части к виду выходит на мост (FR-CH-4001)', async () => {
+  const r = await rig(
+    { v: { activate: (ctx) => void ctx.commands.register('v.form', () => ctx.views.modal('form', { title: 'Форма', data: { имя: 'черновик' } })) } },
+    [manifest('v', { commands: { 'v.form': {} }, ui: { views: { form: { module: './form.js', area: 'modal', title: 'Форма' }, main: './ui.js' } } })],
+    { bundled: ['v'], os: { dataDir: '/nonexistent/d', tempDir: '/nonexistent/t' } },
+  );
+  r.take();
+  const result = r.k.run('v.form');
+  for (let i = 0; i < 200 && r.k.window.modal === undefined; i++) await sleep(5);
+  assert.ok(r.k.window.modal, 'модальное окно показано');
+
+  r.k.modalFor('v', 'form');
+  await r.k.viewPost('v', 'main', 'привет');
+  r.k.closeModal('v', 'form', { имя: 'Проект' });
+  assert.deepEqual(await result, { имя: 'Проект' });
+  await sleep(20);
+
+  const ops = r.take();
+  const byTarget = (target: string) => ops.filter((x) => x.target === target);
+  for (const target of ['bridge:view.modal', 'bridge:view.post', 'bridge:view.modal.close']) {
+    const [op, ...rest] = byTarget(target);
+    assert.equal(rest.length, 0, `${target}: одна запись`);
+    assert.deepEqual([op!.caller, op!.boundaries, op!.outcome], ['view:v', ['bridge'], 'ok'], target);
+  }
+  const [modal] = byTarget('bridge:views.modal');
+  assert.deepEqual([modal!.caller, modal!.hostId, modal!.boundaries, modal!.outcome], ['plugin:v', 'builtin', ['host', 'bridge'], 'ok'], 'ctx.views.modal: Г1 и мост, запись кончается закрытием окна');
+  const [command] = byTarget('command:v.form');
+  assert.equal(modal!.chain, command!.chain, 'окно открыла команда: одна цепочка');
+});

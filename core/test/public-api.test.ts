@@ -130,6 +130,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'SecretStore',
       'ShowNotice',
       'ShownDialog',
+      'ShownModal',
       'SpawnHost',
       'SpawnPtyHost',
       'StateSource',
@@ -160,7 +161,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
   },
   './plugin-check': { source: 'src/index-plugin-check.ts', values: ['CHECKED_KEYS', 'ENTRY_FILES', 'checkPlugin', 'formatProblem', 'isTestPath'], types: ['CheckOptions', 'CheckReport', 'FileRef', 'ImportRules', 'Problem'] },
   './delivery': { source: 'src/index-delivery.ts', values: ['DELIVERY_FILE', 'readDelivery', 'verifyDelivery', 'writeDelivery'], types: ['DeliveryManifest'] },
-  './window': { source: 'src/index-window.ts', values: ['WINDOW_OWNER'], types: ['Area', 'DisablePreview', 'DocumentRow', 'LayoutEntry', 'ShownDialog', 'WindowLock', 'WindowSnapshot', 'WindowTitle'] },
+  './window': { source: 'src/index-window.ts', values: ['WINDOW_OWNER'], types: ['Area', 'DisablePreview', 'DocumentRow', 'LayoutEntry', 'ShownDialog', 'ShownModal', 'WindowLock', 'WindowSnapshot', 'WindowTitle'] },
   './elements': { source: 'elements/elements.ts', values: ['defineElements'], types: [] },
 };
 

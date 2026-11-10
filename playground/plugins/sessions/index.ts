@@ -1,15 +1,10 @@
 import type { AgentEvent, AgentToolsEndpoint, PluginContext, PluginModule, PtyHandle, SessionAction } from '@cyborg-harness/contracts';
 import { MCP_PATH, mcpHandler } from './mcp.ts';
 
-// Вид спрашивает снова сразу после ответа: ожидание короче, чем человек замечает задержку закрытого вида.
-export const ACTIONS_WAIT_MS = 20_000;
-
 interface Actions {
-  version: number;
   list: readonly SessionAction[];
   ready: boolean;
   turnOver: boolean;
-  readonly waiters: Set<() => void>;
 }
 
 /** Агент ждёт новой реплики: ход кончился, и с тех пор агент ничего не начал. */
@@ -77,20 +72,23 @@ const plugin: PluginModule = {
       return texts.filter((t) => t.trim() !== '');
     };
 
-    // Билет вида называет сессию: по нему вид спрашивает кнопки, которые предложил её агент.
-    const byTicket = new Map<string, string>();
+    // Билет вида называет сессию: по нему вид отличает кнопки, которые предложил агент этой сессии, от чужих.
+    const tickets = new Map<string, string>();
     const actions = new Map<string, Actions>();
     const tokens = new Map<string, string>();
-    const changed = (a: Actions) => {
-      a.version++;
-      for (const wake of a.waiters) wake();
-      a.waiters.clear();
+    // Кнопки и готовность агента уходят виду по каналу сразу, как изменились: вид не опрашивает (K-13).
+    const channel = ctx.views.channel('main');
+    const send = (message: Record<string, unknown>) => void channel.post(message).catch((e: unknown) => ctx.log(`канал к виду: ${String(e)}`));
+    const publish = (sessionId: string) => {
+      const ticket = tickets.get(sessionId);
+      const a = actions.get(sessionId);
+      if (ticket !== undefined && a) send({ ticket, actions: a.list, ready: a.ready });
     };
     const setActions = (sessionId: string, list: readonly SessionAction[]) => {
       const a = actions.get(sessionId);
       if (!a || (a.list.length === 0 && list.length === 0)) return;
       a.list = list;
-      changed(a);
+      publish(sessionId);
     };
     const onEvent = (sessionId: string, e: AgentEvent) => {
       const a = actions.get(sessionId);
@@ -99,7 +97,7 @@ const plugin: PluginModule = {
       a.turnOver = e.type === 'turnEnd' && !e.background;
       if (ready === a.ready) return;
       a.ready = ready;
-      changed(a);
+      publish(sessionId);
     };
     const toolSources = () => ctx.contracts.all('cyborg.agent-tool', 1);
     let server: Promise<string> | undefined;
@@ -134,11 +132,13 @@ const plugin: PluginModule = {
       const tools = await endpoint(sessionId);
       const forget = () => {
         if (tools) tokens.delete(tools.token);
-        const a = actions.get(sessionId);
         actions.delete(sessionId);
-        for (const wake of a?.waiters ?? []) wake();
+        // Сессия кончилась: вид снимает кнопки и забывает билет.
+        const ticket = tickets.get(sessionId);
+        tickets.delete(sessionId);
+        if (ticket !== undefined) send({ ticket, actions: [], ready: false, ended: true });
       };
-      actions.set(sessionId, { version: 0, list: [], ready: false, turnOver: false, waiters: new Set() });
+      actions.set(sessionId, { list: [], ready: false, turnOver: false });
       let handle: PtyHandle;
       try {
         const spec = await provider.impl.launch({ sessionId, cwd: ctx.os.paths.data, ...(resume !== undefined && { resumeId: resume }), ...(promptFragments.length > 0 && { promptFragments }), ...(tools && { tools }) });
@@ -164,7 +164,6 @@ const plugin: PluginModule = {
         : undefined;
       handle.onExit((exit) => {
         if (live.get(doc) === handle) live.delete(doc);
-        for (const [t, id] of byTicket) if (id === sessionId) byTicket.delete(t);
         forget();
         void watch?.then((s) => s.dispose());
         void provider.impl.ended(sessionId, exit).then(
@@ -174,8 +173,11 @@ const plugin: PluginModule = {
       });
       ctx.log(`${facts.title}: сессия ${sessionId}, pid ${String(handle.pid)}`);
       const ticket = await handle.share();
-      // Сессия могла выйти, пока выдавался билет: тогда спрашивать по нему нечего.
-      if (actions.has(sessionId)) byTicket.set(ticket, sessionId);
+      // Сессия могла выйти, пока выдавался билет: тогда сообщать по нему нечего. Что накопилось до билета, уходит виду теперь.
+      if (actions.has(sessionId)) {
+        tickets.set(sessionId, ticket);
+        publish(sessionId);
+      }
       return ticket;
     };
 
@@ -187,27 +189,6 @@ const plugin: PluginModule = {
       if (!doc) throw new Error(`документа ${String(id)} нет`);
       if (live.has(doc.id)) throw new Error(`${doc.title}: сессия уже идёт`);
       return launch(field(doc.data, 'agent'), doc.id, field(doc.data, 'resumeId'));
-    });
-    // Долгий опрос: вид не получает толчков от плагина и ждёт здесь смены версии или срока.
-    ctx.commands.register('sessions.actions', async (ticket, since) => {
-      const sessionId = byTicket.get(String(ticket)) ?? '';
-      const a = actions.get(sessionId);
-      // null - сессии нет: вид прекращает опрос, а не крутит его вхолостую.
-      if (!a) return null;
-      if (a.version === since) {
-        await new Promise<void>((resolve) => {
-          const timer = setTimeout(() => {
-            a.waiters.delete(wake);
-            resolve();
-          }, ACTIONS_WAIT_MS);
-          const wake = () => {
-            clearTimeout(timer);
-            resolve();
-          };
-          a.waiters.add(wake);
-        });
-      }
-      return actions.get(sessionId) === a ? { version: a.version, actions: a.list, ready: a.ready } : null;
     });
     // Человек закрыл вкладку в окне: сессии за ней больше не на что показываться.
     ctx.documents.onClose((id) => {
