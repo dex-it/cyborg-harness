@@ -1,7 +1,7 @@
 // Замер K-04: память при десяти видах, десять разных групп рендера против одной общей. Нужен собранный playground и дисплей (на Linux - xvfb-run ... --no-sandbox).
 //   node playground/scripts/spike-groups.mjs [--json] [--no-sandbox] [--runs=3]
 // Десять плагинов с одним видом каждый кладутся в playground/dist/plugins (поставка, сторонний общую группу не получает) и убираются в конце; в «общей» группе их собирает plugins.uiGroups.
-// Виды идут настоящим путём: протокол cyborg-plugin://<группа>/<плагин>/, оболочка, мост. Результат - таблица (docs/04-verification/spike-render-groups.md) или JSON.
+// Виды идут настоящим путём: протокол cyborg-plugin://<группа>/<плагин>/, оболочка, мост. Результат - таблица (docs/05-verification/spike-render-groups.md) или JSON.
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pssKb } from '../src/main/proc-memory.ts';
