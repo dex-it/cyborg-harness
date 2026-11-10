@@ -100,7 +100,7 @@ test('хук вернул undefined или его нет: файл не трон
 test('plugins: воркспейс перекрывает enabled пользователя, группы хостов сливаются; нет файла - пустой новый', async () => {
   await using box = await sandbox();
   const fresh = await open(box);
-  assert.deepEqual(fresh.plugins, { enabled: [], hosts: {}, keybindings: [] });
+  assert.deepEqual(fresh.plugins, { enabled: [], hosts: {}, uiGroups: {}, keybindings: [] });
   assert.deepEqual(await json(box.file), { cyborg: 2, plugins: {}, settings: {} });
   fresh.close();
   await rm(box.file);
@@ -108,8 +108,49 @@ test('plugins: воркспейс перекрывает enabled пользов�
   await mkdir(path.dirname(box.userFile), { recursive: true });
   await writeFile(box.userFile, JSON.stringify({ plugins: { enabled: ['a'], hosts: { one: ['a'] }, keybindings: [{ key: 'F2', command: 'a.go' }] } }));
   const ws = await open(box);
-  assert.deepEqual(ws.plugins, { enabled: ['b'], hosts: { one: ['a'], two: ['b'] }, keybindings: [{ key: 'F2', command: 'a.go' }, { key: 'F2', command: null }] });
+  assert.deepEqual(ws.plugins, { enabled: ['b'], hosts: { one: ['a'], two: ['b'] }, uiGroups: {}, keybindings: [{ key: 'F2', command: 'a.go' }, { key: 'F2', command: null }] });
   ws.close();
+});
+
+// K-04: plugins.uiGroups - группа рендера -> плагины; группа рендера делит мост плагинов, поэтому читается только из слоя пользователя (ADR-CH-0015, п. 5).
+test('plugins.uiGroups: действуют группы пользователя, поле файла воркспейса не действует и называется в problems', async () => {
+  await using box = await sandbox();
+  await writeFile(box.file, JSON.stringify({ cyborg: 2, plugins: { uiGroups: { panels: ['b', 'c'], solo: ['d'] } } }));
+  await mkdir(path.dirname(box.userFile), { recursive: true });
+  await writeFile(box.userFile, JSON.stringify({ plugins: { uiGroups: { panels: ['a'], extra: ['e', 7] } } }));
+  const ws = await open(box);
+  assert.deepEqual(ws.plugins.uiGroups, { panels: ['a'], extra: ['e'] });
+  assert.deepEqual(ws.plugins.hosts, {}, 'группы рендера не смешиваются с группами хостов');
+  assert.deepEqual(ws.problems.map((p) => p.replace(box.root, '')), [
+    '/user/cyborg.json: plugins.uiGroups.extra[1]: ожидается id плагина (строка), получено 7',
+    '/team.cyborg.json: plugins.uiGroups: группы рендера берутся только из файла пользователя, поле воркспейса не действует',
+  ]);
+  ws.close();
+});
+
+test('plugins.uiGroups: ошибки называют поле и файл пользователя, годное остаётся', async () => {
+  await using box = await sandbox();
+  await mkdir(path.dirname(box.userFile), { recursive: true });
+  await writeFile(
+    box.userFile,
+    JSON.stringify({ plugins: { uiGroups: { 'Bad Name': ['a'], list: 'a', ok: ['a', 'b'], 'http:80': ['c'], dup: ['a'], null: null } } }),
+  );
+  const ws = await open(box);
+  assert.deepEqual(ws.plugins.uiGroups, { ok: ['a', 'b'], dup: [] });
+  const rel = ws.problems.map((p) => p.replace(box.root, ''));
+  assert.deepEqual(rel, [
+    '/user/cyborg.json: plugins.uiGroups.Bad Name: ожидается имя группы: строчные латинские буквы, цифры и дефис, части через точку, получено "Bad Name"',
+    '/user/cyborg.json: plugins.uiGroups.list: ожидается список id плагинов, получено "a"',
+    '/user/cyborg.json: plugins.uiGroups.http:80: ожидается имя группы: строчные латинские буквы, цифры и дефис, части через точку, получено "http:80"',
+    '/user/cyborg.json: plugins.uiGroups.dup: плагин a уже назван в группе ok - действует первая',
+    '/user/cyborg.json: plugins.uiGroups.null: ожидается список id плагинов, получено null',
+  ]);
+  ws.close();
+  await writeFile(box.userFile, JSON.stringify({ plugins: { uiGroups: ['a'] } }));
+  const bad = await open(box);
+  assert.deepEqual(bad.plugins.uiGroups, {});
+  assert.deepEqual(bad.problems.map((p) => p.replace(box.root, '')), ['/user/cyborg.json: plugins.uiGroups: ожидается объект «группа -> список id плагинов», получено ["a"]']);
+  bad.close();
 });
 
 test('правка файла извне доходит до ctx.config.onChange; не прошедшая проверку - запись в журнале, значение прежнее; своя запись не будит', async (t) => {
@@ -202,7 +243,7 @@ test('битый файл пользователя не роняет откры�
   const ws = await open(box);
   assert.equal(ws.problems.length, 1);
   assert.match(ws.problems[0] ?? '', /cyborg\.json/);
-  assert.deepEqual(ws.plugins, { enabled: [], hosts: {}, keybindings: [] });
+  assert.deepEqual(ws.plugins, { enabled: [], hosts: {}, uiGroups: {}, keybindings: [] });
   await assert.rejects(ws.config.write('user', 'x', 1, { a: 1 }));
   assert.equal(await readFile(box.userFile, 'utf8'), '{ "plugins": ');
   ws.close();

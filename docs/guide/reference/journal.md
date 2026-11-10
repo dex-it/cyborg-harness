@@ -30,6 +30,7 @@ description: "Записи журнала плагинов: когда ядро 
 | `pty-expired` | предупреждение | Терминал без владельца не взят через `attach` за льготное время и завершён: после падения хоста или после активации плагина, в том числе вернувшегося к оставленным человеком процессам | `id`, `program`, `graceMs` |
 | `key-conflict` | предупреждение | Сочетание уже занято другим плагином | `key`, `command`, `winner` |
 | `host-isolated` | предупреждение | Сторонний плагин назван в группе, но получил отдельный хост | `group`, `hostId` |
+| `group-isolated` | предупреждение | Сторонний плагин назван в группе рендера с другими (`reason: 'third-party'`): плагин получил свою группу (`renderGroup` - его id, origin его видов - `solo_<id>`) | `group`, `renderGroup`, `reason` |
 | `third-party` | предупреждение | Загружен плагин не из поставки: на первом этапе это плагин из каталога пользователя, включённого флагом `--user-plugins`. Код не проверен; запись состояния не меняет. Пишется, только когда приложение передало ядру список поставки `bundled` | - |
 | `host-own-grouped` | предупреждение | Плагин поставки просит `"host": "own"`, а группа `plugins.hosts` сажает его к соседям: действует группа | `group`, `neighbours` |
 
@@ -75,7 +76,7 @@ description: "Записи журнала плагинов: когда ядро 
 
 ## Состояние плагина по журналу
 
-Состояние вычисляется по последней записи жизненного цикла. Записи `key-conflict`, `key-ignored`, `denied`, `deprecated-call`, `unhandled-rejection`, `pty-expired`, `host-isolated`, `host-own-grouped`, `third-party` и `log-summary` о работе плагина ничего не говорят и состояние не меняют: они приходят и после снятия плагина, но запись снятия не перекрывают. По той же последней записи жизненного цикла зависимого `enable` поставщика решает, поднимать ли его: поднимается зависимый, снятый вместе с этим поставщиком (`unloaded` с `by` поставщика), или пропущенный (`skipped`).
+Состояние вычисляется по последней записи жизненного цикла. Записи `key-conflict`, `key-ignored`, `denied`, `deprecated-call`, `unhandled-rejection`, `pty-expired`, `host-isolated`, `group-isolated`, `host-own-grouped`, `third-party` и `log-summary` о работе плагина ничего не говорят и состояние не меняют: они приходят и после снятия плагина, но запись снятия не перекрывают. По той же последней записи жизненного цикла зависимого `enable` поставщика решает, поднимать ли его: поднимается зависимый, снятый вместе с этим поставщиком (`unloaded` с `by` поставщика), или пропущенный (`skipped`).
 
 | Запись | Состояние | «Включить снова» |
 |---|---|---|
@@ -90,7 +91,7 @@ description: "Записи журнала плагинов: когда ядро 
 ## Уровни
 
 - **инфо:** `activated`, `waiting`, `disabled`, `revived`, `host-restart`; `unloaded`, `deactivated` и `uninstalled` без ошибки.
-- **предупреждение:** `denied`, `key-conflict`, `key-ignored`, `safe-mode`, `skipped`, `unhandled-rejection`, `pty-expired`, `host-down`, `host-isolated`, `host-own-grouped`, `third-party`, `log-summary`; `unloaded` и `deactivated` с ошибкой.
+- **предупреждение:** `denied`, `key-conflict`, `key-ignored`, `safe-mode`, `skipped`, `unhandled-rejection`, `pty-expired`, `host-down`, `host-isolated`, `group-isolated`, `host-own-grouped`, `third-party`, `log-summary`; `unloaded` и `deactivated` с ошибкой.
 - **ошибка:** все остальные, а также `config` и `state`, если статус не `ok`, и `uninstalled` с `error`.
 
 ## Дальше

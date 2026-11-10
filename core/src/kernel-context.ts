@@ -247,6 +247,7 @@ export interface KernelContext {
   readonly wire: { readonly manifests: readonly PluginManifest[]; readonly bindings: readonly (readonly [string, readonly (readonly [string, string])[]])[] };
   readonly manifestOf: (pluginId: string) => PluginManifest;
   readonly hostOf: (pluginId: string) => string | undefined;
+  readonly groupOf: (pluginId: string) => string | undefined;
   readonly keys: ReadonlyMap<string, Keybinding>;
   /** Активные сейчас, в порядке активации. */
   readonly active: string[];

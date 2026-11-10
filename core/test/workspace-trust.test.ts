@@ -140,6 +140,37 @@ test('plugins.hosts из файла воркспейса: сторонний п�
   }
 });
 
+test('plugins.uiGroups из файла воркспейса: присланный файл не сажает плагины поставки в одну группу рендера, группа пользователя действует', async () => {
+  await using box = await sandbox();
+  const wsFile = path.join(box.root, 'ws', 'workspace.cyborg.json');
+  const userFile = path.join(box.root, 'user', 'cyborg.json');
+  const view = { ui: { views: { main: './ui.js' } } };
+  // Воркспейс команды сводит в группу w плагин, что рендерит чужие данные (a), и плагин с сильным мостом (lock): XSS в первом получил бы мост второго.
+  await writeFile(wsFile, JSON.stringify({ cyborg: 2, plugins: { enabled: ['a', 'lock', 'x'], uiGroups: { w: ['a', 'lock', 'x'] } } }));
+  await writeFile(userFile, JSON.stringify({ cyborg: 2, plugins: { uiGroups: { u: ['x'] } } }));
+  const opened = await openWorkspace({ file: wsFile, userFile, stateDir: path.join(box.root, 'state') });
+  assert.ok(opened.ok);
+  const ws = opened.workspace;
+  try {
+    const k = await load({
+      apiVersion: PLUGIN_API_VERSION,
+      spawnHost: inlineHosts(async () => ({ activate: () => undefined })),
+      enabled: ws.plugins.enabled,
+      manifests: ['a', 'lock', 'x'].map((id) => manifest(id, view)),
+      bundled: ['a', 'lock', 'x'],
+      uiGroups: ws.plugins.uiGroups,
+      config: ws.config,
+      state: ws.state,
+    });
+    assert.deepEqual([k.groupOf('a'), k.groupOf('lock')], ['a', 'lock'], 'группа воркспейса не объединила плагины');
+    assert.equal(k.groupOf('x'), 'u', 'плагин, названный в двух слоях, получает группу пользователя');
+    assert.ok(ws.problems.some((p) => p.includes('plugins.uiGroups') && p.includes('только из файла пользователя')));
+    await k.unload();
+  } finally {
+    ws.close();
+  }
+});
+
 test('файлы на диске: baseUrl в settings воркспейса хоста не даёт, в settings пользователя даёт', async () => {
   await using box = await sandbox();
   const wsFile = path.join(box.root, 'ws', 'workspace.cyborg.json');

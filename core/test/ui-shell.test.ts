@@ -107,7 +107,7 @@ test('манифест ui.views: путь модуля только вниз о�
     assert.ok(errorsOf({ views: { main: bad } }).some((e) => e.startsWith('ui.views.main:')), bad);
   assert.ok(errorsOf({ views: { Main: './ui.js' } }).some((e) => e.startsWith('ui.views.Main:')));
   assert.ok(errorsOf({ views: {} }).includes('ui.views: нет ни одного вида'));
-  assert.ok(errorsOf({ popup: './pop.js', views: { main: './ui.js' } }).includes('ui.popup: ядро знает только ui.views и ui.overlay'));
+  assert.ok(errorsOf({ popup: './pop.js', views: { main: './ui.js' } }).includes('ui.popup: ядро знает только ui.views, ui.overlay и ui.group'));
   assert.ok(errorsOf('./ui.js').some((e) => e.startsWith('ui:')));
 });
 

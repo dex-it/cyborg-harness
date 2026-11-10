@@ -22,6 +22,7 @@ export function buildKernel(ctx: KernelContext): Kernel {
       return buildLayout(known, (id) => (ctx.graph.rejected.has(id) ? 'out-of-graph' : !ctx.byId.has(id) ? 'not-enabled' : switchedOff.has(id) || userOff.has(id) ? 'disabled' : undefined));
     },
     hostOf: ctx.hostOf,
+    groupOf: ctx.groupOf,
     get keybindings() {
       return keyRegistry.rows();
     },

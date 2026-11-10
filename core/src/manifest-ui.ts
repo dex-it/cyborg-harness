@@ -1,4 +1,4 @@
-import { show, VIEW_NAME } from './manifest-fields.ts';
+import { isValidId, show, VIEW_NAME } from './manifest-fields.ts';
 import { readPlace, readTitle, type Placement } from './manifest-layout.ts';
 import { isRecord } from './wire.ts';
 
@@ -21,13 +21,22 @@ function readViewObject(name: string, raw: Record<string, unknown>, views: Recor
   if (Object.keys(place).length > 0) placement[name] = place;
 }
 
-export function readUi(raw: unknown, errors: string[]): { views: Record<string, string>; placement?: Record<string, Placement>; overlay?: string } | undefined {
+const GROUP_HINT = 'ожидается имя группы: строчные латинские буквы, цифры и дефис, части через точку';
+
+/** Имя группы рендера становится хостом адреса вида (`cyborg-plugin://<группа>/`), поэтому грамматика та же, что у id плагина. */
+export function readGroup(where: string, value: unknown, errors: string[]): string | undefined {
+  if (typeof value === 'string' && isValidId(value)) return value;
+  errors.push(`${where}: ${GROUP_HINT}, получено ${show(value)}`);
+  return undefined;
+}
+
+export function readUi(raw: unknown, errors: string[]): { views: Record<string, string>; placement?: Record<string, Placement>; overlay?: string; group?: string } | undefined {
   if (raw === undefined) return undefined;
   if (!isRecord(raw) || (raw.views !== undefined && !isRecord(raw.views)) || (raw.views === undefined && raw.overlay === undefined)) {
     errors.push('ui: ожидается { "views": { "<вид>": "./<модуль>.js" } } и/или { "overlay": "./<модуль>.js" }');
     return undefined;
   }
-  for (const key of Object.keys(raw)) if (key !== 'views' && key !== 'overlay') errors.push(`ui.${key}: ядро знает только ui.views и ui.overlay`);
+  for (const key of Object.keys(raw)) if (key !== 'views' && key !== 'overlay' && key !== 'group') errors.push(`ui.${key}: ядро знает только ui.views, ui.overlay и ui.group`);
   const views: Record<string, string> = {};
   const placement: Record<string, Placement> = {};
   const rawViews = isRecord(raw.views) ? raw.views : {};
@@ -40,7 +49,8 @@ export function readUi(raw: unknown, errors: string[]): { views: Record<string, 
     else views[name] = entry;
   }
   if (raw.views !== undefined && Object.keys(rawViews).length === 0) errors.push('ui.views: нет ни одного вида');
-  const base = { views, ...(Object.keys(placement).length > 0 && { placement }) };
+  const group = Object.hasOwn(raw, 'group') ? readGroup('ui.group', raw.group, errors) : undefined;
+  const base = { views, ...(Object.keys(placement).length > 0 && { placement }), ...(group !== undefined && { group }) };
   if (raw.overlay === undefined) return base;
   if (!isEntry(raw.overlay)) {
     errors.push(`ui.overlay: ${ENTRY_HINT}, получено ${show(raw.overlay)}`);
