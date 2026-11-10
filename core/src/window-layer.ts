@@ -1,6 +1,6 @@
 // Слой окна (SAD §3.8): диалоги видов и модальные окна плагинов поверх всех фреймов и замок окна. Состояние держит ядро, рисует приложение.
 
-import type { DialogChoice, DialogSpec } from '@cyborg-harness/contracts';
+import type { DialogChoice, DialogSpec, ModalInit, ModalSize } from '@cyborg-harness/contracts';
 import { CoreError } from './errors.ts';
 import { isRecord } from './wire.ts';
 
@@ -48,6 +48,10 @@ export interface ShownModal {
   readonly pluginId: string;
   readonly view: string;
   readonly title: string;
+  /** Размер, который попросил автор; чего нет, то решает приложение. */
+  readonly size?: ModalSize;
+  /** `"view"` - Escape принадлежит виду окна; поля нет - Escape закрывает окно. */
+  readonly escape?: 'view';
 }
 
 export interface WindowLock {
@@ -156,7 +160,7 @@ export class WindowLayer {
     const modal = this.#modal;
     return {
       ...(shown && { dialog: { id: shown.id, pluginId: shown.pluginId, view: shown.view, spec: shown.spec } }),
-      ...(modal && { modal: { id: modal.id, pluginId: modal.pluginId, view: modal.view, title: modal.title } }),
+      ...(modal && { modal: { id: modal.id, pluginId: modal.pluginId, view: modal.view, title: modal.title, ...(modal.size && { size: modal.size }), ...(modal.escape && { escape: modal.escape }) } }),
       title: this.title,
       queued: this.#queue.length + this.#modals.length,
       locks: [...this.#locks.values()],
@@ -202,11 +206,11 @@ export class WindowLayer {
   }
 
   /** Окна идут по одному в порядке просьб; `result` - то, что вид отдал в `closeModal`, а Escape, закрытие окна и выгрузка плагина дают undefined. */
-  showModal(pluginId: string, view: string, title: string, data: unknown): { readonly id: number; readonly result: Promise<unknown> } {
+  showModal(pluginId: string, view: string, title: string, data: unknown, options: Pick<ModalInit, 'size' | 'escape'> = {}): { readonly id: number; readonly result: Promise<unknown> } {
     if ([this.#modal, ...this.#modals].filter((m) => m?.pluginId === pluginId).length >= MAX_PENDING) throw new CoreError('Invalid', `${pluginId}: больше ${String(MAX_PENDING)} модальных окон в очереди`);
     const id = ++this.#seq;
     const result = new Promise<unknown>((resolve) => {
-      this.#modals.push({ id, pluginId, view, title, data, resolve });
+      this.#modals.push({ id, pluginId, view, title, data, ...(options.size && { size: options.size }), ...(options.escape === 'view' && { escape: 'view' as const }), resolve });
     });
     this.#next();
     return { id, result };
@@ -236,10 +240,10 @@ export class WindowLayer {
     this.#next(true);
   }
 
-  /** Escape: закрывает модальное окно, если поверх него нет диалога (Escape тогда принадлежит диалогу); `false` - закрывать нечего. */
+  /** Escape: закрывает модальное окно, если поверх него нет диалога (Escape тогда принадлежит диалогу) и автор не оставил Escape виду; `false` - закрывать нечего или нажатие не наше. */
   dismissModal(): boolean {
     const modal = this.#modal;
-    if (!modal || this.#shown) return false;
+    if (!modal || this.#shown || modal.escape === 'view') return false;
     this.cancelModal(modal.id);
     return true;
   }
