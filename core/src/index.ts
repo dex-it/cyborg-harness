@@ -4,6 +4,7 @@ export { PLUGIN_API_VERSION } from './api-version.ts';
 export { SectionStore } from './config.ts';
 export { CoreError } from './errors.ts';
 export { appendBounded } from './journal.ts';
+export { claimInstance } from './instance.ts';
 export { keyOfInput } from './keys.ts';
 export { load } from './loader.ts';
 export { parseManifest } from './manifest.ts';
@@ -16,10 +17,11 @@ export { describeEntry, entryLevel, entryPlugins, pluginStatuses } from './statu
 export { forkHosts, inlineHosts } from './transports.ts';
 export { MENU_NAMES } from './manifest-menus.ts';
 export { MENU_OWNER, WINDOW_OWNER } from './window-layer.ts';
-export { openWorkspace } from './workspace.ts';
+export { openWorkspace, withFileLock, workspaceKey } from './workspace.ts';
 
 export type { Layer, LayerStore, SectionHandle, SectionResult, SectionSpec } from './config.ts';
 export type { Disposable } from './disposable.ts';
+export type { Claim, InstanceOptions } from './instance.ts';
 export type { DocumentRow } from './documents.ts';
 export type { CoreErrorCode } from './errors.ts';
 export type { ContractGraph, Rejection } from './graph.ts';
@@ -45,4 +47,4 @@ export type { ContractImpl, ContractRegistry, Provider } from './registry.ts';
 export type { PluginState, PluginStatus } from './status.ts';
 export type { HostHandle, SpawnHost } from './transports.ts';
 export type { ShownDialog, WindowLock, WindowSnapshot, WindowTitle } from './window-layer.ts';
-export type { MigrateWorkspace, Migrated, OpenResult, PluginsList, Workspace, WorkspaceOptions } from './workspace.ts';
+export type { FileLockOptions, MigrateWorkspace, Migrated, OpenResult, PluginsList, Workspace, WorkspaceOptions } from './workspace.ts';

@@ -19,6 +19,8 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
   '.': {
     source: 'src/index.ts',
     values: [
+      'DEFAULT_RESTART_FLAGS',
+      'NO_WORKSPACE_KEY',
       'PluginsService',
       'USER_PLUGINS_FLAG',
       'VIEW_CSP',
@@ -30,6 +32,9 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'electronOs',
       'framesOf',
       'guardNavigation',
+      'instanceKey',
+      'isolateSession',
+      'newWindowArgs',
       'quitAfterPlugins',
       'registerViewChannels',
       'registerViewScheme',
@@ -38,6 +43,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'resolveViewRequest',
       'restarts',
       'serveViews',
+      'sessionDataDir',
       'showWindow',
       'singleInstance',
       'startPlugins',
@@ -49,6 +55,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'windowChannel',
       'windowEvents',
       'workspaceInfo',
+      'workspaceInstance',
     ],
     types: [
       'AppMenuItem',

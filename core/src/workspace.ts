@@ -11,12 +11,44 @@ import type { UserKeybinding } from './kernel-types.ts';
 export const CONFIG_FORMAT = 2;
 
 /** Запись через временный файл и rename: оборванная запись не оставляет полупустой файл. */
-export function writeJsonAtomic(file: string, data: unknown): void {
+export function writeJsonAtomic(file: string, data: unknown, mode?: number): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   // pid в имени: два экземпляра приложения не делят временный файл.
   const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n');
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', mode === undefined ? undefined : { mode });
   fs.renameSync(tmp, file);
+}
+
+export interface FileLockOptions {
+  /** Сколько ждать чужой замок, мс; по умолчанию 10 с. */
+  readonly timeoutMs?: number;
+  /** Через сколько мс замок записи считается брошенным и забирается даже при живом pid; по умолчанию как `timeoutMs`. */
+  readonly staleMs?: number;
+}
+
+/**
+ * Замок записи общего файла (`<файл>.write.lock` с pid): чтение, правка и запись внутри `run` не перемежаются с такими же у другого процесса.
+ * Для файлов `userData`, которые пишут несколько экземпляров приложения: «Недавние», слой пользователя, секреты. `run` синхронный и короткий,
+ * замок умершего процесса забирается; живого не дождались за `timeoutMs` - ошибка, а не запись поверх. Замок старше `timeoutMs` по mtime тоже
+ * забирается, даже если его pid жив: тело `run` короткое, а после сбоя посреди записи или перезагрузки этот pid занят чужим процессом.
+ */
+export function withFileLock<T>(file: string, run: () => T, options: FileLockOptions = {}): T {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const deadline = Date.now() + timeoutMs;
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    const lock = lockWorkspace(`${file}.write`, process.pid, options.staleMs ?? timeoutMs);
+    if (lock.ok) {
+      try {
+        return run();
+      } finally {
+        lock.release();
+      }
+    }
+    if (Date.now() >= deadline) throw new Error(`${file}: замок записи ${lock.owner > 0 ? `держит pid ${String(lock.owner)}` : 'то снимают, то берут другие процессы'}, не дождались`);
+    Atomics.wait(pause, 0, 0, 5);
+  }
 }
 
 /** Нет файла - undefined; битый файл - ошибка: его нельзя молча считать пустым и перезаписать. */
@@ -94,21 +126,25 @@ const alive = (pid: number) => {
   }
 };
 
-/** Замок `<файл>.lock` с pid владельца; замок умершего процесса забирается. */
-export function lockWorkspace(file: string, pid = process.pid): LockResult {
+/**
+ * Замок `<файл>.lock` с pid владельца; замок умершего процесса забирается. `maxAgeMs` - для коротких замков записи: замок старше срока
+ * забирается и при живом pid (долгий замок воркспейса его не задаёт). При `ok: false` `owner` 0 значит, что назвать владельца не удалось.
+ */
+export function lockWorkspace(file: string, pid = process.pid, maxAgeMs?: number): LockResult {
   const lock = `${file}.lock`;
   // Замок появляется сразу с pid: файл, созданный пустым и дописанный потом, сосед успел бы счесть протухшим и снять.
   const draft = `${lock}.${randomBytes(8).toString('hex')}`;
   fs.writeFileSync(draft, JSON.stringify({ pid }));
   try {
-    return takeLock(lock, draft, pid);
+    return takeLock(lock, draft, pid, maxAgeMs);
   } finally {
     fs.rmSync(draft, { force: true });
   }
 }
 
-function takeLock(lock: string, draft: string, pid: number): LockResult {
-  for (let attempt = 0; attempt < 2; attempt++) {
+function takeLock(lock: string, draft: string, pid: number, maxAgeMs: number | undefined): LockResult {
+  // Попыток больше двух: при гонке нескольких процессов замок успевают снять и взять между чтением и повтором.
+  for (let attempt = 0; attempt < 50; attempt++) {
     try {
       fs.linkSync(draft, lock);
       let held = true;
@@ -127,16 +163,75 @@ function takeLock(lock: string, draft: string, pid: number): LockResult {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     }
-    let owner: unknown;
+    let text: string;
     try {
-      owner = readJson(lock)?.pid;
-    } catch {
-      owner = undefined;
+      text = fs.readFileSync(lock, 'utf8');
+    } catch (error) {
+      // Замок сняли между попыткой и чтением: снимать нечего, а удалять - значит снять замок, который успел взять сосед.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
     }
-    if (typeof owner === 'number' && owner !== pid && alive(owner)) return { ok: false, owner };
-    fs.rmSync(lock, { force: true });
+    const owner = ownerOf(text);
+    if (owner !== undefined && owner !== pid && alive(owner) && !expired(lock, maxAgeMs)) return { ok: false, owner };
+    reclaim(lock, draft, owner, pid, maxAgeMs);
   }
-  throw new Error(`${lock}: замок не взят`);
+  // Замок всё время то снимают, то берут другие: он занят, хотя назвать владельца за эти попытки не удалось (pid 0).
+  return { ok: false, owner: 0 };
+}
+
+/** Замок старше срока: его mtime - время создания (ссылка на черновик). Нет файла - не просрочен, решает следующая попытка. */
+const expired = (lock: string, maxAgeMs: number | undefined): boolean => {
+  if (maxAgeMs === undefined) return false;
+  try {
+    return Date.now() - fs.statSync(lock).mtimeMs >= maxAgeMs;
+  } catch {
+    return false;
+  }
+};
+
+const ownerOf = (text: string): number | undefined => {
+  try {
+    const pid: unknown = (JSON.parse(text) as { pid?: unknown } | null)?.pid;
+    return typeof pid === 'number' ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Снимает замок мёртвого владельца. Снимать может только тот, кто держит охранный файл `<замок>.reclaim` (создаётся так же, как сам замок,
+ * ссылкой на черновик): пока он у нас, замок не сменит никто, кроме нас, и повторная проверка перед удалением надёжна. Без охраны два
+ * процесса, увидевшие один и тот же мёртвый замок, снимали бы замок друг друга: первый уже взял свой, второй удалил его как «мёртвый».
+ * Охрана живого соседа - ждём (вернёмся в цикл), охрана мёртвого - её удаляем.
+ */
+function reclaim(lock: string, draft: string, expected: number | undefined, mine: number, maxAgeMs: number | undefined): void {
+  const guard = `${lock}.reclaim`;
+  try {
+    fs.linkSync(draft, guard);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    let holder: number | undefined;
+    try {
+      holder = ownerOf(fs.readFileSync(guard, 'utf8'));
+    } catch {
+      return;
+    }
+    if (holder !== undefined && alive(holder)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+    else fs.rmSync(guard, { force: true });
+    return;
+  }
+  try {
+    let text: string | undefined;
+    try {
+      text = fs.readFileSync(lock, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    // Замок за это время мог смениться: снимаем только тот, который видели мёртвым (или просроченным, если владелец жив).
+    if (text !== undefined && ownerOf(text) === expected && (expected === undefined || !alive(expected) || expected === mine || expired(lock, maxAgeMs))) fs.rmSync(lock, { force: true });
+  } finally {
+    fs.rmSync(guard, { force: true });
+  }
 }
 
 /** Итог переноса старого формата приложения: ядро пишет его само, хук только переводит документ. */
@@ -306,6 +401,28 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
       }
     };
     let opening = true;
+    /** `next` получает слой, прочитанный в момент записи (под замком для общего слоя пользователя); `undefined` - писать нечего. */
+    const persist = async <T = void>(layer: Layer, next: (current: Record<string, unknown>) => { document: Record<string, unknown> | undefined; result: T }): Promise<T> => {
+      const target = layers[layer];
+      if (!target) throw new Error(`слоя ${layer} нет`);
+      const f = layer === 'user' ? options.userFile : file;
+      const write = (): T => {
+        let before: string | undefined;
+        try {
+          before = fs.readFileSync(f, 'utf8');
+        } catch {
+          before = undefined;
+        }
+        const { document, result } = next(target.load() ?? {});
+        if (document === undefined) return result;
+        target.save(document);
+        // Неподхваченная правка извне вошла в запись: файл не помечается своим, и слежение сообщит о ней разделам.
+        if (before === written.get(f)) remember(f);
+        return result;
+      };
+      // Слой воркспейса держит один процесс (замок воркспейса); пользовательский файл общий.
+      return layer === 'user' ? withFileLock(f, write) : write();
+    };
     const configStore: LayerStore = {
       load: async (layer) => {
         try {
@@ -316,20 +433,15 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
           throw error;
         }
       },
-      save: async (layer, settings) => {
-        const target = layers[layer];
-        if (!target) throw new Error(`слоя ${layer} нет`);
-        const f = layer === 'user' ? options.userFile : file;
-        let before: string | undefined;
-        try {
-          before = fs.readFileSync(f, 'utf8');
-        } catch {
-          before = undefined;
-        }
-        target.save(settings);
-        // Неподхваченная правка извне вошла в запись: файл не помечается своим, и слежение сообщит о ней разделам.
-        if (before === written.get(f)) remember(f);
-      },
+      save: (layer, settings) => persist(layer, () => ({ document: settings, result: undefined })),
+      // Слой пользователя общий для всех окон `userData`: раздел кладётся в файл, прочитанный под замком в момент записи.
+      update: (layer, id, section) => persist(layer, (current) => ({ document: { ...current, [id]: section }, result: undefined })),
+      // Тем же путём стирается раздел: без этого `load` без замка и `save` потеряли бы раздел, записанный соседом между ними.
+      remove: (layer, id) =>
+        persist(layer, (current) => {
+          const { [id]: gone, ...rest } = current;
+          return gone === undefined ? { document: undefined, result: false } : { document: rest, result: true };
+        }),
     };
     const stateStore: LayerStore = {
       load: async () => (opening ? tolerant(stateFile) : readJson(stateFile)),

@@ -121,5 +121,7 @@ export interface WindowApi {
   answerDialog(id: number, choice: string | undefined): Promise<Reply>;
   closeDocument(id: string): Promise<Reply>;
   openWorkspace(file?: string): Promise<Reply>;
+  /** Воркспейс из «Недавних» в отдельном процессе с тем же `userData`; текущее окно остаётся (K-20). */
+  openWorkspaceInNewWindow(file: string): Promise<Reply>;
   setSafeMode(on: boolean): Promise<Reply>;
 }
