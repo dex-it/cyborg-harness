@@ -10,7 +10,7 @@ import type { PluginContext, PluginOs } from '@cyborg-harness/contracts';
 import { SectionStore, type LayerStore } from '../src/config.ts';
 import { load as loadKernel, type Kernel, type LoadOptions } from '../src/loader.ts';
 import { trackKernels } from './kernels.ts';
-import { parseManifest } from '../src/manifest.ts';
+import { parseManifest, type PluginManifest } from '../src/manifest.ts';
 import { describePermissions, envNameAllowed } from '../src/permissions.ts';
 import type { NoticeEvents } from '../src/notices.ts';
 import { memorySecrets } from '../../testing/src/memory.ts';
@@ -1238,6 +1238,21 @@ test('uninstall, шлюз: eraseSecrets стирает ключи <id>/ даже
   assert.equal(await gateway.eraseSecrets('jira'), 2);
   assert.deepEqual([...store.map.keys()].sort(), ['jira.sub/token', 'jira2/token', 'other/jira/token']);
   assert.equal(await gatewayFor({ dataDir: box.data, tempDir: box.temp }).eraseSecrets('jira'), 0, 'хранилища нет - стирать нечего');
+});
+
+test('uninstall, шлюз: eraseSecrets забывает запомненные значения секретов плагина (для вычёркивания из строк), delete и перезапись ключа - нет', async () => {
+  await using box = await sandbox();
+  const gateway = gatewayFor({ dataDir: box.data, tempDir: box.temp, secrets: memorySecrets() });
+  const call = (id: string, method: string, ...args: unknown[]) => gateway.call({ id } as PluginManifest, method, args, new AbortController().signal);
+  await call('jira', 'secrets.set', 'token', 'old-value');
+  await call('jira', 'secrets.set', 'token', 'new-value');
+  await call('jira', 'secrets.set', 'gone', 'deleted-value');
+  await call('jira', 'secrets.delete', 'gone');
+  await call('jira2', 'secrets.set', 'token', 'jira2-value');
+  assert.deepEqual(gateway.secretValues(['jira']), ['old-value', 'new-value', 'deleted-value'], 'перезапись и delete значение не забывают');
+  assert.equal(await gateway.eraseSecrets('jira'), 1);
+  assert.deepEqual(gateway.secretValues(['jira']), [], 'uninstall забывает значения плагина');
+  assert.deepEqual(gateway.secretValues(['jira2']), ['jira2-value'], 'значения соседа целы');
 });
 
 test('uninstall, шлюз: eraseGrants убирает выбор плагина из памяти и из state, чужой выбор цел', async () => {
