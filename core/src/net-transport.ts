@@ -2,7 +2,7 @@ import type dns from 'node:dns';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
-import { pipeline, Readable } from 'node:stream';
+import { pipeline, Readable, Transform } from 'node:stream';
 import zlib from 'node:zlib';
 
 /** Резолв имени; подменяется в тестах и в средах со своим резолвером. */
@@ -42,6 +42,9 @@ function localV4([a = 0, b = 0, c = 0]: readonly number[]): boolean {
     (a === 172 && b >= 16 && b <= 31) ||
     (a === 192 && b === 168) ||
     (a === 192 && b === 0 && c === 0) || // 192.0.0.0/24: служебные назначения IETF
+    (a === 192 && b === 0 && c === 2) || // 192.0.2.0/24: документация (TEST-NET-1)
+    (a === 198 && b === 51 && c === 100) || // 198.51.100.0/24: документация (TEST-NET-2)
+    (a === 203 && b === 0 && c === 113) || // 203.0.113.0/24: документация (TEST-NET-3)
     (a === 198 && (b === 18 || b === 19)) || // 198.18.0.0/15: стенды замеров, в сети не маршрутизируются
     a >= 224 // многоадресные, зарезервированные и 255.255.255.255
   );
@@ -52,11 +55,18 @@ function localV6(bytes: readonly number[]): boolean {
   const [b0 = 0, b1 = 0] = bytes;
   // Адреса, в которых лежит IPv4: стоит вести себя как с ним, иначе `::ffff:127.0.0.1` обходит правило.
   if (zeros(0, 12)) return localV4(bytes.slice(12)); // ::/96, в том числе :: и ::1
+  if (zeros(0, 8) && bytes[8] === 255 && bytes[9] === 255 && bytes[10] === 0 && bytes[11] === 0) return true; // ::ffff:0:0:0/96: трансляция IPv4 в IPv6 (RFC 2765), адрес в сети не маршрутизируется
   if (zeros(0, 10) && bytes[10] === 255 && bytes[11] === 255) return localV4(bytes.slice(12)); // ::ffff:0:0/96
   if (b0 === 0 && b1 === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b && zeros(4, 12)) return localV4(bytes.slice(12)); // 64:ff9b::/96, NAT64
   if (b0 === 0 && b1 === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b && bytes[4] === 0 && bytes[5] === 1) return true; // 64:ff9b:1::/48: локальный NAT64 (RFC 8215), адрес не несёт публичный IPv4
   if (b0 === 0x20 && b1 === 0x02) return localV4(bytes.slice(2, 6)); // 2002::/16, 6to4
+  const [b2 = 0, b3 = 0] = bytes.slice(2);
   return (
+    (b0 === 0x01 && b1 === 0 && zeros(2, 8)) || // 100::/64: только сброс (RFC 6666)
+    (b0 === 0x20 && b1 === 0x01 && b2 === 0 && b3 === 0) || // 2001::/32: Teredo, в адрес зашит IPv4 сервера и клиента
+    (b0 === 0x20 && b1 === 0x01 && b2 === 0 && b3 === 0x02 && bytes[4] === 0 && bytes[5] === 0) || // 2001:2::/48: стенды замеров (RFC 5180)
+    (b0 === 0x20 && b1 === 0x01 && b2 === 0x0d && b3 === 0xb8) || // 2001:db8::/32: документация
+    (b0 === 0x3f && b1 === 0xff && (b2 & 0xf0) === 0) || // 3fff::/20: документация (RFC 9637)
     (b0 & 0xfe) === 0xfc || // fc00::/7
     (b0 === 0xfe && (b1 & 0xc0) >= 0x80) || // fe80::/10 и устаревший fec0::/10
     b0 === 0xff // многоадресные
@@ -141,22 +151,73 @@ const NO_BODY = new Set([101, 204, 205, 304]);
 
 const LENIENT = { flush: zlib.constants.Z_SYNC_FLUSH, finishFlush: zlib.constants.Z_SYNC_FLUSH };
 
+/** Звеньев `content-encoding` больше этого - отказ: цепочка из сотен звеньев - способ раздуть работу распаковки (как предел у undici). */
+const MAX_CODINGS = 4;
+
+type Decoder = zlib.Gunzip | zlib.BrotliDecompress | zlib.ZstdDecompress | Transform;
+
+/**
+ * `deflate` в HTTP - то zlib-обёртка (RFC 1950), то сырой поток (так отвечают старые серверы). Различает первый байт, как в undici:
+ * у zlib младшие четыре бита - способ сжатия 8.
+ */
+function inflateAuto(): Transform {
+  let inner: zlib.Inflate | zlib.InflateRaw | undefined;
+  const out: Transform = new Transform({
+    transform(chunk: Buffer, _encoding, done) {
+      if (!inner) {
+        const stream = ((chunk[0] ?? 0) & 0x0f) === 8 ? zlib.createInflate(LENIENT) : zlib.createInflateRaw(LENIENT);
+        stream.on('data', (part: Buffer) => {
+          if (!out.push(part)) stream.pause();
+        });
+        stream.on('error', (error) => out.destroy(error));
+        inner = stream;
+      }
+      inner.write(chunk, (error) => done(error));
+    },
+    read() {
+      inner?.resume();
+    },
+    flush(done) {
+      if (!inner) return done();
+      inner.once('end', () => done());
+      inner.end();
+    },
+  });
+  return out;
+}
+
 /**
  * Распаковка ответа, который сервер сжал вопреки `accept-encoding: identity`; предел размера - у читающего тело.
  * Конец потока без полного блока - как у прежнего fetch (undici): пустое тело при `content-encoding` (HEAD, S3-объект) не ошибка.
+ * Кодировки накладываются слева направо, снимаются справа налево; повторные заголовки node уже склеил через запятую.
+ * Возвращает звенья в порядке снятия; `undefined` - есть кодировка, которой ядро не знает, тело уходит как есть, заголовок остаётся.
+ * Звеньев больше `MAX_CODINGS` - ошибка.
  */
-function decoderFor(encoding: string): zlib.Gunzip | zlib.Inflate | zlib.BrotliDecompress | undefined {
-  switch (encoding.trim().toLowerCase()) {
-    case 'gzip':
-    case 'x-gzip':
-      return zlib.createGunzip(LENIENT);
-    case 'deflate':
-      return zlib.createInflate(LENIENT);
-    case 'br':
-      return zlib.createBrotliDecompress({ flush: zlib.constants.BROTLI_OPERATION_FLUSH, finishFlush: zlib.constants.BROTLI_OPERATION_FLUSH });
-    default:
-      return undefined;
+function decodersFor(header: string): Decoder[] | undefined {
+  const codings = header.split(',').map((c) => c.trim().toLowerCase()).filter((c) => c !== '' && c !== 'identity');
+  if (codings.length > MAX_CODINGS) throw new Error(`content-encoding: звеньев ${String(codings.length)}, предел ${String(MAX_CODINGS)}`);
+  const decoders: Decoder[] = [];
+  for (const coding of codings.reverse()) {
+    switch (coding) {
+      case 'gzip':
+      case 'x-gzip':
+        decoders.push(zlib.createGunzip(LENIENT));
+        break;
+      case 'deflate':
+        decoders.push(inflateAuto());
+        break;
+      case 'br':
+        decoders.push(zlib.createBrotliDecompress({ flush: zlib.constants.BROTLI_OPERATION_FLUSH, finishFlush: zlib.constants.BROTLI_OPERATION_FLUSH }));
+        break;
+      case 'zstd':
+        decoders.push(zlib.createZstdDecompress({ flush: zlib.constants.ZSTD_e_flush, finishFlush: zlib.constants.ZSTD_e_flush }));
+        break;
+      default:
+        for (const made of decoders) made.destroy();
+        return undefined;
+    }
   }
+  return decoders;
 }
 
 /** Запрос по `node:http(s)`, чтобы резолв шёл через свой `lookup`; ответ - обычный `Response`. Переадресация не идёт. */
@@ -174,13 +235,14 @@ export function transport(url: URL, init: TransportRequest): Promise<Response> {
         for (let i = 0; i + 1 < incoming.rawHeaders.length; i += 2) out.append(incoming.rawHeaders[i] ?? '', incoming.rawHeaders[i + 1] ?? '');
         const status = incoming.statusCode ?? 502;
         if (NO_BODY.has(status)) incoming.resume();
-        const decoder = NO_BODY.has(status) ? undefined : decoderFor(incoming.headers['content-encoding'] ?? '');
-        if (decoder) {
+        const decoders = NO_BODY.has(status) ? undefined : decodersFor(incoming.headers['content-encoding'] ?? '');
+        const last = decoders?.at(-1);
+        if (decoders && last) {
           out.delete('content-encoding');
           out.delete('content-length');
-          pipeline(incoming, decoder, () => undefined);
+          pipeline([incoming, ...decoders], () => undefined);
         }
-        const source = decoder ?? incoming;
+        const source = last ?? incoming;
         resolve(new Response(NO_BODY.has(status) ? null : (Readable.toWeb(source) as ReadableStream<Uint8Array>), { status, statusText: incoming.statusMessage ?? '', headers: out }));
       } catch (error) {
         incoming.destroy();
