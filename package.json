@@ -36,6 +36,7 @@
     "spike:pty": "node playground/scripts/spike-pty.mjs",
     "spike:pty-stream": "npm run build && node playground/scripts/spike-pty-stream.mjs",
     "spike:pty-restore": "node playground/scripts/spike-pty-restore.mjs",
+    "spike:notify-chain": "npm run build:packages && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON playground/test/measure-notify-chain.ts",
     "prelint": "npm run build:packages",
     "build:contracts": "node contracts/scripts/build.ts",
     "check:contracts": "node contracts/scripts/check-api.ts",

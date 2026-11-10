@@ -13,7 +13,7 @@ Cyborg Harness - ядро плагинов для рабочего места, �
 | `core/examples/` | демо-плагины и сценарии ядра в консоли (`npm run demo`) |
 | `contracts/` | пакет объявлений `@cyborg-harness/contracts`: API плагина и карта контрактов имя -> мажорная версия -> тип, без логики; правила - [contracts/README.md](../contracts/README.md) |
 | `playground/` | Electron-приложение, где ядро видно вживую: хосты в `utilityProcess`, виды во фреймах `cyborg-plugin://<группа>/<плагин>/`, дымовой тест и замеры |
-| `playground/plugins/` | плагины стенда: базовые `sessions`, `agent-claude-code`, `agent-shell`, `session-isolation`, `next-actions`, `pin-lock` и демо `echo`, `chat`, `alice`, `bob`, `flaky`, `later` |
+| `playground/plugins/` | плагины стенда: базовые `sessions`, `agent-claude-code`, `agent-shell`, `session-isolation`, `session-notifications`, `next-actions`, `pin-lock` и демо `echo`, `chat`, `alice`, `bob`, `flaky`, `later` |
 | `docs/` | эта документация, вход - [README.md](README.md) |
 
 ## 2. Архитектура

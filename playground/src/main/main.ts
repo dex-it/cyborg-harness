@@ -157,8 +157,9 @@ const claim = spiking
 /** Первый запуск: alice и bob делят хост c - видно, как падение одного процесса снимает обоих, а чат в хосте b живёт. */
 const DEFAULT_CONFIG = {
   plugins: {
-    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions', 'sessions', 'pin-lock', 'panels', 'editor'],
-    hosts: { a: ['echo'], b: ['chat'], c: ['alice', 'bob'], d: ['flaky'], agents: ['agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions'] },
+    enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions', 'sessions', 'session-notifications', 'pin-lock', 'panels', 'editor'],
+    // session-notifications в своём хосте (PL-02): события sessions идут к нему через границу процессов.
+    hosts: { a: ['echo'], b: ['chat'], c: ['alice', 'bob'], d: ['flaky'], notifications: ['session-notifications'], agents: ['agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions'] },
     // K-04: виды alice и bob делят origin и процесс рендера, остальные - по одному на плагин.
     uiGroups: { duo: ['alice', 'bob'] },
   },

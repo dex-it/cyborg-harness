@@ -61,7 +61,7 @@ flowchart LR
 
 | Группа | Плагины |
 |---|---|
-| Базовые | `sessions`, `agent-claude-code`, `agent-shell`, `session-isolation`, `next-actions`, `pin-lock` |
+| Базовые | `sessions`, `agent-claude-code`, `agent-shell`, `session-isolation`, `session-notifications`, `next-actions`, `pin-lock` |
 | Демо ядра | `echo`, `chat`, `alice`, `bob`, `flaky`, `later` |
 
 Код вида плагина лежит в каталоге `ui/` самого плагина.
