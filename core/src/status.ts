@@ -17,7 +17,7 @@ export interface PluginStatus {
 
 /**
  * Какие виды записей журнала - события жизненного цикла плагина (загружен, пропущен, снят, упал), а какие о его работе ничего не говорят: конфликт сочетаний, отказ шлюза,
- * вызов устаревшего члена, удержанное хостом отклонение, завершённый по сроку pty, выбор хоста. Вторые приходят в любой момент, в том числе после снятия плагина, и не должны
+ * вызов устаревшего члена, удержанное хостом отклонение, завершённый по сроку pty, выбор хоста и группы. Вторые приходят в любой момент, в том числе после снятия плагина, и не должны
  * перекрывать запись жизненного цикла: по последней из них `pluginStatuses` показывает состояние, а `enable` поставщика решает, поднимать ли зависимого.
  * Таблица полная по типу: новый вид записи без пометки компилятор не пропустит.
  */
@@ -48,6 +48,7 @@ const LIFECYCLE: Record<JournalEntry['kind'], boolean> = {
   'unhandled-rejection': false,
   'pty-expired': false,
   'host-isolated': false,
+  'group-isolated': false,
   'host-own-grouped': false,
   'third-party': false,
 };
@@ -188,6 +189,8 @@ export function describeEntry(e: JournalEntry): string {
       return `plugins.keybindings: ${e.key} -> ${String(e.command)} не применено: ${e.reason}`;
     case 'host-isolated':
       return `сторонний плагин не делит хост: группа ${e.group} из plugins.hosts не действует, работает в своём хосте ${e.hostId}`;
+    case 'group-isolated':
+      return `сторонний плагин не делит группу рендера: группа ${e.group} не действует, работает в своей ${e.renderGroup}`;
     case 'third-party':
       return 'сторонний плагин: код не из поставки, не проверен; на этапе 1 хост - обычный процесс Node, и плагин может обойти шлюз ctx.os';
     case 'unhandled-rejection':
@@ -239,6 +242,7 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
     case 'unhandled-rejection':
     case 'host-down':
     case 'host-isolated':
+    case 'group-isolated':
     case 'host-own-grouped':
     case 'third-party':
       return 'warn';

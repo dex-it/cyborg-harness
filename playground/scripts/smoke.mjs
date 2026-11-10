@@ -78,6 +78,8 @@ function defaultConfig() {
 }
 const userConfig = defaultConfig();
 userConfig.plugins.enabled.push('built-dep', 'example');
+// K-04: сторонний built-dep назван в группе duo к alice и bob - группа ему не достаётся (запись group-isolated, предупреждение в строке плагина).
+userConfig.plugins.uiGroups.duo.push('built-dep');
 writeFileSync(join(userData, 'cyborg.json'), JSON.stringify(userConfig, null, 2));
 
 // --inspect=0 - инспектор главного процесса: нажатие оттуда идёт через before-input-event, как с клавиатуры.
@@ -180,15 +182,23 @@ async function main() {
     main(`(async () => {
       const { webContents } = process.mainModule.require('electron');
       const page = webContents.getAllWebContents().find((w) => w.getType() === 'window');
-      const frame = page.mainFrame.framesInSubtree.find((f) => f.origin === 'cyborg-plugin://${id}');
+      const frame = page.mainFrame.framesInSubtree.find((f) => f.url.startsWith('cyborg-plugin://') && new URL(f.url).pathname.split('/')[1] === '${id}');
       return frame ? frame.executeJavaScript(${JSON.stringify(expression)}) : null;
+    })()`);
+  // Origin и процесс рендера первого кадра плагина: виды одной группы делят их.
+  const frameOf = (id) =>
+    main(`(() => {
+      const { webContents } = process.mainModule.require('electron');
+      const page = webContents.getAllWebContents().find((w) => w.getType() === 'window');
+      const frame = page.mainFrame.framesInSubtree.find((f) => f.url.startsWith('cyborg-plugin://') && new URL(f.url).pathname.split('/')[1] === '${id}');
+      return frame ? { origin: frame.origin, pid: frame.osProcessId, url: frame.url } : null;
     })()`);
   // Под замком у pin-lock два документа: вид и экран замка; экран - по ?view=overlay.
   const inOverlay = (id, expression) =>
     main(`(async () => {
       const { webContents } = process.mainModule.require('electron');
       const page = webContents.getAllWebContents().find((w) => w.getType() === 'window');
-      const frame = page.mainFrame.framesInSubtree.find((f) => f.origin === 'cyborg-plugin://${id}' && f.url.includes('view=overlay'));
+      const frame = page.mainFrame.framesInSubtree.find((f) => f.url.startsWith('cyborg-plugin://') && new URL(f.url).pathname.split('/')[1] === '${id}' && f.url.includes('view=overlay'));
       return frame ? frame.executeJavaScript(${JSON.stringify(expression)}) : null;
     })()`);
   const viewLog = (id) => inView(id, "[...document.querySelectorAll('#log li')].map((l) => l.textContent).join('\\n')");
@@ -239,7 +249,7 @@ async function main() {
     main(`(async () => {
       const { webContents } = process.mainModule.require('electron');
       const page = webContents.getAllWebContents().find((w) => w.getType() === 'window');
-      const frames = page.mainFrame.framesInSubtree.filter((f) => f.origin === 'cyborg-plugin://panels');
+      const frames = page.mainFrame.framesInSubtree.filter((f) => f.url.startsWith('cyborg-plugin://panels/panels/'));
       return (await Promise.all(frames.map((f) => f.executeJavaScript("document.getElementById('which')?.textContent ?? ''")))).sort().join('|');
     })()`);
   await waitFor('оба вида panels показаны, каждый со своим именем', async () => (await panelsText()) === 'panels/bar: панель инструментов|panels/panel: боковая колонка');
@@ -257,7 +267,7 @@ async function main() {
       const page = webContents.getAllWebContents().find((w) => w.getType() === 'window');
       return page.mainFrame.framesInSubtree.filter((f) => f.origin === 'cyborg-plugin://panels').map((f) => f.url).sort().join('|');
     })()`);
-  assert.equal(await panelsUrls(), 'cyborg-plugin://panels/?view=bar|cyborg-plugin://panels/?view=panel', 'у видов panels нет своих адресов ?view=<имя>');
+  assert.equal(await panelsUrls(), 'cyborg-plugin://panels/panels/?view=bar|cyborg-plugin://panels/panels/?view=panel', 'у видов panels нет своих адресов ?view=<имя>');
   assert.equal(await inPanels('bar', 'document.getElementById("which").textContent'), 'panels/bar: панель инструментов', 'во фрейме ?view=bar не вид bar');
   assert.equal(await inPanels('panel', 'document.getElementById("which").textContent'), 'panels/panel: боковая колонка', 'во фрейме ?view=panel не вид panel');
   // Свёртка одного вида не прячет другой: кнопка в подписи своей обёртки, документ свёрнутого жив и получает onVisibilityChange.
@@ -308,10 +318,32 @@ async function main() {
   assert.equal(await inView('alice', 'typeof window.playground'), 'undefined', 'вид получил мост окна');
   await inView('alice', "document.getElementById('hello').click()");
   await waitFor('вид alice → чат → вид bob', async () => /→ привет, bob/.test(await viewLog('alice')) && /← alice: привет, bob/.test(await viewLog('bob')));
+  // K-04: alice и bob в одной группе, но лента каждого вида - только его плагина.
+  assert.ok(!/← alice: привет, bob/.test(await viewLog('alice')), 'строка bob попала в вид alice');
+  assert.ok(!/→ привет, bob/.test(await viewLog('bob')), 'строка alice попала в вид bob');
   await inView('bob', "document.getElementById('foreign').click()");
   await waitFor('чужая команда из вида bob отклонена', async () => /отказ: alice\.hello: не команда плагина bob/.test(await viewLog('bob')));
   assert.equal(await inView('bob', 'window.cyborgView.drop()'), null, 'вид получил путь без перетаскивания');
   log('виды во фреймах: свой мост, лента плагина, чужая команда отклонена');
+
+  // K-04: группы рендера. alice и bob - один origin и один процесс рендера, echo - другая группа и другой процесс; сторонний built-dep группу не получил.
+  const [aliceFrame, bobFrame, echoFrame, builtFrame] = await Promise.all([frameOf('alice'), frameOf('bob'), frameOf('echo'), frameOf('built-dep')]);
+  assert.deepEqual([aliceFrame?.origin, bobFrame?.origin, echoFrame?.origin, builtFrame?.origin], ['cyborg-plugin://duo', 'cyborg-plugin://duo', 'cyborg-plugin://echo', 'cyborg-plugin://solo_built-dep']);
+  assert.match(aliceFrame.url, /^cyborg-plugin:\/\/duo\/alice\/\?view=main$/, 'адрес вида не несёт плагина в пути');
+  assert.ok(aliceFrame.pid && aliceFrame.pid === bobFrame.pid, `виды одной группы в разных процессах рендера: ${String(aliceFrame.pid)} и ${String(bobFrame.pid)}`);
+  assert.ok(echoFrame.pid !== aliceFrame.pid && builtFrame.pid !== aliceFrame.pid && echoFrame.pid !== builtFrame.pid, 'виды разных групп делят процесс рендера');
+  // Адрес кадра можно сменить без загрузки (history.pushState): плагин вне группы кадра мост не признаёт, сосед по группе - признаёт (граница доверия - группа).
+  const asAt = (path, command) =>
+    inView('alice', `(async () => { history.pushState({}, '', ${JSON.stringify(path)}); try { return await window.cyborgView.run(${JSON.stringify(command)}); } finally { history.replaceState({}, '', '/alice/?view=main'); } })()`);
+  assert.deepEqual(await asAt('/echo/', 'echo.ping'), { error: 'не вид плагина' }, 'вид группы вызвал команду плагина вне группы подменой адреса');
+  assert.deepEqual(await asAt('/built-dep/', 'echo.ping'), { error: 'не вид плагина' }, 'вид группы назвался сторонним плагином');
+  assert.equal((await asAt('/bob/', 'alice.hello'))?.error, 'alice.hello: не команда плагина bob', 'вид alice, назвавшийся bob, прошёл как alice');
+  assert.equal(await inView('alice', 'location.pathname'), '/alice/', 'адрес кадра не вернулся');
+  assert.match(await text('#plugins-list [data-plugin="built-dep"] .plugin-group-note'), /сторонний плагин не делит группу рендера: группа duo не действует, работает в своей built-dep/, 'нет предупреждения о группе у built-dep');
+  assert.equal(await text('#plugins-list [data-plugin="alice"] .plugin-group'), 'группа duo');
+  assert.equal(await ev(`document.querySelector('#plugins-list [data-plugin="echo"] .plugin-group') === null`), true, 'у плагина в своей группе метка группы');
+  assert.ok(lines().some((l) => l.includes('"pluginId":"built-dep","kind":"group-isolated","group":"duo","renderGroup":"built-dep"')), 'нет записи group-isolated у built-dep');
+  log('группы рендера: alice и bob в одном процессе рендера, echo и built-dep в своих; подмена адреса вне группы отклонена; предупреждение у стороннего');
 
   assert.match(await viewVar('alice', '--cy-scheme'), /^(light|dark)$/, 'токены темы не дошли до вида');
   // Тема рабочего стола бывает тёмной: без шага через светлую смена на dark не случится, и onChange не позовётся.
@@ -327,8 +359,10 @@ async function main() {
   await inView('bob', "document.getElementById('field').value = 'набрано до сворачивания'");
   await toggle();
   await waitFor('свёрнутый вид получил onVisibilityChange', async () => /вид скрыт, DOM жив/.test(await viewLog('bob')));
+  assert.ok(!/вид alice/.test(await viewLog('alice')), 'свёрнутый вид bob дошёл до кадров alice в той же группе');
   await toggle();
   await waitFor('развёрнутый вид получил onVisibilityChange', async () => /вид снова показан/.test(await viewLog('bob')));
+  assert.ok(!/вид alice/.test(await viewLog('alice')), 'развёрнутый вид bob дошёл до кадров alice в той же группе');
   assert.equal(await inView('bob', "document.getElementById('field').value"), 'набрано до сворачивания', 'сворачивание размонтировало вид');
   log('UiContext: тема до mount и при смене, контракт из вида, сворачивание без размонтирования');
 

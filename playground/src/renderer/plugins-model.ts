@@ -21,6 +21,16 @@ export function originNote(row: PluginRow): string | undefined {
   return 'сторонний плагин из каталога пользователя: код не проверен, на этапе 1 исполняется в обычном процессе Node и может обойти шлюз ctx.os; права ниже - то, что он заявил, а не то, что ему можно';
 }
 
+/** Метка группы рендера: нужна, только когда плагин делит origin и процесс рендера с другими, то есть группа не его id. Сторонний всегда один (его группа - `solo_<id>`), метки у него нет. */
+export function groupLabel(row: PluginRow): string | undefined {
+  return row.group === undefined || row.group === row.id || row.origin === 'user' ? undefined : `группа ${row.group}`;
+}
+
+/** Предупреждение о группе: сторонний плагин просил общую группу, ядро дало ему свою (запись `group-isolated` словами). */
+export function groupNote(row: PluginRow): string | undefined {
+  return row.groupWarning;
+}
+
 /** Плашка над списком: каталог пользователя включён запуском, и всё, что в нём лежит, исполняется. */
 export function userPluginsNotice(snapshot: PluginsSnapshot): string | undefined {
   return snapshot.userPlugins ? 'Запуск с --user-plugins: плагины из каталога пользователя загружаются, их код не проверен. Без флага они не читаются.' : undefined;

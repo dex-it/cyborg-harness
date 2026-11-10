@@ -1,16 +1,16 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { protocol, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents, type WebFrameMain } from 'electron';
-import { pluginOfOrigin, VIEW_SCHEME } from './view-protocol.ts';
+import { protocol, type IpcMainInvokeEvent, type WebContents, type WebFrameMain } from 'electron';
+import { groupOfOrigin, VIEW_SCHEME } from './view-protocol.ts';
 import { cspOf, type ViewCsp, type ViewRequest } from './view-files.ts';
 
-/** До `app.ready`: standard даёт схеме свой origin на хост, а с ним site isolation по плагинам. */
+/** До `app.ready`: standard даёт схеме свой origin на хост, а с ним site isolation по группам рендера. */
 export function registerViewScheme(): void {
   protocol.registerSchemesAsPrivileged([{ scheme: VIEW_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 }
 
 export interface ServeViewsOptions {
-  /** CSP ответов: по умолчанию `VIEW_CSP`. Функция получает плагина из адреса запроса (строгая CSP по плагину или группе, K-05). */
+  /** CSP ответов: по умолчанию `VIEW_CSP`. Функция получает плагина и группу из адреса запроса (строгая CSP по плагину или группе, K-05). */
   readonly csp?: ViewCsp;
 }
 
@@ -30,19 +30,14 @@ export function serveViews(resolve: (url: string) => ViewRequest | undefined, sh
   });
 }
 
-/** Все фреймы видов окна: тема одна на всех. */
+/** Все фреймы видов окна: тема одна на всех плагинов и всех групп. */
 export function viewFrames(contents: WebContents): WebFrameMain[] {
-  return contents.mainFrame.framesInSubtree.filter((frame) => pluginOfOrigin(frame.origin) !== undefined);
+  return contents.mainFrame.framesInSubtree.filter((frame) => groupOfOrigin(frame.origin) !== undefined);
 }
 
+/** Фреймы с этим origin, то есть всей группы рендера; кадры одного плагина группы - `framesOfPlugin`. */
 export function framesOf(contents: WebContents, origin: string): WebFrameMain[] {
   return contents.mainFrame.framesInSubtree.filter((frame) => frame.origin === origin);
-}
-
-/** Плагин вида, приславшего сообщение; из окна или чужой страницы - undefined. */
-export function senderPlugin(event: IpcMainEvent | IpcMainInvokeEvent): string | undefined {
-  const frame = event.senderFrame;
-  return frame ? pluginOfOrigin(frame.origin) : undefined;
 }
 
 /** Каналы окна принимают только документ окна: вид плагина не выключит соседа, даже если обойдёт свой preload. */

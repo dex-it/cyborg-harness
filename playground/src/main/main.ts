@@ -107,6 +107,8 @@ const DEFAULT_CONFIG = {
   plugins: {
     enabled: ['echo', 'chat', 'alice', 'bob', 'flaky', 'later', 'agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions', 'sessions', 'pin-lock', 'panels', 'editor'],
     hosts: { a: ['echo'], b: ['chat'], c: ['alice', 'bob'], d: ['flaky'], agents: ['agent-claude-code', 'agent-shell', 'session-isolation', 'next-actions'] },
+    // K-04: виды alice и bob делят origin и процесс рендера, остальные - по одному на плагин.
+    uiGroups: { duo: ['alice', 'bob'] },
   },
 };
 
@@ -135,7 +137,7 @@ function createWindow(): void {
   // Заголовок собирает ядро; `<title>` страницы его бы затёр.
   win.on('page-title-updated', (event) => event.preventDefault());
   const page = path.join(__dirname, 'renderer', 'index.html');
-  guardNavigation(win.webContents, pathToFileURL(page).href, (pluginId, url) => plugins.viewDenied(pluginId, url));
+  guardNavigation(win.webContents, pathToFileURL(page).href, (pluginId, url) => plugins.viewDenied(pluginId, url), plugins);
   void win.loadFile(page);
   bindWindow(win, plugins);
   win.on('closed', () => (win = undefined));
@@ -166,7 +168,7 @@ const start = () => {
     void runSpike({ out: spikeOut, preload: path.join(__dirname, 'preload.js'), rendererDir: path.join(__dirname, 'renderer') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
     return;
   }
-  serveViews((url) => resolveViewRequest(url, (id) => plugins.uiOf(id, true)), path.join(__dirname, 'renderer', 'shell'), viewCsp === undefined ? {} : { csp: viewCsp });
+  serveViews((url) => resolveViewRequest(url, (id) => plugins.uiOf(id), (id) => plugins.wake(id)), path.join(__dirname, 'renderer', 'shell'), viewCsp === undefined ? {} : { csp: viewCsp });
   watchTheme(() => win);
   const userData = app.getPath('userData');
   const config = path.join(userData, 'cyborg.json');

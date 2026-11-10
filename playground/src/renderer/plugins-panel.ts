@@ -7,7 +7,7 @@ import { byId, el } from './dom.ts';
 import { ViewsPanel } from './views-panel.ts';
 import { moveFocus } from './focus.ts';
 import { SideTabs } from './side-tabs.ts';
-import { actionsFor, clock, conflictText, journalFor, keyStatus, mergeFeed, originNote, sortedPlugins, STATE_LABEL, summary, userPluginsNotice, viewSlots, workspaceActionError, type ActionButton } from './plugins-model.ts';
+import { actionsFor, clock, conflictText, groupLabel, groupNote, journalFor, keyStatus, mergeFeed, originNote, sortedPlugins, STATE_LABEL, summary, userPluginsNotice, viewSlots, workspaceActionError, type ActionButton } from './plugins-model.ts';
 
 export interface PluginsPort {
   pluginsSnapshot(): Promise<PluginsSnapshot>;
@@ -146,11 +146,15 @@ export class PluginsPanel {
     head.append(el('span', 'plugin-name', row.id));
     if (row.version) head.append(el('span', 'plugin-version', row.version));
     if (row.host) head.append(el('span', 'plugin-host', row.pid === undefined ? `хост ${row.host}` : `хост ${row.host} · pid ${row.pid}`));
+    const group = groupLabel(row);
+    if (group) head.append(el('span', 'plugin-group', group));
     if (row.origin === 'user') head.append(el('span', 'plugin-origin', 'сторонний'));
     head.append(el('span', 'spacer'), el('span', 'plugin-state', STATE_LABEL[row.state]));
     item.append(head);
     const origin = originNote(row);
     if (origin) item.append(el('p', 'plugin-origin-note', origin));
+    const groupWarning = groupNote(row);
+    if (groupWarning) item.append(el('p', 'plugin-group-note', groupWarning));
     if (row.reason) item.append(el('p', 'plugin-reason', row.reason));
     if (row.permissions.length > 0) {
       const list = el('ul', 'plugin-permissions');

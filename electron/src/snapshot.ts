@@ -15,6 +15,10 @@ export interface PluginRow {
   readonly origin?: PluginOrigin;
   /** Хост, в котором плагин работает или работал бы; у невключённых нет. */
   readonly host?: string;
+  /** Группа рендера плагина с видами: хост адреса его видов, виды группы делят процесс рендера. Нет у плагина без видов и у невключённого. */
+  readonly group?: string;
+  /** Предупреждение о группе: сторонний плагин просил общую группу, ядро дало ему свою (запись `group-isolated` журнала словами). */
+  readonly groupWarning?: string;
   /** Процесс хоста; есть, пока хост жив и он отдельный процесс. */
   readonly pid?: number;
   readonly state: PluginState;

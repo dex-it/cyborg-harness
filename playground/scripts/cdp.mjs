@@ -91,7 +91,7 @@ export async function launch({ config, args = [] } = {}) {
     main(`(async () => {
       const { webContents } = process.mainModule.require('electron');
       const page = webContents.getAllWebContents().find((w) => w.getType() === 'window');
-      const frame = page.mainFrame.framesInSubtree.find((f) => f.origin === 'cyborg-plugin://${id}' && f.url.includes(${JSON.stringify(match)}));
+      const frame = page.mainFrame.framesInSubtree.find((f) => f.url.startsWith('cyborg-plugin://') && new URL(f.url).pathname.split('/')[1] === '${id}' && f.url.includes(${JSON.stringify(match)}));
       return frame ? frame.executeJavaScript(${JSON.stringify(expression)}) : null;
     })()`);
   /** Нажатие мышью в элемент вида: координаты кадра в окне плюс координаты элемента в кадре. */

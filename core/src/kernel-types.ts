@@ -61,6 +61,8 @@ export type JournalEntry =
   | { readonly pluginId?: undefined; readonly kind: 'key-ignored'; readonly key: string; readonly command: string | null; readonly reason: string }
   /** Сторонний плагин назван в группе plugins.hosts с другими - ядро всё равно дало ему свой хост. */
   | { readonly pluginId: string; readonly kind: 'host-isolated'; readonly group: string; readonly hostId: string }
+  /** Сторонний плагин назван в группе рендера с другими (`plugins.uiGroups`, `ui.group`) - ядро всё равно дало ему свою `renderGroup` (id плагина; origin его видов - `Kernel.groupOf`). */
+  | { readonly pluginId: string; readonly kind: 'group-isolated'; readonly group: string; readonly renderGroup: string; readonly reason: 'third-party' }
   /** Загружен плагин не из поставки (по `bundled`): его код не проверен, а на этапе 1 хост - обычный процесс Node. Состояния плагину запись не меняет. */
   | { readonly pluginId: string; readonly kind: 'third-party' }
   /** Промис плагина отклонён без обработчика; хост держится, плагину страйк. */
@@ -124,6 +126,8 @@ export interface LoadOptions {
   readonly entry?: ((manifest: PluginManifest) => string) | undefined;
   /** `plugins.hosts`: группа -> плагины; не названный идёт в `builtin` или в свой хост по `host: "own"`. */
   readonly hosts?: Readonly<Record<string, readonly string[]>> | undefined;
+  /** `plugins.uiGroups`: группа рендера -> плагины с видами; перекрывает `ui.group` манифеста. Не названный идёт в группу по `ui.group`, без неё - в группу со своим id; сторонний всегда один (`Kernel.groupOf` даёт ему `solo_<id>`). */
+  readonly uiGroups?: Readonly<Record<string, readonly string[]>> | undefined;
   /** Акселераторы меню приложения: id пункта -> сочетание. Заняты наравне с командами окна: манифест проигрывает с `key-conflict`, динамически занять нельзя. */
   readonly menuKeys?: Readonly<Record<string, string>> | undefined;
   /** `plugins.keybindings` пользователя: перекрывают манифесты; `command: null` освобождает сочетание для окна. */
@@ -198,6 +202,8 @@ export interface Kernel {
   /** Раскладка по манифестам: виды и типы документов по `order`, при равенстве по id плагина; не включённые, выключенные и вне графа помечены по-разному (`mark`: `not-enabled`, `disabled`, `out-of-graph`). Каждое чтение собирает снимок заново. */
   readonly layout: readonly LayoutEntry[];
   hostOf(pluginId: string): string | undefined;
+  /** Группа рендера плагина с видами: хост адреса `cyborg-plugin://<группа>/`, один процесс рендера на группу; у стороннего - `solo_<id>`, пространство имён, которого у групп поставки нет, чтобы веб-хранилище origin не переходило между ними от загрузки к загрузке; у плагина без `ui` и неизвестного id - undefined. */
+  groupOf(pluginId: string): string | undefined;
   /** Все сочетания: окна и меню, манифесты принятых плагинов, выбор человека и динамические `ctx.keys.register`; `key` - под платформу, как его даёт `keyOfInput`. */
   readonly keybindings: readonly Keybinding[];
   /**
