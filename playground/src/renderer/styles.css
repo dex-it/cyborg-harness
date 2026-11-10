@@ -423,6 +423,15 @@ button:focus-visible {
   white-space: pre-wrap;
 }
 
+.plugin-previous {
+  margin: 6px 0 0;
+  padding-left: 8px;
+  border-left: 3px solid var(--modified);
+  color: var(--fg-dim);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
 .plugin-permissions {
   margin: 6px 0 0;
   padding-left: 16px;
@@ -720,6 +729,23 @@ body[data-locked='true'] main {
   align-items: center;
   gap: 8px;
   color: var(--fg-dim);
+}
+
+.diagnostics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-dim);
+}
+
+.diagnostics[hidden] {
+  display: none;
+}
+
+.diagnostics-status,
+.diagnostics-result {
+  overflow-wrap: anywhere;
 }
 
 .workspace-current {

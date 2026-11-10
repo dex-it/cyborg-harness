@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import type { LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot } from '@cyborg-harness/electron/window';
-import { actionsFor, conflictText, groupLabel, groupNote, journalFor, keyStatus, mergeFeed, originNote, sortedPlugins, summary, userPluginsNotice, viewMode, viewSlots, workspaceActionError } from '../src/renderer/plugins-model.ts';
+import { actionsFor, conflictText, diagnosticsLine, exportMessage, groupLabel, groupNote, journalFor, keyStatus, mergeFeed, originNote, previousNote, sortedPlugins, summary, userPluginsNotice, viewMode, viewSlots, workspaceActionError } from '../src/renderer/plugins-model.ts';
 
 const row = (id: string, state: PluginRow['state'], over: Partial<PluginRow> = {}): PluginRow => ({ id, state, revivable: state === 'stopped', unloaded: false, commands: [], permissions: [], ...over });
 const snapshot = (plugins: PluginRow[], over: Partial<PluginsSnapshot> = {}): PluginsSnapshot => ({ phase: 'ready', safeMode: false, userPlugins: false, problems: [], plugins, layout: [], keys: [], feed: [], journal: [], canHang: true, window: { title: '', queued: 0, locks: [] }, documents: [], workspace: { current: '/w.cyborg.json', recent: [] }, ...over });
@@ -141,5 +141,26 @@ describe('окно «Плагины Cyborg»: действия над воркс
     // Не-Error в отказе (IPC отдаёт и строки) тоже становится текстом.
     // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- проверяется именно не-Error
     assert.equal(await workspaceActionError('Открыть воркспейс', () => Promise.reject('строка')), 'Открыть воркспейс: строка');
+  });
+});
+
+describe('окно «Плагины Cyborg»: диагностика (K-30)', () => {
+  it('причина прошлого сбоя показана отдельно от причины текущего состояния; нет сбоя - нет строки', () => {
+    assert.equal(previousNote(row('echo', 'active')), undefined);
+    const text = previousNote(row('echo', 'active', { previousFailure: { at: Date.UTC(2026, 10, 9, 12, 0, 0), text: 'выключен, сбоев подряд: 3' } }));
+    assert.match(text ?? '', /^В прошлом запуске, .*09\.11\.2026.*: выключен, сбоев подряд: 3$/);
+  });
+
+  it('строка хранения: размер, время самой ранней записи, прошлый запуск и отказ записи; без хранения строки нет', () => {
+    assert.equal(diagnosticsLine(undefined), undefined);
+    assert.equal(diagnosticsLine({ files: 1, bytes: 10 }), 'Диагностика: файлов 1, 1 КиБ; прошлого запуска в файлах нет');
+    const full = diagnosticsLine({ files: 3, bytes: 5 * 1024 * 1024, since: Date.UTC(2026, 10, 9), previousRunAt: Date.UTC(2026, 10, 9, 8), problem: 'ENOSPC' });
+    assert.match(full ?? '', /^Диагностика: файлов 3, 5120 КиБ; записи с .*09\.11\.2026.*; прошлый запуск с .*; запись в файл не удаётся \(ENOSPC\), записи держатся в памяти$/);
+  });
+
+  it('итог выгрузки: куда лёг файл, отказ с текстом, отмена диалога - пустая строка', () => {
+    assert.match(exportMessage({ value: { file: '/tmp/d.txt', bytes: 42 } }), /^Выгрузка сохранена: \/tmp\/d\.txt \(42 Б\)\. Файл остаётся на этом компьютере/);
+    assert.equal(exportMessage({ error: 'выгрузка не записана: EACCES' }), 'выгрузка не записана: EACCES');
+    assert.equal(exportMessage({}), '');
   });
 });

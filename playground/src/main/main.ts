@@ -11,6 +11,7 @@ import {
   bindAppMenu,
   bindWindow,
   electronOs,
+  fileDiagnostics,
   guardNavigation,
   isolateSession,
   PluginsService,
@@ -206,12 +207,18 @@ const start = () => {
     return;
   }
   const hosts = utilityHosts(path.join(__dirname, 'plugin-host.mjs'));
+  // K-30: журнал, строки плагинов и трасса уходят в кольцо и в файлы `userData/diagnostics/<воркспейс>`; окно показывает причину сбоя прошлого запуска и выгружает диагностику.
+  const version = `${APP_NAME} ${app.getVersion()}`;
+  // eslint-disable-next-line no-console -- отказ диска виден в stderr приложения и в строке «Диагностика» окна
+  const diagnostics = fileDiagnostics(userData, workspaceFile, { app: version, onProblem: (text) => console.error(`[diagnostics] ${text}`) });
   // node-pty живёт в своём процессе ядра: его зависание не замораживает окно (K-01).
   const ptyHost = utilityPtyHost(path.join(__dirname, 'pty-host.js'));
   void plugins.start({
     userData,
     workspace: workspaceFile,
     appName: APP_NAME,
+    diagnostics,
+    versions: { app: version },
     migrate: migrateLegacyWorkspace,
     safeMode,
     userPlugins,
