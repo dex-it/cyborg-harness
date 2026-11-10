@@ -76,13 +76,15 @@ Cyborg Harness переворачивает это. В ядре нет ни аг
    npm start
    ```
 
-3. Создайте первый плагин и запустите его тесты:
+3. Скопируйте шаблон плагина и запустите его тесты (в клоне из шага 2 пакеты уже стоят):
 
    ```bash
-   npx cyborg-plugin new my-plugin
+   cp -R templates/plugin my-plugin
    cd my-plugin
    npm test
    ```
+
+   Пакеты в клоне собирает `npm run build` (или `npm run build:packages`): после него в копии работают `npm run check`, `build` и `test`. `npm run typecheck` копии берёт `tsc` корня клона (TS 6 из алиаса), а по TS 7 шаблон проверяет `npm run typecheck` в корне.
 
 </Steps>
 
