@@ -20,6 +20,7 @@ import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type KeptPty, type P
 import { inlinePtyHost, type PtyWatchdog, type SpawnPtyHost } from './pty-link.ts';
 import { HttpServes, type AskHost } from './serve.ts';
 import type { GuardRight } from './via-contract.ts';
+import { startTreeWatch } from './tree-watch.ts';
 import { isRecord } from './wire.ts';
 
 /** Хранилище секретов ядра: ключи `<pluginId>/<key>`; без шифрования ОС `available()` - false, и ядро отказывает, а не пишет открытым текстом. */
@@ -276,6 +277,8 @@ function watchFailure(method: string, error: unknown, recursive: boolean): unkno
     return new CoreError('Unavailable', `${method}: ОС не дала слежение (${code})${recursive ? ': рекурсивное слежение занимает слежение ОС на каждый каталог внутри (Linux: fs.inotify.max_user_watches), следите за каталогами по отдельности' : ''}`);
   }
   if (code === 'ERR_FEATURE_UNAVAILABLE_ON_PLATFORM') return new CoreError('Unavailable', `${method}: рекурсивное слежение на этой платформе недоступно`);
+  // Поток слежения не запустился или упал при постановке: отказ тот же, но с причиной и именем метода.
+  if (error instanceof CoreError && error.code === 'Unavailable') return new CoreError('Unavailable', `${method}: ${error.message}`);
   return error;
 }
 
@@ -797,7 +800,11 @@ export class OsGateway {
         if (this.#watches.has(key)) throw new CoreError('Invalid', `${method}: id ${id} уже занят`);
         if ([...this.#watches.keys()].filter((k) => k.startsWith(`${m.id}\0`)).length >= MAX_WATCHES) throw new CoreError('Invalid', `${method}: больше ${String(MAX_WATCHES)} слежений`);
         // Место занято до первого await: иначе параллельные вызовы прошли бы лимит, а выгрузка посреди вызова оставила бы наблюдателя.
-        const reserved = () => void this.#watches.delete(key);
+        const startup = new AbortController();
+        const reserved = () => {
+          this.#watches.delete(key);
+          startup.abort();
+        };
         this.#watches.set(key, reserved);
         let target: string;
         let first: Stats;
@@ -815,7 +822,7 @@ export class OsGateway {
         let timer: NodeJS.Timeout | undefined;
         const close = (reason?: string) => {
           clearTimeout(timer);
-          watcher.close();
+          void watcher.close();
           if (this.#watches.get(key) !== close) return;
           this.#watches.delete(key);
           if (reason !== undefined) this.#push(m.id, 'fs.change', { pluginId: m.id, id, names: [], closed: reason });
@@ -906,12 +913,22 @@ export class OsGateway {
           });
           return w;
         };
-        let watcher: FSWatcher;
+        // Рекурсивное слежение идёт в потоке (#211): обход тысяч каталогов и разбор лавины событий не должны занимать цикл главного процесса. Подмена `env.watch` (тесты) остаётся в этом потоке.
+        const inWorker = recursive && this.#env.watch === undefined;
+        const onTreeNames = (batch: readonly string[]) => {
+          for (const name of batch) names.add(path.sep === '/' ? name : name.split(path.sep).join('/'));
+          timer ??= setTimeout(() => void send(), WATCH_COALESCE_MS);
+        };
+        let watcher: { close(): unknown };
         try {
-          watcher = attach();
+          watcher = inWorker ? await startTreeWatch(target, { names: onTreeNames, failed: (reason) => close(`наблюдение прервано: ${reason}`) }, { signal: startup.signal }) : attach();
         } catch (error) {
           if (this.#watches.get(key) === reserved) this.#watches.delete(key);
           throw watchFailure(method, error, recursive);
+        }
+        if (this.#watches.get(key) !== reserved) {
+          void watcher.close();
+          throw new CoreError('Unavailable', `${method}: плагин выгружен`);
         }
         this.#watches.set(key, close);
         return undefined;
