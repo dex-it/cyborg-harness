@@ -7,13 +7,19 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import type { PluginContext, PtyExit } from '@cyborg-harness/contracts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { describeEntry } from '../src/status.ts';
-import { load, type JournalEntry, type LoadOptions } from '../src/loader.ts';
+import { load as loadKernel, type JournalEntry, type Kernel, type LoadOptions } from '../src/loader.ts';
+import { trackKernels } from './kernels.ts';
+import { waitFor } from './wait-for.ts';
 import { inlinePtyHost } from '../src/pty-link.ts';
 import { PTY_HOST_LOST, type PtyBackend } from '../src/pty.ts';
 import { Endpoint } from '../src/rpc.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { fakePty, type FakeProc } from '../../testing/src/fake-pty.ts';
 import { fakeView } from './view-channel.ts';
+
+// Ядро выгружается после каждого теста файла, и упавшим тоже: иначе слежение и программы держат процесс файла (core/test/kernels.ts).
+const track = trackKernels();
+const load = async (options: LoadOptions): Promise<Kernel> => track(await loadKernel(options));
 
 const tick = () => sleep(30);
 const shell = { pty: [{ program: '/bin/bash', args: [] }] };
@@ -101,7 +107,8 @@ test('pty-хост упал: владельцы получают onExit, жур�
   first.onExit((e) => exits.push(e));
   await tick();
   s.hosts[0]!.handle.kill();
-  await tick();
+  // Ждём факта (владелец узнал, сторож поднял хост заново), а не 30 мс: до перезапуска любой вызов pty отвечает HostGone.
+  await waitFor('владелец узнал о потере pty и сторож поднял pty-хост заново', () => exits.length > 0 && s.hosts.length === 2 && s.journal('host-restart').length > 0);
   assert.deepEqual(exits, [PTY_HOST_LOST], 'владелец не узнал, что pty потерян');
   assert.deepEqual(await s.pty().list(), [], 'потерянный pty с владельцем остался в списке');
   assert.equal(s.backend.procs[0]?.killed, 'SIGHUP', 'процессы упавшего хоста не завершены');

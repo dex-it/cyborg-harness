@@ -6,14 +6,19 @@ import type { FSWatcher } from 'node:fs';
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { setTimeout as sleep } from 'node:timers/promises';
 import type { PluginContext } from '@cyborg-harness/contracts';
-import { load, type LoadOptions } from '../src/loader.ts';
+import { load as loadKernel, type Kernel, type LoadOptions } from '../src/loader.ts';
+import { trackKernels } from './kernels.ts';
 import type { OsEnvironment } from '../src/os-gateway.ts';
 import { groupKilled, type PtyProcess } from '../src/pty.ts';
 import { inlineHosts } from '../src/transports.ts';
 import type { TestFiles } from './fixtures/contracts.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
+import { waitFor } from './wait-for.ts';
+
+// Ядро выгружается после каждого теста файла, и упавшим тоже: иначе слежение и программы держат процесс файла (core/test/kernels.ts).
+const track = trackKernels();
+const load = async (options: LoadOptions): Promise<Kernel> => track(await loadKernel(options));
 
 const posix = process.platform !== 'win32';
 
@@ -25,14 +30,6 @@ const alive = (pid: number) => {
     return false;
   }
 };
-
-async function until(cond: () => boolean | Promise<boolean>, ms: number, what: string): Promise<void> {
-  for (const end = Date.now() + ms; Date.now() < end; ) {
-    if (await cond()) return;
-    await sleep(20);
-  }
-  assert.fail(`${what}: не дождались за ${String(ms)} мс`);
-}
 
 async function sandbox() {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-life-')));
@@ -59,7 +56,7 @@ const family = (file: string) =>
   `const g=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1e3)'],{stdio:'ignore'});require('fs').writeFileSync(${JSON.stringify(file)},process.pid+' '+g.pid);setInterval(()=>{},1e3)`;
 
 async function pidsOf(file: string): Promise<number[]> {
-  await until(async () => (await readFile(file, 'utf8').catch(() => '')).includes(' '), 5000, 'pid программы');
+  await waitFor('pid программы', async () => (await readFile(file, 'utf8').catch(() => '')).includes(' '));
   return (await readFile(file, 'utf8')).split(' ').map(Number);
 }
 
@@ -79,12 +76,12 @@ test('process.run: выключение плагина и выгрузка яд�
     pids.push(...(await pidsOf(fileB)));
 
     await k.disable('a');
-    await until(() => !alive(pids[0]!) && !alive(pids[1]!), 3000, 'программа и внук выключенного плагина');
+    await waitFor('программа и внук выключенного плагина', () => !alive(pids[0]!) && !alive(pids[1]!));
     assert.ok(alive(pids[2]!) && alive(pids[3]!), 'чужая программа не тронута');
     await runA;
 
     await k.unload();
-    await until(() => !alive(pids[2]!) && !alive(pids[3]!), 3000, 'программа и внук при выгрузке ядра');
+    await waitFor('программа и внук при выгрузке ядра', () => !alive(pids[2]!) && !alive(pids[3]!));
     await runB;
   } finally {
     for (const pid of pids) if (alive(pid)) process.kill(pid, 'SIGKILL');
@@ -100,7 +97,7 @@ test('process.run: timeoutMs завершает и потомков програ
     const run = ctx('a').os.process!.run(process.execPath, ['-e', family(file)], { timeoutMs: 1500 });
     pids.push(...(await pidsOf(file)));
     assert.equal((await run).signal, 'SIGTERM');
-    await until(() => !alive(pids[1]!), 3000, 'внук после тайм-аута');
+    await waitFor('внук после тайм-аута', () => !alive(pids[1]!));
   } finally {
     for (const pid of pids) if (alive(pid)) process.kill(pid, 'SIGKILL');
     await k.unload();
@@ -152,7 +149,7 @@ test('process.run: signal в options - отмена завершает прог�
     pids.push(...(await pidsOf(file)));
     abort.abort();
     await assert.rejects(run, { code: 'Cancelled' });
-    await until(() => !alive(pids[0]!) && !alive(pids[1]!), 3000, 'программа и внук после отмены');
+    await waitFor('программа и внук после отмены', () => !alive(pids[0]!) && !alive(pids[1]!));
     const ok = await ctx('a').os.process!.run(process.execPath, ['-e', '0'], { signal: new AbortController().signal });
     assert.equal(ok.code, 0, 'место в пределе runs освободилось, неотменённый сигнал не мешает');
     await assert.rejects(ctx('a').os.process!.run(process.execPath, ['-e', '0'], { signal: AbortSignal.abort() }), { code: 'Cancelled' });
@@ -177,7 +174,7 @@ test('pty: kill бьёт по группе процесса - потомки о�
       kill: (signal) => process.kill(pid, signal),
     };
     groupKilled(plain).kill('SIGTERM');
-    await until(() => !alive(grand), 3000, 'потомок оболочки после kill');
+    await waitFor('потомок оболочки после kill', () => !alive(grand));
   } finally {
     if (alive(grand)) process.kill(grand, 'SIGKILL');
     leader.kill('SIGKILL');
@@ -217,7 +214,7 @@ test('net.fetch: зависший сервер - Timeout по timeoutMs; выг�
   await assert.rejects(ctx('web').os.net!.fetch('https://api.example.com/', { timeoutMs: 100 }), { code: 'Timeout' });
   assert.ok(Date.now() - started < 2000);
   const pending = ctx('web').os.net!.fetch('https://api.example.com/').catch((e: unknown) => e);
-  await until(() => signals.length === 2, 1000, 'второй запрос');
+  await waitFor('второй запрос', () => signals.length === 2);
   await k.disable('web');
   assert.ok(signals[1]?.aborted, 'запрос выключенного плагина не оборван');
   await pending;
@@ -236,7 +233,7 @@ test('fs.watch: ошибка наблюдателя (кончились inotify,
   const closed: string[] = [];
   await ctx('reader').os.fs.watch(box.work, () => undefined, (reason) => closed.push(reason));
   watchers[0]?.emit('error', new Error('ENOSPC: System limit for number of file watchers reached'));
-  await until(() => closed.length > 0, 1000, 'весть о закрытии');
+  await waitFor('весть о закрытии', () => closed.length > 0);
   assert.match(closed[0]!, /ENOSPC/);
   await k.unload();
 });
@@ -271,10 +268,14 @@ test('пределы: одновременных process.run у плагина -
   const { k, ctx } = await kernel({ a: { process: node, 'fs.read': [box.work] }, b: { process: node } }, { dataDir: box.data, tempDir: box.temp }, { runs: 2, readText: 16 });
   try {
     const wait = (ms: number) => ['-e', `setTimeout(()=>{},${String(ms)})`];
-    const quick = ctx('a').os.process!.run(process.execPath, wait(200));
-    const slow = ctx('a').os.process!.run(process.execPath, wait(60_000), { timeoutMs: 600 });
+    // Первая программа живёт, пока тест не создаст файл: срок в десятые доли секунды обогнал бы проверку предела на занятом раннере (запуск node там дольше).
+    const release = path.join(box.work, 'release');
+    const quick = ctx('a').os.process!.run(process.execPath, ['-e', `const fs=require('fs');setInterval(()=>fs.existsSync(${JSON.stringify(release)})&&process.exit(0),20)`]);
+    // Срок второй - запас на проверки ниже; тест ждёт его конца ровно один раз, когда нужен освободившийся им слот.
+    const slow = ctx('a').os.process!.run(process.execPath, wait(60_000), { timeoutMs: 2500 });
     await assert.rejects(ctx('a').os.process!.run(process.execPath, wait(0)), { code: 'Invalid', message: /уже 2 программ/ });
     assert.equal((await ctx('b').os.process!.run(process.execPath, wait(0))).code, 0, 'предел у каждого плагина свой');
+    await writeFile(release, '1');
     assert.equal((await quick).code, 0);
     const third = ctx('a').os.process!.run(process.execPath, wait(60_000));
     await assert.rejects(ctx('a').os.process!.run(process.execPath, wait(0)), { code: 'Invalid' });

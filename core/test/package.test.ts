@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { describe, it } from 'node:test';
+import { runCommand } from './run-command.ts';
 
 // P-02: ядро как пакет @cyborg-harness/core. Тесты про состав и форму пакета; сборка - `npm run build:core` (её гоняют pretest/pretypecheck/prelint/prebuild).
 const core = path.resolve(import.meta.dirname, '..');
@@ -40,7 +40,7 @@ describe('package.json ядра', () => {
 
   it('engines.node - мажор Node, который несёт Electron playground: берётся у самого Electron (ELECTRON_RUN_AS_NODE, process.versions.node)', () => {
     const electron = createRequire(path.join(root, 'package.json'))('electron') as string;
-    const version = execFileSync(electron, ['-p', 'process.versions.node'], { encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 30_000, killSignal: 'SIGKILL' }).trim();
+    const version = runCommand(electron, ['-p', 'process.versions.node'], { env: { ELECTRON_RUN_AS_NODE: '1' }, timeout: 30_000 }).trim();
     const major = /^(\d+)\./.exec(version)?.[1];
     assert.ok(major, `версия Node в Electron: ${version}`);
     assert.equal(manifest.engines?.node, `>=${major}`, `Node в Electron playground ${version}`);
@@ -107,7 +107,7 @@ describe('собранный пакет (core/dist)', () => {
   });
 
   it('npm pack: в архиве dist, package.json и README, без исходников и тестов', () => {
-    const out = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: core, encoding: 'utf8', timeout: 90_000, killSignal: 'SIGKILL' });
+    const out = runCommand('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: core });
     const [pack] = JSON.parse(out) as [{ files: { path: string }[] }];
     const names = pack.files.map((f) => f.path);
     assert.ok(names.includes('package.json') && names.includes('README.md'), 'нет package.json или README.md');

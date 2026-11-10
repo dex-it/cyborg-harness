@@ -8,6 +8,7 @@ import type { PluginModule } from '@cyborg-harness/core';
 import { WINDOW_OWNER } from '@cyborg-harness/core';
 import type { KeyRow } from '../src/snapshot.ts';
 import { discoverPlugins, PluginsService, readSchemaFile, startPlugins } from '../src/plugins.ts';
+import { waitFor } from './wait-for.ts';
 
 // Контракт для плагинов-подделок теста: карту контрактов приложения (playground/plugins/contracts.ts) пакет не знает.
 declare module '@cyborg-harness/contracts' {
@@ -282,7 +283,7 @@ test('служба окна: сочетания с конфликтом, пер�
   assert.equal(service.press({ ...ctrlShiftE, shift: false }), false, 'свободное сочетание ядро не забирает');
   assert.equal(service.press(ctrlShiftE), true);
   // Запись ear.hi идёт после асинхронного вызова контракта; под нагрузкой фиксированной паузы в 20 мс не хватало.
-  for (let i = 0; i < 150 && service.snapshot().feed.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  await waitFor('две записи ленты', () => service.snapshot().feed.length >= 2);
   assert.deepEqual(
     service.snapshot().feed.map((l) => [l.kind, l.subject, l.text]),
     [
@@ -353,7 +354,7 @@ test('служба окна: динамическое сочетание кно�
   service.setInputFocus('nonsense');
   service.setInputFocus('text');
   assert.equal(service.press(f('F3'), true), true, 'repeat и input: any');
-  for (let i = 0; i < 150 && ran.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  await waitFor('две выполненные команды', () => ran.length >= 2);
   assert.deepEqual(ran, [['build'], ['again']]);
   assert.deepEqual(
     service.snapshot().keys.filter((k) => k.pluginId === 'buttons').map((k) => [k.key, k.live]),
@@ -479,16 +480,12 @@ test('plugins.enabled из файла воркспейса без перезап
   });
   // Без выгрузки упавший тест держит слежение, и процесс файла не выходит.
   t.after(() => kernel.unload());
-  const until = async (what: string, ok: () => boolean) => {
-    for (let i = 0; i < 100 && !ok(); i++) await new Promise((r) => setTimeout(r, 20));
-    assert.ok(ok(), what);
-  };
   assert.deepEqual(kernel.active, ['a', 'b']);
   write(['a']);
-  await until('b выключен', () => applied === 1);
+  await waitFor('b выключен', () => applied === 1);
   assert.deepEqual(kernel.active, ['a']);
   write(['a', 'b', 'c']);
-  await until('b включён', () => applied === 2);
+  await waitFor('b включён', () => applied === 2);
   assert.deepEqual(kernel.active, ['a', 'b']);
   assert.deepEqual(problems, ['plugins.enabled: c - включатся после перезапуска']);
 });

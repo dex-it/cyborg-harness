@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
+import { runCommand, tryCommand } from '../../../core/test/run-command.ts';
 
 // Форма пакета cyborg-plugin: bin, exports и files отвечают за обещания README. Раньше это держали core/test/package.test.ts и consumer.test.ts
 // (пока команда жила в ядре). Пакет собирает `npm run build:tools` (его гоняют pretest/pretypecheck/prelint/prebuild).
@@ -38,13 +38,8 @@ describe('package.json cyborg-plugin: bin, exports, состав пакета', 
 
   it('bin запускается как программа: без команды код 2 и справка, check несуществующего каталога - код 1', () => {
     const run = (args: string[]): { status: number; stderr: string } => {
-      try {
-        execFileSync(binTarget(), args, { stdio: 'pipe' });
-        return { status: 0, stderr: '' };
-      } catch (error) {
-        const failed = error as { status: number; stderr: Buffer };
-        return { status: failed.status, stderr: failed.stderr.toString() };
-      }
+      const { code, out } = tryCommand(binTarget(), args);
+      return { status: code, stderr: out };
     };
     const none = run([]);
     assert.equal(none.status, 2);
@@ -60,7 +55,7 @@ describe('package.json cyborg-plugin: bin, exports, состав пакета', 
   });
 
   it('npm pack --dry-run кладёт в пакет только dist, README и package.json', () => {
-    const out = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: pkg, encoding: 'utf8' });
+    const out = runCommand('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: pkg });
     const [packed] = JSON.parse(out) as [{ files: { path: string }[] }];
     const names = packed.files.map((f) => f.path);
     assert.deepEqual(names.filter((n) => n !== 'package.json' && n !== 'README.md' && !n.startsWith('dist/')), []);

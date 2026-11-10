@@ -5,24 +5,22 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext } from '@cyborg-harness/contracts';
-import { load, type LoadOptions } from '../src/loader.ts';
+import { load as loadKernel, type Kernel, type LoadOptions } from '../src/loader.ts';
+import { trackKernels } from './kernels.ts';
 import { parseManifest } from '../src/manifest.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { pluginStatuses } from '../src/status.ts';
 import type { NoticeEvents } from '../src/notices.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
+import { waitFor } from './wait-for.ts';
+
+// Ядро выгружается после каждого теста файла, и упавшим тоже: иначе слежение и программы держат процесс файла (core/test/kernels.ts).
+const track = trackKernels();
+const load = async (options: LoadOptions): Promise<Kernel> => track(await loadKernel(options));
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 const settle = () => sleep(20);
-
-async function until(cond: () => boolean, ms: number, what: string): Promise<void> {
-  for (const end = Date.now() + ms; Date.now() < end; ) {
-    if (cond()) return;
-    await sleep(20);
-  }
-  assert.fail(`${what}: не дождались за ${String(ms)} мс`);
-}
 
 function start(table: Record<string, PluginModule>, options: Omit<LoadOptions, 'apiVersion' | 'spawnHost' | 'enabled'> & { enabled?: string[] }) {
   const logs: string[] = [];
@@ -59,8 +57,8 @@ test('события окна и ОС: доходят до плагинов вс
   k.emit({ kind: 'suspend' });
   k.emit({ kind: 'resume' });
   k.emit({ kind: 'screen-lock' });
-  // На занятом раннере CI 20 мс не хватало журналу упавшего слушателя: ждём факта, а не срока.
-  await until(() => seen.length >= 7 && k.logs.some((l) => l.startsWith('a: слушатель suspend упал')), 2000, 'события и запись об упавшем слушателе');
+  // Ждём факта, а не срока: на занятом раннере CI 20 мс не хватало журналу упавшего слушателя.
+  await waitFor('события и запись об упавшем слушателе', () => seen.length >= 7 && k.logs.some((l) => l.startsWith('a: слушатель suspend упал')));
   assert.deepEqual(seen.sort(), ['a:focus:false', 'a:lock', 'a:resume', 'b:focus:false', 'b:lock', 'b:resume', 'b:suspend']);
   assert.ok(k.logs.some((l) => l.startsWith('a: слушатель suspend упал: сломан')), k.logs.join('\n'));
   assert.throws(() => k.emit({ kind: 'reboot' } as never), { code: 'Invalid' });
@@ -68,7 +66,7 @@ test('события окна и ОС: доходят до плагинов вс
   await k.disable('a');
   seen.length = 0;
   k.emit({ kind: 'focus', focused: true });
-  await until(() => seen.includes('b:focus:true'), 2000, 'фокус у оставшегося плагина');
+  await waitFor('фокус у оставшегося плагина', () => seen.includes('b:focus:true'));
   await settle();
   assert.deepEqual(seen, ['b:focus:true']);
   await k.unload();
@@ -95,7 +93,8 @@ test('onIdle: один раз на простой, снова - после ак�
   const sub = ctx!.system.onIdle(60, () => fired.push(idle));
   // Значение простоя держится, пока ядро не спросит ОС дважды: медленный раннер за 20 мс может не успеть ни разу.
   const polled = async () => {
-    for (const from = asked; asked < from + 2; ) await sleep(5);
+    const from = asked;
+    await waitFor('два опроса ОС о простое', () => asked >= from + 2);
   };
   assert.throws(() => ctx!.system.onIdle(0, () => undefined), { code: 'Invalid' });
   idle = 30;
@@ -234,23 +233,30 @@ test('activation lazy: enable ждущего поднимает его один 
 
 test('предел слушателей onIdle: сверх предела ядро отказывает с причиной в журнале, снятый слушатель освобождает место', async () => {
   let idle = 0;
+  let polls = 0;
   let ctx: PluginContext | undefined;
-  const k = await start({ lock: { activate: (c) => void (ctx = c) } }, { manifests: [manifest('lock')], idlePoll: 5, idleSeconds: () => idle, limits: { idleWatchers: 2 } });
+  const k = await start({ lock: { activate: (c) => void (ctx = c) } }, { manifests: [manifest('lock')], idlePoll: 5, idleSeconds: () => (polls++, idle), limits: { idleWatchers: 2 } });
+  // Опрос ОС о простое идёт по таймеру: ждём заданного числа опросов, а не срока, за который они «должны» успеть.
+  const polled = async (n = 2) => {
+    const from = polls;
+    await waitFor(`${String(n)} опроса ОС о простое`, () => polls >= from + n);
+  };
   const fired: string[] = [];
   const first = ctx!.system.onIdle(10, () => fired.push('a'));
   ctx!.system.onIdle(10, () => fired.push('b'));
   ctx!.system.onIdle(10, () => fired.push('c'));
-  await settle();
-  assert.ok(k.logs.some((l) => l.includes('слушателей onIdle больше 2')), k.logs.join('\n'));
+  await waitFor('запись о пределе слушателей', () => k.logs.some((l) => l.includes('слушателей onIdle больше 2')));
   idle = 20;
-  await settle();
+  await waitFor('простой замечен обоими слушателями', () => fired.length >= 2);
+  await polled();
   assert.deepEqual(fired.toSorted(), ['a', 'b']);
   first.dispose();
   ctx!.system.onIdle(10, () => fired.push('d'));
   idle = 0;
-  await settle();
+  await polled();
   idle = 20;
-  await settle();
+  await waitFor('простой замечен после возвращения активности', () => fired.length >= 4);
+  await polled();
   assert.deepEqual(fired.toSorted(), ['a', 'b', 'b', 'd']);
   await k.unload();
 });
@@ -297,7 +303,7 @@ test('клик по уведомлению, пока хост перезапус
   handles.get(k.hostOf('bell')!)!.kill();
   assert.equal(closed, 0, 'падение хоста уведомление не закрывает');
   clicks[0]!.click();
-  for (let i = 0; i < 200 && ran.length === 0; i++) await sleep(5);
+  await waitFor('команда уведомления выполнена вернувшимся плагином', () => ran.length > 0);
   assert.notEqual(ctx, before, 'плагин поднят заново');
   assert.deepEqual(ran, ['s1']);
   assert.equal(closed, 1);
