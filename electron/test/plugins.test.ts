@@ -795,11 +795,12 @@ test('модальное окно плагина: данные видит тол
   const userData = tmp();
   const dir = path.join(userData, 'plugins');
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['face'] } }));
-  plugin(dir, 'face', { commands: { 'face.form': {} }, ui: { views: { main: './ui/ui.js', form: { module: './ui/form.js', area: 'modal', title: 'Форма' } } } }, 'export default {}');
+  plugin(dir, 'face', { commands: { 'face.form': {}, 'face.own': {} }, ui: { views: { main: './ui/ui.js', form: { module: './ui/form.js', area: 'modal', title: 'Форма' } } } }, 'export default {}');
   const modules: Record<string, PluginModule> = {
     face: {
       activate(ctx) {
         ctx.commands.register('face.form', () => ctx.views.modal('form', { data: { имя: 'черновик' } }));
+        ctx.commands.register('face.own', () => ctx.views.modal('form', { size: { width: 800 }, escape: 'view' }));
       },
     },
   };
@@ -830,6 +831,14 @@ test('модальное окно плагина: данные видит тол
   await waitFor('окно показано', () => shown() !== undefined);
   assert.equal(service.dismissModal(), true);
   assert.deepEqual(await escaped, {});
+
+  const own = service.runFor('face', 'face.own', []);
+  await waitFor('окно показано', () => shown() !== undefined);
+  assert.deepEqual(shown()?.size, { width: 800 }, 'размер автора дошёл до снимка окна');
+  assert.equal(shown()?.escape, 'view');
+  assert.equal(service.dismissModal(), false, 'Escape оставлен виду: страница получает нажатие, главный процесс его не гасит');
+  assert.deepEqual(service.closeModalFor('face', 'form', 'сам'), {}, 'вид закрывает такое окно сам');
+  assert.deepEqual(await own, { value: 'сам' });
 
   const closed = service.runFor('face', 'face.form', []);
   await waitFor('окно показано', () => shown() !== undefined);

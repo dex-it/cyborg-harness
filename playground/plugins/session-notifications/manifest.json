@@ -1,0 +1,20 @@
+{
+  "id": "session-notifications",
+  "version": "1.0.0",
+  "engines": {
+    "cyborg": "^1"
+  },
+  "optional": {
+    "cyborg.sessions": "^1"
+  },
+  "commands": {
+    "session-notifications.open": {
+      "args": [
+        "string"
+      ]
+    }
+  },
+  "permissions": {
+    "notify": true
+  }
+}

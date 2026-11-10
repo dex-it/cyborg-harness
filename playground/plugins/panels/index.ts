@@ -1,7 +1,7 @@
 import type { PluginModule } from '@cyborg-harness/contracts';
 
 // Два вида одного плагина в разных областях. Главная часть показывает канал «главная часть - вид» (K-13): толчок идёт только виду panel,
-// а виду bar (то же имя плагина, другое имя вида) не доходит. Модальное окно (вид form с area "modal") и диалог из главной части: команды panels.form и panels.confirm.
+// а виду bar (то же имя плагина, другое имя вида) не доходит. Модальное окно (вид form с area "modal") и диалог из главной части: команды panels.form, panels.form-own (размер и Escape от автора) и panels.confirm.
 const panels: PluginModule = {
   activate(ctx) {
     const channel = ctx.views.channel('panel');
@@ -11,6 +11,12 @@ const panels: PluginModule = {
     ctx.commands.register('panels.form', async () => {
       const result = await ctx.views.modal('form', { data: { name: 'черновик' } });
       ctx.log(`форма вернула: ${result === undefined ? 'ничего' : JSON.stringify(result)}`);
+      return result;
+    });
+    // Окно с размером автора и Escape у вида (#163): вид сам решает, что значит Escape, и закрывает окно кнопкой.
+    ctx.commands.register('panels.form-own', async () => {
+      const result = await ctx.views.modal('form', { title: 'Широкая форма', data: { name: 'черновик', ownEscape: true }, size: { width: 700, height: 300 }, escape: 'view' });
+      ctx.log(`широкая форма вернула: ${result === undefined ? 'ничего' : JSON.stringify(result)}`);
       return result;
     });
     ctx.commands.register('panels.confirm', async () => {
