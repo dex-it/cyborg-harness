@@ -1,7 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { forkHosts, load, PLUGIN_API_VERSION } from '@cyborg-harness/core';
+import { fakePty, memorySecrets, sandbox } from '@cyborg-harness/testing';
 import { waitFor } from '../../core/test/wait-for.ts';
-import { chainRig, type Heard, type Rig } from './chain-rig.ts';
+import { agentEnv, chainRig, fakeNotify, PLUGINS, runHook, type Heard, type Rig } from './chain-rig.ts';
 
 // PL-02 (#18): хук claude -> agent-claude-code (fs.watch, readSlice) -> sessions (cyborg.sessions) -> session-notifications -> уведомление ядра.
 // Хук - настоящая команда из --settings плагина; уведомление - подставная среда ядра; claude в PATH - заглушка.
@@ -113,4 +118,49 @@ test('без права notify у плагина нет ctx.os.notify: он го
   await waitFor('плагин разобрал событие', () => s.logs.some(([id, line]) => id === 'session-notifications' && line.includes('показывать нечем')));
   assert.equal(s.notices.shown.length, 0, 'до среды уведомление не дошло');
   assert.deepEqual(types(s.heard.slice(base)), ['waiting'], 'событие цепочки дошло, нет только уведомления');
+});
+
+test('те же плагины в разных процессах ОС (forkHosts): событие «ждёт» проходит границу хостов и приводит к уведомлению, клик возвращается командой', async () => {
+  await using box = await sandbox('cyborg-chain-fork-');
+  const notices = fakeNotify();
+  const logs: (readonly [string, string])[] = [];
+  const ids = ['agent-claude-code', 'sessions', 'session-notifications'];
+  const pty = fakePty();
+  const k = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ids,
+    manifests: await Promise.all(ids.map(async (id) => JSON.parse(await readFile(path.join(PLUGINS, id, 'manifest.json'), 'utf8')) as unknown)),
+    entry: (m) => pathToFileURL(path.join(PLUGINS, m.id, 'index.ts')).href,
+    spawnHost: forkHosts(),
+    // sessions и session-notifications в разных процессах: у обоих ничего общего, кроме ядра.
+    hosts: { agents: ['agent-claude-code'], sessions: ['sessions'], notify: ['session-notifications'] },
+    os: { dataDir: box.path('data'), tempDir: box.path('temp'), pty, secrets: memorySecrets(), ...(await agentEnv(box)), ...notices.os },
+    // Зависание хоста определяет сторож; на занятом раннере холодный старт трёх процессов Node не должен сойти за него.
+    watchdog: { interval: 200, timeout: 30_000, strikes: 3 },
+    onLog: (pluginId, message) => void logs.push([pluginId, message]),
+  });
+  try {
+    assert.equal(new Set(ids.map((id) => k.hostOf(id))).size, 3, 'каждый плагин в своём хосте');
+    assert.deepEqual(k.active.toSorted(), ids.toSorted(), JSON.stringify(k.journal.filter((e) => e.kind === 'failed')));
+    await waitFor('session-notifications подписался', () => logs.some(([id, line]) => id === 'session-notifications' && line.includes('подписан на cyborg.sessions')));
+    await k.run('sessions.new', 'agent-claude-code');
+    const file = pty.procs.at(-1)?.options.env.CYBORG_EVENTS;
+    assert.ok(file);
+    const settings = path.join(box.path('data'), 'agent-claude-code', 'claude-hooks.json');
+    // watch встаёт на конец файла сам: проба повторяется, пока sessions не отдаст её в журнал (в процессе sessions её видно по строке describe).
+    await waitFor('watch сессии встал', async () => {
+      await runHook(settings, file, { hook_event_name: 'PostToolUse', tool_name: 'ReadyProbe' });
+      return logs.some(([id, line]) => id === 'sessions' && line.includes('ReadyProbe'));
+    }, { interval: 100 });
+    k.emit({ kind: 'focus', focused: false });
+    await runHook(settings, file, waiting('x'));
+    await waitFor('уведомление показано', () => notices.shown.length === 1);
+    assert.equal(notices.shown[0]!.body, 'Просит разрешение');
+    notices.shown[0]!.events.click();
+    await waitFor('команда клика выполнена в процессе плагина', () => logs.some(([id, line]) => id === 'session-notifications' && line.includes('открыта сессия')));
+    assert.equal(notices.raised(), 1);
+    assert.deepEqual(k.journal.filter((e) => e.kind === 'denied' || e.kind === 'failed' || e.kind === 'host-down'), []);
+  } finally {
+    await k.unload();
+  }
 });
