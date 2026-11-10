@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
-import { checkGateway, checkHosts, main, parseMeasurement, render } from '../check-budgets.ts';
+import { checkGateway, checkHosts, fails, main, parseMeasurement, render } from '../check-budgets.ts';
 import type { Budgets } from '../check-budgets.ts';
 
 // P-10: сверка замеров с порогами из playground/budgets.json. Замеры - образцы формы `spike-gateway.mjs --json` и `spike-hosts.mjs --json`.
@@ -12,7 +12,7 @@ const real = JSON.parse(fs.readFileSync(path.join(repo, 'playground', 'budgets.j
 
 const budgets: Budgets = {
   decision: { source: 'https://example.test/21', row: 6, date: '2026-11-07' },
-  gateway: { callP99Ms: 1, watchP99Ms: 5, maxBytes: 65536, blocking: ['linux'] },
+  gateway: { callP99Ms: 1, watchP99Ms: 5, maxBytes: 65536, blocking: ['linux'], guarded: ['fs.readText', 'fs.watch', 'pty.write', 'secrets.get'], blockingMargin: 1.5 },
   hosts: { blocking: [], limits: { linux: { pssPerHostMb: null, callP99Ms: null }, darwin: { pssPerHostMb: null, callP99Ms: null } } },
 };
 
@@ -37,6 +37,9 @@ describe('файл порогов в репозитории', () => {
     assert.equal(real.gateway.callP99Ms, 1);
     assert.equal(real.gateway.watchP99Ms, 5);
     assert.equal(real.gateway.maxBytes, 65536);
+    assert.deepEqual(real.gateway.blocking, ['linux']);
+    assert.deepEqual(real.gateway.guarded, ['fs.readText', 'fs.watch', 'pty.write', 'secrets.get']);
+    assert.equal(real.gateway.blockingMargin, 1.5);
     assert.ok(fs.existsSync(path.join(repo, 'docs', '03-requirements', '01-plugin-host', 'srs.md')));
   });
 
@@ -52,11 +55,25 @@ describe('checkGateway', () => {
     assert.deepEqual(findings.map((f) => f.over), [false, false]);
   });
 
-  it('вызов дороже 1 мс на Linux - превышение, которое красит PR', () => {
-    const [f] = checkGateway(budgets, { costs: [cost('pty.write', 65536, 1.01)] }, 'linux');
+  it('вызов дороже порога блокировки (бюджет 1 мс на запас 1,5) на Linux красит PR', () => {
+    const [f] = checkGateway(budgets, { costs: [cost('pty.write', 65536, 1.6)] }, 'linux');
     assert.equal(f?.over, true);
     assert.equal(f.blocking, true);
     assert.equal(f.limit, 1);
+    assert.equal(f.blockAbove, 1.5);
+    assert.equal(fails(f), true);
+  });
+
+  it('между бюджетом и порогом блокировки - строка выше бюджета, но PR зелёный (запас на шум раннера)', () => {
+    const [f] = checkGateway(budgets, { costs: [cost('fs.readText', 64, 1.2)] }, 'linux');
+    assert.equal(f?.over, true);
+    assert.equal(fails(f), false);
+    assert.match(render('Шлюз', [f]), /выше бюджета, в запасе до 1\.5/);
+  });
+
+  it('не охраняемые пути (fs.readText.cold, net.fetch) шумят на раннере: выше порога, но не красят', () => {
+    const findings = checkGateway(budgets, { costs: [cost('fs.readText.cold', 64, 2.6), cost('net.fetch', 65536, 1.4), cost('net.fetch.checked', 65536, 9)] }, 'linux');
+    assert.deepEqual(findings.map((f) => [f.over, f.blocking, fails(f)]), [[true, false, false], [true, false, false], [true, false, false]]);
   });
 
   it('ровно на пороге - ещё в бюджете (не больше 1 мс)', () => {
@@ -65,8 +82,8 @@ describe('checkGateway', () => {
   });
 
   it('fs.watch сверяется со своим порогом 5 мс, а не с порогом вызова', () => {
-    const findings = checkGateway(budgets, { costs: [cost('fs.watch', 64, 3), cost('fs.watch', 64, 5.5)] }, 'linux');
-    assert.deepEqual(findings.map((f) => [f.limit, f.over]), [[5, false], [5, true]]);
+    const findings = checkGateway(budgets, { costs: [cost('fs.watch', 64, 3), cost('fs.watch', 64, 5.5), cost('fs.watch', 64, 8)] }, 'linux');
+    assert.deepEqual(findings.map((f) => [f.limit, f.over, fails(f)]), [[5, false, false], [5, true, false], [5, true, true]]);
   });
 
   it('размер выше 64 КиБ справочный и в сверку не входит', () => {
@@ -85,6 +102,7 @@ describe('checkGateway', () => {
     const [f] = checkGateway(budgets, { costs: [cost('fs.readText', 64, 2)] }, 'darwin');
     assert.equal(f?.over, true);
     assert.equal(f.blocking, false);
+    assert.equal(fails(f), false);
   });
 
   it('прогон с ошибкой и пустой замер - тоже красные: замер, которого не было, не зелёный', () => {
@@ -166,7 +184,7 @@ describe('main: код выхода', () => {
     const dir = tmp(files(1.7));
     const result = main(['--gateway', 'gateway.json', '--budgets', 'budgets.json', '--platform', 'linux'], dir);
     assert.equal(result.code, 1);
-    assert.match(result.err, /бюджет превышен: fs\.readText, 64 Б 1\.7 мс при пороге 1/);
+    assert.match(result.err, /бюджет превышен: fs\.readText, 64 Б 1\.7 мс при пороге блокировки 1\.5/);
     assert.match(result.out, /ПРЕВЫШЕН/);
   });
 
@@ -174,7 +192,7 @@ describe('main: код выхода', () => {
     const dir = tmp(files(1.7));
     const result = main(['--gateway', 'gateway.json', '--budgets', 'budgets.json', '--platform', 'darwin'], dir);
     assert.equal(result.code, 0);
-    assert.match(result.out, /выше порога, не блокирует/);
+    assert.match(result.out, /выше бюджета, не блокирует/);
   });
 
   it('сводка дописывается в файл --summary', () => {

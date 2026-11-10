@@ -7,7 +7,17 @@ import path from 'node:path';
 
 export interface Budgets {
   readonly decision: { readonly source: string; readonly row: number; readonly date: string };
-  readonly gateway: { readonly callP99Ms: number; readonly watchP99Ms: number; readonly maxBytes: number; readonly blocking: readonly string[] };
+  readonly gateway: {
+    readonly callP99Ms: number;
+    readonly watchP99Ms: number;
+    readonly maxBytes: number;
+    /** Платформы, где превышение красит PR. */
+    readonly blocking: readonly string[];
+    /** Пути, которые красят PR; остальные шумят на раннере и идут справочно. */
+    readonly guarded: readonly string[];
+    /** Запас на шум раннера: красит значение выше бюджета, умноженного на него. */
+    readonly blockingMargin: number;
+  };
   readonly hosts: {
     readonly blocking: readonly string[];
     readonly limits: Readonly<Record<string, { readonly pssPerHostMb: number | null; readonly callP99Ms: number | null } | undefined>>;
@@ -42,14 +52,21 @@ export interface Finding {
   readonly unit: string;
   /** Выше порога или числа нет при заданном пороге. */
   readonly over: boolean;
-  /** Превышение красит PR: порог задан и платформа в списке `blocking`. */
+  /** Метрика на страже: порог задан, платформа в `blocking`, путь в `guarded`. */
   readonly blocking: boolean;
+  /** Выше этого числа PR красный (бюджет с запасом на шум); `null` - порога нет. */
+  readonly blockAbove: number | null;
 }
 
 const finite = (n: number | null | undefined): n is number => typeof n === 'number' && Number.isFinite(n);
 
-function finding(metric: string, value: number, limit: number | null, unit: string, blocking: boolean): Finding {
-  return { metric, value, limit, unit, over: limit !== null && !(value <= limit), blocking: blocking && limit !== null };
+function finding(metric: string, value: number, limit: number | null, unit: string, blocking: boolean, margin = 1): Finding {
+  return { metric, value, limit, unit, over: limit !== null && !(value <= limit), blocking: blocking && limit !== null, blockAbove: limit === null ? null : limit * margin };
+}
+
+/** Красит ли строка PR: на страже и значение выше порога блокировки (NaN - тоже). */
+export function fails(f: Finding): boolean {
+  return f.blocking && f.blockAbove !== null && !(f.value <= f.blockAbove);
 }
 
 /**
@@ -89,7 +106,7 @@ export function checkGateway(budgets: Budgets, result: GatewayResult, platform: 
   for (const c of costs) {
     // У net.fetch проверка адреса из плагина не мерится (шлюз отверг бы 127.0.0.1 под именем): тогда берётся цена транспорта с проверкой.
     const value = finite(c.pluginP99) ? c.pluginP99 : (c.gatewayP99 ?? NaN);
-    findings.push(finding(`${c.path}, ${String(c.sizeBytes)} Б`, value, c.path === 'fs.watch' ? g.watchP99Ms : g.callP99Ms, 'мс', blocking));
+    findings.push(finding(`${c.path}, ${String(c.sizeBytes)} Б`, value, c.path === 'fs.watch' ? g.watchP99Ms : g.callP99Ms, 'мс', blocking && g.guarded.includes(c.path), g.blockingMargin));
   }
   return findings;
 }
@@ -109,10 +126,16 @@ export function checkHosts(budgets: Budgets, result: HostsResult, platform: stri
 
 const fmt = (n: number): string => (Number.isFinite(n) ? String(Math.round(n * 1000) / 1000) : 'нет числа');
 
+function status(f: Finding): string {
+  if (fails(f)) return 'ПРЕВЫШЕН';
+  if (f.over) return f.blocking ? `выше бюджета, в запасе до ${fmt(f.blockAbove ?? NaN)}` : 'выше бюджета, не блокирует';
+  return f.limit === null ? 'информационно' : 'в бюджете';
+}
+
 /** Таблица для журнала шага и `$GITHUB_STEP_SUMMARY`. */
 export function render(title: string, findings: readonly Finding[]): string {
   if (findings.length === 0) return `### ${title}\n\nзамер не дал строк\n`;
-  const rows = findings.map((f) => `| ${f.metric} | ${fmt(f.value)}${f.unit ? ` ${f.unit}` : ''} | ${f.limit === null ? 'не задан' : `${fmt(f.limit)} ${f.unit}`.trim()} | ${f.over ? (f.blocking ? 'ПРЕВЫШЕН' : 'выше порога, не блокирует') : f.limit === null ? 'информационно' : 'в бюджете'} |`);
+  const rows = findings.map((f) => `| ${f.metric} | ${fmt(f.value)}${f.unit ? ` ${f.unit}` : ''} | ${f.limit === null ? 'не задан' : `${fmt(f.limit)} ${f.unit}`.trim()} | ${status(f)} |`);
   return `### ${title}\n\n| Метрика | Замер | Порог | Итог |\n|---|---|---|---|\n${rows.join('\n')}\n`;
 }
 
@@ -153,9 +176,9 @@ export function main(args: readonly string[], root: string): CheckOutput {
   const text = sections.join('\n');
   const summary = option(args, 'summary');
   if (summary !== undefined) fs.appendFileSync(path.resolve(root, summary), `${text}\n`);
-  const failed = all.filter((f) => f.over && f.blocking);
+  const failed = all.filter(fails);
   if (failed.length === 0) return { code: 0, out: text, err: '' };
-  return { code: 1, out: text, err: `бюджет превышен: ${failed.map((f) => `${f.metric} ${fmt(f.value)} ${f.unit} при пороге ${fmt(f.limit ?? NaN)}`).join('; ')}\n` };
+  return { code: 1, out: text, err: `бюджет превышен: ${failed.map((f) => `${f.metric} ${fmt(f.value)} ${f.unit} при пороге блокировки ${fmt(f.blockAbove ?? NaN)}`).join('; ')}\n` };
 }
 
 if (process.argv[1] === import.meta.filename) {
