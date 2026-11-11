@@ -70,6 +70,38 @@ describe('сравнение с базой', () => {
   });
 });
 
+describe('кандидат в выпуск 1.0.0-rc.N (K-21)', () => {
+  const rc1 = { version: '1.0.0-rc.1', body: 'A' };
+  it('в отличие от -dev декларации кандидата без нового номера не меняются', () => {
+    assert.deepEqual(compareWithBase(rc1, { version: '1.0.0-rc.1', body: 'A' }), []);
+    const problems = compareWithBase(rc1, { version: '1.0.0-rc.1', body: 'B' });
+    assert.equal(problems.length, 1);
+    assert.match(problems[0]!, /без повышения версии пакета \(1\.0\.0-rc\.1\)/);
+  });
+  it('новый кандидат, выпуск после кандидата и кандидат после линии разработки - можно', () => {
+    assert.deepEqual(compareWithBase(rc1, { version: '1.0.0-rc.2', body: 'B' }), []);
+    assert.deepEqual(compareWithBase({ version: '1.0.0-rc.9', body: 'A' }, { version: '1.0.0-rc.10', body: 'B' }), [], 'номера сравниваются числом, а не строкой');
+    assert.deepEqual(compareWithBase(rc1, { version: '1.0.0', body: 'B' }), []);
+    assert.deepEqual(compareWithBase({ version: '1.0.0-dev', body: 'A' }, { version: '1.0.0-rc.1', body: 'B' }), []);
+  });
+  it('возврат на меньший кандидат, на линию разработки или на предрелиз прежнего выпуска - понижение', () => {
+    assert.match(compareWithBase({ version: '1.0.0-rc.2', body: 'A' }, { version: '1.0.0-rc.1', body: 'A' })[0]!, /понижена/);
+    assert.match(compareWithBase(rc1, { version: '1.0.0-dev', body: 'A' })[0]!, /понижена/);
+  });
+  it('устаревший снимок кандидата: просят повысить версию, как у выпуска', () => {
+    const out = built();
+    fs.appendFileSync(path.join(out, 'index.d.ts'), 'export type Extra = string;\n');
+    const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'cyborg-contracts-rc-'));
+    const stale = path.join(dir, 'api-snapshot.txt');
+    fs.writeFileSync(stale, renderSnapshot('1.0.0-rc.1', 'устарело\n'));
+    const problems = checkSnapshot(out, '1.0.0-rc.1', stale);
+    assert.equal(problems.length, 1, problems.join('; '));
+    assert.match(problems[0]!, /повысьте версию/);
+    fs.rmSync(out, { recursive: true });
+    fs.rmSync(dir, { recursive: true });
+  });
+});
+
 describe('снимок в репозитории', () => {
   it('совпадает с собранными декларациями и версией пакета', () => {
     const out = built();

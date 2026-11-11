@@ -37,16 +37,23 @@ export function readSnapshot(file = SNAPSHOT_FILE): Snapshot {
   return parseSnapshot(fs.readFileSync(file, 'utf8'));
 }
 
-/** Версия с суффиксом (`1.0.0-dev`) - линия разработки ещё не выпущенного пакета: её API меняется свободно, правило повышения действует после первого выпуска. */
-const isPrerelease = (version: string): boolean => version.includes('-');
+/** Линия разработки: любой суффикс, кроме `-rc.N`. Выпуска ещё нет и кандидата тоже: API меняется свободно, правило повышения действует после заморозки (K-21). */
+const isDevLine = (version: string): boolean => version.includes('-') && !/-rc\.\d+$/.test(version);
 
-/** Порядок по числам версии; у равных чисел выпуск старше предрелиза, а два предрелиза не сравниваются. */
+/** Порядок версий: числа, затем выпуск старше предрелиза, кандидат `-rc.N` старше линии разработки, два кандидата - по номеру; две линии разработки не сравниваются. */
 function lower(a: string, b: string): boolean {
   const [x, y] = [a, b].map((v) => (v.split(/[-+]/)[0] ?? '').split('.').map(Number));
   for (let i = 0; i < 3; i++) {
     if ((x?.[i] ?? 0) !== (y?.[i] ?? 0)) return (x?.[i] ?? 0) < (y?.[i] ?? 0);
   }
-  return isPrerelease(a) && !isPrerelease(b);
+  return rank(a) < rank(b);
+}
+
+/** Выпуск - бесконечность, кандидат - его номер, линия разработки - минус единица. */
+function rank(version: string): number {
+  if (!version.includes('-')) return Number.POSITIVE_INFINITY;
+  const rc = /-rc\.(\d+)$/.exec(version);
+  return rc?.[1] === undefined ? -1 : Number(rc[1]);
 }
 
 /** Снимок в репозитории против собранных деклараций `dir` и версии пакета. */
@@ -55,8 +62,8 @@ export function checkSnapshot(dir: string, packageVersion: string, file = SNAPSH
   const problems: string[] = [];
   if (snapshot.version !== packageVersion) problems.push(`снимок снят для версии ${snapshot.version}, а в package.json ${packageVersion}: обновите снимок (npm run snapshot:contracts)`);
   if (snapshot.body !== normalizeDeclarations(dir)) {
-    // На линии разработки версию повышать не нужно (см. `isPrerelease`): просим только запись в CHANGELOG и снимок.
-    const raise = isPrerelease(snapshot.version) ? '' : 'повысьте версию пакета, ';
+    // На линии разработки версию повышать не нужно (см. `isDevLine`): просим только запись в CHANGELOG и снимок.
+    const raise = isDevLine(snapshot.version) ? '' : 'повысьте версию пакета, ';
     problems.push(`декларации пакета изменены, а снимок ${snapshot.version} - нет: ${raise}запишите изменение в CHANGELOG.md и обновите снимок (npm run snapshot:contracts)`);
   }
   return problems;
@@ -66,6 +73,6 @@ export function checkSnapshot(dir: string, packageVersion: string, file = SNAPSH
 export function compareWithBase(base: Snapshot | undefined, current: Snapshot): string[] {
   if (!base) return [];
   if (lower(current.version, base.version)) return [`версия пакета понижена: ${base.version} -> ${current.version}`];
-  if (current.body !== base.body && current.version === base.version && !isPrerelease(base.version)) return [`публичные декларации изменены без повышения версии пакета (${base.version}): повысьте версию по правилам README.md и обновите снимок`];
+  if (current.body !== base.body && current.version === base.version && !isDevLine(base.version)) return [`публичные декларации изменены без повышения версии пакета (${base.version}): повысьте версию по правилам README.md и обновите снимок`];
   return [];
 }

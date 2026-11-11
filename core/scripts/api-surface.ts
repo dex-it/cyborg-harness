@@ -32,6 +32,7 @@ export const TYPE_SOURCES: readonly Source[] = [
   { file: 'core/src/manifest.ts', only: ['PluginManifest', 'SectionDecl', 'ArgSpec', 'CommandSpec', 'CommandCallers', 'KeybindingSpec'] },
   { file: 'core/src/manifest-layout.ts', only: ['Placement', 'DocumentDecl', 'Area'] },
   { file: 'core/src/via-contract.ts', only: ['Guard', 'GuardRight', 'MemberGuards'] },
+  { file: 'core/src/manifest-menus.ts', only: ['Contributes', 'MenuItemDecl', 'MenuName', 'StateSource'] },
 ];
 
 export interface ConstSource {
@@ -46,6 +47,7 @@ export const CONST_SOURCES: readonly ConstSource[] = [
   { file: 'core/src/manifest.ts', name: 'TOP_LEVEL', kind: 'set' },
   { file: 'core/src/manifest-layout.ts', name: 'AREAS', kind: 'set' },
   { file: 'core/src/via-contract.ts', name: 'GUARD_RIGHTS', kind: 'set' },
+  { file: 'core/src/manifest-menus.ts', name: 'MENU_NAMES', kind: 'set' },
   { file: 'core/src/window-layer.ts', name: 'WINDOW_COMMANDS', kind: 'map' },
 ];
 
@@ -62,7 +64,7 @@ export const KERNEL_SIDE: ReadonlySet<string> = new Set([
   'PluginOs', 'OsFs', 'OsSecrets', 'OsPty', 'OsNotify', 'OsDialog', 'OsUi', 'UiLock', 'PluginSecrets', 'HttpServer', 'PtyHandle', 'PtyInfo', 'PtyExit',
   'DirEntry', 'FileStat', 'FileSlice', 'ProcessResult', 'HttpResponse', 'ServeRequest',
   'UiContext', 'UiTerminal', 'FeedLine', 'Reply', 'ViewDrop', 'ItemEventDetail', 'ToggleEventDetail',
-  'PluginManifest', 'SectionDecl', 'ArgSpec', 'CommandSpec', 'KeybindingSpec', 'Placement', 'DocumentDecl', 'Guard',
+  'PluginManifest', 'SectionDecl', 'ArgSpec', 'CommandSpec', 'KeybindingSpec', 'Placement', 'DocumentDecl', 'Guard', 'Contributes', 'MenuItemDecl', 'StateSource',
 ]);
 
 const printer = ts.createPrinter({ removeComments: true, newLine: ts.NewLineKind.LineFeed });
@@ -221,39 +223,88 @@ export function constsOf(text: string, spec: ConstSource): Map<string, string> {
   return out;
 }
 
-/** Теги из таблицы `ELEMENTS` и наблюдаемые атрибуты каждого с учётом наследования классов. */
+const LIFECYCLE = new Set(['constructor', 'connectedCallback', 'disconnectedCallback', 'adoptedCallback', 'attributeChangedCallback']);
+
+interface ElementClass {
+  parent?: string;
+  attrs?: string[];
+  /** Открытые свойства и методы: имя -> `get`, `set`, тип и признак метода. */
+  props: Map<string, { get?: string; set?: string; method?: string }>;
+  /** Имена событий: `fire('x')`, `new CustomEvent('x')`, `new Event('x')`. */
+  events: Set<string>;
+}
+
+const isPublicMember = (m: ts.ClassElement): boolean => !has(m, ts.SyntaxKind.PrivateKeyword) && !has(m, ts.SyntaxKind.ProtectedKeyword) && !has(m, ts.SyntaxKind.StaticKeyword) && !(m.name !== undefined && ts.isPrivateIdentifier(m.name));
+
+function eventsIn(node: ts.Node, out: Set<string>): void {
+  if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'fire' && node.expression.expression.kind === ts.SyntaxKind.ThisKeyword) {
+    const first = node.arguments[0];
+    if (first && ts.isStringLiteralLike(first)) out.add(first.text);
+  }
+  if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && (node.expression.text === 'CustomEvent' || node.expression.text === 'Event')) {
+    const first = node.arguments?.[0];
+    if (first && ts.isStringLiteralLike(first)) out.add(first.text);
+  }
+  ts.forEachChild(node, (child) => eventsIn(child, out));
+}
+
+function classOf(node: ts.ClassDeclaration, sf: ts.SourceFile, file: string, name: string): ElementClass {
+  const entry: ElementClass = { props: new Map(), events: new Set() };
+  const parent = node.heritageClauses?.find((c) => c.token === ts.SyntaxKind.ExtendsKeyword)?.types[0]?.expression;
+  if (parent && ts.isIdentifier(parent)) entry.parent = parent.text;
+  for (const m of node.members) {
+    if (ts.isPropertyDeclaration(m) && has(m, ts.SyntaxKind.StaticKeyword) && memberName(m.name, sf) === 'observedAttributes' && m.initializer) entry.attrs = stringItems(unwrap(m.initializer), `${file}: ${name}.observedAttributes`);
+    if (!isPublicMember(m) || m.name === undefined) continue;
+    const prop = memberName(m.name, sf);
+    if (LIFECYCLE.has(prop)) continue;
+    const slot = entry.props.get(prop) ?? {};
+    if (ts.isGetAccessor(m)) slot.get = m.type ? print(m.type, sf) : 'unknown';
+    else if (ts.isSetAccessor(m)) slot.set = m.parameters[0]?.type ? print(m.parameters[0].type, sf) : 'unknown';
+    else if (ts.isMethodDeclaration(m)) slot.method = signature(m, sf);
+    else continue;
+    entry.props.set(prop, slot);
+  }
+  eventsIn(node, entry.events);
+  return entry;
+}
+
+/** Теги из таблицы `ELEMENTS`, наблюдаемые атрибуты, открытые свойства (аксессоры и методы) и события каждого с учётом наследования классов. */
 export function elementsOf(text: string, file = ELEMENTS_FILE): Map<string, string> {
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const table = constInitializer(sf, 'ELEMENTS', file);
   if (!ts.isObjectLiteralExpression(table)) throw new Error(`снимок API: ${file}: ELEMENTS - не объект`);
-  const classes = new Map<string, { parent?: string; attrs?: string[] }>();
+  const classes = new Map<string, ElementClass>();
   for (const node of sf.statements) {
-    if (!ts.isClassDeclaration(node) || !node.name) continue;
-    const parent = node.heritageClauses?.find((c) => c.token === ts.SyntaxKind.ExtendsKeyword)?.types[0]?.expression;
-    const entry: { parent?: string; attrs?: string[] } = {};
-    if (parent && ts.isIdentifier(parent)) entry.parent = parent.text;
-    for (const m of node.members) {
-      if (ts.isPropertyDeclaration(m) && has(m, ts.SyntaxKind.StaticKeyword) && memberName(m.name, sf) === 'observedAttributes' && m.initializer) entry.attrs = stringItems(unwrap(m.initializer), `${file}: ${node.name.text}.observedAttributes`);
-    }
-    classes.set(node.name.text, entry);
+    if (ts.isClassDeclaration(node) && node.name) classes.set(node.name.text, classOf(node, sf, file, node.name.text));
   }
   const out = new Map<string, string>();
   for (const prop of table.properties) {
     if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.initializer)) throw new Error(`снимок API: ${file}: ELEMENTS содержит не пару тег: класс`);
     const tag = memberName(prop.name, sf);
     put(out, `set element-tags | ${tag}`, '');
+    let attrs: string[] | undefined;
+    const props = new Map<string, { get?: string; set?: string; method?: string }>();
+    const events = new Set<string>();
     let cls: string | undefined = prop.initializer.text;
-    let attrs: string[] = [];
     for (let seen = 0; cls && seen < 16; seen++) {
       const entry = classes.get(cls);
-      if (!entry) throw new Error(`снимок API: ${file}: класс ${cls} элемента ${tag} не найден`);
-      if (entry.attrs) {
-        attrs = entry.attrs;
+      if (!entry) {
+        // Базовый класс вне файла (`HTMLElement`) в снимок не входит; своё имя цепочки, которого нет, - ошибка.
+        if (seen === 0) throw new Error(`снимок API: ${file}: класс ${cls} элемента ${tag} не найден`);
         break;
       }
+      attrs ??= entry.attrs;
+      for (const [name, slot] of entry.props) props.set(name, { ...slot, ...props.get(name) });
+      for (const event of entry.events) events.add(event);
       cls = entry.parent;
     }
-    for (const attr of attrs) put(out, `set attributes ${tag} | ${attr}`, '');
+    for (const attr of attrs ?? []) put(out, `set attributes ${tag} | ${attr}`, '');
+    for (const name of [...props.keys()].sort(byKey)) {
+      const slot = props.get(name) ?? {};
+      if (slot.method !== undefined) put(out, `map element-props ${tag} | ${name}`, `method ${slot.method}`);
+      else put(out, `map element-props ${tag} | ${name}`, `${slot.get !== undefined && slot.set !== undefined ? 'get/set' : slot.get !== undefined ? 'get' : 'set'} ${slot.get ?? slot.set ?? 'unknown'}`);
+    }
+    for (const event of [...events].sort(byKey)) put(out, `set element-events ${tag} | ${event}`, '');
   }
   return out;
 }
@@ -330,8 +381,14 @@ export function compareSurfaces(etalon: Surface, now: Surface): Change[] {
 
 const describeChange = (c: Change): string => `  - ${c.breaking ? 'ломающее' : 'добавление'}: ${c.key}: ${c.why}`;
 
-/** Версия с суффиксом (`1.0.0-dev`) - линия разработки ещё не выпущенного пакета, как в P-01. */
-export const isPrerelease = (version: string): boolean => version.includes('-');
+/** Кандидат в выпуск (`1.0.0-rc.1`): форма API заморожена для выпуска, изменение допустимо только новым кандидатом (K-21). */
+export const candidateOf = (version: string): { readonly next: string } | undefined => {
+  const match = /^(.*-rc\.)(\d+)$/.exec(version);
+  return match?.[1] === undefined || match[2] === undefined ? undefined : { next: `${match[1]}${String(Number(match[2]) + 1)}` };
+};
+
+/** Линия разработки ещё не выпущенного пакета (`1.0.0-dev`, как в P-01): любой суффикс, кроме `-rc.N`. */
+export const isPrerelease = (version: string): boolean => version.includes('-') && candidateOf(version) === undefined;
 
 function parts(version: string): [number, number, number] {
   const [a = 0, b = 0, c = 0] = (version.split(/[-+]/)[0] ?? '').split('.').map(Number);
@@ -347,7 +404,7 @@ export function compareVersions(a: string, b: string): number {
 export interface CheckInput {
   /** `PLUGIN_API_VERSION`. */
   readonly apiVersion: string;
-  /** Версия пакета контрактов: суффикс `-dev` включает линию разработки. */
+  /** Версия пакета контрактов: суффикс `-dev` - линия разработки, `-rc.N` - кандидат, без суффикса - выпуск после заморозки. */
   readonly packageVersion: string;
   readonly surface: Surface;
   /** Тексты эталонов по версии из имени файла. */
@@ -362,6 +419,7 @@ export function checkSurface(input: CheckInput): string[] {
   const { apiVersion, packageVersion, surface, etalons } = input;
   const problems: string[] = [];
   const dev = isPrerelease(packageVersion);
+  const candidate = candidateOf(packageVersion);
   const parsed = new Map<string, Surface>();
   for (const [version, text] of etalons) {
     try {
@@ -386,7 +444,9 @@ export function checkSurface(input: CheckInput): string[] {
     const changes = compareSurfaces(own, surface);
     if (changes.length > 0) {
       const list = changes.map(describeChange).join('\n');
-      if (dev) {
+      if (candidate) {
+        problems.push(`публичный API плагина изменён, а эталон ${apiVersion}.txt принят как кандидат ${packageVersion}:\n${list}\nДо выпуска ${apiVersion} это допустимо только новым кандидатом: поднимите версию в contracts/package.json до ${candidate.next}, затем npm run snapshot:api и npm run snapshot:contracts, строка в contracts/CHANGELOG.md. После выпуска ${apiVersion} ломающее потребует мажорной версии ${String(major(apiVersion) + 1)}.0.0, добавление - ${nextMinor(apiVersion)}.`);
+      } else if (dev) {
         problems.push(`публичный API плагина изменён, а эталон ${apiVersion}.txt - нет (пакет контрактов ${packageVersion} - линия разработки, версия API не повышается):\n${list}\nЕсли изменение задумано: npm run snapshot:api, строка в contracts/CHANGELOG.md. Ломающее после заморозки (K-21) потребует новой мажорной версии, добавление - минорной.`);
       } else if (changes.some((c) => c.breaking)) {
         problems.push(`ломающее изменение публичного API плагина в пределах мажорной версии ${String(major(apiVersion))} (эталон ${apiVersion}.txt):\n${list}\nВерните изменение. Если оно задумано, повысьте мажорную версию: PLUGIN_API_VERSION в core/src/api-version.ts и version в contracts/package.json до ${String(major(apiVersion) + 1)}.0.0, затем npm run snapshot:api (создаст эталон ${String(major(apiVersion) + 1)}.0.0.txt) и запись в contracts/CHANGELOG.md; согласует владелец API (contracts/README.md).`);

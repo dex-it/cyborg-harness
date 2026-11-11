@@ -10,6 +10,7 @@ alias GuardRight :: = (typeof GUARD_RIGHTS)[number]
 alias Layer :: = string
 alias LogLevel :: union
 alias MemberGuards :: = Readonly<Record<string, readonly Guard[]>>
+alias MenuName :: = (typeof MENU_NAMES)[number]
 alias ProgramRule :: union
 alias PtyTicket :: = string
 alias SectionResult :: union
@@ -18,6 +19,7 @@ alias UiRemote :: <T> = { readonly [P in keyof T as NonNullable<T[P]> extends (.
 interface ArgSpec
 interface AskDialog
 interface CommandSpec
+interface Contributes
 interface DialogChoice
 interface DirEntry
 interface Disposable
@@ -39,6 +41,7 @@ interface KeyRegistration :: extends Disposable
 interface KeyWhen
 interface KeybindingSpec
 interface ListItem
+interface MenuItemDecl
 interface ModalInit
 interface ModalResize
 interface ModalSize
@@ -79,6 +82,7 @@ interface SectionDecl
 interface SectionSpec
 interface ServeRequest
 interface ServeResponse
+interface StateSource
 interface TabItem
 interface ToggleEventDetail
 interface TreeItem
@@ -92,6 +96,16 @@ interface ViewModal
 interface WatchOptions
 map WINDOW_COMMANDS | cyborg.window.focus-next :: F6
 map WINDOW_COMMANDS | cyborg.window.focus-prev :: Shift+F6
+map element-props cy-button | disabled :: get/set boolean
+map element-props cy-field | disabled :: get/set boolean
+map element-props cy-field | value :: get/set string
+map element-props cy-list | items :: get/set readonly ListItem[]
+map element-props cy-list | selected :: get/set string | undefined
+map element-props cy-tabs | selected :: get/set string | undefined
+map element-props cy-tabs | tabs :: get/set readonly TabItem[]
+map element-props cy-tree | expanded :: get/set readonly string[]
+map element-props cy-tree | items :: get/set readonly TreeItem[]
+map element-props cy-tree | selected :: get/set string | undefined
 member ArgSpec.kind :: readonly prop WireKind
 member ArgSpec.optional :: readonly prop boolean
 member AskDialog.buttons :: readonly prop readonly DialogChoice[]
@@ -102,6 +116,7 @@ member CommandSpec.args :: readonly prop readonly ArgSpec[]
 member CommandSpec.callers :: readonly optional prop CommandCallers
 member CommandSpec.guard :: readonly optional prop readonly Guard[]
 member CommandSpec.rest :: readonly optional prop WireKind
+member Contributes.menus :: readonly prop readonly MenuItemDecl[]
 member DialogChoice.id :: readonly prop string
 member DialogChoice.label :: readonly prop string
 member DirEntry.kind :: readonly union
@@ -158,6 +173,14 @@ member KeybindingSpec.key :: readonly prop string
 member ListItem.detail :: readonly optional prop string
 member ListItem.id :: readonly prop string
 member ListItem.label :: readonly prop string
+member MenuItemDecl.accelerator :: readonly optional prop string
+member MenuItemDecl.checked :: readonly optional prop StateSource
+member MenuItemDecl.command :: readonly prop string
+member MenuItemDecl.enabled :: readonly optional prop StateSource
+member MenuItemDecl.id :: readonly prop string
+member MenuItemDecl.menu :: readonly prop MenuName
+member MenuItemDecl.order :: readonly optional prop number
+member MenuItemDecl.title :: readonly prop string
 member ModalInit.data :: readonly optional prop unknown
 member ModalInit.escape :: readonly optional union
 member ModalInit.size :: readonly optional prop ModalSize
@@ -362,6 +385,9 @@ member ServeRequest.path :: readonly prop string
 member ServeResponse.body :: readonly optional prop string
 member ServeResponse.headers :: readonly optional prop Readonly<Record<string, string>>
 member ServeResponse.status :: readonly prop number
+member StateSource.contract :: readonly prop string
+member StateSource.major :: readonly prop number
+member StateSource.member :: readonly prop string
 member TabItem.id :: readonly prop string
 member TabItem.label :: readonly prop string
 member ToggleEventDetail.expanded :: readonly prop boolean
@@ -421,6 +447,10 @@ set GUARD_RIGHTS | fs.read
 set GUARD_RIGHTS | fs.write
 set GUARD_RIGHTS | secrets.ref
 set GUARD_RIGHTS | shell
+set MENU_NAMES | tools
+set MENU_NAMES | view
+set MENU_NAMES | window
+set MENU_NAMES | workspace
 set TOP_LEVEL | $schema
 set TOP_LEVEL | activation
 set TOP_LEVEL | commands
@@ -454,6 +484,13 @@ set attributes cy-tabs | label
 set attributes cy-tabs | selected
 set attributes cy-tree | label
 set attributes cy-tree | selected
+set element-events cy-field | change
+set element-events cy-list | cy-activate
+set element-events cy-list | cy-select
+set element-events cy-tabs | cy-select
+set element-events cy-tree | cy-activate
+set element-events cy-tree | cy-select
+set element-events cy-tree | cy-toggle
 set element-tags | cy-button
 set element-tags | cy-empty
 set element-tags | cy-field

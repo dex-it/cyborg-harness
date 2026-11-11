@@ -36,15 +36,18 @@ function edited(file: string, from: string, to: string): ReadFile {
   };
 }
 
-/** Проверка текущих исходников (или испорченных `source`) против эталона; `dev: false` - как после заморозки, версия пакета без суффикса. */
-function problemsOf(source: ReadFile, dev: boolean): string[] {
-  return checkSurface({ apiVersion, packageVersion: dev ? packageVersion() : '1.0.0', surface: extractSurface(source), etalons });
+/** Линии версии пакета контрактов: разработка (`-dev`), кандидат в выпуск (`-rc.N`), выпуск после заморозки (без суффикса). */
+const LINES = { dev: '1.0.0-dev', rc: '1.0.0-rc.1', final: '1.0.0' } as const;
+
+/** Проверка текущих исходников (или испорченных `source`) против эталона на выбранной линии. */
+function problemsOf(source: ReadFile, line: keyof typeof LINES): string[] {
+  return checkSurface({ apiVersion, packageVersion: LINES[line], surface: extractSurface(source), etalons });
 }
 
 describe('эталон и исходники', () => {
   it('эталон текущей версии API совпадает с исходниками', () => {
-    assert.deepEqual(problemsOf(read, true), []);
-    assert.deepEqual(problemsOf(read, false), []);
+    for (const line of ['dev', 'rc', 'final'] as const) assert.deepEqual(problemsOf(read, line), [], line);
+    assert.deepEqual(checkSurface({ apiVersion, packageVersion: packageVersion(), surface: extractSurface(read), etalons }), [], 'версия пакета из репозитория');
   });
 
   it('эталон покрывает интерфейсы, поля манифеста и теги из задачи', () => {
@@ -58,6 +61,27 @@ describe('эталон и исходники', () => {
     for (const key of ['set TOP_LEVEL | provides', 'set TOP_LEVEL | permissions', 'member PluginManifest.provides', 'map WINDOW_COMMANDS | cyborg.window.focus-next', 'set element-tags | cy-button', 'set attributes cy-button | disabled', "variant ElementTag | 'cy-button'", "variant CoreErrorCode | 'NotFound'"]) {
       assert.ok(surface.has(key), `нет записи ${key}`);
     }
+  });
+
+  // K-21, пункт 2 задачи: что замораживается 1.0. Перечень записан здесь, а не выведен из эталона, иначе пропавшая из снимка группа не заметна.
+  it('эталон покрывает весь перечень замораживаемого API', () => {
+    const { surface } = parseSurface(fs.readFileSync(path.join(import.meta.dirname, 'api-snapshot', `${apiVersion}.txt`), 'utf8'));
+    const keys = [...surface.keys()];
+    const count = (prefix: string): number => keys.filter((k) => k.startsWith(prefix)).length;
+    const frozen: Record<string, readonly string[]> = {
+      'ctx плагина и вложенные объекты (contracts/plugin.ts)': ['member PluginContext.log', 'member PluginContext.keys', 'member PluginContext.views', 'member PluginContext.dialogs', 'member PluginContext.documents', 'member PluginContext.window', 'member PluginContext.system', 'member PluginContext.secrets', 'member PluginContext.os', 'member PluginModule.activate', 'member PluginKeys.register', 'member ViewChannel.post'],
+      'ctx вида (contracts/view.ts)': ['member UiContext.channel', 'member UiContext.modal', 'member UiContext.dialogs', 'member UiContext.keys.of', 'member UiContext.state', 'member UiContext.terminal.open', 'member UiModule.mount'],
+      'ctx.os и права (contracts/os.ts)': ['member PluginOs.fs', 'member PluginOs.process', 'member PluginOs.net', 'member PluginOs.pty', 'member PluginOs.notify', 'member PluginPermissions.fs.read', 'member PluginPermissions.notify', 'member PluginPermissions.ui.lock', 'member ProcessOptions.signal', 'member ProcessOptions.maxOutputBytes', 'member OsFs.watch', 'member OsFs.realpath'],
+      'члены K-14, K-18, K-19': ['member OsNotify.show', 'member OsNotify.close', 'member NotifyOptions.onClick', 'member PluginWindow.setTitle', 'member PluginWindow.onFocusChange', 'member PluginWindow.focused', 'member PluginSystem.onBeforeQuit', 'member PluginSystem.onIdle', 'member OsUi.lock'],
+      'манифест (core/src/manifest*.ts)': ['set TOP_LEVEL | contributes', 'set TOP_LEVEL | commands', 'set TOP_LEVEL | engines', 'member PluginManifest.contributes', 'member PluginManifest.ui.views', 'member PluginManifest.ui.placement', 'member CommandSpec.callers', 'member Guard.right', 'set AREAS | modal', 'set GUARD_RIGHTS | fs.read'],
+      'вклады в меню (K-08)': ['interface Contributes', 'member Contributes.menus', 'interface MenuItemDecl', 'member MenuItemDecl.menu', 'member MenuItemDecl.command', 'member MenuItemDecl.order', 'member MenuItemDecl.accelerator', 'member MenuItemDecl.enabled', 'member MenuItemDecl.checked', 'member StateSource.contract', 'member StateSource.major', 'member StateSource.member', 'set MENU_NAMES | workspace', 'set MENU_NAMES | view', 'set MENU_NAMES | tools', 'set MENU_NAMES | window'],
+      'элементы cy-*: свойства и события': ['map element-props cy-list | items', 'map element-props cy-tree | expanded', 'map element-props cy-tabs | tabs', 'map element-props cy-field | value', 'map element-props cy-button | disabled', 'set element-events cy-list | cy-select', 'set element-events cy-list | cy-activate', 'set element-events cy-tree | cy-toggle', 'set element-events cy-field | change'],
+      'команды окна': ['map WINDOW_COMMANDS | cyborg.window.focus-next', 'map WINDOW_COMMANDS | cyborg.window.focus-prev'],
+    };
+    for (const [group, list] of Object.entries(frozen)) for (const key of list) assert.ok(surface.has(key), `${group}: нет записи ${key}`);
+    assert.equal(count('set element-tags | '), 7, 'семь тегов cy-*');
+    assert.equal(count("variant CoreErrorCode | '"), 13, 'коды CoreErrorCode: уменьшение - ломающее, увеличение - минор и новый эталон');
+    assert.equal(count('map WINDOW_COMMANDS | '), 2);
   });
 
   it('снимок не зависит от порядка запуска: повторный разбор даёт тот же текст, текст читается обратно', () => {
@@ -80,7 +104,7 @@ describe('эталон и исходники', () => {
   });
 });
 
-describe('порча исходников: линия разработки и после заморозки', () => {
+describe('порча исходников: линия разработки, кандидат и после заморозки', () => {
   const cases: readonly { readonly name: string; readonly source: ReadFile; readonly key: string }[] = [
     { name: 'удалено поле PluginContext', source: edited('contracts/plugin.ts', '  readonly pluginId: string;\n  readonly subscriptions', '  readonly subscriptions'), key: 'member PluginContext.pluginId' },
     { name: 'сменён тип аргумента метода ctx.commands.register', source: edited('contracts/plugin.ts', 'register(name: string, handler: CommandHandler): Disposable;', 'register(name: number, handler: CommandHandler): Disposable;'), key: 'member PluginContext.commands.register' },
@@ -89,6 +113,9 @@ describe('порча исходников: линия разработки и п
     { name: 'удалён тег из ElementTag', source: edited('contracts/elements.ts', " | 'cy-spinner';", ';'), key: "variant ElementTag | 'cy-spinner'" },
     { name: 'удалено поле манифеста из TOP_LEVEL', source: edited('core/src/manifest.ts', "'ui', 'documents', 'host'", "'ui', 'host'"), key: 'set TOP_LEVEL | documents' },
     { name: 'удалено поле PluginManifest', source: edited('core/src/manifest.ts', '  readonly keybindings: readonly KeybindingSpec[];\n', ''), key: 'member PluginManifest.keybindings' },
+    { name: 'свойство items у cy-list стало только для чтения', source: edited('core/elements/elements.ts', "  set items(items: readonly ListItem[]) {\n    this.#items = checkItems('cy-list', items);\n    this.render();\n  }\n\n", ''), key: 'map element-props cy-list | items' },
+    { name: 'сменён тип свойства tabs у cy-tabs', source: edited('core/elements/elements.ts', 'get tabs(): readonly TabItem[] {', 'get tabs(): readonly TabItem[] | undefined {'), key: 'map element-props cy-tabs | tabs' },
+    { name: 'событие cy-toggle переименовано', source: edited('core/elements/elements.ts', "this.fire('cy-toggle', { id, expanded: open });", "this.fire('cy-toggled', { id, expanded: open });"), key: 'set element-events cy-tree | cy-toggle' },
     { name: 'удалена команда окна', source: edited('core/src/window-layer.ts', "  'cyborg.window.focus-prev': 'Shift+F6',\n", ''), key: 'map WINDOW_COMMANDS | cyborg.window.focus-prev' },
     { name: 'сменено сочетание команды окна', source: edited('core/src/window-layer.ts', "'cyborg.window.focus-next': 'F6'", "'cyborg.window.focus-next': 'F7'"), key: 'map WINDOW_COMMANDS | cyborg.window.focus-next' },
     { name: 'удалён код отказа CoreErrorCode', source: edited('contracts/plugin.ts', "  | 'NotFound';", ';'), key: "variant CoreErrorCode | 'NotFound'" },
@@ -99,18 +126,25 @@ describe('порча исходников: линия разработки и п
   ];
 
   for (const c of cases) {
-    it(`${c.name}: после заморозки - ломающее, на линии разработки - просьба обновить эталон`, () => {
-      const frozen = problemsOf(c.source, false);
+    it(`${c.name}: после заморозки - ломающее, у кандидата - новый кандидат, на линии разработки - просьба обновить эталон`, () => {
+      const frozen = problemsOf(c.source, 'final');
       assert.equal(frozen.length, 1, frozen.join('\n'));
       assert.match(frozen[0]!, /ломающее изменение публичного API плагина в пределах мажорной версии 1/);
       assert.ok(frozen[0]!.includes(`ломающее: ${c.key}`), `в сообщении нет «${c.key}»:\n${frozen[0]}`);
       assert.match(frozen[0]!, /npm run snapshot:api/);
       assert.match(frozen[0]!, /2\.0\.0/);
-      const dev = problemsOf(c.source, true);
+      const dev = problemsOf(c.source, 'dev');
       assert.equal(dev.length, 1, dev.join('\n'));
       assert.match(dev[0]!, /линия разработки/);
       assert.ok(dev[0]!.includes(c.key));
       assert.match(dev[0]!, /npm run snapshot:api/);
+      const rc = problemsOf(c.source, 'rc');
+      assert.equal(rc.length, 1, rc.join('\n'));
+      assert.match(rc[0]!, /кандидат 1\.0\.0-rc\.1/);
+      assert.ok(rc[0]!.includes(c.key), `в сообщении нет «${c.key}»:\n${rc[0]}`);
+      assert.match(rc[0]!, /1\.0\.0-rc\.2/);
+      assert.match(rc[0]!, /npm run snapshot:api/);
+      assert.match(rc[0]!, /npm run snapshot:contracts/);
     });
   }
 
@@ -120,23 +154,30 @@ describe('порча исходников: линия разработки и п
     { name: 'обязательный член в PluginContext (ядро его создаёт)', source: edited('contracts/plugin.ts', '  readonly pluginId: string;\n  readonly subscriptions', '  readonly pluginId: string;\n  readonly extra: string;\n  readonly subscriptions'), key: 'member PluginContext.extra' },
     { name: 'новый тег cy-badge', source: (rel) => (rel === 'contracts/elements.ts' ? read(rel).replace(" | 'cy-spinner';", " | 'cy-spinner' | 'cy-badge';") : rel === 'core/elements/elements.ts' ? read(rel).replace("'cy-spinner': CySpinner }", "'cy-spinner': CySpinner, 'cy-badge': CyEmpty }") : read(rel)), key: 'set element-tags | cy-badge' },
     { name: 'новый атрибут cy-button', source: edited('core/elements/elements.ts', "class CyButton extends CyElement {\n  static readonly observedAttributes = ['disabled'];", "class CyButton extends CyElement {\n  static readonly observedAttributes = ['disabled', 'variant'];"), key: 'set attributes cy-button | variant' },
+    { name: 'новое свойство cy-empty', source: edited('core/elements/elements.ts', "class CyEmpty extends CyElement {\n  static readonly observedAttributes = ['heading'];", "class CyEmpty extends CyElement {\n  static readonly observedAttributes = ['heading'];\n  get extra(): string {\n    return '';\n  }"), key: 'map element-props cy-empty | extra' },
+    { name: 'новое событие cy-list', source: edited('core/elements/elements.ts', "li.addEventListener('dblclick', () => this.fire('cy-activate', { id }));", "li.addEventListener('dblclick', () => this.fire('cy-activate', { id }));\n    li.addEventListener('contextmenu', () => this.fire('cy-menu', { id }));"), key: 'set element-events cy-list | cy-menu' },
     { name: 'новое поле манифеста', source: edited('core/src/manifest.ts', "'ui', 'documents', 'host'", "'ui', 'documents', 'menus', 'host'"), key: 'set TOP_LEVEL | menus' },
     { name: 'новый код отказа', source: edited('contracts/plugin.ts', "  | 'NotFound';", "  | 'NotFound'\n  | 'Busy';"), key: "variant CoreErrorCode | 'Busy'" },
   ];
 
   for (const c of additive) {
-    it(`${c.name}: после заморозки - просьба поднять минор и создать эталон, а не отказ`, () => {
-      const frozen = problemsOf(c.source, false);
+    it(`${c.name}: после заморозки - просьба поднять минор и создать эталон, у кандидата - новый кандидат, а не отказ`, () => {
+      const frozen = problemsOf(c.source, 'final');
       assert.equal(frozen.length, 1, frozen.join('\n'));
       assert.match(frozen[0]!, /публичный API плагина дополнен, а версия API и эталон - нет/);
       assert.ok(frozen[0]!.includes(`добавление: ${c.key}`), `в сообщении нет «${c.key}»:\n${frozen[0]}`);
       assert.match(frozen[0]!, /1\.1\.0/);
       assert.match(frozen[0]!, /npm run snapshot:api/);
       assert.doesNotMatch(frozen[0]!, /ломающее:/);
-      const dev = problemsOf(c.source, true);
+      const dev = problemsOf(c.source, 'dev');
       assert.equal(dev.length, 1, dev.join('\n'));
       assert.ok(dev[0]!.includes(c.key));
       assert.match(dev[0]!, /npm run snapshot:api/);
+      const rc = problemsOf(c.source, 'rc');
+      assert.equal(rc.length, 1, rc.join('\n'));
+      assert.match(rc[0]!, /кандидат 1\.0\.0-rc\.1/);
+      assert.ok(rc[0]!.includes(`добавление: ${c.key}`), `в сообщении нет «${c.key}»:\n${rc[0]}`);
+      assert.match(rc[0]!, /1\.0\.0-rc\.2/);
     });
   }
 
@@ -151,7 +192,7 @@ describe('порча исходников: линия разработки и п
       if (rel === 'core/elements/elements.ts') return text.replace("observedAttributes = ['disabled'];", "observedAttributes = [\n    'disabled',\n  ];");
       return text;
     };
-    assert.deepEqual(problemsOf(source, false), []);
+    for (const line of ['dev', 'rc', 'final'] as const) assert.deepEqual(problemsOf(source, line), [], line);
   });
 });
 
@@ -285,6 +326,41 @@ describe('разбор констант и элементов', () => {
     ].join('\n');
     assert.deepEqual([...elementsOf(src, 'e.ts').keys()], ['set element-tags | x-child', 'set attributes x-child | a', 'set attributes x-child | b', 'set element-tags | x-own', 'set attributes x-own | c', 'set element-tags | x-plain']);
     assert.throws(() => elementsOf("const ELEMENTS = { 'x-a': Missing };", 'e.ts'), /класс Missing/);
+  });
+
+  it('свойства и события элемента: открытые аксессоры и события из fire и Event, без приватных и защищённых, с наследованием', () => {
+    const src = [
+      'class Base {',
+      '  get a(): string { return ""; }',
+      '  set a(v: string) {}',
+      '  get ro(): number { return 1; }',
+      '  protected get hidden(): number { return 1; }',
+      '  get #secret(): number { return 1; }',
+      '  private get closed(): number { return 1; }',
+      '  protected fire(t: string): void {}',
+      '  protected run(): void { this.fire("base-event"); }',
+      '}',
+      'class Child extends Base {',
+      '  set a(v: string) {}',
+      '  get own(): readonly string[] { return []; }',
+      '  set own(v: readonly string[]) {}',
+      '  protected go(): void { this.dispatchEvent(new CustomEvent("x-custom")); this.dispatchEvent(new Event("change")); }',
+      '  attributeChangedCallback(): void {}',
+      '  connectedCallback(): void {}',
+      '  focusRow(id: string): void {}',
+      '}',
+      "const ELEMENTS = { 'x-child': Child } as const;",
+    ].join('\n');
+    const got = elementsOf(src, 'e.ts');
+    assert.deepEqual([...got].filter(([k]) => k.includes('element-props') || k.includes('element-events')), [
+      ['map element-props x-child | a', 'get/set string'],
+      ['map element-props x-child | focusRow', 'method (_: string) => void'],
+      ['map element-props x-child | own', 'get/set readonly string[]'],
+      ['map element-props x-child | ro', 'get number'],
+      ['set element-events x-child | base-event', ''],
+      ['set element-events x-child | change', ''],
+      ['set element-events x-child | x-custom', ''],
+    ]);
   });
 
   it('повтор записи в эталоне и дубль объявления - ошибка', () => {

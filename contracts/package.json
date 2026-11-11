@@ -1,6 +1,6 @@
 {
   "name": "@cyborg-harness/contracts",
-  "version": "1.0.0-dev",
+  "version": "1.0.0-rc.1",
   "description": "Типы контрактов cyborg.* без логики; сторонние пакеты дополняют карту Contracts",
   "type": "module",
   "types": "./dist/index.d.ts",
