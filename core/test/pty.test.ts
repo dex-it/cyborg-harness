@@ -356,6 +356,36 @@ test('пределы pty: ввод больше предела - Invalid, pty ж
   await s.pty('term').spawn({ program: '/bin/bash' });
 });
 
+test('пределы pty по умолчанию (PL-01): ввод ровно 1 МиБ проходит, на байт больше - Invalid; размер 1 и 1000 проходит, 0 и 1001 нет - из хоста плагина и из вида', async () => {
+  const MIB = 1024 * 1024;
+  await using s = await setup({ term: shell });
+  const a = await s.pty('term').spawn({ program: '/bin/bash', persist: true });
+  const proc = s.backend.procs[0]!;
+  // Предел считается в байтах UTF-8: 524288 двухбайтных символов - ровно 1 МиБ, на символ больше - уже нет.
+  await a.write('x'.repeat(MIB));
+  await a.write('я'.repeat(MIB / 2));
+  await assert.rejects(a.write('x'.repeat(MIB + 1)), { code: 'Invalid', message: new RegExp(`больше ${String(MIB)} байт`) });
+  await assert.rejects(a.write('я'.repeat(MIB / 2 + 1)), { code: 'Invalid', message: /больше 1048576 байт/ });
+  await a.write('после');
+  assert.deepEqual(proc.writes.map((w) => w.length), [MIB, MIB / 2, 'после'.length], 'отклонённый ввод дошёл до pty, а следующий не прошёл');
+
+  await a.resize(1000, 1000);
+  await a.resize(1, 1);
+  for (const [cols, rows] of [[0, 24], [80, 0], [1001, 24], [80, 1001], [1.5, 24], [80, Number.NaN]] as const) await assert.rejects(a.resize(cols, rows), { code: 'Invalid' }, `${String(cols)}x${String(rows)}`);
+  assert.deepEqual(proc.resizes, [[1000, 1000], [1, 1]], 'неверный размер дошёл до pty');
+
+  // Вид пишет в порт мимо хоста плагина: те же числа проверяет pty-хост.
+  const b = await s.pty('term').spawn({ program: '/bin/bash', persist: true });
+  const other = s.backend.procs[1]!;
+  const view = fakeView();
+  await s.k.openTerminal('term', await b.share(), view.channel);
+  assert.deepEqual(await view.write('x'.repeat(MIB)), { ok: true });
+  assert.match((await view.write('x'.repeat(MIB + 1))).error ?? '', /больше 1048576 байт/);
+  assert.deepEqual(await view.resize(1000, 1000), { ok: true });
+  for (const [cols, rows] of [[0, 24], [80, 0], [1001, 24], [80, 1001]] as const) assert.match((await view.resize(cols, rows)).error ?? '', /целые 1\.\.1000/, `${String(cols)}x${String(rows)}`);
+  assert.deepEqual([other.writes.length, other.writes[0]?.length, other.resizes], [1, MIB, [[1000, 1000]]]);
+});
+
 test('pty.write из хоста плагина: pty молчит - сверх ptyQueue Invalid сразу в вызове, вывод процесса снимает отказ (#167)', async () => {
   await using s = await setup({ term: shell }, true, { ptyInput: 1024, ptyInputBurst: 1 << 30, ptyInputRate: 1 << 30, ptyQueue: 2500 });
   const pty = await s.pty('term').spawn({ program: '/bin/bash' });

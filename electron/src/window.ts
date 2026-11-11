@@ -1,6 +1,7 @@
 // Окно и приложение: события ядра -> окно, окно и ОС -> ядро, экземпляры приложения. Раскладку окна и меню делает приложение.
 import { app, nativeTheme, Notification, powerMonitor, type BrowserWindow } from 'electron';
 import { claimWorkspace, sessionDataDir } from './instances.ts';
+import { routeInput } from './key-route.ts';
 import type { PluginsEvents, PluginsService } from './plugins.ts';
 import { themeTokens } from './theme.ts';
 import { viewOfUrl } from './view-protocol.ts';
@@ -72,12 +73,7 @@ export function windowEvents(getWindow: () => BrowserWindow | undefined): Plugin
 export function bindWindow(win: BrowserWindow, plugins: PluginsService): void {
   // Ядро видит нажатие раньше страницы: сочетание активного плагина до окна не доходит.
   win.webContents.on('before-input-event', (event, input) => {
-    // Escape закрывает модальное окно плагина, где бы ни стоял фокус (в том числе во фрейме его вида); диалог поверх окна забирает Escape себе.
-    if (input.type === 'keyDown' && input.key === 'Escape' && plugins.dismissModal()) {
-      event.preventDefault();
-      return;
-    }
-    if (input.type === 'keyDown' && plugins.press(input, input.isAutoRepeat)) event.preventDefault();
+    if (routeInput(plugins, input)) event.preventDefault();
   });
   win.on('focus', () => plugins.emit({ kind: 'focus', focused: true }));
   win.on('blur', () => plugins.emit({ kind: 'focus', focused: false }));

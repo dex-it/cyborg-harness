@@ -20,6 +20,8 @@ type AgentRow = AgentFacts & { readonly pluginId: string };
 interface PreviousRow {
   readonly id: string;
   readonly title: string;
+  /** Процесс идущей сессии: показанную в этом виде из списка убирает совпадение с `pid` терминала. */
+  readonly pid?: number;
 }
 
 /** Сообщение главной части по каналу: кнопки и готовность агента одной сессии; `ended` - сессия кончилась. */
@@ -136,15 +138,20 @@ export function mount(root: HTMLElement, ctx: UiContext): Disposable {
     xterm.focus();
     void listPrevious().catch(failed);
   };
+  // Идущие сессии (после перезагрузки окна, после подхвата оставленных) открываются заново по новому билету, прошлого запуска - поднимаются через restore.
+  const running = new Set<string>();
   const listPrevious = async () => {
-    const rows = (await ctx.commands.run('sessions.previous')) as PreviousRow[];
-    previous.items = rows.map((r) => ({ id: r.id, label: r.title, detail: 'с прошлого запуска' }));
-    previous.hidden = rows.length === 0;
+    const [rows, idle] = await Promise.all([ctx.commands.run('sessions.running') as Promise<PreviousRow[]>, ctx.commands.run('sessions.previous') as Promise<PreviousRow[]>]);
+    const hidden = rows.filter((r) => r.pid !== term?.pid);
+    running.clear();
+    for (const r of hidden) running.add(r.id);
+    previous.items = [...hidden.map((r) => ({ id: r.id, label: r.title, detail: 'идёт' })), ...idle.map((r) => ({ id: r.id, label: r.title, detail: 'с прошлого запуска' }))];
+    previous.hidden = previous.items.length === 0;
   };
   previous.addEventListener('cy-activate', (event) => {
     const { id } = (event as CustomEvent<ItemEventDetail>).detail;
     const row = previous.items.find((r) => r.id === id);
-    void open(row?.label ?? id, 'sessions.restore', id).catch(failed);
+    void open(row?.label ?? id, running.has(id) ? 'sessions.reopen' : 'sessions.restore', id).catch(failed);
   });
   const list = async () => {
     const rows = (await ctx.commands.run('sessions.agents')) as AgentRow[];

@@ -1,7 +1,7 @@
 ---
 feature: 06-delivery
 status: review
-date: 2026-11-10
+date: 2026-11-11
 origin: derived
 ---
 
@@ -60,7 +60,7 @@ origin: derived
 - **Требование:** на Linux и macOS системное сочетание срабатывает из любого `<iframe>`, а pty переживает перезапуск хоста и окна. Единый реестр сочетаний на macOS работает так же, как на Linux.
 - **traced from:** BR-CH-001; ограничение 6 BRD.
 - **источник:** [проверка на macOS](../../05-verification/macos-check.md); [открытый вопрос 12 SAD](../../04-architecture/design/sad.md#8-открытые-вопросы). Вынесено из NFR-CH-1009; сочетания - FR-CH-2004, pty - FR-CH-1015.
-- **verification:** испытание - дымовой тест окна на macOS и Linux в CI (`.github/workflows/ci.yml`); осмотр - [проверка на macOS](../../05-verification/macos-check.md) (`Cmd+Shift+A`, `F2`, `Cmd+Shift+B`, `F6` проверены; буквы в поле вида, `Cmd+C`/`Cmd+V`, замок, терминал человеком - нет). Ещё нет: единого реестра сочетаний на macOS (PL-03, после K-08; K-07 влит, PR #121).
+- **verification:** испытание - дымовой тест окна на macOS и Linux в CI (`.github/workflows/ci.yml`); осмотр - [проверка на macOS](../../05-verification/macos-check.md) (`Cmd+Shift+A`, `F2`, `Cmd+Shift+B`, `F6` проверены; буквы в поле вида, `Cmd+C`/`Cmd+V`, замок, терминал человеком - нет). Единый реестр сочетаний (PL-03, 2026-11-11): акселераторы меню приложения идут в реестр ядра (`menuKeys`), конфликты с ними видны при загрузке, пилот `keys-pilot` и сверка с `RESERVED_*` Cyborg - тестами (`core/test/keys-menu-parity.test.ts`, `playground/test/pilot-keys.test.ts`), шаг дымового теста на macOS проходит. Ещё нет: настоящих нажатий на macOS (`Cmd+Shift+N`, `Cmd+0`, `Cmd+C`/`Cmd+V`, `Cmd+Shift+L`, `Cmd+Backspace`, `Option`+стрелки, перехват из `<iframe>` другого origin) - окно на этом Mac не получает фокус без человека, шаги и таблица в [проверке на macOS](../../05-verification/macos-check.md#единый-реестр-сочетаний-pl-03-2026-11-11).
 - **класс:** Portability.
 
 ### NFR-CH-1007 Поставка пакетами

@@ -26,6 +26,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'VIEW_CSP',
       'alertNotification',
       'appMenuTemplate',
+      'baseAccelerators',
       'bindAppMenu',
       'bindWindow',
       'discoverPlugins',

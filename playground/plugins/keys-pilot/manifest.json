@@ -1,0 +1,24 @@
+{
+  "id": "keys-pilot",
+  "version": "1.0.0",
+  "engines": {
+    "cyborg": "^1"
+  },
+  "commands": {
+    "keys-pilot.press": {
+      "args": [
+        "string"
+      ]
+    },
+    "keys-pilot.report": {}
+  },
+  "ui": {
+    "views": {
+      "main": {
+        "module": "./ui/ui.js",
+        "area": "sidebar",
+        "order": 400
+      }
+    }
+  }
+}

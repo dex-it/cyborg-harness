@@ -13,6 +13,7 @@ import { collectTools } from '../plugins/sessions/mcp.ts';
 import { projectDirName } from '../plugins/agent-claude-code/history.ts';
 import { ISOLATION_PROMPT } from '../plugins/session-isolation/index.ts';
 import { waitFor } from '../../core/test/wait-for.ts';
+import { fakeView } from '../../core/test/view-channel.ts';
 import { agentEnv } from './chain-rig.ts';
 
 const PLUGINS = path.join(import.meta.dirname, '..', 'plugins');
@@ -39,7 +40,7 @@ interface ChannelMessage {
 }
 
 /** Настоящие модули плагинов в ядре; probe - потребитель, через которого тест зовёт контракт; claude - скрипт в PATH. */
-async function setup(store?: LayerStore, extra: readonly string[] = [], rogue?: InlinePlugin) {
+async function setup(store?: LayerStore, extra: readonly string[] = [], rogue?: InlinePlugin, osExtra: { ptyOrphanGrace?: number } = {}) {
   const box = await sandbox('cyborg-agents-');
   // Что главная часть sessions послала своему виду main (K-13): сообщения канала, как их получило бы окно.
   const sent: { readonly pluginId: string; readonly view: string; readonly message: unknown }[] = [];
@@ -52,7 +53,7 @@ async function setup(store?: LayerStore, extra: readonly string[] = [], rogue?: 
   const ids = [...PROVIDERS, ...extra, 'session-isolation', 'sessions'];
   const k = await startKernel({
     plugins: [...ids.map((id) => path.join(PLUGINS, id)), probePlugin, ...(rogue ? [rogue] : [])],
-    os,
+    os: { ...os, ...osExtra },
     ...(store && { state: store }),
     // Как в приложении: поставка - плагины каталога, пространство cyborg.* закрыто всем остальным (K-15).
     load: { onViewMessage: (pluginId, view, message) => void sent.push({ pluginId, view, message }), ...(rogue && { bundled: ids, reservedPrefixes: ['cyborg.'] }) },
@@ -280,6 +281,68 @@ test('sessions: вкладка сессии переживает перезап�
   await s.k.closeDocument(prev.id);
   await waitFor('закрытая вкладка завершила сессию', () => proc.killed);
   assert.deepEqual(s.k.documents, []);
+});
+
+test('sessions: оставленная человеком сессия подхватывается при активации (attach), а не завершается по сроку; вкладку можно открыть заново (ревью K-02, PL-01)', async () => {
+  await using s = await setup(undefined, [], undefined, { ptyOrphanGrace: 150 });
+  await s.k.run('sessions.new', 'agent-shell');
+  const proc = s.backend.procs.at(-1)!;
+  const [doc] = s.k.documents;
+  assert.ok(doc);
+  assert.deepEqual(await s.k.run('sessions.running'), [{ id: doc.id, title: doc.title, pid: proc.pid }], 'живая сессия видна для повторного подключения окна');
+  await s.k.disable('sessions', { keepPty: true });
+  proc.emit('пока плагин выключен\r\n');
+  await s.k.enable('sessions');
+  // Льготный срок ядра начался с активации: без attach процесс был бы завершён с записью pty-expired.
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(proc.killed, undefined, 'плагин сессий не подхватил оставленный pty, ядро завершило его по сроку');
+  assert.deepEqual(s.k.journal.filter((e) => e.kind === 'pty-expired'), []);
+  assert.deepEqual(s.k.keptPty(), [], 'подхваченный процесс остался в списке оставленных');
+  assert.deepEqual(await s.k.run('sessions.running'), [{ id: doc.id, title: doc.title, pid: proc.pid }], 'подхваченная сессия не числится идущей');
+  assert.deepEqual(await s.k.run('sessions.previous'), [], 'идущая сессия - не прошлого запуска');
+
+  // Окно открывает её по новому билету: хвост содержит то, что процесс вывел без владельца.
+  const ticket = await s.k.run('sessions.reopen', doc.id);
+  assert.equal(typeof ticket, 'string');
+  const view = fakeView();
+  const terminal = await s.k.openTerminal('sessions', ticket as string, view.channel);
+  assert.match(terminal.backlog, /пока плагин выключен/);
+  assert.deepEqual(await view.write('ls\r'), { ok: true });
+  assert.deepEqual(proc.writes, ['ls\r']);
+  await assert.rejects(s.k.run('sessions.reopen', 'нет-такого'), /сессии нет/);
+
+  // Процесс вышел: подхваченная сессия кончается как обычная - вкладка остаётся, поднимается через restore.
+  proc.exit(0);
+  await waitFor('подхваченная сессия кончилась', async () => ((await s.k.run('sessions.running')) as unknown[]).length === 0);
+  assert.equal(((await s.k.run('sessions.previous')) as unknown[]).length, 1);
+});
+
+test('sessions: процесс вышел, пока плагин был выключен, - подхват отдаёт выход, вкладка ждёт restore', async () => {
+  await using s = await setup(undefined, [], undefined, { ptyOrphanGrace: 150 });
+  await s.k.run('sessions.new', 'agent-shell');
+  const proc = s.backend.procs.at(-1)!;
+  await s.k.disable('sessions', { keepPty: true });
+  proc.exit(3);
+  await s.k.enable('sessions');
+  assert.deepEqual(await s.k.run('sessions.running'), [], 'вышедший процесс числится идущим');
+  assert.equal(((await s.k.run('sessions.previous')) as unknown[]).length, 1, 'вкладка вышедшей сессии пропала');
+  assert.deepEqual(s.k.keptPty(), []);
+});
+
+test('sessions: подхваченная сессия claude продолжает слушать хуки - кнопки и готовность идут виду по новому билету', async () => {
+  await using s = await setup(undefined, ['next-actions'], undefined, { ptyOrphanGrace: 150 });
+  await s.k.run('sessions.new', 'agent-claude-code');
+  const events = s.backend.procs.at(-1)!.options.env.CYBORG_EVENTS!;
+  const [doc] = s.k.documents;
+  assert.ok(doc);
+  await s.k.disable('sessions', { keepPty: true });
+  await s.k.enable('sessions');
+  const ticket = (await s.k.run('sessions.reopen', doc.id)) as string;
+  const ready = () => s.channel(ticket).at(-1)?.ready;
+  assert.equal(ready(), false);
+  // Подписка на файл событий начинается с конца файла, как при запуске: повтор Stop готовность не меняет.
+  await armed(events, `${JSON.stringify({ hook_event_name: 'Stop' })}\n`, () => ready() === true);
+  assert.deepEqual(s.channel(ticket).at(-1), { ticket, actions: [], ready: true });
 });
 
 test('sessions: восстановленная сессия claude продолжается через resume поставщика', async () => {
