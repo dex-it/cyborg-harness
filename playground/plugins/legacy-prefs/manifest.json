@@ -1,0 +1,20 @@
+{
+  "id": "legacy-prefs",
+  "version": "1.0.0",
+  "engines": { "cyborg": "^1" },
+  "commands": {
+    "legacy-prefs.import": { "args": ["record"] },
+    "legacy-prefs.pending": { "args": ["string"] },
+    "legacy-prefs.done": { "args": ["string"] }
+  },
+  "ui": {
+    "views": {
+      "terminal": "./ui/prefs.js",
+      "notifications": "./ui/prefs.js",
+      "tasks": "./ui/prefs.js",
+      "mrs": "./ui/prefs.js",
+      "search": "./ui/prefs.js",
+      "extensions": "./ui/prefs.js"
+    }
+  }
+}

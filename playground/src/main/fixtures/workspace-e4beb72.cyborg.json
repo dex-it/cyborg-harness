@@ -1,0 +1,82 @@
+{
+  "projects": [
+    {
+      "id": "p-cyborg",
+      "name": "Cyborg",
+      "description": "Рабочее место с сессиями агентов",
+      "repos": [
+        "/work/example/cyborg",
+        "/work/example/cyborg-docs"
+      ],
+      "trackers": {
+        "github": true,
+        "gitlab": false
+      },
+      "jira": {
+        "enabled": true,
+        "projects": [
+          "CYB",
+          "DEMO"
+        ]
+      },
+      "color": "#4a90d9"
+    },
+    {
+      "id": "p-core",
+      "name": "Core",
+      "description": "",
+      "repos": [
+        "/work/example/core"
+      ],
+      "trackers": {
+        "github": false,
+        "gitlab": true
+      },
+      "notes": {
+        "owner": "team-a",
+        "tags": [
+          "core",
+          "infra"
+        ]
+      }
+    },
+    {
+      "id": "p-empty",
+      "name": "Пустой",
+      "description": "без репозиториев",
+      "repos": [],
+      "trackers": {
+        "github": false,
+        "gitlab": false
+      },
+      "jira": {
+        "enabled": false,
+        "projects": []
+      }
+    }
+  ],
+  "lastProjectId": "p-core",
+  "commands": [
+    {
+      "label": "Сливай",
+      "text": "сливай",
+      "submit": true,
+      "hotkey": "F1",
+      "description": "Фраза «сливай»: слить PR текущей ветки."
+    },
+    {
+      "label": "Ревью",
+      "text": "проведи ревью {branch}",
+      "submit": false,
+      "disabled": true
+    },
+    {
+      "label": "Сделай PR"
+    }
+  ],
+  "futureNote": {
+    "from": "newer-version",
+    "keep": true
+  },
+  "theme": "dark"
+}
