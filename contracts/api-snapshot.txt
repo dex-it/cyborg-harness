@@ -1,4 +1,4 @@
-// @cyborg-harness/contracts 1.0.0-dev
+// @cyborg-harness/contracts 1.0.0-rc.1
 // Снимок публичных деклараций без комментариев; правила - README.md, раздел «Установка и версии». Обновление: npm run snapshot:contracts после повышения версии в package.json.
 // ---- agent.d.ts
 import type { PtyExit } from './os.js';
