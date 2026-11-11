@@ -51,7 +51,13 @@ test('меню ОС: вклад в меню, которого нет у прил
 });
 
 // PL-03: акселераторы меню приложения идут в единый реестр ядра (`LoadOptions.menuKeys`) из настоящего меню, а не из списка, который ведут руками (D-27).
-type Node = { label?: string; role?: string; type?: string; accelerator?: string | null; submenu?: { items: Node[] } };
+interface Node {
+  label?: string;
+  role?: string;
+  type?: string;
+  accelerator?: string | null;
+  submenu?: { items: Node[] };
+}
 const menu = (items: Node[]): { items: Node[] } => ({ items });
 
 test('акселераторы меню: обход собирает путь -> сочетание, включая сочетания ролей, и пропускает разделители и пункты без сочетания', () => {
