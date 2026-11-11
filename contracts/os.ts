@@ -231,7 +231,7 @@ export interface PluginOs {
   readonly paths: { readonly data: string; readonly temp: string; readonly home: string };
   readonly fs: OsFs;
   readonly pty?: OsPty;
-  /** Программы нет в системе (или нет `cwd`) - `NotFound`; ненулевой код выхода ошибкой не считается и приходит в `ProcessResult.code`. */
+  /** Программы нет в системе (или нет `cwd`) - `NotFound`; ненулевой код выхода ошибкой не считается и приходит в `ProcessResult.code`. Одновременных программ у плагина не больше 16, сверх - `Invalid`: очереди у ядра нет, пул ведёт плагин. */
   readonly process?: { run(program: string, args: readonly string[], options?: ProcessOptions): Promise<ProcessResult> };
   readonly net?: { fetch(url: string, request?: HttpRequest): Promise<HttpResponse> };
   readonly env?: { get(name: string): Promise<string | undefined> };
