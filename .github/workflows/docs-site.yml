@@ -9,13 +9,17 @@ name: Docs site
 #
 # Проверка НЕ должна быть required: у pull_request ниже фильтр путей, а required-проверка,
 # которая не запустилась, вешает PR в BLOCKED. Сайт собирается из docs/guide, site и значка
-# приложения (assets/icon.svg).
+# приложения (assets/icon.svg); справочник ctx (docs/guide/reference/ctx-api.md) сверяется с TSDoc контрактов
+# перед сборкой (site: `npm run api:check`), поэтому правка contracts/*.ts тоже запускает проверку.
 on:
   pull_request:
     paths:
       - 'docs/guide/**'
       - 'site/**'
       - 'assets/**'
+      - 'contracts/*.ts'
+      - 'contracts/CHANGELOG.md'
+      - 'scripts/api-reference.ts'
       - '.github/workflows/docs-site.yml'
   push:
     branches:

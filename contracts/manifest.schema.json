@@ -1,0 +1,756 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Манифест плагина Cyborg Harness",
+  "description": "Схема manifest.json плагина (API 1.0). Источник правды - разбор манифеста в core/src/manifest.ts: схема даёт подсказки редактору и ловит ошибки формы, а связи между полями (команды в пространстве имён плагина, привязки клавиш к своим командам, ui.lock и ui.overlay, источники пунктов меню, диапазоны версий по смыслу) проверяет только ядро и cyborg-plugin check.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "version",
+    "engines"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Адрес этой схемы для редактора; ядро поле игнорирует."
+    },
+    "id": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/id"
+        },
+        {
+          "not": {
+            "enum": [
+              "cyborg",
+              "cyborg.window",
+              "cyborg.workspace"
+            ]
+          }
+        }
+      ],
+      "description": "Идентификатор плагина; cyborg, cyborg.window и cyborg.workspace заняты командами окна и ядра."
+    },
+    "version": {
+      "$ref": "#/definitions/version"
+    },
+    "engines": {
+      "type": "object",
+      "required": [
+        "cyborg"
+      ],
+      "properties": {
+        "cyborg": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/range"
+            }
+          ],
+          "description": "Диапазон версий API плагинов, под который собран плагин; нижняя граница - минор сборки, например ^1.0."
+        }
+      }
+    },
+    "provides": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/definitions/id"
+      },
+      "description": "Контракты, которые отдаёт плагин.",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "$ref": "#/definitions/version"
+          },
+          {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/definitions/version"
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "version"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "version": {
+                "$ref": "#/definitions/contractVersions"
+              },
+              "guard": {
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/definitions/guardRights"
+                },
+                "description": "Член контракта -> право вызывающего на аргумент (via-contract)."
+              },
+              "deprecated": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z_$][\\w$]*$"
+                },
+                "description": "Члены с пометкой @deprecated: их вызовы ядро пишет в журнал."
+              }
+            }
+          }
+        ]
+      }
+    },
+    "requires": {
+      "$ref": "#/definitions/rangeMap",
+      "description": "Контракты, без поставщика которых плагин не загружается (кратность one)."
+    },
+    "optional": {
+      "$ref": "#/definitions/rangeMap",
+      "description": "Контракты, без поставщика которых плагин работает (кратность one)."
+    },
+    "consumes": {
+      "$ref": "#/definitions/rangeMap",
+      "description": "Контракты кратности many: поставщики приходят и уходят во время работы."
+    },
+    "commands": {
+      "description": "Команды плагина: список имён или имя -> {args, rest, callers, guard}.",
+      "oneOf": [
+        {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/definitions/id"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/definitions/id"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^(?:string|number|boolean|array|strings|record|any)\\??$"
+                }
+              },
+              "rest": {
+                "enum": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "array",
+                  "strings",
+                  "record",
+                  "any"
+                ]
+              },
+              "callers": {
+                "enum": [
+                  "user",
+                  "plugins"
+                ],
+                "description": "Кому открыта команда; не объявлено - user."
+              },
+              "guard": {
+                "$ref": "#/definitions/guardRights"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "keybindings": {
+      "type": "array",
+      "description": "Сочетания клавиш, привязанные к своим командам без обязательных аргументов.",
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "command"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "contributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Вклады в окно: пункты меню.",
+      "properties": {
+        "menus": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "menu",
+              "title",
+              "command"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/definitions/viewName"
+              },
+              "menu": {
+                "enum": [
+                  "workspace",
+                  "view",
+                  "tools",
+                  "window"
+                ]
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "command": {
+                "type": "string"
+              },
+              "order": {
+                "type": "number"
+              },
+              "accelerator": {
+                "type": "string"
+              },
+              "enabled": {
+                "$ref": "#/definitions/stateSource"
+              },
+              "checked": {
+                "$ref": "#/definitions/stateSource"
+              }
+            }
+          }
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Права плагина; перечень и смысл - справочник прав.",
+      "properties": {
+        "fs.read": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/area_fs"
+          }
+        },
+        "fs.write": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "const": "workspace.git"
+              },
+              {
+                "$ref": "#/definitions/area_fs"
+              }
+            ]
+          }
+        },
+        "shell": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "const": "any"
+              },
+              {
+                "$ref": "#/definitions/area_fs"
+              },
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9+.-]*:$",
+                "not": {
+                  "enum": [
+                    "file:",
+                    "javascript:",
+                    "data:",
+                    "vbscript:"
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "process": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/programRule"
+          }
+        },
+        "pty": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/programRule"
+          }
+        },
+        "launch": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/programRule"
+          }
+        },
+        "net": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?:config:[A-Za-z][\\w.]*|[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*(?::\\d+)?)$"
+          }
+        },
+        "env": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          }
+        },
+        "notify": {
+          "type": "boolean"
+        },
+        "clipboard": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "read",
+              "write"
+            ]
+          }
+        },
+        "secrets.ref": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9+.-]*://."
+          }
+        },
+        "security.roots": {
+          "type": "boolean"
+        },
+        "ui.lock": {
+          "type": "boolean"
+        },
+        "serve": {
+          "type": "boolean"
+        }
+      }
+    },
+    "config": {
+      "$ref": "#/definitions/section",
+      "description": "Раздел настроек плагина."
+    },
+    "state": {
+      "$ref": "#/definitions/section",
+      "description": "Раздел состояния плагина."
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Виды плагина, экран замка и группа рендера.",
+      "anyOf": [
+        {
+          "required": [
+            "views"
+          ]
+        },
+        {
+          "required": [
+            "overlay"
+          ]
+        }
+      ],
+      "properties": {
+        "views": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "not": {
+              "const": "overlay"
+            }
+          },
+          "description": "Вид -> модуль mount или объект вида.",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "$ref": "#/definitions/moduleJs"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "module"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "module": {
+                    "$ref": "#/definitions/moduleJs"
+                  },
+                  "area": {
+                    "$ref": "#/definitions/area"
+                  },
+                  "order": {
+                    "type": "number"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "overlay": {
+          "$ref": "#/definitions/moduleJs",
+          "description": "Экран замка; только вместе с правом ui.lock."
+        },
+        "group": {
+          "$ref": "#/definitions/id",
+          "description": "Рекомендуемая группа рендера."
+        },
+        "inlineStyles": {
+          "type": "boolean",
+          "description": "true - виду нужны инлайн-стили (xterm, Monaco)."
+        }
+      }
+    },
+    "documents": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 16,
+      "propertyNames": {
+        "$ref": "#/definitions/viewName"
+      },
+      "description": "Типы документов плагина.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "restorable": {
+            "type": "boolean"
+          },
+          "area": {
+            "$ref": "#/definitions/areaDocument"
+          },
+          "order": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "host": {
+      "const": "own",
+      "description": "Просьба о собственном хосте."
+    },
+    "activation": {
+      "const": "lazy",
+      "description": "Не при старте, а по первой команде, сочетанию, показу вида или потребителю контракта."
+    },
+    "lock": {
+      "type": "object",
+      "required": [
+        "onStart"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "onStart": {
+          "const": true
+        }
+      },
+      "description": "Окно закрыто с первого кадра; только с правом ui.lock."
+    }
+  },
+  "definitions": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)*$",
+      "description": "Имя из строчных латинских букв, цифр и дефиса; части через точку."
+    },
+    "viewName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9]\\d*)(?:\\.(?:0|[1-9]\\d*))?(?:\\.(?:0|[1-9]\\d*))?$",
+      "description": "Версия x.y.z (ядро принимает и сокращения 1 и 1.2; пишите три части)."
+    },
+    "range": {
+      "type": "string",
+      "pattern": "^\\s*(?:\\*|[\\^~]?(?:0|[1-9]\\d*)(?:\\.(?:0|[1-9]\\d*))?(?:\\.(?:0|[1-9]\\d*))?)\\s*$",
+      "description": "Диапазон версий: *, 1, 1.2, 1.2.3, ^1.2, ~1.2."
+    },
+    "area": {
+      "enum": [
+        "sidebar",
+        "main",
+        "toolbar",
+        "popup",
+        "modal"
+      ],
+      "description": "Род области окна."
+    },
+    "areaDocument": {
+      "enum": [
+        "sidebar",
+        "main",
+        "toolbar",
+        "popup"
+      ],
+      "description": "Область вкладки документа; модальным бывает вид, а не документ."
+    },
+    "moduleJs": {
+      "type": "string",
+      "pattern": "^\\./(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\\.js$",
+      "description": "Путь ./<модуль>.js внутри каталога плагина."
+    },
+    "schemaFile": {
+      "type": "string",
+      "pattern": "^\\./(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\\.json$",
+      "description": "Путь ./<файл>.json внутри каталога плагина."
+    },
+    "guardRights": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "description": "Право на аргумент: номер аргумента или \"номер.поле\".",
+      "properties": {
+        "fs.read": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 99
+            },
+            {
+              "type": "string",
+              "pattern": "^\\d{1,2}(?:\\.[A-Za-z_$][\\w$]*)?$"
+            }
+          ]
+        },
+        "fs.write": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 99
+            },
+            {
+              "type": "string",
+              "pattern": "^\\d{1,2}(?:\\.[A-Za-z_$][\\w$]*)?$"
+            }
+          ]
+        },
+        "shell": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 99
+            },
+            {
+              "type": "string",
+              "pattern": "^\\d{1,2}(?:\\.[A-Za-z_$][\\w$]*)?$"
+            }
+          ]
+        },
+        "secrets.ref": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 99
+            },
+            {
+              "type": "string",
+              "pattern": "^\\d{1,2}(?:\\.[A-Za-z_$][\\w$]*)?$"
+            }
+          ]
+        }
+      }
+    },
+    "contractVersions": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/version"
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/version"
+          }
+        }
+      ]
+    },
+    "rangeMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/definitions/id"
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/range"
+      }
+    },
+    "pathRule": {
+      "type": "string",
+      "allOf": [
+        {
+          "pattern": "^(?:~|~?/.*)$"
+        },
+        {
+          "not": {
+            "pattern": "(?:^|/)\\.{1,2}(?:/|$)"
+          }
+        },
+        {
+          "not": {
+            "pattern": "^~?/[^/]*\\*"
+          }
+        },
+        {
+          "not": {
+            "pattern": "/(?=[^/]*\\*\\*)(?!\\*\\*(?:/|$))"
+          }
+        }
+      ],
+      "description": "Абсолютный путь или ~/путь; маска * - часть имени, ** - любые каталоги; без . и .. и без маски в первом имени."
+    },
+    "area_fs": {
+      "anyOf": [
+        {
+          "enum": [
+            "workspace",
+            "plugin-data",
+            "plugin-temp",
+            "granted"
+          ]
+        },
+        {
+          "$ref": "#/definitions/pathRule"
+        }
+      ]
+    },
+    "programRule": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "not": {
+            "const": "$SHELL"
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "program",
+            "args"
+          ],
+          "properties": {
+            "program": {
+              "type": "string",
+              "minLength": 1,
+              "not": {
+                "const": "$SHELL"
+              }
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "env": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:_\\*)?$"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "program",
+            "args"
+          ],
+          "properties": {
+            "program": {
+              "const": "$SHELL"
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 2
+            },
+            "env": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:_\\*)?$"
+              }
+            }
+          },
+          "description": "Оболочка входа только с флагом и скриптом в args."
+        }
+      ],
+      "description": "Программа или {program, args, env?}; \"$SHELL\" - оболочка входа, только с флагом и скриптом."
+    },
+    "stateSource": {
+      "type": "object",
+      "required": [
+        "contract",
+        "major",
+        "member"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "contract": {
+          "$ref": "#/definitions/id"
+        },
+        "major": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "member": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+        }
+      },
+      "description": "Булев член контракта, из которого пункт берёт enabled или checked."
+    },
+    "section": {
+      "type": "object",
+      "required": [
+        "version"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "schema": {
+          "$ref": "#/definitions/schemaFile"
+        }
+      },
+      "description": "Раздел настроек или состояния: версия формата и схема значения."
+    }
+  }
+}

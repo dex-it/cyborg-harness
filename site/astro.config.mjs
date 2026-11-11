@@ -107,11 +107,11 @@ export default defineConfig({
         { label: 'Как это устроено', items: [{ slug: 'concepts', label: 'Обзор' }, 'concepts/architecture', 'concepts/lifecycle', 'concepts/contracts-model', 'concepts/isolation', 'concepts/trust', 'concepts/data'] },
         {
           label: 'Автору плагина',
-          items: [{ slug: 'authors', label: 'Обзор' }, 'authors/manifest', 'authors/main-api', 'authors/view-api', 'authors/contracts', 'authors/testing', 'authors/packaging', 'authors/recipes'],
+          items: [{ slug: 'authors', label: 'Обзор' }, 'authors/manifest', 'authors/main-api', 'authors/view-api', 'authors/contracts', 'authors/testing', 'authors/packaging', 'authors/recipes', 'authors/lifecycle', 'authors/debugging', 'authors/boundary'],
         },
         {
           label: 'Справка',
-          items: ['reference/manifest', 'reference/permissions', 'reference/contracts-catalog', 'reference/journal', 'reference/errors', 'reference/hotkeys', 'reference/platforms', 'reference/packages'],
+          items: ['reference/manifest', 'reference/ctx-api', 'reference/permissions', 'reference/contracts-catalog', 'reference/journal', 'reference/errors', 'reference/hotkeys', 'reference/platforms', 'reference/packages'],
         },
         {
           label: 'Разработка',

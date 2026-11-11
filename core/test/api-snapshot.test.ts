@@ -106,7 +106,7 @@ describe('эталон и исходники', () => {
 
 describe('порча исходников: линия разработки, кандидат и после заморозки', () => {
   const cases: readonly { readonly name: string; readonly source: ReadFile; readonly key: string }[] = [
-    { name: 'удалено поле PluginContext', source: edited('contracts/plugin.ts', '  readonly pluginId: string;\n  readonly subscriptions', '  readonly subscriptions'), key: 'member PluginContext.pluginId' },
+    { name: 'удалено поле PluginContext', source: edited('contracts/plugin.ts', '  readonly pluginId: string;\n  /** Набор', '  /** Набор'), key: 'member PluginContext.pluginId' },
     { name: 'сменён тип аргумента метода ctx.commands.register', source: edited('contracts/plugin.ts', 'register(name: string, handler: CommandHandler): Disposable;', 'register(name: number, handler: CommandHandler): Disposable;'), key: 'member PluginContext.commands.register' },
     { name: 'удалён атрибут cy-button', source: edited('core/elements/elements.ts', "class CyButton extends CyElement {\n  static readonly observedAttributes = ['disabled'];", 'class CyButton extends CyElement {\n  static readonly observedAttributes = [];'), key: 'set attributes cy-button | disabled' },
     { name: 'удалён тег cy-spinner из таблицы элементов', source: edited('core/elements/elements.ts', ", 'cy-spinner': CySpinner } as const", ' } as const'), key: 'set element-tags | cy-spinner' },
@@ -122,7 +122,7 @@ describe('порча исходников: линия разработки, ка
     { name: 'необязательное поле стало обязательным', source: edited('contracts/plugin.ts', 'readonly config?: PluginSection;', 'readonly config: PluginSection;'), key: 'member PluginContext.config' },
     { name: 'удалён член вложенного объекта ui.keys.of', source: edited('contracts/view.ts', '    of(command: string): string | undefined;\n', ''), key: 'member UiContext.keys.of' },
     { name: 'новый обязательный член PluginModule', source: edited('contracts/plugin.ts', '  activate(ctx: PluginContext)', '  readonly name: string;\n  activate(ctx: PluginContext)'), key: 'member PluginModule.name' },
-    { name: 'новое обязательное поле параметров DocumentInit', source: edited('contracts/plugin.ts', 'export interface DocumentInit {\n  readonly title: string;', 'export interface DocumentInit {\n  readonly kind: string;\n  readonly title: string;'), key: 'member DocumentInit.kind' },
+    { name: 'новое обязательное поле параметров DocumentInit', source: edited('contracts/plugin.ts', 'export interface DocumentInit {\n  /** Заголовок вкладки. */\n  readonly title: string;', 'export interface DocumentInit {\n  readonly kind: string;\n  /** Заголовок вкладки. */\n  readonly title: string;'), key: 'member DocumentInit.kind' },
   ];
 
   for (const c of cases) {
@@ -149,9 +149,9 @@ describe('порча исходников: линия разработки, ка
   }
 
   const additive: readonly { readonly name: string; readonly source: ReadFile; readonly key: string }[] = [
-    { name: 'необязательный член в PluginContext', source: edited('contracts/plugin.ts', '  readonly pluginId: string;\n  readonly subscriptions', '  readonly pluginId: string;\n  readonly extra?: string;\n  readonly subscriptions'), key: 'member PluginContext.extra' },
+    { name: 'необязательный член в PluginContext', source: edited('contracts/plugin.ts', '  readonly pluginId: string;\n  /** Набор', '  readonly pluginId: string;\n  readonly extra?: string;\n  /** Набор'), key: 'member PluginContext.extra' },
     { name: 'необязательный член в PluginModule', source: edited('contracts/plugin.ts', '  activate(ctx: PluginContext)', '  readonly name?: string;\n  activate(ctx: PluginContext)'), key: 'member PluginModule.name' },
-    { name: 'обязательный член в PluginContext (ядро его создаёт)', source: edited('contracts/plugin.ts', '  readonly pluginId: string;\n  readonly subscriptions', '  readonly pluginId: string;\n  readonly extra: string;\n  readonly subscriptions'), key: 'member PluginContext.extra' },
+    { name: 'обязательный член в PluginContext (ядро его создаёт)', source: edited('contracts/plugin.ts', '  readonly pluginId: string;\n  /** Набор', '  readonly pluginId: string;\n  readonly extra: string;\n  /** Набор'), key: 'member PluginContext.extra' },
     { name: 'новый тег cy-badge', source: (rel) => (rel === 'contracts/elements.ts' ? read(rel).replace(" | 'cy-spinner';", " | 'cy-spinner' | 'cy-badge';") : rel === 'core/elements/elements.ts' ? read(rel).replace("'cy-spinner': CySpinner }", "'cy-spinner': CySpinner, 'cy-badge': CyEmpty }") : read(rel)), key: 'set element-tags | cy-badge' },
     { name: 'новый атрибут cy-button', source: edited('core/elements/elements.ts', "class CyButton extends CyElement {\n  static readonly observedAttributes = ['disabled'];", "class CyButton extends CyElement {\n  static readonly observedAttributes = ['disabled', 'variant'];"), key: 'set attributes cy-button | variant' },
     { name: 'новое свойство cy-empty', source: edited('core/elements/elements.ts', "class CyEmpty extends CyElement {\n  static readonly observedAttributes = ['heading'];", "class CyEmpty extends CyElement {\n  static readonly observedAttributes = ['heading'];\n  get extra(): string {\n    return '';\n  }"), key: 'map element-props cy-empty | extra' },

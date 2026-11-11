@@ -5,7 +5,8 @@ export type { PluginPermissions };
 
 export const AREAS = ['workspace', 'plugin-data', 'plugin-temp', 'granted'] as const;
 
-const KEYS = ['fs.read', 'fs.write', 'shell', 'process', 'pty', 'launch', 'net', 'env', 'notify', 'clipboard', 'secrets.ref', 'security.roots', 'ui.lock', 'serve'] as const;
+/** Права, которые знает разбор манифеста; по ним тест сверяет схему манифеста (`contracts/manifest.schema.json`). */
+export const PERMISSION_KEYS = ['fs.read', 'fs.write', 'shell', 'process', 'pty', 'launch', 'net', 'env', 'notify', 'clipboard', 'secrets.ref', 'security.roots', 'ui.lock', 'serve'] as const;
 
 const isPath = (v: string) => {
   if (!(v.startsWith('/') || v === '~' || v.startsWith('~/'))) return false;
@@ -46,7 +47,7 @@ export function readPermissions(raw: unknown, errors: string[]): PluginPermissio
     errors.push('permissions: ожидается объект');
     return {};
   }
-  for (const key of Object.keys(raw)) if (!(KEYS as readonly string[]).includes(key)) errors.push(`permissions.${key}: неизвестное право`);
+  for (const key of Object.keys(raw)) if (!(PERMISSION_KEYS as readonly string[]).includes(key)) errors.push(`permissions.${key}: неизвестное право`);
   const out: Record<string, unknown> = {};
   const set = (key: string, value: unknown) => {
     if (value !== undefined) out[key] = value;

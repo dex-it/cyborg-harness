@@ -10,10 +10,11 @@
   "scripts": {
     "brand": "node scripts/copy-brand.mjs",
     "dev": "npm run brand && astro dev",
-    "build": "npm run brand && astro build",
+    "api:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON ../scripts/api-reference.ts --check",
+    "build": "npm run brand && npm run api:check && astro build",
     "verify": "node scripts/check-dist.mjs",
     "preview": "astro preview",
-    "check": "npm run brand && astro check",
+    "check": "npm run brand && npm run api:check && astro check",
     "astro": "astro"
   },
   "dependencies": {

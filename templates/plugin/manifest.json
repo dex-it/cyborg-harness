@@ -1,4 +1,5 @@
 {
+  "$schema": "./node_modules/@cyborg-harness/contracts/manifest.schema.json",
   "id": "example",
   "version": "1.0.0",
   "engines": { "cyborg": "^1" },

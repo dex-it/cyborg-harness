@@ -54,6 +54,9 @@ jobs:
       - name: npm test
         timeout-minutes: 8
         run: npm test
+      # Справочник ctx и UiContext (P-04) собран из TSDoc контрактов: правка описаний без `npm run docs:api` красит шаг. Ту же сверку делает сборка сайта (site, `api:check`).
+      - name: справочник ctx и UiContext (свежесть)
+        run: npm run check:docs-api
       # Публичные типы пакета контрактов изменились - версия пакета выше, чем в ветке назначения (contracts/README.md, «Установка и версии»).
       - name: contracts (снимок API и версия)
         if: github.event_name == 'pull_request'

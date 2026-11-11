@@ -53,8 +53,8 @@ describe('package.json пакета контрактов', () => {
     assert.equal(pkg.type, 'module');
     assert.equal(pkg.types, './dist/index.d.ts');
     // Только условие types: рантайма в пакете нет, импорт значения должен падать при разрешении, а не отдавать пустой модуль.
-    assert.deepEqual(pkg.exports, { '.': { types: './dist/index.d.ts' }, './package.json': './package.json' });
-    assert.deepEqual(pkg.files, ['dist', 'README.md', 'CHANGELOG.md']);
+    assert.deepEqual(pkg.exports, { '.': { types: './dist/index.d.ts' }, './manifest.schema.json': './manifest.schema.json', './package.json': './package.json' });
+    assert.deepEqual(pkg.files, ['dist', 'manifest.schema.json', 'README.md', 'CHANGELOG.md']);
     assert.equal(pkg.repository?.type, 'git');
     assert.equal(pkg.repository.url, 'git+https://github.com/dex-it/cyborg-harness.git');
     assert.equal(pkg.repository.directory, 'contracts');
@@ -121,9 +121,9 @@ describe('npm pack и пустой потребитель', () => {
     fs.rmSync(work, { recursive: true, force: true });
   });
 
-  it('в tarball: package.json, README, CHANGELOG и декларации; исходных .ts нет', () => {
+  it('в tarball: package.json, README, CHANGELOG, схема манифеста и декларации; исходных .ts нет', () => {
     const names = report[0]!.files.map((f) => f.path).sort();
-    assert.deepEqual(names, ['CHANGELOG.md', 'README.md', 'dist/agent.d.ts', 'dist/elements.d.ts', 'dist/git.d.ts', 'dist/index.d.ts', 'dist/os.d.ts', 'dist/plugin.d.ts', 'dist/sessions.d.ts', 'dist/tree.d.ts', 'dist/view.d.ts', 'package.json']);
+    assert.deepEqual(names, ['CHANGELOG.md', 'README.md', 'dist/agent.d.ts', 'dist/elements.d.ts', 'dist/git.d.ts', 'dist/index.d.ts', 'dist/os.d.ts', 'dist/plugin.d.ts', 'dist/sessions.d.ts', 'dist/tree.d.ts', 'dist/view.d.ts', 'manifest.schema.json', 'package.json']);
     assert.deepEqual(names.filter((n) => n.endsWith('.ts') && !n.endsWith('.d.ts')), []);
   });
 
@@ -185,6 +185,9 @@ export const view: UiModule<{ innerHTML: string }> = {
       npm(['install', tarball, '--offline', '--ignore-scripts', '--no-audit', '--no-fund'], project);
       assert.ok(fs.existsSync(path.join(project, 'node_modules', '@cyborg-harness', 'contracts', 'dist', 'index.d.ts')));
       runCommand(process.execPath, [tsc, '-p', project]);
+      // Путь из `$schema` манифеста автора (P-04): схема лежит в установленном пакете и совпадает с исходной.
+      const installed = path.join(project, 'node_modules', '@cyborg-harness', 'contracts', 'manifest.schema.json');
+      assert.equal(fs.readFileSync(installed, 'utf8'), fs.readFileSync(path.join(contracts, 'manifest.schema.json'), 'utf8'));
     });
   }
 });

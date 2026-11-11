@@ -46,6 +46,8 @@
     "snapshot:api": "node core/scripts/api-surface.ts --update",
     "lint": "node scripts/lint.mjs",
     "check:docs-links": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-docs-links.ts docs README.md",
+    "docs:api": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/api-reference.ts --write",
+    "check:docs-api": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/api-reference.ts --check",
     "check:docs-trace": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-docs-trace.ts",
     "check:budgets": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-budgets.ts",
     "release": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/release.ts",
