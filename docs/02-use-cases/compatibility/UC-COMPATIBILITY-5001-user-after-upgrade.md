@@ -2,7 +2,7 @@
 level: use-case
 id: UC-COMPATIBILITY-5001
 feature: 05-compatibility
-touches: 01-plugin-host, 02-extension-contracts
+touches: 01-plugin-host, 02-extension-contracts, 04-observability
 status: review
 date: 2026-11-10
 origin: derived

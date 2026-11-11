@@ -16,11 +16,11 @@ traced from: BR-CH-001
 
 ## Критерии приёмки
 
-1. [FR-CH-2021] [UC-EXTENSION-CONTRACTS-2001#5] [UC-EXTENSION-CONTRACTS-2001#7]
+1. [FR-CH-2021] [UC-EXTENSION-CONTRACTS-2001#7]
    - Дано встроенный плагин добавлен в `plugins.enabled` поставки и идёт в хост `builtin`
    - Когда разработчик собирает приложение
    - Тогда `core/src` не менялся; в коде ядра нет имён плагинов
-2. [FR-CH-2021] [UC-EXTENSION-CONTRACTS-2001#6]
+2. [FR-CH-2021]
    - Дано новый встроенный плагин в репозитории
    - Когда разработчик прогоняет `npm test` (в нём проверка импортов `core/test/plugin-imports.test.ts`), `npm run typecheck`, `npm run lint`, `npm run smoke`
    - Тогда все гейты зелёные без правок ядра

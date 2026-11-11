@@ -27,7 +27,7 @@ origin: derived
 | Снимок API | эталон `core/test/api-snapshot/<версия>.txt`, `npm run check:contracts` | `core/test/api-snapshot.test.ts`, `contracts/` | каждый PR; правила - `contracts/README.md` |
 | Окно | `npm run smoke`: настоящий Electron под DevTools Protocol, хосты, виды во фреймах, CSP, слой окна, воркспейс, шаблон плагина | `playground/scripts/smoke.mjs` | каждый PR, CI на macOS и Linux |
 | Пакеты | установка собранных архивов в пустой проект; `cyborg-plugin check`, `build`, `pack` на шаблоне | `core/test/consumer.test.ts`, `testing/test`, шаг CI «шаблон плагина» | каждый PR |
-| Покрытие требований | `npm run check:docs-trace`: каждая норма дала критерий приёмки, каждая ветка сценария покрыта критерием или названа открытой; таблица - [coverage.md](../03-requirements/coverage.md) | `scripts/check-docs-trace.ts`, шаг CI «ссылки в docs», `scripts/test/check-docs-trace.test.ts` | каждый PR, CI |
+| Покрытие требований | `npm run check:docs-trace`: каждая норма дала критерий приёмки, каждая ветка сценария покрыта критерием или названа открытой, критерии на ещё не сделанное помечены `[целевое поведение]`; таблица - [coverage.md](../03-requirements/coverage.md) | `scripts/check-docs-trace.ts`, шаг CI «ссылки в docs», `scripts/test/check-docs-trace.test.ts` | каждый PR, CI |
 | Замеры | память хоста и кадра, задержка, шлюз, pty, Monaco и xterm | [спайки и замеры](../README.md#где-что) в этой папке, скрипты `npm run spike*`; бюджет шлюза в CI - `spike:gateway` | при изменении устройства, которое влияет на число |
 | Ручная проверка | клик и настоящая клавиатура на macOS, живой `claude` (`CYBORG_SMOKE_CLAUDE`) | [macos-check.md](macos-check.md) | перед выпуском |
 

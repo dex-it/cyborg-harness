@@ -2,6 +2,7 @@
 level: use-case
 id: UC-DELIVERY-6001
 feature: 06-delivery
+touches: 05-compatibility
 status: review
 date: 2026-11-10
 origin: derived

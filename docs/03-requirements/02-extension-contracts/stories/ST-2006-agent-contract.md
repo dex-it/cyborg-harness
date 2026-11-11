@@ -12,18 +12,18 @@ traced from: BR-CH-003, BR-CH-005
 
 Как автор поставщика агента, я хочу подключить свою программу как плагин `cyborg.agent`, чтобы она появилась рядом с Claude Code и ядро и `sessions` не менялись.
 
-Нормы: FR-CH-2009, FR-CH-2010, FR-CH-2015, FR-CH-2016, FR-CH-2017, FR-CH-2018, FR-CH-2019, FR-CH-2020. Сценарии: UC-COMPATIBILITY-5001, UC-EXTENSION-CONTRACTS-2002. SRS - [srs.md](../srs.md).
+Нормы: FR-CH-1015, FR-CH-2007, FR-CH-2009, FR-CH-2010, FR-CH-2012, FR-CH-2015, FR-CH-2016, FR-CH-2017, FR-CH-2018, FR-CH-2019, FR-CH-2020. Сценарии: UC-COMPATIBILITY-5001, UC-EXTENSION-CONTRACTS-2002. SRS - [srs.md](../srs.md).
 
 ## Критерии приёмки
 
-1. [FR-CH-2009] [UC-EXTENSION-CONTRACTS-2002#1] [UC-EXTENSION-CONTRACTS-2002#2]
+1. [FR-CH-2009] [FR-CH-2012] [UC-EXTENSION-CONTRACTS-2002#1] [UC-EXTENSION-CONTRACTS-2002#2]
    - Дано манифест поставщика с `"provides": { "cyborg.agent": "1.0" }` и правом `launch` на программу
    - Когда автор подключает плагин
    - Тогда поставщик отдаёт `facts`, `launch`, `watch`, `ended`, `history`; прав `pty` ему не нужно, процесс запускает потребитель; регистрации агента в ядре нет
-2. [FR-CH-2009] [UC-EXTENSION-CONTRACTS-2002#6] [UC-EXTENSION-CONTRACTS-2002#6а]
-   - Дано потребитель запускает `ctx.os.pty.spawn` с `describedBy`
+2. [FR-CH-2009] [FR-CH-2007] [UC-EXTENSION-CONTRACTS-2002#6] [UC-EXTENSION-CONTRACTS-2002#6а]
+   - Дано потребитель запускает `ctx.os.pty.spawn` с `describedBy`; в одном случае программы нет в праве `pty` потребителя, в другом - в праве `launch` поставщика
    - Когда описание сверяется
-   - Тогда учитываются и право `pty` потребителя, и право `launch` поставщика - права пересекаются
+   - Тогда учитываются и право `pty` потребителя, и право `launch` поставщика - права пересекаются; программа вне любого из двух прав даёт `PermissionDenied` и запись `denied`, процесс не запущен
 3. [FR-CH-2009]
    - Дано поставщик без `capabilities.resume`
    - Когда потребитель просит продолжить сессию
@@ -32,11 +32,11 @@ traced from: BR-CH-003, BR-CH-005
    - Дано установлено два плагина-поставщика `cyborg.agent`
    - Когда человек включает плагины
    - Тогда `sessions` показывает кнопку новой сессии на каждого, добавление поставщика не меняет код ядра и `sessions`
-5. [FR-CH-2015] [UC-EXTENSION-CONTRACTS-2002#5]
+5. [FR-CH-2009] [FR-CH-1015] [UC-EXTENSION-CONTRACTS-2002#5]
    - Дано человек нажал кнопку агента
    - Когда `sessions` спрашивает `facts`
    - Тогда `launch` отдаёт описание запуска с фрагментами промпта от `cyborg.session-prompt`, процесс запускает `ctx.os.pty.spawn` с `persist` и `describedBy`
-6. [FR-CH-2009] [UC-EXTENSION-CONTRACTS-2002#7]
+6. [FR-CH-2009] [FR-CH-1015] [UC-EXTENSION-CONTRACTS-2002#7]
    - Дано процесс агента запущен
    - Когда вид `sessions` открывает терминал
    - Тогда терминал открыт по билету, события `watch` (`cwd`, `session`, `activity`, `prompt`, `turnEnd`, `waiting`) приходят от поставщика
@@ -68,3 +68,7 @@ traced from: BR-CH-003, BR-CH-005
    - Дано хуки `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`, `Notification` пишут в файл сессии; после `Stop` сессия молчит 30 с
    - Когда агент закончил ход без фоновой работы
    - Тогда `watch` через `fs.watch` и `fs.readSlice` отдаёт «ждёт»; `resumeId` равен `session_id` хука `SessionStart`; `history` - интерактивные сессии каталога и его worktree
+14. [FR-CH-2009] [UC-COMPATIBILITY-5001#6]
+   - Дано поставщик с `capabilities.resume` и сессия прошлого запуска
+   - Когда человек выбирает её в «Сессии прошлого запуска»
+   - Тогда сессия поднимается через `resume` поставщика, `resumeId` передан
