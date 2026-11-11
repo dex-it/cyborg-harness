@@ -1,6 +1,6 @@
 # Сравнение bb, dsh и Cyborg
 
-Основано на разборах [bb](bb.md) и [DeepSeek Harness](deepseek-harness.md) и на исходном состоянии [Cyborg](cyborg-today.md). Последняя колонка - целевое решение по [SAD](../04-architecture/design/sad.md); обоснования - в ADR (`../04-architecture/adr/`), прежде всего [ADR-CH-0001](../04-architecture/adr/ADR-CH-0001-core-and-plugins.md) и [ADR-CH-0005](../04-architecture/adr/ADR-CH-0005-plugin-interaction.md). Первая версия колонки (ядро с реестром сервисов, шиной событий и около восьми точек расширения) снята: проверка SAD2 ([ресёрч-2](sad2-validation.md)) и решения владельца её заменили.
+Основано на разборах [bb](bb.md) и [DeepSeek Harness](deepseek-harness.md) и на исходном состоянии [Cyborg](cyborg-today.md). Последняя колонка - целевое решение по [SAD](../04-architecture/design/sad.md); обоснования - в ADR (`../04-architecture/adr/`), прежде всего [ADR-CH-0001](../04-architecture/adr/ADR-CH-0001-core-and-plugins.md) и [ADR-CH-0005](../04-architecture/adr/ADR-CH-0005-plugin-interaction.md). Первая версия колонки (ядро с реестром сервисов, шиной событий и около восьми точек расширения) снята: проверка SAD2 ([ресёрч-2](sad2-validation.md)) и решения владельца её заменили. ADR-CH-0006 в таблице ниже (перенос «душителем» с паритетом) снят и в харнес не вошёл, номера 0006, 0009, 0010, 0011 и 0013 в [каталоге ADR](../04-architecture/adr/README.md) не заняты.
 
 ## 1. Сводная таблица
 

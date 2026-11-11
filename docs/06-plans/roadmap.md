@@ -287,7 +287,7 @@ origin: derived
 | [P-07 #43](https://github.com/dex-it/cyborg-harness/issues/43) | загрузка встроенных плагинов из каталога поставки | сделано: поставка `cyborg-plugin delivery` с `delivery.json`, точка входа `index.mjs` и только он, сверка сумм при старте, проверка подмены; проба в упакованном приложении ([проверка](../05-verification/bundled-delivery.md)) |
 | [T-10 #22](https://github.com/dex-it/cyborg-harness/issues/22) | плагины вне репозитория и из упакованной сборки | не начато |
 | [P-10 #11](https://github.com/dex-it/cyborg-harness/issues/11) | CI и релизы: публикация пакетов, бюджеты ([5](#5-производительность-и-ресурсы)), проверка ссылок | готова к ревью: релиз по тегу (`release.yml`, `scripts/release.ts`), бюджеты (`playground/budgets.json`), ссылки (`npm run check:docs-links`), `npm audit`, dependabot, кэш `node-pty`; без владельца не сделано: пробный выпуск в реестр, токен, лицензия, переменная `RELEASE_PUBLISH` |
-| [P-11 #13](https://github.com/dex-it/cyborg-harness/issues/13) | приёмка документов владельцем, план миграции Cyborg в ai-cyborg | не начато |
+| [P-11 #13](https://github.com/dex-it/cyborg-harness/issues/13) | приёмка документов владельцем, план миграции Cyborg в ai-cyborg | на ревью: [чек-лист приёмки](acceptance-checklist.md) и [план переезда](migration-plan-cyborg.md) собраны и сверены, статусы документов и перенос плана в ai-cyborg ждут владельца |
 
 ## 10. Опыт автора плагина
 
