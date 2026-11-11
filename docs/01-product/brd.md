@@ -2,7 +2,7 @@
 level: product
 feature: cyborg-harness
 status: review
-date: 2026-11-10
+date: 2026-11-11
 origin: derived
 ---
 
@@ -67,7 +67,7 @@ Cyborg Harness - ядро плагинов для Cyborg. Ядро не знае
 - **Требование:** новый агент подключается плагином - поставщиком контракта `cyborg.agent` - без правок ядра.
 - **traced from:** цель «модульный клиент для агентов, локальных и готовых вроде Claude Code».
 - **rationale:** reason - в ядре нет агента и его запуска, агент - обычный плагин ([SAD, раздел 5](../04-architecture/design/sad.md#5-пример-базовая-часть)); assumptions - агент имеет CLI, который работает в pty.
-- **MOE:** второй поставщик написан без правок ядра; общий набор тестов `cyborg.agent` проходят оба (`agent-claude-code` и `agent-shell`, `playground/test/agents.test.ts`).
+- **MOE:** второй поставщик написан без правок ядра; общий набор тестов `cyborg.agent` проходят оба (`agent-claude-code` и `agent-shell`, `playground/test/agents.test.ts`). Осознанное расхождение: `agent-shell` - агент без следов, он проверяет форму контракта, но не заменяет настоящего второго агента; пока его нет, мера выполнена условно, а контракт нельзя считать устоявшимся ([SAD, вопрос 13](../04-architecture/design/sad.md#8-открытые-вопросы), [ADR-CH-0004](../04-architecture/adr/ADR-CH-0004-agent-provider-contract.md), п. 7).
 
 ### BR-CH-004 Сторонние плагины
 
@@ -129,7 +129,7 @@ Cyborg Harness - ядро плагинов для Cyborg. Ядро не знае
 
 ## 7. Предположения и риски
 
-Предположения: `utilityProcess` годится для хостов плагинов ([замер](../05-verification/spike-hosts.md)); `ses` с `lockdown()` работает в `utilityProcess` - не проверено, спайк до этапа 2 ([открытый вопрос 7 SAD](../04-architecture/design/sad.md#8-открытые-вопросы)). Риски и меры - [SAD, раздел 9](../04-architecture/design/sad.md#9-риски).
+Предположения: `utilityProcess` годится для хостов плагинов ([замер](../05-verification/spike-hosts.md)); `ses` с `lockdown()` работает в Electron 45 - спайк сделан ([ресёрч-2, 2.3](../research/sad2-validation.md#23-hardened-js-ses-230-в-electron-45), [ADR-CH-0003](../04-architecture/adr/ADR-CH-0003-trust-and-isolation.md)); остаётся совместимость бандлов зависимостей (`zod`, `marked` сканер `ses` не проходят), она проверяется на этапе 2 ([открытый вопрос 7 SAD](../04-architecture/design/sad.md#8-открытые-вопросы)). Риски и меры - [SAD, раздел 9](../04-architecture/design/sad.md#9-риски).
 
 ## 8. Фичи
 
