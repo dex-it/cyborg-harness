@@ -11,7 +11,7 @@ import { sandbox, type Sandbox } from '@cyborg-harness/testing';
 
 const PLUGINS = path.join(import.meta.dirname, '..', 'plugins');
 export const PILOT = ['files', 'git', 'viewer'] as const;
-export type PilotId = (typeof PILOT)[number];
+export type PilotId = (typeof PILOT)[number] | 'trackers';
 
 export const git = (cwd: string, ...args: string[]): string =>
   execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
