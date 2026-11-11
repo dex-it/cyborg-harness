@@ -11,7 +11,8 @@
 
 ## Unreleased
 
-Пусто: изменения до кандидата записаны ниже.
+- `manifest.schema.json` [patch]: схема манифеста плагина (JSON Schema draft-07) входит в пакет и адресуется из манифеста автора через `$schema` (`./node_modules/@cyborg-harness/contracts/manifest.schema.json`, экспорт `@cyborg-harness/contracts/manifest.schema.json`). Объявления типов не менялись, снимок `api-snapshot.txt` тот же; поля схемы сверяет с `core/src/manifest.ts` тест `core/test/manifest-schema.test.ts` (P-04).
+- Описания (TSDoc) добавлены каждому публичному члену `PluginContext`, `UiContext`, `PluginOs` и связанных типов; из них собирается справочник `docs/guide/reference/ctx-api.md` (P-04). Объявления не менялись.
 
 ## 1.0.0-rc.1 - 2026-11-11
 

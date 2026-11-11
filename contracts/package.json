@@ -6,9 +6,10 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": { "types": "./dist/index.d.ts" },
+    "./manifest.schema.json": "./manifest.schema.json",
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md", "CHANGELOG.md"],
+  "files": ["dist", "manifest.schema.json", "README.md", "CHANGELOG.md"],
   "repository": { "type": "git", "url": "git+https://github.com/dex-it/cyborg-harness.git", "directory": "contracts" },
   "publishConfig": { "registry": "https://registry.npmjs.org/", "access": "restricted" },
   "scripts": {
