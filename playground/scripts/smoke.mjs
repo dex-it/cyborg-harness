@@ -177,10 +177,12 @@ async function main() {
       app.focus({ steal: true });
       win.show();
       win.focus();
-      win.webContents.focus();
     })()`);
   // Ввод как с клавиатуры через протокол DevTools страницы: он идёт во фрейм с фокусом и не зависит от фокуса окна в оконной системе.
-  const typeText = (text) => ev.send('Input.insertText', { text });
+  const typeText = async (text) => {
+    await focusWindow();
+    return ev.send('Input.insertText', { text });
+  };
   const KEY_CODES = { Enter: 13, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, Tab: 9 };
   const tap = async (key) => {
     const base = { key, code: key, windowsVirtualKeyCode: KEY_CODES[key], ...(key === 'Enter' && { text: '\r' }) };
@@ -190,6 +192,7 @@ async function main() {
   // Строки экрана xterm: в #screen лежат ещё его <style>, их текст в проверку не берём.
   const sessionScreen = () => inView('sessions', "[...document.querySelectorAll('#screen .xterm-rows > div')].map((d) => d.textContent).join('\\n')");
   const clickIn = async (id, selector, clickCount = 1) => {
+    await focusWindow();
     const frame = await ev(`(() => { const r = document.querySelector('.views [data-plugin="${id}"] iframe').getBoundingClientRect(); return [r.left, r.top]; })()`);
     const inner = await inView(id, `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
     const at = { x: frame[0] + inner[0], y: frame[1] + inner[1], button: 'left', clickCount };
@@ -694,7 +697,11 @@ async function main() {
     const sh = /^pty (\d+)$/.exec(await inView('echo', "document.getElementById('term-state').textContent"))[1];
     const alive = (p) => main(`(() => { try { process.kill(${p}, 0); return true; } catch { return false; } })()`);
     const ask = () => ev("document.querySelector('dialog.pty-dialog[open]')?.textContent ?? ''");
-    const choose = (choice) => ev(`(() => { const b = document.querySelector('dialog.pty-dialog[open] button[data-choice=${JSON.stringify(choice)}]'); b?.click(); return !!b; })()`);
+    const choose = async (choice) => {
+      await focusWindow();
+      return chooseIn(choice);
+    };
+    const chooseIn = (choice) => ev(`(() => { const b = document.querySelector('dialog.pty-dialog[open] button[data-choice=${JSON.stringify(choice)}]'); b?.click(); return !!b; })()`);
     const load = async () => (await button('echo', 'Загрузить')) || button('echo', 'Включить снова');
     await focusWindow();
     assert.equal(await button('echo', 'Выгрузить'), true);
@@ -1025,6 +1032,7 @@ async function main() {
   // на Linux и Windows - webContents.copy()/paste() сфокусированного кадра. Считаем и то и другое: меню-role, затем сам вызов.
   const viaRole = {};
   const edit = async (action, done) => {
+    await focusWindow();
     assert.equal(await roleItem(action), true, `в меню Edit нет role ${action}`);
     const worked = await waitFor(`role ${action} через меню`, done, 1500).then(() => true, () => false);
     if (!worked) await main(`process.mainModule.require('electron').webContents.getAllWebContents().find((w) => w.getType() === 'window').${action}()`);
@@ -1035,6 +1043,7 @@ async function main() {
   let clipboardSkipped = '';
   try {
     await setClipboard('');
+    await focusWindow();
     await focusEditor();
     await clickIn('editor', '.monaco-editor .view-lines');
     // Без выделения Monaco копирует строку с кареткой (emptySelectionClipboard): выделение клавишами в окне CI ненадёжно, а проверяется канал copy.
