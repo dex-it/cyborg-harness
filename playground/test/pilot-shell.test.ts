@@ -88,3 +88,23 @@ test('меню: пункт не из снимка - NotFound, команда п�
   await assert.rejects(k.runMenuItem('stub-files', 'nope'), { code: 'NotFound' });
   await assert.rejects(k.runMenuItem('stub-sessions', 'search'), { code: 'NotFound' });
 });
+
+test('заголовок окна: воркспейс, название проекта от плагина, приложение; смена проекта обновляет строку, выгрузка плагина снимает фрагмент', async () => {
+  const titles: string[] = [];
+  await using k = await startKernel({
+    plugins: dirs(['stub-project']),
+    load: { windowTitle: { workspace: 'team.cyborg.json', app: 'Cyborg Playground' }, onWindow: (snapshot) => void titles.push(snapshot.title) },
+  });
+  assert.equal(k.window.title, 'team.cyborg.json - Cyborg Playground');
+  await k.run('stub-project.next');
+  assert.equal(k.window.title, 'team.cyborg.json - Альфа - Cyborg Playground');
+  await k.run('stub-project.next');
+  assert.equal(k.window.title, 'team.cyborg.json - Бета - Cyborg Playground');
+  await k.run('stub-project.next');
+  assert.equal(k.window.title, 'team.cyborg.json - Cyborg Playground', 'проект снят - фрагмента нет');
+  await k.run('stub-project.next');
+  await k.disable('stub-project');
+  assert.equal(k.window.title, 'team.cyborg.json - Cyborg Playground', 'выгрузка плагина снимает его фрагмент');
+  assert.equal(titles.at(-1), k.window.title, 'приложение получает ту же строку');
+  assert.ok(titles.includes('team.cyborg.json - Бета - Cyborg Playground'), 'каждая смена проекта дошла до приложения');
+});
