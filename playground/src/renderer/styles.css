@@ -96,6 +96,7 @@ button:focus-visible {
 
 .pane-session {
   grid-area: session;
+  overflow-y: auto;
 }
 
 .side {
@@ -152,11 +153,29 @@ button:focus-visible {
 .views-main {
   display: flex;
   flex: 1;
-  min-height: 0;
+  flex-direction: column;
+  /* В маленьком окне терминалу остаётся не меньше 11 строк экрана, колонка прокручивается: полоса и панель инструментов не отнимают у него место. */
+  min-height: 400px;
 }
 
+/* Основная область выкладывает виды друг под другом по order: первый (терминал) занимает всё место, следующие (полоса кнопок под ним) - полосу. */
 .views-main .view {
-  flex: 1;
+  flex: 0 0 52px;
+}
+
+.views-main .view[data-slot='0'] {
+  flex: 1 0 340px;
+}
+
+/* Адрес фрейма нужен только крупным видам: у полосы и кнопок панели инструментов подпись занимает место. */
+.views-main .view:not([data-slot='0']) .view-origin,
+.views-toolbar .view-origin {
+  display: none;
+}
+
+.side .views-side-page {
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: minmax(160px, 1fr);
 }
 
 /* Панель инструментов основной области: полоса над документами; без видов она пуста и места не занимает. */
@@ -171,19 +190,29 @@ button:focus-visible {
 
 .views-toolbar .view {
   flex: 1;
-  height: 110px;
+  height: 84px;
 }
 
-/* Всплывающий слой: виды поверх остального окна, справа внизу. */
+/* Выезжающая панель: справа во всю высоту окна, закрыта - за краем и недоступна для фокуса (inert). */
 .views-popup {
   position: fixed;
-  right: 18px;
-  bottom: 18px;
+  top: 0;
+  right: 0;
+  bottom: 0;
   z-index: 5;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  width: 320px;
+  width: 340px;
+  padding: 14px;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  transform: translateX(100%);
+  transition: transform 0.18s ease-out;
+}
+
+.views-popup[data-open='true'] {
+  transform: none;
 }
 
 .views-popup:empty {
@@ -191,11 +220,44 @@ button:focus-visible {
 }
 
 .views-popup .view {
-  height: 220px;
-  padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
+  flex: 1;
+}
+
+.pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Полоса сессий: вкладки документов основной области над панелью инструментов. */
+.session-strip {
+  display: flex;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+}
+
+.session-strip[hidden] {
+  display: none;
+}
+
+.session-strip [role='tab'] {
+  margin-bottom: -1px;
+  padding: 2px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--fg-dim);
+}
+
+.session-strip [role='tab'][aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  color: var(--fg);
+}
+
+.session-strip [role='tab'][data-available='false'] {
+  font-style: italic;
+  opacity: 0.7;
 }
 
 .view-title {

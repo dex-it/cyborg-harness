@@ -1,5 +1,6 @@
 // Дымовой тест собранного playground по DevTools Protocol; нужен дисплей (на Linux - xvfb-run ... --no-sandbox).
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -171,9 +172,21 @@ async function main() {
       page.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
       page.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
     })()`);
+  // На общей машине фокус ОС уходит к чужим окнам: у окна без фокуса фрейм не получает `focus`, а у модального `<dialog>` не доходит `close`. Забираем фокус явно.
+  const focusWindow = () =>
+    main(`(() => {
+      const { app, BrowserWindow } = process.mainModule.require('electron');
+      const win = BrowserWindow.getAllWindows()[0];
+      app.focus({ steal: true });
+      win.show();
+      win.focus();
+    })()`);
   // Ввод как с клавиатуры через протокол DevTools страницы: он идёт во фрейм с фокусом и не зависит от фокуса окна в оконной системе.
-  const typeText = (text) => ev.send('Input.insertText', { text });
-  const KEY_CODES = { Enter: 13, ArrowDown: 40, Tab: 9 };
+  const typeText = async (text) => {
+    await focusWindow();
+    return ev.send('Input.insertText', { text });
+  };
+  const KEY_CODES = { Enter: 13, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, Tab: 9 };
   const tap = async (key) => {
     const base = { key, code: key, windowsVirtualKeyCode: KEY_CODES[key], ...(key === 'Enter' && { text: '\r' }) };
     await ev.send('Input.dispatchKeyEvent', { type: 'keyDown', ...base });
@@ -182,6 +195,7 @@ async function main() {
   // Строки экрана xterm: в #screen лежат ещё его <style>, их текст в проверку не берём.
   const sessionScreen = () => inView('sessions', "[...document.querySelectorAll('#screen .xterm-rows > div')].map((d) => d.textContent).join('\\n')");
   const clickIn = async (id, selector, clickCount = 1) => {
+    await focusWindow();
     const frame = await ev(`(() => { const r = document.querySelector('.views [data-plugin="${id}"] iframe').getBoundingClientRect(); return [r.left, r.top]; })()`);
     const inner = await inView(id, `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
     const at = { x: frame[0] + inner[0], y: frame[1] + inner[1], button: 'left', clickCount };
@@ -285,11 +299,49 @@ async function main() {
   }
   log('акселераторы меню окна (Cmd/Ctrl+0, C, V) - в едином реестре ядра');
 
-  await waitFor('виды echo, alice и bob во фреймах', async () => (await views()) === 'alice/main,bob/main,built-dep/main,echo/main,editor/main,example/main,panels/bar,panels/panel,pin-lock/main,sessions/main' && (await inView('bob', "document.readyState")) === 'complete' && (await inView('alice', "!!document.getElementById('hello')")) === true);
+  // PL-08: меню и заголовок окна от пилотных плагинов раскладки Cyborg - четыре пункта от трёх плагинов, состояние идёт за плагином, заголовок собирают вклады плагинов.
+  const pilotItem = async (label) =>
+    JSON.parse(
+      await main(`(() => {
+        const { Menu } = process.mainModule.require('electron');
+        const flat = (items) => items.flatMap((i) => [i, ...(i.submenu ? flat(i.submenu.items) : [])]);
+        const i = flat(Menu.getApplicationMenu()?.items ?? []).find((x) => x.label === ${JSON.stringify(label)});
+        return JSON.stringify(i ? { enabled: i.enabled, checked: i.checked, type: i.type, accelerator: i.accelerator ?? null } : null);
+      })()`),
+    );
+  // Кнопка команды занята, пока идёт предыдущий вызов: нажатие на занятую ничего не делает, поэтому ждём, пока она освободится.
+  const runCommand = async (id, label) => {
+    await waitFor(`кнопка ${label} свободна`, () => ev(`[...document.querySelectorAll('#plugins-list [data-plugin=${JSON.stringify(id)}] button')].some((b) => b.textContent === ${JSON.stringify(label)} && !b.disabled)`));
+    assert.equal(await button(id, label), true);
+  };
+  const windowTitle = () => main("process.mainModule.require('electron').BrowserWindow.getAllWindows()[0].getTitle()");
+  await waitFor('пункты «Свойства проекта», «Уведомления», «Поиск», «Расширения» пришли от плагинов', async () => (await Promise.all(['Свойства проекта', 'Уведомления', 'Поиск', 'Расширения'].map(pilotItem))).every(Boolean));
+  assert.deepEqual(await pilotItem('Свойства проекта'), { enabled: false, checked: false, type: 'normal', accelerator: null }, 'проект не выбран - «Свойства проекта» недоступны');
+  assert.deepEqual(await pilotItem('Уведомления'), { enabled: true, checked: true, type: 'checkbox', accelerator: null });
+  assert.equal((await pilotItem('Поиск')).enabled, false, '«Поиск» зависит от выбранного проекта');
+  assert.equal((await pilotItem('Расширения')).enabled, true);
+  assert.match(await windowTitle(), / - Cyborg Playground$/);
+  assert.ok(!(await windowTitle()).includes('Альфа'), 'проект ещё не выбран');
+  await runCommand('stub-project', 'stub-project.next');
+  await waitFor('выбор проекта включил пункты двух плагинов', async () => (await pilotItem('Свойства проекта')).enabled && (await pilotItem('Поиск')).enabled);
+  await waitFor('заголовок окна получил название проекта от плагина', async () => / - Альфа - Cyborg Playground$/.test(await windowTitle()));
+  assert.equal(await clickMenu('Поиск'), true);
+  await waitFor('пункт меню выполнил команду stub-files, вид получил толчок по каналу', async () => (await inView('stub-files', "document.getElementById('search')?.textContent ?? ''")) === 'поиск открыт командой плагина');
+  assert.equal(await clickMenu('Уведомления'), true);
+  await waitFor('галочка «Уведомления» идёт за состоянием плагина', async () => (await pilotItem('Уведомления')).checked === false);
+  assert.equal(await clickMenu('Уведомления'), true);
+  await waitFor('галочка вернулась', async () => (await pilotItem('Уведомления')).checked === true);
+  await runCommand('stub-project', 'stub-project.next');
+  await waitFor('смена проекта обновила заголовок окна', async () => / - Бета - Cyborg Playground$/.test(await windowTitle()));
+  await runCommand('stub-project', 'stub-project.next');
+  await waitFor('проект снят - из заголовка и меню ушло всё его', async () => !(await windowTitle()).includes('Бета') && (await pilotItem('Свойства проекта')).enabled === false);
+  log('пилот PL-08: четыре пункта меню от плагинов идут за их состоянием, пункт выполняет команду плагина, заголовок окна обновляется при смене проекта');
+
+  await waitFor('виды echo, alice и bob во фреймах', async () => (await views()) === 'alice/main,bob/main,built-dep/main,echo/main,editor/main,example/main,panels/bar,panels/panel,pin-lock/main,sessions/main,stub-commands/strip,stub-files/tree,stub-sessions/list,stub-sessions/new,stub-tracker/mrs,stub-tracker/status,stub-tracker/task-panel,stub-tracker/tasks' && (await inView('bob', "document.readyState")) === 'complete' && (await inView('alice', "!!document.getElementById('hello')")) === true);
   // Область вида задаёт манифест, окно раскладывает по раскладке ядра: оба вида panels на своих местах, у каждого свой ctx.view.
   const area = (selector) => ev(`[...document.querySelectorAll(${JSON.stringify(selector + ' [data-plugin]')})].map((f) => f.dataset.plugin + '/' + f.dataset.view).sort().join(',')`);
-  assert.equal(await area('#main-view'), 'sessions/main', 'основная область не по манифесту');
-  assert.equal(await area('#toolbar-view'), 'panels/bar', 'панель инструментов не по манифесту');
+  assert.equal(await area('#main-view'), 'sessions/main,stub-commands/strip', 'основная область не по манифесту');
+  assert.equal(await area('#toolbar-view'), 'panels/bar,stub-sessions/new,stub-tracker/mrs,stub-tracker/status,stub-tracker/tasks', 'панель инструментов не по манифесту');
   assert.equal(await area('#views'), 'alice/main,bob/main,built-dep/main,echo/main,editor/main,example/main,panels/panel,pin-lock/main', 'боковая колонка не по манифесту');
   const panelsText = () =>
     main(`(async () => {
@@ -570,7 +622,7 @@ async function main() {
     (await states({ chat: 'stopped', alice: 'stopped', bob: 'active' })) && lines().includes('[plugins] bob: чат пропал'),
   );
   assert.match(await text('#plugins-list [data-plugin="alice"] .plugin-reason'), /выгружен вместе с chat/);
-  await waitFor('на месте вида снятой alice - заглушка с причиной', async () => (await views()) === 'bob/main,built-dep/main,echo/main,editor/main,example/main,panels/bar,panels/panel,pin-lock/main,sessions/main' && /выгружен вместе с chat/.test(await text('#views [data-plugin="alice"] .view-reason')));
+  await waitFor('на месте вида снятой alice - заглушка с причиной', async () => (await views()) === 'bob/main,built-dep/main,echo/main,editor/main,example/main,panels/bar,panels/panel,pin-lock/main,sessions/main,stub-commands/strip,stub-files/tree,stub-sessions/list,stub-sessions/new,stub-tracker/mrs,stub-tracker/status,stub-tracker/task-panel,stub-tracker/tasks' && /выгружен вместе с chat/.test(await text('#views [data-plugin="alice"] .view-reason')));
   assert.ok(await ev(`[...document.querySelectorAll('#views [data-plugin="alice"] button')].some((b) => b.textContent === 'Журнал')`), 'у заглушки нет «Журнал»');
   assert.equal((await keyRow(combo('A')))?.live, 'false');
   await press(combo('A'));
@@ -580,7 +632,7 @@ async function main() {
     (await states({ chat: 'active', alice: 'active' })) && lines().includes('[plugins] bob: чат вернулся, подписываюсь снова'),
   );
   assert.notEqual(await pid('chat'), chatPid, 'после выгрузки chat должен подняться в новом процессе');
-  await waitFor('вид alice вернулся', async () => (await views()) === 'alice/main,bob/main,built-dep/main,echo/main,editor/main,example/main,panels/bar,panels/panel,pin-lock/main,sessions/main');
+  await waitFor('вид alice вернулся', async () => (await views()) === 'alice/main,bob/main,built-dep/main,echo/main,editor/main,example/main,panels/bar,panels/panel,pin-lock/main,sessions/main,stub-commands/strip,stub-files/tree,stub-sessions/list,stub-sessions/new,stub-tracker/mrs,stub-tracker/status,stub-tracker/task-panel,stub-tracker/tasks');
   await waitFor('новый документ alice помнит приветы из state воркспейса', async () => (await inView('alice', "document.getElementById('greeted')?.textContent")) === 'приветов: 1');
   log('выгрузка с зависимыми, загрузка в новый процесс, переподписка');
 
@@ -655,8 +707,13 @@ async function main() {
     const sh = /^pty (\d+)$/.exec(await inView('echo', "document.getElementById('term-state').textContent"))[1];
     const alive = (p) => main(`(() => { try { process.kill(${p}, 0); return true; } catch { return false; } })()`);
     const ask = () => ev("document.querySelector('dialog.pty-dialog[open]')?.textContent ?? ''");
-    const choose = (choice) => ev(`(() => { const b = document.querySelector('dialog.pty-dialog[open] button[data-choice=${JSON.stringify(choice)}]'); b?.click(); return !!b; })()`);
+    const choose = async (choice) => {
+      await focusWindow();
+      return chooseIn(choice);
+    };
+    const chooseIn = (choice) => ev(`(() => { const b = document.querySelector('dialog.pty-dialog[open] button[data-choice=${JSON.stringify(choice)}]'); b?.click(); return !!b; })()`);
     const load = async () => (await button('echo', 'Загрузить')) || button('echo', 'Включить снова');
+    await focusWindow();
     assert.equal(await button('echo', 'Выгрузить'), true);
     await waitFor('выключение echo спрашивает о его процессах', async () => (await ask()).includes(`/bin/sh - pid ${sh}`));
     assert.equal(await ev("document.activeElement?.dataset.choice ?? ''"), 'keep', 'фокус вопроса не на безопасном ответе');
@@ -787,19 +844,98 @@ async function main() {
   await waitFor('окно открыто по PIN', () => ev("document.body.dataset.locked === 'false' && !document.getElementById('playground').inert && document.getElementById('lock-layer').hidden"));
   log('замок: виды скрыты, экран замка, чужие сочетания не перехвачены, открытие по PIN');
 
-  const focusedArea = () => ev("(() => { const a = document.activeElement; return a?.tagName === 'IFRAME' ? 'вид ' + a.closest('[data-plugin]').dataset.plugin : [...(a?.classList ?? [])].join(' '); })()");
+  // PL-08: F6 идёт по областям окна в порядке окна; кто держит фокус - вид (плагин/вид), вкладка или панель каркаса.
+  const focusedArea = () =>
+    ev(`(() => {
+      const a = document.activeElement;
+      if (a?.tagName === 'IFRAME') { const v = a.closest('[data-plugin]').dataset; return 'вид ' + v.plugin + '/' + v.view; }
+      if (a?.getAttribute('role') === 'tab') return 'вкладка ' + a.textContent;
+      return [...(a?.classList ?? [])].join(' ');
+    })()`);
+  await focusWindow();
   await ev('document.activeElement?.blur()');
+  // Порядок областей: панель инструментов по order (Статус 100, Задачи 200, MR/PR 300, Новая сессия 400, демо panels/bar 900), затем основная область
+  // (терминал 100, полоса кнопок под ним 200); выезжающая панель закрыта и пропущена; дальше вкладки боковой колонки и открытая панель окна.
+  const circle = ['вид stub-tracker/status', 'вид stub-tracker/tasks', 'вид stub-tracker/mrs', 'вид stub-sessions/new', 'вид panels/bar', 'вид sessions/main', 'вид stub-commands/strip', 'вкладка Плагины', 'pane pane-plugins'];
+  for (let i = 0; i < circle.length; i++) {
+    await press('F6');
+    await waitFor(`F6: остановка ${i + 1} - ${circle[i]}`, async () => (await focusedArea()) === circle[i]);
+  }
   await press('F6');
-  await waitFor('F6: фокус на первой панели', async () => /pane-plugins/.test(await focusedArea()));
-  await press('F6');
-  // Порядок обхода - порядок окна: панель инструментов основной области (вид bar плагина panels) стоит над основной областью.
-  await waitFor('F6: скрытые вкладки пропущены, следом первый вид окна - панель инструментов', async () => (await focusedArea()) === 'вид panels');
+  await waitFor('F6 замкнул круг: снова первая область', async () => (await focusedArea()) === circle[0]);
   await press('Shift+F6');
-  await press('Shift+F6');
-  await waitFor('Shift+F6 с первой панели - на последний вид', async () => /^вид /.test(await focusedArea()));
-  const last = (await focusedArea()).slice('вид '.length);
-  await waitFor('фокус вида лёг на его элемент, а не на body', async () => !['BODY', null].includes(await inView(last, 'document.activeElement?.tagName ?? null')));
-  log(`порядок фокуса: F6 по панелям, Shift+F6 по кругу на вид ${last}, внутри вида - первый элемент`);
+  await waitFor('Shift+F6 с первой области - на последнюю', async () => (await focusedArea()) === circle.at(-1));
+  for (let i = circle.length - 2; i >= 0; i--) {
+    await press('Shift+F6');
+    await waitFor(`Shift+F6: остановка ${i + 1} - ${circle[i]}`, async () => (await focusedArea()) === circle[i]);
+  }
+  // Фокус внутри вида лёг на его элемент, а не на body (оболочка вида кладёт его на первый фокусируемый).
+  for (let i = 0; i < 4; i++) await press('Shift+F6');
+  await waitFor('фокус вида sessions лёг на его элемент, а не на body', async () => {
+    if ((await focusedArea()) !== 'вид sessions/main') return false;
+    if (!['BODY', null].includes(await inView('sessions', 'document.activeElement?.tagName ?? null'))) return true;
+    // Фокус ОС ушёл к чужому окну в момент перехода: возвращаем его и повторяем переход на тот же фрейм.
+    await focusWindow();
+    await ev("document.activeElement?.blur(); document.querySelector('.views [data-plugin=\"sessions\"] iframe').focus()");
+    return false;
+  });
+  // Вкладки боковой колонки: вид с подписью - своя вкладка (подпись и порядок из манифестов), стрелки и Home ходят по вкладкам.
+  const sideTabs = () => ev("[...document.querySelectorAll('#side-tabs [role=tab]')].map((t) => t.textContent + (t.getAttribute('aria-selected') === 'true' ? '*' : '')).join('|')");
+  assert.equal(await sideTabs(), 'Файлы|Сессии|Плагины*|Виды|Документы|Сообщения|Журнал|Клавиши', 'вкладки боковой колонки не по манифестам: подписи и order видов');
+  await ev("document.querySelector('#side-tabs [role=tab][aria-selected=true]').focus()");
+  await tap('ArrowLeft');
+  await waitFor('ArrowLeft: вкладка «Сессии»', async () => (await sideTabs()).includes('Сессии*'));
+  await tap('ArrowLeft');
+  await waitFor('ArrowLeft: вкладка «Файлы»', async () => (await sideTabs()).startsWith('Файлы*'));
+  assert.equal(await ev("document.getElementById('panel-plugins').hidden"), true, 'панель «Плагины» осталась открытой');
+  await ev("document.getElementById('tab-plugins').click()");
+  log(`порядок фокуса: F6 прошёл ${circle.length} областей по кругу и обратно Shift+F6, вкладки боковой колонки ходят стрелками`);
+
+  const loadPlugin = async (id) => (await button(id, 'Загрузить')) || button(id, 'Включить снова');
+  // PL-08: выезжающая панель открывается кнопкой окна и недоступна для фокуса, пока закрыта.
+  assert.equal(await ev("document.getElementById('popup-toggle').hidden"), false, 'есть вид выезжающей панели - есть и кнопка');
+  assert.equal(await ev("document.getElementById('popup-toggle').textContent"), 'Панель задач', 'подпись кнопки - title вида из манифеста');
+  assert.deepEqual(await ev("(() => { const p = document.getElementById('popup-view'); return [p.inert, p.dataset.open ?? '']; })()"), [true, 'false'], 'закрытая панель не inert');
+  await ev("document.getElementById('popup-toggle').click()");
+  assert.deepEqual(await ev("(() => { const p = document.getElementById('popup-view'); return [p.inert, p.dataset.open, document.getElementById('popup-toggle').getAttribute('aria-expanded')]; })()"), [false, 'true', 'true']);
+  // Открытая панель входит в обход F6: после основной области, до вкладок боковой колонки.
+  await ev('document.activeElement?.blur()');
+  const walked = [];
+  for (let i = 0; i < 12 && !walked.includes('вид stub-tracker/task-panel'); i++) {
+    await press('F6');
+    await waitFor(`F6: фокус сдвинулся (${i + 1})`, async () => (await focusedArea()) !== (walked.at(-1) ?? ''));
+    walked.push(await focusedArea());
+  }
+  assert.ok(walked.includes('вид stub-tracker/task-panel'), `F6 не дошёл до открытой выезжающей панели: ${walked.join(' > ')}`);
+  assert.ok(walked.indexOf('вид stub-tracker/task-panel') > walked.indexOf('вид stub-commands/strip'), 'панель стоит раньше основной области');
+  await ev("document.getElementById('popup-toggle').click()");
+  assert.deepEqual(await ev("(() => { const p = document.getElementById('popup-view'); return [p.inert, p.dataset.open]; })()"), [true, 'false']);
+  await ev('document.activeElement?.blur()');
+
+  // PL-08: отключение плагина перестраивает область без перезагрузки окна - на месте его видов заглушки, чужие фреймы не тронуты, порядок прежний.
+  await ev("window.__pl08 = 'kept'; document.querySelector('#toolbar-view [data-plugin=\"panels\"] iframe').dataset.keep = '1'");
+  await inPanels('bar', "window.__pl08frame = 'kept'");
+  const toolbarOrder = () =>
+    ev(`[...document.querySelectorAll('#toolbar-view > .view')].sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left).map((f) => f.dataset.plugin + '/' + f.dataset.view + (f.classList.contains('view-placeholder') ? ':заглушка' : '')).join(',')`);
+  const liveToolbar = 'stub-tracker/status,stub-tracker/tasks,stub-tracker/mrs,stub-sessions/new,panels/bar';
+  assert.equal(await toolbarOrder(), liveToolbar, 'панель инструментов не в порядке order манифестов');
+  await runCommand('stub-tracker', 'Выгрузить');
+  await waitFor('stub-tracker выгружен', async () => (await state('stub-tracker')) === 'stopped');
+  await waitFor('на месте видов stub-tracker заглушки, порядок прежний', async () => (await toolbarOrder()) === 'stub-tracker/status:заглушка,stub-tracker/tasks:заглушка,stub-tracker/mrs:заглушка,stub-sessions/new,panels/bar');
+  assert.equal(await ev("document.querySelectorAll('#popup-view .view-placeholder').length"), 1, 'вид выезжающей панели не заменён заглушкой');
+  assert.match(await text('#toolbar-view .view-placeholder .view-reason'), /\S/, 'у заглушки нет причины');
+  assert.deepEqual(await ev("[window.__pl08, document.querySelector('#toolbar-view [data-plugin=\"panels\"] iframe').dataset.keep]"), ['kept', '1'], 'окно перезагрузилось или фрейм соседа пересоздан');
+  assert.equal(await inPanels('bar', 'window.__pl08frame'), 'kept', 'документ соседнего вида перезагрузился');
+  // Вид боковой колонки с подписью: вкладка остаётся, внутри заглушка.
+  await runCommand('stub-files', 'Выгрузить');
+  await waitFor('на месте вкладки «Файлы» заглушка', async () => (await ev("document.querySelectorAll('.pane-side-page .view-placeholder').length")) === 1);
+  assert.match(await sideTabs(), /^Файлы\|Сессии\|Плагины\*/, 'вкладка выгруженного вида пропала');
+  assert.equal(await loadPlugin('stub-files'), true);
+  assert.equal(await loadPlugin('stub-tracker'), true);
+  await waitFor('виды stub-tracker вернулись на свои места', async () => (await toolbarOrder()) === liveToolbar && (await state('stub-tracker')) !== 'stopped');
+  await waitFor('вид «Файлы» снова во фрейме', async () => (await ev("document.querySelectorAll('.pane-side-page .view-placeholder').length")) === 0);
+  assert.equal(await ev('window.__pl08'), 'kept', 'окно перезагрузилось при возврате плагина');
+  log('перестройка: выгрузка stub-tracker и stub-files ставит заглушки на их места без перезагрузки окна и фреймов соседей, возврат плагина возвращает виды в прежний порядок');
 
   const agentButtons = () => inView('sessions', "[...document.querySelectorAll('#agents cy-button')].map((b) => b.dataset.agent + (b.disabled ? '-' : '+')).sort().join(',')");
   await waitFor('sessions видит обоих поставщиков cyborg.agent', async () => /^claude-code[+-],shell\+$/.test(await agentButtons()));
@@ -817,6 +953,23 @@ async function main() {
   await waitFor('pty сообщил размер', async () => (ptySize = /размер-(\d+x\d+)/.exec(await sessionScreen())?.[1] ?? '') !== '');
   assert.notEqual(ptySize, '32x120', 'размер pty не подогнан под экран вида');
   log(`cyborg.agent: два поставщика (${await agentButtons()}), sessions запускает pty по описанию агента; клавиши с экрана уходят в сессию, pty по экрану ${ptySize}`);
+  // PL-08: открытая сессия - вкладка полосы сессий над панелью инструментов, порядок вкладок задаёт order типа документа.
+  await waitFor('сессия агента появилась вкладкой полосы сессий', async () => (await ev("(() => { const s = document.getElementById('session-strip'); return !s.hidden && s.querySelectorAll('[role=tab][data-document]').length >= 1; })()")) === true);
+  assert.equal(await ev("document.getElementById('session-strip').nextElementSibling.id"), 'toolbar-view', 'полоса сессий стоит не над панелью инструментов');
+  assert.equal(await ev("document.querySelectorAll('#session-strip [role=tab][aria-selected=true]').length"), 1, 'в полосе сессий нет ровно одной выбранной вкладки');
+  // Снимки окна для docs/05-verification: CYBORG_SMOKE_SHOT=<путь без расширения> кладёт два PNG (панель закрыта и открыта).
+  if (process.env.CYBORG_SMOKE_SHOT) {
+    const shot = async (file) => writeFileSync(file, Buffer.from((await ev.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+    await ev("document.querySelector('#side-tabs [role=tab]').click()");
+    await sleep(800);
+    await shot(`${process.env.CYBORG_SMOKE_SHOT}.png`);
+    await ev("document.getElementById('popup-toggle').click()");
+    await sleep(800);
+    await shot(`${process.env.CYBORG_SMOKE_SHOT}-popup.png`);
+    await ev("document.getElementById('popup-toggle').click()");
+    await ev("document.getElementById('tab-plugins').click()");
+    log(`снимки окна записаны: ${process.env.CYBORG_SMOKE_SHOT}.png, ${process.env.CYBORG_SMOKE_SHOT}-popup.png`);
+  }
 
   // PL-05: Monaco и xterm в одном окне, каждый во фрейме на своём origin cyborg-plugin://; воркеры, шрифт и таблицы - файлы того же origin под CSP вида.
   await ev("document.getElementById('tab-views').click()");
@@ -889,6 +1042,7 @@ async function main() {
   // на Linux и Windows - webContents.copy()/paste() сфокусированного кадра. Считаем и то и другое: меню-role, затем сам вызов.
   const viaRole = {};
   const edit = async (action, done) => {
+    await focusWindow();
     assert.equal(await roleItem(action), true, `в меню Edit нет role ${action}`);
     const worked = await waitFor(`role ${action} через меню`, done, 1500).then(() => true, () => false);
     if (!worked) await main(`process.mainModule.require('electron').webContents.getAllWebContents().find((w) => w.getType() === 'window').${action}()`);
@@ -899,6 +1053,7 @@ async function main() {
   let clipboardSkipped = '';
   try {
     await setClipboard('');
+    await focusWindow();
     await focusEditor();
     await clickIn('editor', '.monaco-editor .view-lines');
     // Без выделения Monaco копирует строку с кареткой (emptySelectionClipboard): выделение клавишами в окне CI ненадёжно, а проверяется канал copy.
@@ -1169,6 +1324,11 @@ async function main() {
   } else near(shrunk.window, ceiling, 'окно выше потолка 80vh');
   await inForm("document.getElementById('grow').click()");
   await waitFor('вид получил ответ на просьбу выше экрана', async () => (await fitted()) === 'высота: 4000');
+  // Окно хоста перестраивается по сообщению моста после ответа виду: читать размер надо, дождавшись его, а не сразу (нестабильность на macOS CI, PR #220).
+  await waitFor('окно по просьбе 4000 дошло до потолка 80vh', async () => {
+    const box = await fitBox();
+    return Math.abs(box.window - box.vh * 0.8) <= 4;
+  });
   const grown = await fitBox();
   near(grown.window, grown.vh * 0.8, 'окно по просьбе 4000 не упёрлось в потолок 80vh');
   assert.ok(grown.frame <= grown.window, 'область вида вылезла из окна');
