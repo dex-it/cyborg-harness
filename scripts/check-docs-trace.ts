@@ -8,6 +8,7 @@ import path from 'node:path';
 // (нормы с «Ещё нет»): таблица выводит такие критерии отдельно от проверяемых. Всё, что скрипт не смог разобрать (расширение с латинской «a»,
 // файл без слага, заголовок нормы другого вида, строка «Открыто» без метки), - находка, а не молчаливый пропуск. Таблица покрытия
 // `docs/03-requirements/coverage.md` собирается этим же скриптом (`--write`), в режиме проверки она обязана совпадать с собранной.
+// Цепочка BR продукта -> BR фичи (`brd-feat.md`) -> норма проверяется так же: у каждой нормы `traced from` называет BR своей фичи (или находку из журнала решений фичи), у каждого BR фичи - BR продукта.
 // Без сети и без зависимостей.
 
 const REQUIREMENTS = 'docs/03-requirements';
@@ -279,6 +280,96 @@ function counterProblems(root: string, stories: readonly Story[], scenarios: rea
   return problems;
 }
 
+const PRODUCT_BRD = 'docs/01-product/brd.md';
+
+/** Номера BR по заголовкам `### BR-CH-NNN` (продукт - три цифры, фича - блок и три цифры номера) и заголовки `BR-CH-` другого вида. */
+function readBrHeadings(text: string, digits: string): { ids: string[]; odd: string[] } {
+  const ids: string[] = [];
+  const odd: string[] = [];
+  for (const line of text.split('\n')) {
+    const m = /^### (BR-CH-\d+)(?: .+)?$/.exec(line);
+    if (m?.[1] !== undefined && new RegExp(`^BR-CH-\\d${digits}$`).test(m[1])) ids.push(m[1]);
+    else if (/^#{1,6}\s*BR-CH-/.test(line)) odd.push(clip(line));
+  }
+  return { ids, odd };
+}
+
+/** Строка `traced from` каждого заголовка: id единицы -> текст строки (undefined, если строки нет). */
+function tracedFrom(text: string, headingPattern: RegExp): Map<string, string | undefined> {
+  const traced = new Map<string, string | undefined>();
+  let current: string | undefined;
+  for (const line of text.split('\n')) {
+    const m = headingPattern.exec(line);
+    if (m?.[1] !== undefined) {
+      current = m[1];
+      traced.set(current, undefined);
+    } else if (current !== undefined && line.startsWith('- **traced from:**')) traced.set(current, line);
+  }
+  return traced;
+}
+
+/** Цепочка BR продукта -> BR фичи -> норма (#137 п. 4): у фичи есть brd-feat.md, у каждого её BR - родитель в BRD продукта, у каждой нормы - BR своей фичи или находка из журнала решений; счётчик `NN.BR` не меньше наибольшего номера. */
+function chainProblems(root: string): string[] {
+  const problems: string[] = [];
+  const expanded = new Set<string>();
+  const productPath = path.join(root, PRODUCT_BRD);
+  const product = new Set(fs.existsSync(productPath) ? readBrHeadings(read(root, PRODUCT_BRD), '{3}').ids : []);
+  for (const feature of listDirs(path.join(root, REQUIREMENTS))) {
+    const dir = `${REQUIREMENTS}/${feature}`;
+    if (!fs.existsSync(path.join(root, dir, 'srs.md'))) continue;
+    const block = featureBlock(feature);
+    const brdPath = `${dir}/brd-feat.md`;
+    if (!fs.existsSync(path.join(root, brdPath))) {
+      problems.push(`${brdPath}: нет brd-feat.md (BRD фичи обязателен)`);
+      continue;
+    }
+    const brdText = read(root, brdPath);
+    const headings = readBrHeadings(brdText, '{4,}');
+    for (const odd of headings.odd) problems.push(`${brdPath}: заголовок BR не вида «### BR-CH-<блок>NNN Название»: ${odd}`);
+    const own = new Set<string>();
+    let max = 0;
+    for (const id of headings.ids) {
+      const number = Number(id.slice('BR-CH-'.length));
+      if (Math.floor(number / 1000) !== block) problems.push(`${brdPath}: ${id} вне блока номеров фичи ${feature}`);
+      else {
+        own.add(id);
+        max = Math.max(max, number);
+      }
+    }
+    for (const [id, line] of tracedFrom(brdText, /^### (BR-CH-\d{4,})(?: .+)?$/)) {
+      const parents = [...(line ?? '').matchAll(/\bBR-CH-(\d{3})\b/g)].map((m) => `BR-CH-${m[1] ?? ''}`);
+      if (parents.length === 0) problems.push(`${id}: traced from не называет BR продукта`);
+      for (const parent of parents) expanded.add(parent);
+      for (const parent of parents) if (!product.has(parent)) problems.push(`${id}: traced from называет ${parent}, которого нет в BRD продукта (${PRODUCT_BRD})`);
+    }
+    const logPath = path.join(root, dir, 'decision-log.md');
+    const log = fs.existsSync(logPath) ? read(root, `${dir}/decision-log.md`) : '';
+    for (const [norm, line] of tracedFrom(read(root, `${dir}/srs.md`), /^### (N?FR-CH-\d+) /)) {
+      if (line === undefined) {
+        problems.push(`${norm}: нет строки traced from`);
+        continue;
+      }
+      const found = /находка (D-\d+)/.exec(line)?.[1];
+      if (found !== undefined) {
+        if (!new RegExp(`\\|\\s*${found}\\s*\\|`).test(log)) problems.push(`${norm}: находка ${found} не записана в ${dir}/decision-log.md`);
+        continue;
+      }
+      const ids = [...line.matchAll(/\bBR-CH-(\d{4,})\b/g)].map((m) => `BR-CH-${m[1] ?? ''}`);
+      if (ids.length === 0) problems.push(`${norm}: traced from не называет BR фичи (BR-CH-NNNN) и не ссылается на находку`);
+      for (const id of ids) {
+        if (Math.floor(Number(id.slice('BR-CH-'.length)) / 1000) !== block) problems.push(`${norm}: ${id} вне блока номеров фичи ${feature}`);
+        else if (!own.has(id)) problems.push(`${norm}: ${id} нет в ${brdPath}`);
+      }
+    }
+    const key = `${String(block).padStart(2, '0')}.BR`;
+    const value = counterValue(root, key);
+    if (value === undefined) problems.push(`нет счётчика ${COUNTER}/${key}, а в блоке есть номер ${String(max)}`);
+    else if (!(value >= max)) problems.push(`счётчик ${COUNTER}/${key} равен ${String(value)}, а в блоке есть номер ${String(max)}`);
+  }
+  for (const id of [...product].sort(compare)) if (!expanded.has(id)) problems.push(`${id}: BR продукта не развёрнут ни в одном BR фичи`);
+  return problems;
+}
+
 export function collect(root: string): TraceReport {
   const parsedUnits = readUnits(root);
   const parsedScenarios = readScenarios(root);
@@ -328,7 +419,7 @@ export function collect(root: string): TraceReport {
   }
   for (const unit of units) if (!coveredUnits.has(unit.id)) problems.push(`${unit.id}: норма не дала ни одного критерия приёмки`);
   for (const sc of scenarios) for (const b of sc.branches) if (!coveredBranches.has(`${b.uc}#${b.id}`)) problems.push(`${b.uc}#${b.id}: ${b.kind} сценария не покрыт критерием и не назван открытым`);
-  problems.push(...counterProblems(root, stories, scenarios));
+  problems.push(...counterProblems(root, stories, scenarios), ...chainProblems(root));
   return { units, scenarios, stories, problems };
 }
 
