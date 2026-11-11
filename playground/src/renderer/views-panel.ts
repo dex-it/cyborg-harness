@@ -5,6 +5,8 @@ import type { Area } from '@cyborg-harness/core/window';
 import type { PluginRow } from '@cyborg-harness/electron/window';
 import { el } from './dom.ts';
 import { viewMode, type ViewSlot } from './plugins-model.ts';
+import type { SidePage } from './side-tabs.ts';
+import type { WindowPlan } from './window-plan.ts';
 
 export interface ViewsPort {
   setViewVisible(id: string, view: string, visible: boolean): Promise<void>;
@@ -14,7 +16,8 @@ export interface ViewsPort {
 
 interface Box {
   readonly figure: HTMLElement;
-  readonly area: Area;
+  /** Где стоит вид: область окна или своя вкладка боковой колонки (`sidebar:tab`). */
+  readonly place: string;
   readonly live: boolean;
   readonly update: (slot: ViewSlot) => void;
 }
@@ -22,47 +25,69 @@ interface Box {
 /** Куда окно кладёт виды каждой области; боковая колонка - общая сетка вкладки «Виды», остальные - свои места окна. У модального окна места в странице нет: его показывает слой окна (`WindowLayerView`) по просьбе главной части. */
 export type AreaRoots = Readonly<Record<Exclude<Area, 'modal'>, HTMLElement>>;
 
+/** Вкладки боковой колонки: окно отдаёт корень панели для каждого вида с подписью. */
+export interface SidePages {
+  syncPages(pages: readonly SidePage[]): ReadonlyMap<string, HTMLElement>;
+}
+
 export class ViewsPanel {
   private readonly boxes = new Map<string, Box>();
   private readonly roots: AreaRoots;
   private readonly empty: HTMLElement;
   private readonly port: ViewsPort;
+  private readonly pages: SidePages;
 
-  constructor(roots: AreaRoots, port: ViewsPort) {
+  constructor(roots: AreaRoots, port: ViewsPort, pages: SidePages) {
     this.roots = roots;
     this.port = port;
+    this.pages = pages;
     this.empty = el('p', 'empty', 'Включённых плагинов с видом нет');
     roots.sidebar.append(this.empty);
   }
 
-  sync(slots: readonly ViewSlot[]): void {
-    const wanted = new Map(slots.map((slot) => [slot.key, slot]));
+  /**
+   * Виды по плану окна. Порядок внутри области - `order` ядра: новый вид встаёт на своё место, существующие не двигаются
+   * (перенос `<iframe>` в DOM перезагружает документ), а перестановка идёт стилем `order` и номером `data-slot` обёртки.
+   */
+  sync(plan: WindowPlan): void {
+    const roots = this.pages.syncPages(plan.sideTabs.map((slot) => ({ key: slot.key, title: slot.entry.title ?? slot.row.id })));
+    const wanted = new Map<string, { slot: ViewSlot; place: string; root: HTMLElement; index: number }>();
+    const put = (list: readonly ViewSlot[], place: string, rootOf: (slot: ViewSlot) => HTMLElement | undefined) => {
+      list.forEach((slot, index) => {
+        const root = rootOf(slot);
+        if (root) wanted.set(slot.key, { slot, place, root, index });
+      });
+    };
+    put(plan.toolbar, 'toolbar', () => this.roots.toolbar);
+    put(plan.main, 'main', () => this.roots.main);
+    put(plan.popup, 'popup', () => this.roots.popup);
+    put(plan.sidebar, 'sidebar', () => this.roots.sidebar);
+    put(plan.sideTabs, 'sidebar:tab', (slot) => roots.get(slot.key));
     for (const [key, box] of this.boxes) {
-      const slot = wanted.get(key);
-      if (slot?.entry.area === box.area && (slot.mode !== 'placeholder') === box.live) continue;
+      const next = wanted.get(key);
+      if (next?.place === box.place && (next.slot.mode !== 'placeholder') === box.live) continue;
       box.figure.remove();
       this.boxes.delete(key);
     }
-    // Перенос <iframe> в DOM перезагружает его документ: новый вид встаёт на своё место, старые не двигаются.
-    const previous = new Map<Area, HTMLElement>();
-    for (const [key, slot] of wanted) {
-      const area = slot.entry.area;
-      if (area === 'modal') continue; // его рисует слой окна
+    const previous = new Map<HTMLElement, HTMLElement>();
+    for (const [key, { slot, place, root, index }] of wanted) {
       let box = this.boxes.get(key);
       if (!box) {
-        box = slot.mode === 'placeholder' ? this.placeholder(slot) : this.frame(slot);
+        box = slot.mode === 'placeholder' ? this.placeholder(slot, place) : this.frame(slot, place);
         this.boxes.set(key, box);
-        const before = previous.get(area);
+        const before = previous.get(root);
         if (before) before.after(box.figure);
-        else this.roots[area].prepend(box.figure);
+        else root.prepend(box.figure);
       }
+      box.figure.style.order = String(index);
+      box.figure.dataset.slot = String(index);
       box.update(slot);
-      previous.set(area, box.figure);
+      previous.set(root, box.figure);
     }
-    this.empty.hidden = [...this.boxes.values()].some((box) => box.area === 'sidebar');
+    this.empty.hidden = plan.sidebar.length > 0 || plan.sideTabs.length > 0;
   }
 
-  private frame({ row, entry }: ViewSlot): Box {
+  private frame({ row, entry }: ViewSlot, place: string): Box {
     const figure = el('figure', 'view');
     figure.dataset.plugin = row.id;
     figure.dataset.view = entry.name;
@@ -93,7 +118,7 @@ export class ViewsPanel {
     });
     return {
       figure,
-      area: entry.area,
+      place,
       live: true,
       update: (next) => {
         const restarting = viewMode(next.row, next.entry) === 'restarting';
@@ -104,7 +129,7 @@ export class ViewsPanel {
     };
   }
 
-  private placeholder({ row, entry }: ViewSlot): Box {
+  private placeholder({ row, entry }: ViewSlot, place: string): Box {
     const figure = el('figure', 'view view-placeholder');
     figure.dataset.plugin = row.id;
     figure.dataset.view = entry.name;
@@ -114,7 +139,7 @@ export class ViewsPanel {
     figure.append(el('figcaption', 'view-caption', entry.title ?? row.id), reason, actions);
     return {
       figure,
-      area: entry.area,
+      place,
       live: false,
       update: (next) => {
         figure.dataset.state = next.row.state;

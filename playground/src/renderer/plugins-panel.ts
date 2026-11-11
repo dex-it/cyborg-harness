@@ -7,7 +7,9 @@ import { byId, el } from './dom.ts';
 import { ViewsPanel } from './views-panel.ts';
 import { moveFocus } from './focus.ts';
 import { SideTabs } from './side-tabs.ts';
-import { actionsFor, clock, conflictText, diagnosticsLine, exportMessage, groupLabel, groupNote, journalFor, keyStatus, mergeFeed, originNote, previousNote, sortedPlugins, STATE_LABEL, summary, userPluginsNotice, viewSlots, workspaceActionError, type ActionButton } from './plugins-model.ts';
+import { actionsFor, clock, conflictText, diagnosticsLine, exportMessage, groupLabel, groupNote, journalFor, keyStatus, mergeFeed, originNote, previousNote, sortedPlugins, STATE_LABEL, summary, userPluginsNotice, workspaceActionError, type ActionButton } from './plugins-model.ts';
+import { SessionStrip } from './session-strip.ts';
+import { windowPlan } from './window-plan.ts';
 
 export interface PluginsPort {
   pluginsSnapshot(): Promise<PluginsSnapshot>;
@@ -60,6 +62,12 @@ export class PluginsPanel {
   private readonly journalEl = byId('plugins-journal', HTMLElement);
   private readonly views: ViewsPanel;
   private readonly tabs = new SideTabs(byId('side-tabs', HTMLElement));
+  private readonly strip = new SessionStrip(byId('session-strip', HTMLElement), (id) => {
+    this.activeDocument = id;
+    this.markActiveDocument();
+  });
+  private readonly popupEl = byId('popup-view', HTMLElement);
+  private readonly popupToggle = byId('popup-toggle', HTMLButtonElement);
   private snapshot: PluginsSnapshot | null = null;
   private focus: string | null = null;
   /** Вкладка документа, которую выбрал плагин (`ctx.documents.reveal`); строки перерисовываются по снимку, поэтому id помнит панель. */
@@ -85,7 +93,9 @@ export class PluginsPanel {
         setViewVisible: (id, view, visible) => port.setViewVisible(id, view, visible),
         actions: (row) => actionsFor(row, false).filter((b) => b.action === 'enable' || b.action === 'journal').map((b) => this.button(row.id, b)),
       },
+      this.tabs,
     );
+    this.popupToggle.addEventListener('click', () => this.openPopup(this.popupEl.dataset.open !== 'true'));
     this.journalAll.addEventListener('click', () => this.showJournal(null));
     byId('workspace-open', HTMLButtonElement).addEventListener('click', () => void this.workspaceAction('Открыть воркспейс', () => port.openWorkspace()));
     this.safeModeEnter.addEventListener('click', () => void port.setSafeMode(true));
@@ -104,10 +114,24 @@ export class PluginsPanel {
   private revealDocument(id: string): void {
     this.activeDocument = id;
     this.scrollToActive = true;
+    this.strip.reveal(id);
     this.tabs.reveal(this.documentsEl);
     this.markActiveDocument();
     // Строки приходят со снимком: если документ открыт только что, а снимка с ним ещё нет, отметка встанет при ближайшей отрисовке.
     void this.refresh();
+  }
+
+  /** Выезжающая панель: кнопка окна открывает и закрывает её; закрытая недоступна для фокуса, пока в ней нет видов - кнопки нет. */
+  private openPopup(open: boolean): void {
+    this.popupEl.dataset.open = String(open);
+    this.popupEl.inert = !open;
+    this.popupToggle.setAttribute('aria-expanded', String(open));
+  }
+
+  private syncPopup(label: string, any: boolean): void {
+    this.popupToggle.hidden = !any;
+    this.popupToggle.textContent = label;
+    if (!any) this.openPopup(false);
   }
 
   private markActiveDocument(): void {
@@ -175,7 +199,10 @@ export class PluginsPanel {
     this.markActiveDocument();
     this.renderFeed();
     this.renderJournal();
-    this.views.sync(viewSlots(snapshot.plugins, snapshot.layout));
+    const plan = windowPlan(snapshot.plugins, snapshot.layout, snapshot.documents);
+    this.views.sync(plan);
+    this.strip.sync(plan.strip, this.activeDocument);
+    this.syncPopup(plan.popup[0]?.entry.title ?? 'Панель', plan.popup.length > 0);
     this.layer.sync(snapshot.window, snapshot.plugins, snapshot.layout);
   }
 

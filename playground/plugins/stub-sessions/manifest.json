@@ -1,0 +1,11 @@
+{
+  "id": "stub-sessions",
+  "version": "1.0.0",
+  "engines": { "cyborg": "^1" },
+  "ui": {
+    "views": {
+      "list": { "module": "./ui/ui.js", "area": "sidebar", "order": 200, "title": "Сессии" },
+      "new": { "module": "./ui/ui.js", "area": "toolbar", "order": 400, "title": "Новая сессия" }
+    }
+  }
+}
