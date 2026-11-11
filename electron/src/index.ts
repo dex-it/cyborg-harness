@@ -19,6 +19,6 @@ export { alertNotification, bindWindow, isolateSession, quitAfterPlugins, showWi
 export { instanceKey, newWindowArgs, NO_WORKSPACE_KEY, sessionDataDir, workspaceNeighbors } from './instances.ts';
 export { DEFAULT_RESTART_FLAGS, restarts, workspaceInfo } from './restarts.ts';
 export type { RestartFlags, RestartOptions, Restarts } from './restarts.ts';
-export { bindAppMenu } from './app-menu.ts';
+export { baseAccelerators, bindAppMenu } from './app-menu.ts';
 export { appMenuTemplate } from './app-menu-template.ts';
 export type { AppMenuItem } from './app-menu-template.ts';

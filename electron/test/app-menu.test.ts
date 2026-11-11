@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { MenuEntry } from '@cyborg-harness/core';
-import { appMenuTemplate, type AppMenuItem } from '../src/app-menu-template.ts';
+import { acceleratorsOf, appMenuTemplate, type AppMenuItem } from '../src/app-menu-template.ts';
 
 // K-08: меню ОС собирается из снимка ядра; Electron для этого не нужен, шаблон - данные.
 const entry = (over: Partial<MenuEntry> & Pick<MenuEntry, 'pluginId' | 'id' | 'menu'>): MenuEntry => ({ title: over.id, command: `${over.pluginId}.run`, order: 1000, enabled: true, ...over });
@@ -48,4 +48,33 @@ test('меню ОС: вклад в меню, которого нет у прил
   assert.deepEqual(template.slice(3).map((t) => t.label), ['Инструменты', 'Окно']);
   assert.deepEqual(labels(sub(template, 'Инструменты')), ['Поиск']);
   assert.deepEqual(appMenuTemplate(base, [], () => undefined).length, 3, 'без вкладов меню приложения не растёт');
+});
+
+// PL-03: акселераторы меню приложения идут в единый реестр ядра (`LoadOptions.menuKeys`) из настоящего меню, а не из списка, который ведут руками (D-27).
+interface Node {
+  label?: string;
+  role?: string;
+  type?: string;
+  accelerator?: string | null;
+  submenu?: { items: Node[] };
+}
+const menu = (items: Node[]): { items: Node[] } => ({ items });
+
+test('акселераторы меню: обход собирает путь -> сочетание, включая сочетания ролей, и пропускает разделители и пункты без сочетания', () => {
+  const items: Node[] = [
+    { label: 'Electron', role: 'appmenu', submenu: menu([{ label: 'Hide Electron', role: 'hide', accelerator: 'Command+H' }, { type: 'separator' }, { label: 'Quit Electron', role: 'quit', accelerator: 'CommandOrControl+Q' }]) },
+    { label: 'Edit', role: 'editmenu', submenu: menu([{ label: 'Copy', role: 'copy', accelerator: 'CommandOrControl+C' }, { label: 'Delete', role: 'delete', accelerator: null }, { submenu: menu([{ role: 'togglesmartquotes' }]) }]) },
+    { label: 'Вид', submenu: menu([{ role: 'toggledevtools', accelerator: 'Alt+Command+I' }]) },
+  ];
+  assert.deepEqual(acceleratorsOf(items), {
+    'Electron/Hide Electron': 'Command+H',
+    'Electron/Quit Electron': 'CommandOrControl+Q',
+    'Edit/Copy': 'CommandOrControl+C',
+    'Вид/toggledevtools': 'Alt+Command+I',
+  });
+});
+
+test('акселераторы меню: два пункта с одним путём не затирают друг друга', () => {
+  const items: Node[] = [{ label: 'Файл', submenu: menu([{ label: 'Открыть', accelerator: 'CmdOrCtrl+O' }, { label: 'Открыть', accelerator: 'CmdOrCtrl+Shift+O' }]) }];
+  assert.deepEqual(Object.values(acceleratorsOf(items)).toSorted(), ['CmdOrCtrl+O', 'CmdOrCtrl+Shift+O']);
 });

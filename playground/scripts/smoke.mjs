@@ -274,6 +274,13 @@ async function main() {
   assert.equal(await clickMenu('Echo: отметка'), true);
   await waitFor('галочка снята вместе с состоянием', async () => (await menuItem('Echo: отметка'))?.checked === false);
   log('меню приложения: пункты плагина из снимка ядра, нажатие выполняет команду, галочка следует состоянию');
+  // PL-03: сочетания настоящего меню окна (роли Electron: resetZoom, copy, paste, toggleDevTools) стоят в едином реестре ядра за владельцем cyborg.menu, а не в списке, который ведут руками.
+  const menuMod = process.platform === 'darwin' ? 'Meta' : 'Ctrl';
+  for (const key of [`${menuMod}+0`, `${menuMod}+C`, `${menuMod}+V`]) {
+    const row = await waitFor(`реестр знает акселератор меню ${key}`, () => keyRow(key));
+    assert.match(row.text, /\(cyborg\.menu\)/, `${key}: владелец не меню приложения`);
+  }
+  log('акселераторы меню окна (Cmd/Ctrl+0, C, V) - в едином реестре ядра');
 
   await waitFor('виды echo, alice и bob во фреймах', async () => (await views()) === 'alice/main,bob/main,built-dep/main,echo/main,editor/main,example/main,panels/bar,panels/panel,pin-lock/main,sessions/main' && (await inView('bob', "document.readyState")) === 'complete' && (await inView('alice', "!!document.getElementById('hello')")) === true);
   // Область вида задаёт манифест, окно раскладывает по раскладке ядра: оба вида panels на своих местах, у каждого свой ctx.view.

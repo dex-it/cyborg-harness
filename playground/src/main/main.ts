@@ -8,6 +8,7 @@ import { app, BrowserWindow, clipboard, dialog, Notification, powerMonitor, shel
 import { RecentWorkspaces, withFileLock } from '@cyborg-harness/core';
 import {
   alertNotification,
+  baseAccelerators,
   bindAppMenu,
   bindWindow,
   electronOs,
@@ -114,7 +115,8 @@ const menuBase: AppMenuItem[] = [
   ...(process.platform === 'darwin' ? [{ role: 'appMenu' } as const] : []),
   { label: 'Воркспейс', menu: 'workspace', submenu: [{ role: process.platform === 'darwin' ? 'close' : 'quit' }] },
   { role: 'editMenu' },
-  { label: 'Вид', menu: 'view', submenu: [{ role: 'toggleDevTools' }] },
+  // resetZoom: Cmd/Ctrl+0 - сочетание Cyborg, которое там живёт в слушателе окна; здесь оно акселератор меню и занято в реестре ядра (PL-03).
+  { label: 'Вид', menu: 'view', submenu: [{ role: 'toggleDevTools' }, { role: 'resetZoom' }] },
   { label: 'Окно', menu: 'window', submenu: [{ role: 'minimize' }] },
 ];
 
@@ -261,6 +263,8 @@ const start = () => {
     migrate: migrateLegacyWorkspace,
     safeMode,
     userPlugins,
+    // Настоящие акселераторы меню окна: плагин не займёт их динамически, манифест на них проиграет с записью в журнале (PL-03).
+    menuKeys: baseAccelerators(menuBase),
     neighbors: workspaceNeighbors(userData, workspaceFile),
     builtinDir: path.join(__dirname, deliveryMode ? 'delivery' : 'plugins'),
     builtinMode: deliveryMode ? 'delivery' : 'stand',

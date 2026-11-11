@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { inlineHosts } from '@cyborg-harness/core';
 import type { PluginModule, TraceRecord } from '@cyborg-harness/core';
-import { WINDOW_OWNER } from '@cyborg-harness/core';
+import { MENU_OWNER, WINDOW_OWNER } from '@cyborg-harness/core';
 import { DELIVERY_FILE, writeDelivery } from '@cyborg-harness/core/delivery';
 import { ENTRY_FILES as CHECKED_ENTRY_FILES } from '@cyborg-harness/core/plugin-check';
 import type { KeyRow } from '../src/snapshot.ts';
@@ -1043,4 +1043,51 @@ test('контрольные суммы: нет delivery.json у непусто�
     assert.ok(!quiet.some((p) => p.includes(DELIVERY_FILE)), `в ${empty} суммы не нужны`);
     await k.unload();
   }
+});
+
+test('служба окна: menuKeys приложения - единый реестр с меню; конфликт манифеста виден при загрузке, динамическое занять нельзя, нажатие забирает меню ОС (PL-03)', async (t) => {
+  const userData = tmp();
+  const dir = path.join(userData, 'plugins');
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['finder', 'buttons'] } }));
+  plugin(dir, 'finder', { commands: ['finder.open'], keybindings: [{ key: 'CmdOrCtrl+Shift+F', command: 'finder.open' }] }, 'export default {}');
+  plugin(dir, 'buttons', { commands: { 'buttons.run': { args: ['string'] } } }, 'export default {}');
+  const answers: unknown[] = [];
+  const modules: Record<string, PluginModule> = {
+    buttons: {
+      async activate(ctx) {
+        ctx.commands.register('buttons.run', () => undefined);
+        // Меню приложения ведёт себя как у Cyborg: Shift+Cmd+X - «Расширения», Cmd+C - роль copy; обе заняты до плагина.
+        for (const key of ['CmdOrCtrl+Shift+X', 'CmdOrCtrl+C', 'F4']) {
+          try {
+            answers.push(await ctx.keys.register({ key, command: 'buttons.run', args: [key] }));
+          } catch (error) {
+            answers.push((error as { code?: string }).code);
+          }
+        }
+      },
+    },
+  };
+  const lines: string[] = [];
+  const service = new PluginsService({ changed: () => {}, alert: () => {} }, () => 5);
+  await service.start({
+    userData,
+    builtinDir: path.join(userData, 'нет'),
+    userPlugins: true,
+    spawnHost: inlineHosts(async (entry) => modules[/\/(\w+)\/index\.mjs$/.exec(entry)?.[1] ?? ''] ?? { activate() {} }),
+    platform: 'darwin',
+    menuKeys: { 'Поиск/Найти': 'CmdOrCtrl+Shift+F', 'Расширения/Магазины': 'CmdOrCtrl+Shift+X', 'Edit/Copy': 'CommandOrControl+C' },
+    log: (line) => lines.push(line),
+  });
+  t.after(() => service.unload());
+  const meta = (key: string, code: string, shift = false) => ({ key, code, control: false, alt: false, shift, meta: true });
+
+  assert.deepEqual(answers.slice(0, 2), ['CommandConflict', 'CommandConflict'], 'сочетание меню динамически не занять');
+  assert.deepEqual((answers[2] as { active: boolean }).active, true, 'свободная F4 досталась плагину');
+  assert.ok(lines.some((l) => l.includes('"kind":"key-conflict"') && l.includes('"pluginId":"finder"') && l.includes('"winner":"cyborg.menu"')), 'конфликт манифеста с меню записан в журнал при загрузке');
+  assert.ok(lines.some((l) => l.includes('"kind":"key-conflict"') && l.includes('"pluginId":"buttons"') && l.includes('Shift+Meta+X')), 'отказ динамическому тоже в журнале');
+  const rows = service.snapshot().keys;
+  const finder = rows.find((k) => k.key === 'Shift+Meta+F');
+  assert.deepEqual([finder?.pluginId, finder?.command, finder?.shadowed], [MENU_OWNER, 'Поиск/Найти', [{ pluginId: 'finder', command: 'finder.open' }]]);
+  assert.equal(service.press(meta('F', 'KeyF', true)), false, 'нажатие меню ядро не забирает: его обработает меню ОС');
+  assert.equal(service.press(meta('c', 'KeyC')), false);
 });

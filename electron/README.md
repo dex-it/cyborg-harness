@@ -34,7 +34,7 @@ Peer-зависимости: `@cyborg-harness/core`, `@cyborg-harness/contracts`
 - перехват клавиш ядром раньше страницы, события фокуса окна, сна, пробуждения и блокировки экрана, выход с ожиданием `onBeforeQuit` плагинов, одиночный экземпляр;
 - перезапуск приложения при смене воркспейса и безопасного режима с вопросом о живых pty;
 - слой окна: диалоги видов и экраны замков из снимка ядра (`WindowLayerView`);
-- меню приложения по вкладам плагинов: `bindAppMenu(plugins, base)` ставит `Menu.setApplicationMenu` из снимка `Kernel.menus` и пересобирает его при смене снимка, нажатие пункта исполняет его команду через ядро; `appMenuTemplate` - то же шаблоном без Electron;
+- меню приложения по вкладам плагинов: `bindAppMenu(plugins, base)` ставит `Menu.setApplicationMenu` из снимка `Kernel.menus` и пересобирает его при смене снимка, нажатие пункта исполняет его команду через ядро; `appMenuTemplate` - то же шаблоном без Electron; `baseAccelerators(base)` отдаёт сочетания построенного меню (в том числе тех, что Electron дал ролям: `copy`, `quit`, `resetZoom`), приложение передаёт их в `StartOptions.menuKeys`, и ядро ведёт их в одном реестре с командами окна, манифестами и `ctx.keys.register` (PL-03): ручной список занятых сочетаний не нужен;
 - раскладку видов: `PluginsSnapshot.layout` (`LayoutRow`) - упорядоченный снимок `Kernel.layout` (область, `order`, заголовок), у вида плагина свой адрес для `<iframe>`; плагин с несколькими видами показывает все.
 
 Делает приложение (в playground это `playground/src/main/main.ts` и `playground/src/renderer`):

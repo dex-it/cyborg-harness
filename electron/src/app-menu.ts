@@ -1,6 +1,6 @@
 // Меню приложения: ставит меню ОС по снимку ядра и пересобирает его, когда снимок меняется (K-08, SAD 3.9).
 import { Menu } from 'electron';
-import { appMenuTemplate, type AppMenuItem } from './app-menu-template.ts';
+import { acceleratorsOf, appMenuTemplate, type AppMenuItem } from './app-menu-template.ts';
 import type { PluginsService } from './plugins.ts';
 
 /**
@@ -20,4 +20,12 @@ export function bindAppMenu(plugins: PluginsService, base: readonly AppMenuItem[
   const stop = plugins.watch(apply);
   apply();
   return stop;
+}
+
+/**
+ * Настоящие акселераторы меню приложения для `StartOptions.menuKeys`: меню строится из тех же `base`, что видит ОС, поэтому роли (`copy`, `quit`, `togglefullscreen`) приходят с сочетаниями Electron.
+ * Пункты плагинов сюда не входят: их сочетания ядро берёт из манифестов само.
+ */
+export function baseAccelerators(base: readonly AppMenuItem[]): Record<string, string> {
+  return acceleratorsOf(Menu.buildFromTemplate(appMenuTemplate(base, [], () => undefined)).items);
 }
