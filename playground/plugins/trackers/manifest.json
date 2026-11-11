@@ -1,0 +1,19 @@
+{
+  "id": "trackers",
+  "version": "1.0.0",
+  "engines": {
+    "cyborg": "^1"
+  },
+  "commands": {
+    "trackers.list": { "args": ["string", "string", "record?"], "callers": "plugins" },
+    "trackers.cancel": { "args": ["string"], "callers": "plugins" },
+    "trackers.stats": {}
+  },
+  "permissions": {
+    "process": [
+      { "program": "gh", "args": ["api", "--method", "GET"], "env": ["GH_PROMPT_DISABLED", "NO_COLOR"] },
+      { "program": "glab", "args": ["api", "--method", "GET"], "env": ["NO_COLOR"] },
+      { "program": "jira", "args": ["issue", "list", "--raw"], "env": ["NO_COLOR"] }
+    ]
+  }
+}
