@@ -1,0 +1,11 @@
+{
+  "id": "stub-files",
+  "version": "1.0.0",
+  "engines": { "cyborg": "^1" },
+  "commands": { "stub-files.search": {} },
+  "ui": {
+    "views": {
+      "tree": { "module": "./ui/ui.js", "area": "sidebar", "order": 100, "title": "Файлы" }
+    }
+  }
+}

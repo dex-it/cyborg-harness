@@ -33,11 +33,15 @@
       </header>
 
       <section class="pane pane-session" aria-labelledby="session-title">
-        <h2 id="session-title">Основная область</h2>
+        <div class="pane-head">
+          <h2 id="session-title">Основная область</h2>
+          <button id="popup-toggle" class="popup-toggle" type="button" aria-controls="popup-view" aria-expanded="false" hidden>Панель</button>
+        </div>
+        <div id="session-strip" class="session-strip" role="tablist" aria-label="Сессии" hidden></div>
         <div id="toolbar-view" class="views views-toolbar" aria-label="Панель инструментов"></div>
         <div id="main-view" class="views views-main"></div>
       </section>
-      <div id="popup-view" class="views views-popup" aria-label="Всплывающие виды"></div>
+      <aside id="popup-view" class="views views-popup" aria-label="Выезжающая панель" inert></aside>
 
       <div class="side">
         <div id="side-tabs" class="side-tabs" role="tablist" aria-label="Панели">

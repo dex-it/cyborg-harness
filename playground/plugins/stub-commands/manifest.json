@@ -1,0 +1,10 @@
+{
+  "id": "stub-commands",
+  "version": "1.0.0",
+  "engines": { "cyborg": "^1" },
+  "ui": {
+    "views": {
+      "strip": { "module": "./ui/ui.js", "area": "main", "order": 200, "title": "Кнопки команд" }
+    }
+  }
+}

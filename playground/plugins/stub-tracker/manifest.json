@@ -1,0 +1,13 @@
+{
+  "id": "stub-tracker",
+  "version": "1.0.0",
+  "engines": { "cyborg": "^1" },
+  "ui": {
+    "views": {
+      "status": { "module": "./ui/ui.js", "area": "toolbar", "order": 100, "title": "Статус" },
+      "tasks": { "module": "./ui/ui.js", "area": "toolbar", "order": 200, "title": "Задачи" },
+      "mrs": { "module": "./ui/ui.js", "area": "toolbar", "order": 300, "title": "MR/PR" },
+      "task-panel": { "module": "./ui/ui.js", "area": "popup", "order": 100, "title": "Панель задач" }
+    }
+  }
+}
