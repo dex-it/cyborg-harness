@@ -92,10 +92,10 @@ test('файл e4beb72: ни одно значение не потеряно, п
     const state = (await json(ws.stateFile)) as Record<string, unknown>;
     const projects = old.projects as Record<string, unknown>[];
     // projects -> settings.projects.items (id, name, description, repos и неизвестные поля проекта на месте)
-    assert.deepEqual(config.settings.projects, { items: projects.map(({ trackers: _t, jira: _j, ...own }) => own) });
+    assert.deepEqual(config.settings.projects, { items: projects.map((p) => Object.fromEntries(Object.entries(p).filter(([k]) => k !== 'trackers' && k !== 'jira'))) });
     // trackers и jira проекта -> settings.trackers.byProject.<id>; проект без обоих полей в таблицу не попадает
     assert.deepEqual(config.settings.trackers, {
-      byProject: Object.fromEntries(projects.map((p) => [p.id, { ...(p.trackers as object), ...(p.jira !== undefined && { jira: p.jira }) }])),
+      byProject: Object.fromEntries(projects.map((p): [string, unknown] => [p.id as string, { ...(p.trackers as object), ...(p.jira !== undefined && { jira: p.jira }) }])),
     });
     // commands -> settings.command-buttons.commands как записаны (поля неизвестной кнопки тоже)
     assert.deepEqual(config.settings['command-buttons'], { commands: old.commands });
@@ -158,7 +158,8 @@ test('перенос: неизвестные поля проекта остаю�
 
 test('перенос: commands - только список; иное значение, как и lastProjectId не строкой, остаётся в файле на месте', () => {
   const migrated = migrateLegacyWorkspace({ projects: [], commands: { не: 'список' }, lastProjectId: 7 });
-  assert.deepEqual(migrated?.config, { settings: { projects: { items: [] } }, commands: { не: 'список' }, lastProjectId: 7 });
-  assert.deepEqual(migrated?.state, {});
+  assert.ok(migrated);
+  assert.deepEqual(migrated.config, { settings: { projects: { items: [] } }, commands: { не: 'список' }, lastProjectId: 7 });
+  assert.deepEqual(migrated.state, {});
   assert.deepEqual(migrateLegacyWorkspace({ projects: [], commands: [], lastProjectId: null })?.config, { settings: { projects: { items: [] }, 'command-buttons': { commands: [] } } });
 });
