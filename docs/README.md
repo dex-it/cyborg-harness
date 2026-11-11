@@ -31,6 +31,7 @@
 | Пилот PL-08: раскладка окна Cyborg на областях, вклады в меню, заголовок, `F6`, перестройка при выгрузке плагина | [05-verification/pl08-window-layout.md](05-verification/pl08-window-layout.md) |
 | Плагины вне репозитория и из упакованной сборки (asar): что грузится, что нет и почему, ограничения автора на `.ts` (T-10) | [05-verification/external-plugins.md](05-verification/external-plugins.md) |
 | База Cyborg: старт, память, терминал, панели, бандлы и записанные сессии S1-S18 для сравнения с ядром | [05-verification/cyborg-baseline.md](05-verification/cyborg-baseline.md) |
+| Пилот PL-06: перенос файла воркспейса и `localStorage` Cyborg, таблица «поле - куда», потери, откат на старую версию | [05-verification/pilot-legacy-data.md](05-verification/pilot-legacy-data.md) |
 | Эпик «Микроядро»: цель, карта, итерации, реестр задач | [06-plans/epic-microkernel.md](06-plans/epic-microkernel.md) |
 | Анализ готовности ядра и инвентарь Cyborg | [research/microkernel-readiness.md](research/microkernel-readiness.md), [research/cyborg-migration-inventory.md](research/cyborg-migration-inventory.md) |
 | Сайт документации (источник страниц - `guide/`) | [guide/](guide/index.mdx), сборка - `site/` |
