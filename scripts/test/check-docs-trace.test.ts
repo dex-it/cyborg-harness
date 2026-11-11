@@ -11,7 +11,9 @@ after(() => {
   for (const root of roots) fs.rmSync(root, { recursive: true, force: true });
 });
 
-const SRS = '# SRS\n\n### FR-CH-1001 Манифест\n\n- **Требование:** x\n\n### NFR-CH-1001 Бюджет\n\n- **Требование:** y\n';
+const SRS = '# SRS\n\n### FR-CH-1001 Манифест\n\n- **Требование:** x\n- **traced from:** BR-CH-1001.\n\n### NFR-CH-1001 Бюджет\n\n- **Требование:** y\n- **traced from:** BR-CH-1001 (мера).\n';
+const PRODUCT_BRD = '# BRD\n\n### BR-CH-001 Модульность\n\n- **traced from:** цель.\n';
+const FEATURE_BRD = '# BRD фичи\n\n### BR-CH-1001 Плагин подключается\n\n- **Требование:** x\n- **traced from:** BR-CH-001.\n';
 const SCENARIO = '---\nid: UC-PLUGIN-HOST-1001\nfeature: 01-plugin-host\n---\n\n# Сбой плагина\n\n## Основной ход\n\n1. Плагин падает.\n2. Хост ловит.\n\n## Расширения\n\n- **1а. Плагин завис.** Сторож.\n- **1а1. Три раза подряд.** Выключен.\n\n## Постусловия\n\n3. не ветка\n';
 const STORY = (criteria: string, extra = ''): string =>
   `---\nlevel: story\nid: ST-1001\nfeature: 01-plugin-host\n---\n\n# ST-1001 Сбой остаётся у плагина\n\n## Критерии приёмки\n\n${criteria}\n${extra}`;
@@ -24,6 +26,10 @@ function tree(files: Record<string, string>): string {
     'docs/03-requirements/01-plugin-host/srs.md': SRS,
     'docs/02-use-cases/plugin-host/UC-PLUGIN-HOST-1001-plugin-failure-isolated.md': SCENARIO,
     'docs/03-requirements/01-plugin-host/stories/ST-1001-failure.md': STORY(FULL),
+    'docs/01-product/brd.md': PRODUCT_BRD,
+    'docs/03-requirements/01-plugin-host/brd-feat.md': FEATURE_BRD,
+    'docs/03-requirements/01-plugin-host/decision-log.md': '# Журнал\n\n| ID | Решение |\n|---|---|\n| D-01 | x |\n',
+    'docs/.req_counter/01.BR': '1001\n',
     'docs/.req_counter/01.ST': '1001\n',
     'docs/.req_counter/01.UC': '1001\n',
   };
@@ -190,10 +196,13 @@ describe('collect: строка «Открыто» (#212, P9)', () => {
 });
 
 describe('collect: номер блока не из одной цифры (#212, P10)', () => {
-  const SRS10 = '# SRS\n\n### FR-CH-10001 Десятая\n\n- **Требование:** x\n';
+  const SRS10 = '# SRS\n\n### FR-CH-10001 Десятая\n\n- **Требование:** x\n- **traced from:** BR-CH-10001.\n';
+  const BRD10 = '# BRD\n\n### BR-CH-10001 Десятая\n\n- **traced from:** BR-CH-001.\n';
   const STORY10 = (id: string): string => `---\nlevel: story\nid: ${id}\nfeature: 10-tenth\n---\n\n# ${id} Десятая\n\n## Критерии приёмки\n\n1. [FR-CH-10001]\n   - Дано a\n`;
   const extra = (id: string, counter: string): Record<string, string> => ({
     'docs/03-requirements/10-tenth/srs.md': SRS10,
+    'docs/03-requirements/10-tenth/brd-feat.md': BRD10,
+    'docs/.req_counter/10.BR': '10001\n',
     [`docs/03-requirements/10-tenth/stories/${id}-x.md`]: STORY10(id),
     'docs/.req_counter/10.ST': counter,
   });
@@ -219,6 +228,8 @@ describe('collect: номер блока не из одной цифры (#212, 
       'docs/02-use-cases/tenth/UC-PLUGIN-HOST-10001-tenth.md': uc,
       'docs/.req_counter/10.UC': '10000\n',
       'docs/03-requirements/10-tenth/srs.md': SRS10,
+      'docs/03-requirements/10-tenth/brd-feat.md': BRD10,
+      'docs/.req_counter/10.BR': '10001\n',
       'docs/03-requirements/10-tenth/stories/ST-10001-x.md': STORY10('ST-10001').replace('1. [FR-CH-10001]', '1. [FR-CH-10001] [UC-PLUGIN-HOST-10001#1] [UC-PLUGIN-HOST-10001#2] [UC-PLUGIN-HOST-10001#1а] [UC-PLUGIN-HOST-10001#1а1]'),
       'docs/.req_counter/10.ST': '10001\n',
     });
@@ -315,5 +326,64 @@ describe('документы репозитория', () => {
     assert.equal(result.code, 0, result.err);
     const report = collect(repo);
     assert.ok(report.units.length > 100 && report.stories.length > 30, `норм ${String(report.units.length)}, историй ${String(report.stories.length)}`);
+  });
+});
+
+describe('collect: цепочка BR продукта - BR фичи - норма', () => {
+  const SRS_FILE = 'docs/03-requirements/01-plugin-host/srs.md';
+  const BRD_FILE = 'docs/03-requirements/01-plugin-host/brd-feat.md';
+  const problems = (files: Record<string, string>): readonly string[] => collect(tree(files)).problems;
+
+  it('образец без находок', () => {
+    assert.deepEqual(problems({}), []);
+  });
+
+  it('норма без строки traced from - находка', () => {
+    assert.ok(problems({ [SRS_FILE]: SRS.replace('- **traced from:** BR-CH-1001.\n', '') }).some((p) => p.includes('FR-CH-1001') && p.includes('traced from')));
+  });
+
+  it('норма, трассированная только на BR продукта, - находка', () => {
+    assert.ok(problems({ [SRS_FILE]: SRS.replace('BR-CH-1001.', 'BR-CH-001.') }).some((p) => p.includes('FR-CH-1001') && p.includes('BR фичи')));
+  });
+
+  it('норма на BR фичи, которого нет в brd-feat.md, - находка', () => {
+    assert.ok(problems({ [SRS_FILE]: SRS.replace('BR-CH-1001.', 'BR-CH-1009.') }).some((p) => p.includes('BR-CH-1009') && p.includes('нет в')));
+  });
+
+  it('норма на BR чужого блока - находка', () => {
+    assert.ok(problems({ [SRS_FILE]: SRS.replace('BR-CH-1001.', 'BR-CH-2001.') }).some((p) => p.includes('BR-CH-2001') && p.includes('блок')));
+  });
+
+  it('находка D-NN допустима, если запись есть в decision-log фичи, и нет - если записи нет', () => {
+    const swapped = SRS.replace('BR-CH-1001.', 'находка D-01: BR продукта нет.');
+    assert.deepEqual(problems({ [SRS_FILE]: swapped }), []);
+    assert.ok(problems({ [SRS_FILE]: swapped.replace('D-01', 'D-07') }).some((p) => p.includes('D-07')));
+  });
+
+  it('фича без brd-feat.md - находка', () => {
+    const root = tree({});
+    fs.rmSync(path.join(root, BRD_FILE));
+    assert.ok(collect(root).problems.some((p) => p.includes('brd-feat.md')));
+  });
+
+  it('BR фичи без родителя в BRD продукта - находка', () => {
+    assert.ok(problems({ [BRD_FILE]: FEATURE_BRD.replace('BR-CH-001.', 'цель.') }).some((p) => p.includes('BR-CH-1001') && p.includes('BR продукта')));
+    assert.ok(problems({ [BRD_FILE]: FEATURE_BRD.replace('BR-CH-001.', 'BR-CH-099.') }).some((p) => p.includes('BR-CH-099')));
+  });
+
+  it('заголовок BR фичи другого вида и BR вне блока фичи - находки', () => {
+    assert.ok(problems({ [BRD_FILE]: FEATURE_BRD + '\n## BR-CH-1002 Не тот заголовок\n' }).some((p) => p.includes('BR-CH-1002') && p.includes('заголовок')));
+    assert.ok(problems({ [BRD_FILE]: FEATURE_BRD + '\n### BR-CH-2001 Чужой блок\n\n- **traced from:** BR-CH-001.\n' }).some((p) => p.includes('BR-CH-2001') && p.includes('блок')));
+  });
+
+  it('BR продукта, не развёрнутый ни в одном BR фичи, - находка', () => {
+    assert.ok(problems({ 'docs/01-product/brd.md': `${PRODUCT_BRD}\n### BR-CH-002 Данные\n\n- **traced from:** цель.\n` }).some((p) => p.includes('BR-CH-002') && p.includes('не развёрнут')));
+  });
+
+  it('счётчик 01.BR меньше наибольшего номера или отсутствует - находка', () => {
+    assert.ok(problems({ 'docs/.req_counter/01.BR': '1000\n' }).some((p) => p.includes('01.BR')));
+    const root = tree({});
+    fs.rmSync(path.join(root, 'docs/.req_counter/01.BR'));
+    assert.ok(collect(root).problems.some((p) => p.includes('01.BR')));
   });
 });
