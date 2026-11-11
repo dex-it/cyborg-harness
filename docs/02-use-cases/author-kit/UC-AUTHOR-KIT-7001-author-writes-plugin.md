@@ -2,7 +2,7 @@
 level: use-case
 id: UC-AUTHOR-KIT-7001
 feature: 07-author-kit
-touches: 03-security-trust
+touches: 01-plugin-host, 02-extension-contracts, 03-security-trust, 05-compatibility
 status: review
 date: 2026-11-10
 origin: derived

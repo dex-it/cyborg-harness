@@ -2,6 +2,7 @@
 level: use-case
 id: UC-SECURITY-TRUST-3001
 feature: 03-security-trust
+touches: 01-plugin-host, 02-extension-contracts
 status: review
 date: 2026-11-10
 origin: derived

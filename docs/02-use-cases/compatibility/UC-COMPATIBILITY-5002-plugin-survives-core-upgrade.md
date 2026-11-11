@@ -2,6 +2,7 @@
 level: use-case
 id: UC-COMPATIBILITY-5002
 feature: 05-compatibility
+touches: 01-plugin-host
 status: review
 date: 2026-11-10
 origin: derived

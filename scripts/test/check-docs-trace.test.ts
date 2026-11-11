@@ -12,7 +12,7 @@ after(() => {
 });
 
 const SRS = '# SRS\n\n### FR-CH-1001 Манифест\n\n- **Требование:** x\n\n### NFR-CH-1001 Бюджет\n\n- **Требование:** y\n';
-const SCENARIO = '---\nid: UC-PLUGIN-HOST-1001\n---\n\n# Сбой плагина\n\n## Основной ход\n\n1. Плагин падает.\n2. Хост ловит.\n\n## Расширения\n\n- **1а. Плагин завис.** Сторож.\n- **1а1. Три раза подряд.** Выключен.\n\n## Постусловия\n\n3. не ветка\n';
+const SCENARIO = '---\nid: UC-PLUGIN-HOST-1001\nfeature: 01-plugin-host\n---\n\n# Сбой плагина\n\n## Основной ход\n\n1. Плагин падает.\n2. Хост ловит.\n\n## Расширения\n\n- **1а. Плагин завис.** Сторож.\n- **1а1. Три раза подряд.** Выключен.\n\n## Постусловия\n\n3. не ветка\n';
 const STORY = (criteria: string, extra = ''): string =>
   `---\nlevel: story\nid: ST-1001\nfeature: 01-plugin-host\n---\n\n# ST-1001 Сбой остаётся у плагина\n\n## Критерии приёмки\n\n${criteria}\n${extra}`;
 const FULL = '1. [FR-CH-1001] [NFR-CH-1001] [UC-PLUGIN-HOST-1001#1] [UC-PLUGIN-HOST-1001#2] [UC-PLUGIN-HOST-1001#1а] [UC-PLUGIN-HOST-1001#1а1]\n   - Дано плагин\n   - Когда падает\n   - Тогда окно живо\n';
@@ -33,6 +33,9 @@ function tree(files: Record<string, string>): string {
   }
   return root;
 }
+
+/** Та же история под другим номером и фичей: заменяются только шапка и заголовок, метки сценария остаются. */
+const asStory = (text: string, id: string, feature: string): string => text.replace('id: ST-1001', `id: ${id}`).replace('# ST-1001', `# ${id}`).replace('feature: 01-plugin-host', `feature: ${feature}`);
 
 const STORY_FILE = 'docs/03-requirements/01-plugin-host/stories/ST-1001-failure.md';
 
@@ -98,6 +101,180 @@ describe('collect: находки', () => {
   });
 });
 
+describe('collect: нераспознанное - находка, а не молчаливый пропуск (#212, P8)', () => {
+  const SCENARIO_FILE = 'docs/02-use-cases/plugin-host/UC-PLUGIN-HOST-1001-plugin-failure-isolated.md';
+
+  it('расширение с латинской «a» вместо кириллической не пропадает из счёта', () => {
+    const root = tree({ [SCENARIO_FILE]: SCENARIO.replace('- **1а. Плагин завис.**', '- **1a. Плагин завис.**') });
+    const problems = collect(root).problems;
+    assert.ok(
+      problems.some((p) => p.startsWith('UC-PLUGIN-HOST-1001: строка расширения не распознана') && p.includes('1a.')),
+      problems.join('\n'),
+    );
+  });
+
+  it('шаг основного хода не вида «N. » - находка', () => {
+    const root = tree({ [SCENARIO_FILE]: SCENARIO.replace('2. Хост ловит.', '2) Хост ловит.') });
+    const problems = collect(root).problems;
+    assert.ok(problems.some((p) => p.startsWith('UC-PLUGIN-HOST-1001: строка основного хода не распознана') && p.includes('2)')), problems.join('\n'));
+  });
+
+  it('файл сценария без слага в имени - находка', () => {
+    const root = tree({ 'docs/02-use-cases/plugin-host/UC-PLUGIN-HOST-1002.md': SCENARIO.replace(/1001/g, '1002') });
+    const problems = collect(root).problems;
+    assert.ok(problems.includes('docs/02-use-cases/plugin-host/UC-PLUGIN-HOST-1002.md: имя файла сценария не вида UC-<ФИЧА>-NNNN-<слаг>.md'), problems.join('\n'));
+  });
+
+  it('сценарий без разделов «Основной ход» и «Расширения» - находки, а не нуль веток', () => {
+    const root = tree({ [SCENARIO_FILE]: '---\nid: UC-PLUGIN-HOST-1001\nfeature: 01-plugin-host\n---\n\n# Сбой плагина\n\n1. Плагин падает.\n' });
+    const problems = collect(root).problems;
+    assert.ok(problems.includes('UC-PLUGIN-HOST-1001: нет раздела «Основной ход» с шагами'), problems.join('\n'));
+    assert.ok(problems.includes('UC-PLUGIN-HOST-1001: нет раздела «Расширения»'), problems.join('\n'));
+  });
+
+  it('заголовок нормы другого вида не пропускается', () => {
+    for (const heading of ['### FR-CH-1002: Список', '## FR-CH-1002 Список', '#### NFR-CH-1002 Список', '### FR-CH-1002']) {
+      const root = tree({ 'docs/03-requirements/01-plugin-host/srs.md': `${SRS}\n${heading}\n` });
+      const problems = collect(root).problems;
+      assert.ok(
+        problems.some((p) => p.startsWith('docs/03-requirements/01-plugin-host/srs.md:') && p.includes('заголовок нормы не вида «### FR-CH-NNNN Название»')),
+        `${heading}: ${problems.join('\n')}`,
+      );
+    }
+  });
+
+  it('фича без srs.md и файл вне схемы в stories - находки', () => {
+    const root = tree({ 'docs/03-requirements/02-extension-contracts/stories/ST-2001-x.md': asStory(STORY(FULL), 'ST-2001', '02-extension-contracts'), 'docs/03-requirements/01-plugin-host/stories/notes.md': '# заметки\n' });
+    const problems = collect(root).problems;
+    assert.ok(problems.includes('docs/03-requirements/02-extension-contracts: нет srs.md'), problems.join('\n'));
+    assert.ok(problems.includes('docs/03-requirements/01-plugin-host/stories/notes.md: имя файла истории не вида ST-NNNN-<слаг>.md'), problems.join('\n'));
+  });
+
+  it('строка критерия не из одних меток, пропуск или повтор номера - находки', () => {
+    const root = tree({ [STORY_FILE]: STORY(`${FULL}2. [FR-CH-1001] текст после метки\n   - Дано a\n4. [FR-CH-1001]\n   - Дано b\n4. [FR-CH-1001]\n   - Дано c\n`) });
+    const problems = collect(root).problems;
+    assert.ok(problems.includes('ST-1001: строка критерия не распознана «2. [FR-CH-1001] текст после метки» (ждём «N. [метка] [метка]»)'), problems.join('\n'));
+    assert.ok(problems.includes('ST-1001: номера критериев идут не подряд: после 1 стоит 4'), problems.join('\n'));
+    assert.ok(problems.includes('ST-1001: номер критерия 4 повторяется'), problems.join('\n'));
+  });
+
+  it('файлы с CRLF разбираются так же, как с LF', () => {
+    const files: Record<string, string> = {
+      'docs/03-requirements/01-plugin-host/srs.md': SRS.replaceAll('\n', '\r\n'),
+      'docs/02-use-cases/plugin-host/UC-PLUGIN-HOST-1001-plugin-failure-isolated.md': SCENARIO.replaceAll('\n', '\r\n'),
+      [STORY_FILE]: STORY(FULL, '\nОткрыто: [FR-CH-1001] вопрос.\n').replaceAll('\n', '\r\n'),
+    };
+    const report = collect(tree(files));
+    assert.deepEqual(report.problems, []);
+    assert.equal(report.scenarios[0]?.branches.length, 4);
+    assert.equal(report.units.length, 2);
+  });
+});
+
+describe('collect: строка «Открыто» (#212, P9)', () => {
+  it('без метки ветки или нормы - находка', () => {
+    const root = tree({ [STORY_FILE]: STORY(FULL, '\nОткрыто: норма отложена, вопрос 12.\n') });
+    assert.deepEqual(collect(root).problems, ['ST-1001: «Открыто» без метки ветки [UC-...#N] или нормы [FR-CH-NNNN]']);
+  });
+
+  it('называет норму: она видна в таблице и не считается обычным покрытием; несуществующая норма - находка', () => {
+    const root = tree({ [STORY_FILE]: STORY(FULL, '\nОткрыто: [NFR-CH-1001] отложена.\n') });
+    const report = collect(root);
+    assert.deepEqual(report.problems, []);
+    assert.deepEqual(report.stories[0]?.openUnits, ['NFR-CH-1001']);
+    assert.match(renderCoverage(report), /\| NFR-CH-1001 \| 01-plugin-host \| Бюджет \| ST-1001\/1 \| {2}\| открыта \(ST-1001\) \|/);
+    assert.match(renderCoverage(report), /норм 2 \(FR 1, NFR 1\), все дали критерий \(только целевое поведение: 0; открыто: 1\)/);
+    const bad = tree({ [STORY_FILE]: STORY(FULL, '\nОткрыто: [FR-CH-9999] вопрос.\n') });
+    assert.deepEqual(collect(bad).problems, ['ST-1001: «Открыто» называет несуществующую норму [FR-CH-9999]']);
+  });
+});
+
+describe('collect: номер блока не из одной цифры (#212, P10)', () => {
+  const SRS10 = '# SRS\n\n### FR-CH-10001 Десятая\n\n- **Требование:** x\n';
+  const STORY10 = (id: string): string => `---\nlevel: story\nid: ${id}\nfeature: 10-tenth\n---\n\n# ${id} Десятая\n\n## Критерии приёмки\n\n1. [FR-CH-10001]\n   - Дано a\n`;
+  const extra = (id: string, counter: string): Record<string, string> => ({
+    'docs/03-requirements/10-tenth/srs.md': SRS10,
+    [`docs/03-requirements/10-tenth/stories/${id}-x.md`]: STORY10(id),
+    'docs/.req_counter/10.ST': counter,
+  });
+
+  it('история фичи 10 берёт блок «10», а не «1»: счётчик 10.ST сверяется', () => {
+    assert.deepEqual(collect(tree(extra('ST-10001', '10001\n'))).problems, []);
+    assert.deepEqual(collect(tree(extra('ST-10001', '10000\n'))).problems, ['счётчик docs/.req_counter/10.ST равен 10000, а в блоке есть номер 10001']);
+  });
+
+  it('история фичи 10 с номером из блока 1 - вне блока своей фичи', () => {
+    const problems = collect(tree(extra('ST-1002', '10000\n'))).problems;
+    assert.ok(problems.includes('ST-1002: номер вне блока фичи 10-tenth'), problems.join('\n'));
+  });
+
+  it('идентификатор истории не вида ST-<блок>NNN - находка', () => {
+    const problems = collect(tree({ 'docs/03-requirements/01-plugin-host/stories/ST-101-x.md': asStory(STORY(FULL), 'ST-101', '01-plugin-host') })).problems;
+    assert.ok(problems.includes('ST-101: идентификатор истории не вида ST-<блок фичи><NNN>'), problems.join('\n'));
+  });
+
+  it('сценарий с пятизначным номером находится и сверяется со счётчиком UC блока', () => {
+    const uc = SCENARIO.replaceAll('1001', '10001').replace('feature: 01-plugin-host', 'feature: 10-tenth');
+    const root = tree({
+      'docs/02-use-cases/tenth/UC-PLUGIN-HOST-10001-tenth.md': uc,
+      'docs/.req_counter/10.UC': '10000\n',
+      'docs/03-requirements/10-tenth/srs.md': SRS10,
+      'docs/03-requirements/10-tenth/stories/ST-10001-x.md': STORY10('ST-10001').replace('1. [FR-CH-10001]', '1. [FR-CH-10001] [UC-PLUGIN-HOST-10001#1] [UC-PLUGIN-HOST-10001#2] [UC-PLUGIN-HOST-10001#1а] [UC-PLUGIN-HOST-10001#1а1]'),
+      'docs/.req_counter/10.ST': '10001\n',
+    });
+    assert.deepEqual(collect(root).problems, ['счётчик docs/.req_counter/10.UC равен 10000, а в блоке есть номер 10001']);
+  });
+});
+
+describe('целевое поведение (#212, P3)', () => {
+  const TARGET = FULL.replace('1. [FR-CH-1001]', '1. [целевое поведение] [FR-CH-1001]');
+
+  it('метка не нужна нормой и не считается знакомой единицей; критерий без метки нормы всё равно находка', () => {
+    assert.deepEqual(collect(tree({ [STORY_FILE]: STORY(TARGET) })).problems, []);
+    const only = tree({ [STORY_FILE]: STORY(`${FULL}2. [целевое поведение]\n   - Дано a\n`) });
+    assert.deepEqual(collect(only).problems, ['ST-1001/2: критерий без метки нормы (FR-CH-... или NFR-CH-...)']);
+  });
+
+  it('таблица разводит проверяемые критерии и целевое поведение; итог считает нормы и ветки только с целевым', () => {
+    const text = renderCoverage(collect(tree({ [STORY_FILE]: STORY(TARGET.replace('[NFR-CH-1001] ', '')) })));
+    assert.match(text, /\| Норма \| Фича \| Название \| Критерии \| Целевое поведение \| Открыто \|/);
+    assert.match(text, /\| FR-CH-1001 \| 01-plugin-host \| Манифест \| {2}\| ST-1001\/1 \| {2}\|/);
+    assert.match(text, /\| шаг 1 \| ST-1001\/1 \(целевое поведение\) \|/);
+    assert.match(text, /только целевое поведение: 1; открыто: 0\); веток сценариев 4, покрыто 4 \(только целевое поведение: 4\), открыто 0/);
+    const mixed = renderCoverage(collect(tree({ [STORY_FILE]: STORY(`${TARGET.replace('[NFR-CH-1001] ', '')}2. [FR-CH-1001] [UC-PLUGIN-HOST-1001#2]\n   - Дано a\n`) })));
+    assert.match(mixed, /\| FR-CH-1001 \| 01-plugin-host \| Манифест \| ST-1001\/2 \| ST-1001\/1 \| {2}\|/);
+    assert.match(mixed, /\| шаг 2 \| ST-1001\/1 \(целевое поведение\), ST-1001\/2 \|/);
+    assert.match(mixed, /только целевое поведение: 0; открыто: 0\); веток сценариев 4, покрыто 4 \(только целевое поведение: 3\), открыто 0/);
+  });
+});
+
+describe('сценарий и фичи критериев (#212, P11)', () => {
+  it('сценарий без поля feature в шапке - находка', () => {
+    const root = tree({ 'docs/02-use-cases/plugin-host/UC-PLUGIN-HOST-1001-plugin-failure-isolated.md': SCENARIO.replace('feature: 01-plugin-host\n', '') });
+    assert.deepEqual(collect(root).problems, ['UC-PLUGIN-HOST-1001: нет поля feature в шапке']);
+  });
+
+  it('критерий фичи, которой нет ни в feature, ни в touches сценария, - находка', () => {
+    const scenario = SCENARIO;
+    const other = asStory(STORY('1. [FR-CH-2001] [UC-PLUGIN-HOST-1001#1]\n   - Дано a\n'), 'ST-2001', '02-other');
+    const root = tree({
+      'docs/02-use-cases/plugin-host/UC-PLUGIN-HOST-1001-plugin-failure-isolated.md': scenario,
+      'docs/03-requirements/02-other/srs.md': SRS.replace('FR-CH-1001', 'FR-CH-2001').replace('NFR-CH-1001 Бюджет', 'NFR-CH-2001 Бюджет'),
+      'docs/03-requirements/02-other/stories/ST-2001-x.md': other,
+      'docs/.req_counter/02.ST': '2001\n',
+    });
+    const problems = collect(root).problems;
+    assert.ok(problems.includes('UC-PLUGIN-HOST-1001: ST-2001/1 (фича 02-other) метит ветку #1, а фичи нет ни в feature, ни в touches сценария'), problems.join('\n'));
+    const fixed = tree({
+      'docs/02-use-cases/plugin-host/UC-PLUGIN-HOST-1001-plugin-failure-isolated.md': scenario.replace('feature: 01-plugin-host\n', 'feature: 01-plugin-host\ntouches: 02-other\n'),
+      'docs/03-requirements/02-other/srs.md': SRS.replace('FR-CH-1001', 'FR-CH-2001').replace('NFR-CH-1001 Бюджет', 'NFR-CH-2001 Бюджет'),
+      'docs/03-requirements/02-other/stories/ST-2001-x.md': other,
+      'docs/.req_counter/02.ST': '2001\n',
+    });
+    assert.ok(!collect(fixed).problems.some((p) => p.includes('touches')), collect(fixed).problems.join('\n'));
+  });
+});
+
 describe('renderCoverage и main', () => {
   it('таблица называет критерии нормы и ветки, открытая ветка помечена', () => {
     const without = FULL.replace(' [UC-PLUGIN-HOST-1001#1а1]', '');
@@ -105,7 +282,7 @@ describe('renderCoverage и main', () => {
     assert.match(text, /\| FR-CH-1001 \| 01-plugin-host \| Манифест \| ST-1001\/1 \|/);
     assert.match(text, /\| шаг 1 \| ST-1001\/1 \|/);
     assert.match(text, /\| расширение 1а1 \| открыта \(ST-1001\) \|/);
-    assert.match(text, /веток сценариев 4, покрыто 3, открыто 1/);
+    assert.match(text, /веток сценариев 4, покрыто 3 \(только целевое поведение: 0\), открыто 1/);
   });
 
   it('--write записывает таблицу, проверка принимает её и отвергает устаревшую; шапка файла сохраняется', () => {

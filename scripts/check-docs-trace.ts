@@ -4,8 +4,11 @@ import path from 'node:path';
 // `node scripts/check-docs-trace.ts [--write]` - полнота двух сторон между сценариями, нормами и историями (#186, CI-шаг «ссылки в docs»).
 // Каждая норма (`### FR-CH-NNNN`, `### NFR-CH-NNNN` в srs.md фич) обязана дать критерий приёмки в какой-нибудь истории, каждая ветка сценария
 // (шаг основного хода и расширение) - быть покрыта критерием либо названа открытой строкой `Открыто: [UC-...#ветка]` в истории;
-// метка критерия не должна указывать на несуществующую единицу. Таблица покрытия `docs/03-requirements/coverage.md` собирается этим же
-// скриптом (`--write`), в режиме проверки она обязана совпадать с собранной. Без сети и без зависимостей.
+// метка критерия не должна указывать на несуществующую единицу. Метка `[целевое поведение]` на критерии отмечает поведение, которого ещё нет
+// (нормы с «Ещё нет»): таблица выводит такие критерии отдельно от проверяемых. Всё, что скрипт не смог разобрать (расширение с латинской «a»,
+// файл без слага, заголовок нормы другого вида, строка «Открыто» без метки), - находка, а не молчаливый пропуск. Таблица покрытия
+// `docs/03-requirements/coverage.md` собирается этим же скриптом (`--write`), в режиме проверки она обязана совпадать с собранной.
+// Без сети и без зависимостей.
 
 const REQUIREMENTS = 'docs/03-requirements';
 const USE_CASES = 'docs/02-use-cases';
@@ -27,7 +30,10 @@ export interface Branch {
 export interface Criterion {
   readonly story: string;
   readonly number: number;
+  /** Метки норм и веток; метка `[целевое поведение]` сюда не входит. */
   readonly labels: readonly string[];
+  /** Критерий описывает поведение, которого ещё нет. */
+  readonly target: boolean;
 }
 
 export interface Story {
@@ -38,11 +44,15 @@ export interface Story {
   readonly criteria: readonly Criterion[];
   /** Ветки, названные в строках «Открыто: ...». */
   readonly open: readonly string[];
+  /** Нормы, названные в строках «Открыто: ...». */
+  readonly openUnits: readonly string[];
 }
 
 export interface Scenario {
   readonly id: string;
   readonly title: string;
+  /** Фича из шапки и фичи из `touches`. */
+  readonly features: readonly string[];
   readonly branches: readonly Branch[];
 }
 
@@ -54,7 +64,18 @@ export interface TraceReport {
 }
 
 const UNIT_LABEL = /^N?FR-CH-\d+$/;
-const BRANCH_LABEL = /^(UC-[A-Z-]+-\d{4})#(.+)$/;
+const BRANCH_LABEL = /^(UC-[A-Z-]+-\d{4,})#(.+)$/;
+const TARGET_LABEL = 'целевое поведение';
+
+/** Сравнение по кодовым точкам: порядок в таблице не зависит от локали (R2 задачи #212). */
+function compare(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function clip(line: string): string {
+  const text = line.trim();
+  return text.length > 80 ? `${text.slice(0, 80)}...` : text;
+}
 
 function listDirs(dir: string): string[] {
   if (!fs.existsSync(dir)) return [];
@@ -62,7 +83,7 @@ function listDirs(dir: string): string[] {
     .readdirSync(dir, { withFileTypes: true })
     .filter((e) => e.isDirectory())
     .map((e) => e.name)
-    .sort();
+    .sort(compare);
 }
 
 function listFiles(dir: string, pattern: RegExp): string[] {
@@ -74,76 +95,153 @@ function listFiles(dir: string, pattern: RegExp): string[] {
     .sort();
 }
 
+/** Файл целиком с `\n` вместо `\r\n`: регулярные выражения ниже не знают `\r`. */
 function read(root: string, rel: string): string {
-  return fs.readFileSync(path.join(root, rel), 'utf8');
+  return fs.readFileSync(path.join(root, rel), 'utf8').replaceAll('\r\n', '\n');
 }
 
-/** Нормы фич в порядке папок и появления в srs.md. */
-function readUnits(root: string): Unit[] {
+interface Parsed<T> {
+  readonly items: T[];
+  readonly problems: string[];
+}
+
+/** Номер фичи из имени папки: `01-plugin-host` -> 1, `10-x` -> 10. */
+function featureBlock(feature: string): number | undefined {
+  const m = /^(\d+)-/.exec(feature);
+  return m?.[1] === undefined ? undefined : Number(m[1]);
+}
+
+/** Нормы фич в порядке папок и появления в srs.md; заголовок нормы другого вида и фича без srs.md - находки. */
+function readUnits(root: string): Parsed<Unit> {
   const units: Unit[] = [];
+  const problems: string[] = [];
   for (const feature of listDirs(path.join(root, REQUIREMENTS))) {
     const srs = path.join(REQUIREMENTS, feature, 'srs.md');
-    if (!fs.existsSync(path.join(root, srs))) continue;
-    for (const m of read(root, srs).matchAll(/^### (N?FR-CH-\d+) (.+)$/gm)) if (m[1] !== undefined && m[2] !== undefined) units.push({ id: m[1], title: m[2].trim(), feature });
+    if (!fs.existsSync(path.join(root, srs))) {
+      problems.push(`${REQUIREMENTS}/${feature}: нет srs.md`);
+      continue;
+    }
+    const lines = read(root, srs).split('\n');
+    lines.forEach((line, index) => {
+      const m = /^### (N?FR-CH-\d+) (.+)$/.exec(line);
+      if (m?.[1] !== undefined && m[2] !== undefined) units.push({ id: m[1], title: m[2].trim(), feature });
+      else if (/^#{1,6}\s*N?FR-CH-/.test(line)) problems.push(`${srs.replaceAll(path.sep, '/')}:${String(index + 1)}: заголовок нормы не вида «### FR-CH-NNNN Название»: ${clip(line)}`);
+    });
   }
-  return units;
+  return { items: units, problems };
 }
 
-/** Ветки сценария: шаги основного хода (`1.`) и расширения (`- **1а.`, `- **1а1.`). */
-function readScenarios(root: string): Scenario[] {
+/** Шапка файла: поля `ключ: значение` между первой парой `---`. */
+function frontMatter(text: string): Map<string, string> {
+  const fields = new Map<string, string>();
+  const block = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text)?.[1] ?? '';
+  for (const line of block.split('\n')) {
+    const m = /^([^:\s]+):\s*(.*)$/.exec(line);
+    if (m?.[1] !== undefined && m[2] !== undefined) fields.set(m[1], m[2].trim());
+  }
+  return fields;
+}
+
+/** Ветки сценария: шаги основного хода (`1.`) и расширения (`- **1а.`, `- **1а1.`); строка раздела, которой не нашлось места, - находка. */
+function readScenarios(root: string): Parsed<Scenario> {
   const scenarios: Scenario[] = [];
+  const problems: string[] = [];
   for (const dir of listDirs(path.join(root, USE_CASES))) {
-    for (const name of listFiles(path.join(root, USE_CASES, dir), /^UC-.+\.md$/)) {
-      const id = /^(UC-[A-Z-]+-\d{4})-/.exec(name)?.[1];
-      if (id === undefined) continue;
+    for (const name of listFiles(path.join(root, USE_CASES, dir), /\.md$/)) {
+      const rel = `${USE_CASES}/${dir}/${name}`;
+      const id = /^(UC-[A-Z-]+-\d{4,})-.+\.md$/.exec(name)?.[1];
+      if (id === undefined) {
+        problems.push(`${rel}: имя файла сценария не вида UC-<ФИЧА>-NNNN-<слаг>.md`);
+        continue;
+      }
       const text = read(root, path.join(USE_CASES, dir, name));
       const title = /^# (.+)$/m.exec(text)?.[1]?.trim() ?? id;
+      const head = frontMatter(text);
+      const own = head.get('feature');
+      if (own === undefined || own === '') problems.push(`${id}: нет поля feature в шапке`);
+      const touches = (head.get('touches') ?? '').split(',').map((f) => f.trim()).filter((f) => f !== '' && f !== '-');
       const branches: Branch[] = [];
       let section = '';
+      let hasExtensions = false;
       for (const line of text.split('\n')) {
         const heading = /^## (.+)$/.exec(line);
         if (heading?.[1] !== undefined) {
           section = heading[1].trim();
+          if (section === 'Расширения') hasExtensions = true;
           continue;
         }
         if (section === 'Основной ход') {
           const step = /^(\d+)\. /.exec(line)?.[1];
           if (step !== undefined) branches.push({ uc: id, id: step, kind: 'шаг' });
+          else if (/^\d/.test(line)) problems.push(`${id}: строка основного хода не распознана «${clip(line)}» (ждём «N. текст»)`);
         } else if (section === 'Расширения') {
           const ext = /^- \*\*(\d+[а-яё]\d*)\./.exec(line)?.[1];
           if (ext !== undefined) branches.push({ uc: id, id: ext, kind: 'расширение' });
+          else if (line.startsWith('- **')) problems.push(`${id}: строка расширения не распознана «${clip(line)}» (ждём «- **Nб. ...»: цифры и кириллическая буква)`);
         }
       }
-      scenarios.push({ id, title, branches });
+      if (!branches.some((b) => b.kind === 'шаг')) problems.push(`${id}: нет раздела «Основной ход» с шагами`);
+      if (!hasExtensions) problems.push(`${id}: нет раздела «Расширения»`);
+      scenarios.push({ id, title, features: [...(own === undefined || own === '' ? [] : [own]), ...touches], branches });
     }
   }
-  return scenarios.sort((a, b) => a.id.localeCompare(b.id));
+  return { items: scenarios.sort((a, b) => compare(a.id, b.id)), problems };
 }
 
-function readStories(root: string): Story[] {
+function readStories(root: string): Parsed<Story> {
   const stories: Story[] = [];
+  const problems: string[] = [];
   for (const feature of listDirs(path.join(root, REQUIREMENTS))) {
     const dir = path.join(REQUIREMENTS, feature, 'stories');
-    for (const name of listFiles(path.join(root, dir), /^ST-.+\.md$/)) {
+    for (const name of listFiles(path.join(root, dir), /\.md$/)) {
       const file = path.join(dir, name);
+      if (!/^ST-\d+-.+\.md$/.test(name)) {
+        problems.push(`${file.replaceAll(path.sep, '/')}: имя файла истории не вида ST-NNNN-<слаг>.md`);
+        continue;
+      }
       const text = read(root, file);
       const id = /^id: (ST-\d+)$/m.exec(text)?.[1] ?? /^ST-\d+/.exec(name)?.[0] ?? name;
       const title = /^# ST-\d+ (.+)$/m.exec(text)?.[1]?.trim() ?? id;
       const criteria: Criterion[] = [];
       const open: string[] = [];
+      const openUnits: string[] = [];
+      let section = '';
       for (const line of text.split('\n')) {
+        const heading = /^## (.+)$/.exec(line);
+        if (heading?.[1] !== undefined) section = heading[1].trim();
         const criterion = /^(\d+)\. ((?:\[[^\]]+\] ?)+)$/.exec(line);
         if (criterion?.[1] !== undefined && criterion[2] !== undefined) {
-          const labels = [...criterion[2].matchAll(/\[([^\]]+)\]/g)].flatMap((m) => (m[1] === undefined ? [] : [m[1]]));
-          criteria.push({ story: id, number: Number(criterion[1]), labels });
+          const all = [...criterion[2].matchAll(/\[([^\]]+)\]/g)].flatMap((m) => (m[1] === undefined ? [] : [m[1]]));
+          criteria.push({ story: id, number: Number(criterion[1]), labels: all.filter((l) => l !== TARGET_LABEL), target: all.includes(TARGET_LABEL) });
+        } else if (section === 'Критерии приёмки' && /^\d+\. /.test(line)) {
+          problems.push(`${id}: строка критерия не распознана «${clip(line)}» (ждём «N. [метка] [метка]»)`);
         } else if (line.startsWith('Открыто:')) {
-          for (const m of line.matchAll(/\[(UC-[A-Z-]+-\d{4}#[^\]]+)\]/g)) if (m[1] !== undefined) open.push(m[1]);
+          const labels = [...line.matchAll(/\[([^\]]+)\]/g)].flatMap((m) => (m[1] === undefined ? [] : [m[1]]));
+          let named = false;
+          for (const label of labels) {
+            if (BRANCH_LABEL.test(label)) {
+              open.push(label);
+              named = true;
+            } else if (UNIT_LABEL.test(label)) {
+              openUnits.push(label);
+              named = true;
+            }
+          }
+          if (!named) problems.push(`${id}: «Открыто» без метки ветки [UC-...#N] или нормы [FR-CH-NNNN]`);
         }
       }
-      stories.push({ id, feature, title, file, criteria, open });
+      const seen = new Set<number>();
+      let previous = 0;
+      for (const c of criteria) {
+        if (seen.has(c.number)) problems.push(`${id}: номер критерия ${String(c.number)} повторяется`);
+        else if (c.number !== previous + 1) problems.push(`${id}: номера критериев идут не подряд: после ${String(previous)} стоит ${String(c.number)}`);
+        seen.add(c.number);
+        previous = c.number;
+      }
+      stories.push({ id, feature, title, file, criteria, open, openUnits });
     }
   }
-  return stories;
+  return { items: stories, problems };
 }
 
 function counterValue(root: string, key: string): number | undefined {
@@ -152,7 +250,13 @@ function counterValue(root: string, key: string): number | undefined {
   return Number(fs.readFileSync(file, 'utf8').trim());
 }
 
-/** Сверка счётчиков `N.ST` и `N.UC` с наибольшим номером единиц своего блока. */
+/** Блок номера и номер единицы: `ST-1001` -> блок 1, `ST-10001` -> блок 10 (три последние цифры - порядковый номер в блоке). */
+function numberBlock(id: string, prefix: 'ST-' | 'UC-'): { block: number; value: number } | undefined {
+  const m = (prefix === 'ST-' ? /^ST-(\d+?)(\d{3})$/ : /-(\d+?)(\d{3})$/).exec(id);
+  return m?.[1] === undefined || m[2] === undefined ? undefined : { block: Number(m[1]), value: Number(`${m[1]}${m[2]}`) };
+}
+
+/** Сверка счётчиков `NN.ST` и `NN.UC` с наибольшим номером единиц своего блока. */
 function counterProblems(root: string, stories: readonly Story[], scenarios: readonly Scenario[]): string[] {
   const problems: string[] = [];
   const maxima = new Map<string, number>();
@@ -160,14 +264,14 @@ function counterProblems(root: string, stories: readonly Story[], scenarios: rea
     maxima.set(key, Math.max(maxima.get(key) ?? 0, value));
   };
   for (const s of stories) {
-    const m = /^ST-(\d)(\d{3})$/.exec(s.id);
-    if (m?.[1] !== undefined) bump(`0${m[1]}.ST`, Number(`${m[1]}${m[2] ?? ''}`));
+    const n = numberBlock(s.id, 'ST-');
+    if (n !== undefined) bump(`${String(n.block).padStart(2, '0')}.ST`, n.value);
   }
   for (const sc of scenarios) {
-    const m = /-(\d)(\d{3})$/.exec(sc.id);
-    if (m?.[1] !== undefined) bump(`0${m[1]}.UC`, Number(`${m[1]}${m[2] ?? ''}`));
+    const n = numberBlock(sc.id, 'UC-');
+    if (n !== undefined) bump(`${String(n.block).padStart(2, '0')}.UC`, n.value);
   }
-  for (const [key, max] of [...maxima].sort(([a], [b]) => a.localeCompare(b))) {
+  for (const [key, max] of [...maxima].sort(([a], [b]) => compare(a, b))) {
     const value = counterValue(root, key);
     if (value === undefined) problems.push(`нет счётчика ${COUNTER}/${key}, а в блоке есть номер ${String(max)}`);
     else if (!(value >= max)) problems.push(`счётчик ${COUNTER}/${key} равен ${String(value)}, а в блоке есть номер ${String(max)}`);
@@ -176,39 +280,51 @@ function counterProblems(root: string, stories: readonly Story[], scenarios: rea
 }
 
 export function collect(root: string): TraceReport {
-  const units = readUnits(root);
-  const scenarios = readScenarios(root);
-  const stories = readStories(root);
-  const problems: string[] = [];
+  const parsedUnits = readUnits(root);
+  const parsedScenarios = readScenarios(root);
+  const parsedStories = readStories(root);
+  const units = parsedUnits.items;
+  const scenarios = parsedScenarios.items;
+  const stories = parsedStories.items;
+  const problems: string[] = [...parsedUnits.problems, ...parsedScenarios.problems, ...parsedStories.problems];
   const unitIds = new Set(units.map((u) => u.id));
   const branchKeys = new Set(scenarios.flatMap((sc) => sc.branches.map((b) => `${b.uc}#${b.id}`)));
+  const scenarioFeatures = new Map(scenarios.map((sc) => [sc.id, sc.features]));
   const storyIds = new Set<string>();
   const coveredUnits = new Set<string>();
   const coveredBranches = new Set<string>();
   for (const story of stories) {
     if (storyIds.has(story.id)) problems.push(`${story.id}: идентификатор истории повторяется (${story.file})`);
     storyIds.add(story.id);
-    const block = /^0*(\d)/.exec(story.feature)?.[1];
-    if (block !== undefined && story.id.charAt(3) !== block) problems.push(`${story.id}: номер вне блока фичи ${story.feature}`);
+    const number = numberBlock(story.id, 'ST-');
+    if (number === undefined) problems.push(`${story.id}: идентификатор истории не вида ST-<блок фичи><NNN>`);
+    else if (number.block !== featureBlock(story.feature)) problems.push(`${story.id}: номер вне блока фичи ${story.feature}`);
     if (story.criteria.length === 0) problems.push(`${story.id}: нет ни одного критерия приёмки`);
     for (const c of story.criteria) {
       const where = `${story.id}/${String(c.number)}`;
       if (!c.labels.some((l) => UNIT_LABEL.test(l))) problems.push(`${where}: критерий без метки нормы (FR-CH-... или NFR-CH-...)`);
+      const strangers = new Map<string, string[]>();
       for (const label of c.labels) {
         const branch = BRANCH_LABEL.exec(label);
         if (UNIT_LABEL.test(label)) {
           if (unitIds.has(label)) coveredUnits.add(label);
           else problems.push(`${where}: метка [${label}] указывает на несуществующую норму`);
         } else if (branch) {
-          if (branchKeys.has(label)) coveredBranches.add(label);
-          else problems.push(`${where}: метка [${label}] указывает на несуществующую ветку сценария`);
+          if (branchKeys.has(label)) {
+            coveredBranches.add(label);
+            const uc = branch[1] ?? '';
+            const known = scenarioFeatures.get(uc) ?? [];
+            if (known.length > 0 && !known.includes(story.feature)) strangers.set(uc, [...(strangers.get(uc) ?? []), `#${branch[2] ?? ''}`]);
+          } else problems.push(`${where}: метка [${label}] указывает на несуществующую ветку сценария`);
         } else problems.push(`${where}: незнакомая метка [${label}]`);
       }
+      for (const [uc, ids] of strangers) problems.push(`${uc}: ${where} (фича ${story.feature}) метит ${ids.length === 1 ? 'ветку' : 'ветки'} ${ids.join(', ')}, а фичи нет ни в feature, ни в touches сценария`);
     }
     for (const label of story.open) {
       if (branchKeys.has(label)) coveredBranches.add(label);
       else problems.push(`${story.id}: «Открыто» называет несуществующую ветку [${label}]`);
     }
+    for (const label of story.openUnits) if (!unitIds.has(label)) problems.push(`${story.id}: «Открыто» называет несуществующую норму [${label}]`);
   }
   for (const unit of units) if (!coveredUnits.has(unit.id)) problems.push(`${unit.id}: норма не дала ни одного критерия приёмки`);
   for (const sc of scenarios) for (const b of sc.branches) if (!coveredBranches.has(`${b.uc}#${b.id}`)) problems.push(`${b.uc}#${b.id}: ${b.kind} сценария не покрыт критерием и не назван открытым`);
@@ -225,30 +341,43 @@ function sortKey(id: string): string {
 function byStory(a: string, b: string): number {
   const [sa = '', na = '0'] = a.split('/');
   const [sb = '', nb = '0'] = b.split('/');
-  return sa === sb ? Number(na) - Number(nb) : sortKey(sa).localeCompare(sortKey(sb));
+  return sa === sb ? Number(na) - Number(nb) : compare(sortKey(sa), sortKey(sb));
 }
 
 /** Тело таблицы покрытия: без шапки, чтобы дата в шапке не участвовала в сверке. */
 export function renderCoverage(report: TraceReport): string {
-  const refs = new Map<string, string[]>();
-  const add = (key: string, ref: string): void => {
-    const list = refs.get(key) ?? [];
-    if (!list.includes(ref)) list.push(ref);
-    refs.set(key, list);
-  };
-  for (const story of report.stories) for (const c of story.criteria) for (const label of c.labels) add(label, `${story.id}/${String(c.number)}`);
+  // Метка -> критерии, разведённые на проверяемые и описывающие целевое поведение.
+  const refs = new Map<string, { checked: string[]; target: string[] }>();
+  for (const story of report.stories) {
+    for (const c of story.criteria) {
+      for (const label of c.labels) {
+        const entry = refs.get(label) ?? { checked: [], target: [] };
+        const list = c.target ? entry.target : entry.checked;
+        const ref = `${story.id}/${String(c.number)}`;
+        if (!list.includes(ref)) list.push(ref);
+        refs.set(label, entry);
+      }
+    }
+  }
   const open = new Map<string, string[]>();
-  for (const story of report.stories) for (const label of story.open) open.set(label, [...(open.get(label) ?? []), story.id]);
+  for (const story of report.stories) for (const label of [...story.open, ...story.openUnits]) open.set(label, [...(open.get(label) ?? []), story.id]);
   const criteria = report.stories.reduce((n, s) => n + s.criteria.length, 0);
+  const targetCriteria = report.stories.reduce((n, s) => n + s.criteria.filter((c) => c.target).length, 0);
   const branches = report.scenarios.flatMap((sc) => sc.branches);
-  const openBranches = branches.filter((b) => !refs.has(`${b.uc}#${b.id}`) && open.has(`${b.uc}#${b.id}`)).length;
+  const entryOf = (key: string): { checked: string[]; target: string[] } => refs.get(key) ?? { checked: [], target: [] };
+  const has = (key: string): boolean => entryOf(key).checked.length + entryOf(key).target.length > 0;
+  const onlyTarget = (key: string): boolean => entryOf(key).checked.length === 0 && entryOf(key).target.length > 0;
+  const openBranches = branches.filter((b) => !has(`${b.uc}#${b.id}`) && open.has(`${b.uc}#${b.id}`)).length;
+  const targetBranches = branches.filter((b) => onlyTarget(`${b.uc}#${b.id}`)).length;
+  const targetUnits = report.units.filter((u) => onlyTarget(u.id)).length;
+  const openUnits = report.units.filter((u) => open.has(u.id)).length;
   const frCount = report.units.filter((u) => u.id.startsWith('FR')).length;
   const out: string[] = [
     '# Покрытие критериями приёмки',
     '',
-    'Таблица собрана из `srs.md` фич, сценариев и историй командой `npm run check:docs-trace -- --write`; руками не правится. `npm run check:docs-trace` падает, если норма не дала критерия, ветка сценария не покрыта и не названа открытой, метка указывает на несуществующую единицу или эта таблица расходится с собранной. Метка критерия - `[FR-CH-NNNN]` или `[NFR-CH-NNNN]` (норма) и `[UC-{ФИЧА}-NNNN#ветка]` (шаг `N` или расширение `Nб` сценария); в ячейках ниже `ST-NNNN/k` - критерий k истории.',
+    `Таблица собрана из \`srs.md\` фич, сценариев и историй командой \`npm run check:docs-trace -- --write\`; руками не правится. \`npm run check:docs-trace\` падает, если норма не дала критерия, ветка сценария не покрыта и не названа открытой, метка указывает на несуществующую единицу, строка скриптом не разобрана или эта таблица расходится с собранной. Метка критерия - \`[FR-CH-NNNN]\` или \`[NFR-CH-NNNN]\` (норма) и \`[UC-{ФИЧА}-NNNN#ветка]\` (шаг \`N\` или расширение \`Nб\` сценария); метка \`[${TARGET_LABEL}]\` отмечает критерий на поведение, которого ещё нет (норма с «Ещё нет»): он описывает цель, а не проверенное. Строка \`Открыто: [метка] ...\` в истории называет ветку или норму, по которой решения нет. В ячейках ниже \`ST-NNNN/k\` - критерий k истории; критерии на целевое поведение выведены отдельно от проверяемых.`,
     '',
-    `Итог: историй ${String(report.stories.length)}, критериев ${String(criteria)}; норм ${String(report.units.length)} (FR ${String(frCount)}, NFR ${String(report.units.length - frCount)}), все дали критерий; веток сценариев ${String(branches.length)}, покрыто ${String(branches.length - openBranches)}, открыто ${String(openBranches)}.`,
+    `Итог: историй ${String(report.stories.length)}, критериев ${String(criteria)} (из них на целевое поведение ${String(targetCriteria)}); норм ${String(report.units.length)} (FR ${String(frCount)}, NFR ${String(report.units.length - frCount)}), все дали критерий (только целевое поведение: ${String(targetUnits)}; открыто: ${String(openUnits)}); веток сценариев ${String(branches.length)}, покрыто ${String(branches.length - openBranches)} (только целевое поведение: ${String(targetBranches)}), открыто ${String(openBranches)}.`,
     '',
     '## Истории',
     '',
@@ -261,15 +390,20 @@ export function renderCoverage(report: TraceReport): string {
     out.push(`### ${sc.id} ${sc.title}`, '', '| Ветка | Критерии |', '|---|---|');
     for (const b of sc.branches) {
       const key = `${b.uc}#${b.id}`;
-      const covered = [...(refs.get(key) ?? [])].sort(byStory);
+      const entry = refs.get(key) ?? { checked: [], target: [] };
+      const covered = [...entry.checked.map((r) => ({ r, target: false })), ...entry.target.map((r) => ({ r, target: true }))].sort((x, y) => byStory(x.r, y.r));
       const holders = open.get(key);
-      const cell = covered.length > 0 ? covered.join(', ') : `открыта (${(holders ?? []).join(', ')})`;
+      const cell = covered.length > 0 ? covered.map((c) => (c.target ? `${c.r} (${TARGET_LABEL})` : c.r)).join(', ') : `открыта (${(holders ?? []).join(', ')})`;
       out.push(`| ${b.kind} ${b.id} | ${cell} |`);
     }
     out.push('');
   }
-  out.push('## Нормы', '', '| Норма | Фича | Название | Критерии |', '|---|---|---|---|');
-  for (const u of report.units) out.push(`| ${u.id} | ${u.feature} | ${u.title} | ${[...(refs.get(u.id) ?? [])].sort(byStory).join(', ')} |`);
+  out.push('## Нормы', '', '| Норма | Фича | Название | Критерии | Целевое поведение | Открыто |', '|---|---|---|---|---|---|');
+  for (const u of report.units) {
+    const entry = refs.get(u.id) ?? { checked: [], target: [] };
+    const holders = open.get(u.id);
+    out.push(`| ${u.id} | ${u.feature} | ${u.title} | ${[...entry.checked].sort(byStory).join(', ')} | ${[...entry.target].sort(byStory).join(', ')} | ${holders === undefined ? '' : `открыта (${holders.join(', ')})`} |`);
+  }
   out.push('');
   return out.join('\n');
 }

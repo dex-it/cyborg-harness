@@ -2,7 +2,7 @@
 level: use-case
 id: UC-EXTENSION-CONTRACTS-2001
 feature: 02-extension-contracts
-touches: 01-plugin-host
+touches: 01-plugin-host, 03-security-trust, 05-compatibility, 07-author-kit
 status: review
 date: 2026-11-10
 origin: derived

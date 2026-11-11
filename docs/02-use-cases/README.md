@@ -4,12 +4,12 @@
 
 | ID | Сценарий | Фича | Задевает | Актор | Требования | Этап |
 |---|---|---|---|---|---|---|
-| UC-PLUGIN-HOST-1001 | [Плагин падает, приложение работает](plugin-host/UC-PLUGIN-HOST-1001-plugin-failure-isolated.md) | 01 | 02, 04 | Пользователь, автор плагина | BR-CH-006 | 1 |
-| UC-EXTENSION-CONTRACTS-2001 | [Автор встроенного плагина добавляет функцию](extension-contracts/UC-EXTENSION-CONTRACTS-2001-maintainer-adds-feature.md) | 02 | 01 | Разработчик поставки | BR-CH-001 | 1 |
+| UC-PLUGIN-HOST-1001 | [Плагин падает, приложение работает](plugin-host/UC-PLUGIN-HOST-1001-plugin-failure-isolated.md) | 01 | 02, 03, 04 | Пользователь, автор плагина | BR-CH-006 | 1 |
+| UC-EXTENSION-CONTRACTS-2001 | [Автор встроенного плагина добавляет функцию](extension-contracts/UC-EXTENSION-CONTRACTS-2001-maintainer-adds-feature.md) | 02 | 01, 03, 05, 07 | Разработчик поставки | BR-CH-001 | 1 |
 | UC-EXTENSION-CONTRACTS-2002 | [Подключение второго агента](extension-contracts/UC-EXTENSION-CONTRACTS-2002-second-agent.md) | 02 | 07 | Автор поставщика агента, пользователь | BR-CH-003 | 1 |
-| UC-SECURITY-TRUST-3001 | [Установка стороннего плагина с проверкой прав](security-trust/UC-SECURITY-TRUST-3001-third-party-install-permissions.md) | 03 | - | Пользователь | BR-CH-004, BR-CH-005 | 2 |
+| UC-SECURITY-TRUST-3001 | [Установка стороннего плагина с проверкой прав](security-trust/UC-SECURITY-TRUST-3001-third-party-install-permissions.md) | 03 | 01, 02 | Пользователь | BR-CH-004, BR-CH-005 | 2 |
 | UC-OBSERVABILITY-4001 | [Причина вчерашнего сбоя видна по трассе операций](observability/UC-OBSERVABILITY-4001-diagnose-failure-by-trace.md) | 04 | - | Пользователь, мейнтейнер | BR-CH-006 | 1 |
-| UC-COMPATIBILITY-5001 | [Пользователь после обновления](compatibility/UC-COMPATIBILITY-5001-user-after-upgrade.md) | 05 | 01, 02 | Пользователь | BR-CH-002 | 1 |
-| UC-COMPATIBILITY-5002 | [Плагин переживает обновление ядра](compatibility/UC-COMPATIBILITY-5002-plugin-survives-core-upgrade.md) | 05 | - | Автор плагина, пользователь | BR-CH-008 | 1 |
-| UC-DELIVERY-6001 | [Приложение подключает ядро пакетами](delivery/UC-DELIVERY-6001-app-embeds-core.md) | 06 | - | Разработчик приложения | BR-CH-009 | 1 |
-| UC-AUTHOR-KIT-7001 | [Автор создаёт плагин вне поставки](author-kit/UC-AUTHOR-KIT-7001-author-writes-plugin.md) | 07 | 03 | Автор плагина вне поставки | BR-CH-004, BR-CH-010 | 1 |
+| UC-COMPATIBILITY-5001 | [Пользователь после обновления](compatibility/UC-COMPATIBILITY-5001-user-after-upgrade.md) | 05 | 01, 02, 04 | Пользователь | BR-CH-002 | 1 |
+| UC-COMPATIBILITY-5002 | [Плагин переживает обновление ядра](compatibility/UC-COMPATIBILITY-5002-plugin-survives-core-upgrade.md) | 05 | 01 | Автор плагина, пользователь | BR-CH-008 | 1 |
+| UC-DELIVERY-6001 | [Приложение подключает ядро пакетами](delivery/UC-DELIVERY-6001-app-embeds-core.md) | 06 | 05 | Разработчик приложения | BR-CH-009 | 1 |
+| UC-AUTHOR-KIT-7001 | [Автор создаёт плагин вне поставки](author-kit/UC-AUTHOR-KIT-7001-author-writes-plugin.md) | 07 | 01, 02, 03, 05 | Автор плагина вне поставки | BR-CH-004, BR-CH-010 | 1 |
