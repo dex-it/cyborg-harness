@@ -178,6 +178,11 @@ export interface StartOptions {
   readonly os?: OsEnvironment;
   /** Под какую платформу читать CmdOrCtrl; по умолчанию - текущая. */
   readonly platform?: string;
+  /**
+   * Акселераторы меню приложения: путь пункта -> сочетание (`baseAccelerators(base)`). Ядро держит их в одном реестре с командами окна, манифестами и `ctx.keys.register`:
+   * манифест на такое сочетание проигрывает с `key-conflict` при загрузке, плагину динамически оно недоступно (PL-03; вместо списка занятых сочетаний, который приложение ведёт руками).
+   */
+  readonly menuKeys?: Readonly<Record<string, string>>;
   /** Секунды простоя пользователя по ОС - для `ctx.system.onIdle`. */
   readonly idleSeconds?: () => number;
   readonly onJournal?: (entry: JournalEntry) => void;
@@ -242,6 +247,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     hosts: ws.plugins.hosts,
     uiGroups: ws.plugins.uiGroups,
     keybindings: ws.plugins.keybindings,
+    menuKeys: options.menuKeys,
     // Признак поставки - каталог установки, а не манифест: сторонний автор пишет в манифест что угодно.
     bundled: [...found.origins].filter(([, dir]) => dir === options.builtinDir).map(([id]) => id),
     // ADR-CH-0002 п. 6: cyborg.* - пространство поставки; чужой поставщик cyborg.agent сделал бы встроенного потребителя ambiguous.
