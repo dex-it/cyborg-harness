@@ -2,6 +2,10 @@
   "id": "stub-tracker",
   "version": "1.0.0",
   "engines": { "cyborg": "^1" },
+  "commands": { "stub-tracker.extensions": {} },
+  "contributes": {
+    "menus": [{ "id": "extensions", "menu": "tools", "title": "Расширения", "command": "stub-tracker.extensions", "order": 300 }]
+  },
   "ui": {
     "views": {
       "status": { "module": "./ui/ui.js", "area": "toolbar", "order": 100, "title": "Статус" },

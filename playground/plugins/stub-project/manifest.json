@@ -1,0 +1,13 @@
+{
+  "id": "stub-project",
+  "version": "1.0.0",
+  "engines": { "cyborg": "^1" },
+  "provides": { "demo.project": "1.0" },
+  "commands": { "stub-project.next": {}, "stub-project.notifications": {}, "stub-project.properties": {} },
+  "contributes": {
+    "menus": [
+      { "id": "properties", "menu": "workspace", "title": "Свойства проекта", "command": "stub-project.properties", "order": 100, "enabled": { "contract": "demo.project", "major": 1, "member": "hasSelected" } },
+      { "id": "notifications", "menu": "view", "title": "Уведомления", "command": "stub-project.notifications", "order": 100, "checked": { "contract": "demo.project", "major": 1, "member": "notificationsOn" } }
+    ]
+  }
+}

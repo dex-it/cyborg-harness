@@ -2,7 +2,13 @@
   "id": "stub-files",
   "version": "1.0.0",
   "engines": { "cyborg": "^1" },
+  "optional": { "demo.project": "^1" },
   "commands": { "stub-files.search": {} },
+  "contributes": {
+    "menus": [
+      { "id": "search", "menu": "view", "title": "Поиск", "command": "stub-files.search", "order": 200, "accelerator": "CmdOrCtrl+Shift+F", "enabled": { "contract": "demo.project", "major": 1, "member": "hasSelected" } }
+    ]
+  },
   "ui": {
     "views": {
       "tree": { "module": "./ui/ui.js", "area": "sidebar", "order": 100, "title": "Файлы" }
