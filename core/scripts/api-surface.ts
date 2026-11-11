@@ -330,8 +330,14 @@ export function compareSurfaces(etalon: Surface, now: Surface): Change[] {
 
 const describeChange = (c: Change): string => `  - ${c.breaking ? 'ломающее' : 'добавление'}: ${c.key}: ${c.why}`;
 
-/** Версия с суффиксом (`1.0.0-dev`) - линия разработки ещё не выпущенного пакета, как в P-01. */
-export const isPrerelease = (version: string): boolean => version.includes('-');
+/** Кандидат в выпуск (`1.0.0-rc.1`): форма API заморожена для выпуска, изменение допустимо только новым кандидатом (K-21). */
+export const candidateOf = (version: string): { readonly next: string } | undefined => {
+  const match = /^(.*-rc\.)(\d+)$/.exec(version);
+  return match?.[1] === undefined || match[2] === undefined ? undefined : { next: `${match[1]}${String(Number(match[2]) + 1)}` };
+};
+
+/** Линия разработки ещё не выпущенного пакета (`1.0.0-dev`, как в P-01): любой суффикс, кроме `-rc.N`. */
+export const isPrerelease = (version: string): boolean => version.includes('-') && candidateOf(version) === undefined;
 
 function parts(version: string): [number, number, number] {
   const [a = 0, b = 0, c = 0] = (version.split(/[-+]/)[0] ?? '').split('.').map(Number);
@@ -347,7 +353,7 @@ export function compareVersions(a: string, b: string): number {
 export interface CheckInput {
   /** `PLUGIN_API_VERSION`. */
   readonly apiVersion: string;
-  /** Версия пакета контрактов: суффикс `-dev` включает линию разработки. */
+  /** Версия пакета контрактов: суффикс `-dev` - линия разработки, `-rc.N` - кандидат, без суффикса - выпуск после заморозки. */
   readonly packageVersion: string;
   readonly surface: Surface;
   /** Тексты эталонов по версии из имени файла. */
@@ -362,6 +368,7 @@ export function checkSurface(input: CheckInput): string[] {
   const { apiVersion, packageVersion, surface, etalons } = input;
   const problems: string[] = [];
   const dev = isPrerelease(packageVersion);
+  const candidate = candidateOf(packageVersion);
   const parsed = new Map<string, Surface>();
   for (const [version, text] of etalons) {
     try {
@@ -386,7 +393,9 @@ export function checkSurface(input: CheckInput): string[] {
     const changes = compareSurfaces(own, surface);
     if (changes.length > 0) {
       const list = changes.map(describeChange).join('\n');
-      if (dev) {
+      if (candidate) {
+        problems.push(`публичный API плагина изменён, а эталон ${apiVersion}.txt принят как кандидат ${packageVersion}:\n${list}\nДо выпуска ${apiVersion} это допустимо только новым кандидатом: поднимите версию в contracts/package.json до ${candidate.next}, затем npm run snapshot:api и npm run snapshot:contracts, строка в contracts/CHANGELOG.md. После выпуска ${apiVersion} ломающее потребует мажорной версии ${String(major(apiVersion) + 1)}.0.0, добавление - ${nextMinor(apiVersion)}.`);
+      } else if (dev) {
         problems.push(`публичный API плагина изменён, а эталон ${apiVersion}.txt - нет (пакет контрактов ${packageVersion} - линия разработки, версия API не повышается):\n${list}\nЕсли изменение задумано: npm run snapshot:api, строка в contracts/CHANGELOG.md. Ломающее после заморозки (K-21) потребует новой мажорной версии, добавление - минорной.`);
       } else if (changes.some((c) => c.breaking)) {
         problems.push(`ломающее изменение публичного API плагина в пределах мажорной версии ${String(major(apiVersion))} (эталон ${apiVersion}.txt):\n${list}\nВерните изменение. Если оно задумано, повысьте мажорную версию: PLUGIN_API_VERSION в core/src/api-version.ts и version в contracts/package.json до ${String(major(apiVersion) + 1)}.0.0, затем npm run snapshot:api (создаст эталон ${String(major(apiVersion) + 1)}.0.0.txt) и запись в contracts/CHANGELOG.md; согласует владелец API (contracts/README.md).`);

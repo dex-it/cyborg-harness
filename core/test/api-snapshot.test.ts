@@ -36,15 +36,18 @@ function edited(file: string, from: string, to: string): ReadFile {
   };
 }
 
-/** Проверка текущих исходников (или испорченных `source`) против эталона; `dev: false` - как после заморозки, версия пакета без суффикса. */
-function problemsOf(source: ReadFile, dev: boolean): string[] {
-  return checkSurface({ apiVersion, packageVersion: dev ? packageVersion() : '1.0.0', surface: extractSurface(source), etalons });
+/** Линии версии пакета контрактов: разработка (`-dev`), кандидат в выпуск (`-rc.N`), выпуск после заморозки (без суффикса). */
+const LINES = { dev: '1.0.0-dev', rc: '1.0.0-rc.1', final: '1.0.0' } as const;
+
+/** Проверка текущих исходников (или испорченных `source`) против эталона на выбранной линии. */
+function problemsOf(source: ReadFile, line: keyof typeof LINES): string[] {
+  return checkSurface({ apiVersion, packageVersion: LINES[line], surface: extractSurface(source), etalons });
 }
 
 describe('эталон и исходники', () => {
   it('эталон текущей версии API совпадает с исходниками', () => {
-    assert.deepEqual(problemsOf(read, true), []);
-    assert.deepEqual(problemsOf(read, false), []);
+    for (const line of ['dev', 'rc', 'final'] as const) assert.deepEqual(problemsOf(read, line), [], line);
+    assert.deepEqual(checkSurface({ apiVersion, packageVersion: packageVersion(), surface: extractSurface(read), etalons }), [], 'версия пакета из репозитория');
   });
 
   it('эталон покрывает интерфейсы, поля манифеста и теги из задачи', () => {
@@ -80,7 +83,7 @@ describe('эталон и исходники', () => {
   });
 });
 
-describe('порча исходников: линия разработки и после заморозки', () => {
+describe('порча исходников: линия разработки, кандидат и после заморозки', () => {
   const cases: readonly { readonly name: string; readonly source: ReadFile; readonly key: string }[] = [
     { name: 'удалено поле PluginContext', source: edited('contracts/plugin.ts', '  readonly pluginId: string;\n  readonly subscriptions', '  readonly subscriptions'), key: 'member PluginContext.pluginId' },
     { name: 'сменён тип аргумента метода ctx.commands.register', source: edited('contracts/plugin.ts', 'register(name: string, handler: CommandHandler): Disposable;', 'register(name: number, handler: CommandHandler): Disposable;'), key: 'member PluginContext.commands.register' },
@@ -99,18 +102,25 @@ describe('порча исходников: линия разработки и п
   ];
 
   for (const c of cases) {
-    it(`${c.name}: после заморозки - ломающее, на линии разработки - просьба обновить эталон`, () => {
-      const frozen = problemsOf(c.source, false);
+    it(`${c.name}: после заморозки - ломающее, у кандидата - новый кандидат, на линии разработки - просьба обновить эталон`, () => {
+      const frozen = problemsOf(c.source, 'final');
       assert.equal(frozen.length, 1, frozen.join('\n'));
       assert.match(frozen[0]!, /ломающее изменение публичного API плагина в пределах мажорной версии 1/);
       assert.ok(frozen[0]!.includes(`ломающее: ${c.key}`), `в сообщении нет «${c.key}»:\n${frozen[0]}`);
       assert.match(frozen[0]!, /npm run snapshot:api/);
       assert.match(frozen[0]!, /2\.0\.0/);
-      const dev = problemsOf(c.source, true);
+      const dev = problemsOf(c.source, 'dev');
       assert.equal(dev.length, 1, dev.join('\n'));
       assert.match(dev[0]!, /линия разработки/);
       assert.ok(dev[0]!.includes(c.key));
       assert.match(dev[0]!, /npm run snapshot:api/);
+      const rc = problemsOf(c.source, 'rc');
+      assert.equal(rc.length, 1, rc.join('\n'));
+      assert.match(rc[0]!, /кандидат 1\.0\.0-rc\.1/);
+      assert.ok(rc[0]!.includes(c.key), `в сообщении нет «${c.key}»:\n${rc[0]}`);
+      assert.match(rc[0]!, /1\.0\.0-rc\.2/);
+      assert.match(rc[0]!, /npm run snapshot:api/);
+      assert.match(rc[0]!, /npm run snapshot:contracts/);
     });
   }
 
@@ -125,18 +135,23 @@ describe('порча исходников: линия разработки и п
   ];
 
   for (const c of additive) {
-    it(`${c.name}: после заморозки - просьба поднять минор и создать эталон, а не отказ`, () => {
-      const frozen = problemsOf(c.source, false);
+    it(`${c.name}: после заморозки - просьба поднять минор и создать эталон, у кандидата - новый кандидат, а не отказ`, () => {
+      const frozen = problemsOf(c.source, 'final');
       assert.equal(frozen.length, 1, frozen.join('\n'));
       assert.match(frozen[0]!, /публичный API плагина дополнен, а версия API и эталон - нет/);
       assert.ok(frozen[0]!.includes(`добавление: ${c.key}`), `в сообщении нет «${c.key}»:\n${frozen[0]}`);
       assert.match(frozen[0]!, /1\.1\.0/);
       assert.match(frozen[0]!, /npm run snapshot:api/);
       assert.doesNotMatch(frozen[0]!, /ломающее:/);
-      const dev = problemsOf(c.source, true);
+      const dev = problemsOf(c.source, 'dev');
       assert.equal(dev.length, 1, dev.join('\n'));
       assert.ok(dev[0]!.includes(c.key));
       assert.match(dev[0]!, /npm run snapshot:api/);
+      const rc = problemsOf(c.source, 'rc');
+      assert.equal(rc.length, 1, rc.join('\n'));
+      assert.match(rc[0]!, /кандидат 1\.0\.0-rc\.1/);
+      assert.ok(rc[0]!.includes(`добавление: ${c.key}`), `в сообщении нет «${c.key}»:\n${rc[0]}`);
+      assert.match(rc[0]!, /1\.0\.0-rc\.2/);
     });
   }
 
@@ -151,7 +166,7 @@ describe('порча исходников: линия разработки и п
       if (rel === 'core/elements/elements.ts') return text.replace("observedAttributes = ['disabled'];", "observedAttributes = [\n    'disabled',\n  ];");
       return text;
     };
-    assert.deepEqual(problemsOf(source, false), []);
+    for (const line of ['dev', 'rc', 'final'] as const) assert.deepEqual(problemsOf(source, line), [], line);
   });
 });
 
