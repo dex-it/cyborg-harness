@@ -73,6 +73,9 @@ flowchart LR
 | [T-05](https://github.com/dex-it/cyborg-harness/issues/10) | Тест: секрет не попадает в журнал, config и state | S | - |
 | [T-07](https://github.com/dex-it/cyborg-harness/issues/14) | Задержка шлюза ctx.os на горячих путях и бюджеты | M | [D-00](https://github.com/dex-it/cyborg-harness/issues/21) |
 | [T-11](https://github.com/dex-it/cyborg-harness/issues/26) | Гигиена кода и документов: комментарии, нумерация вопросов, имена ADR, расхождения roadmap | S | - |
+| [K-24](https://github.com/dex-it/cyborg-harness/issues/84) | Кнопки следующего шага не отвечают за человека | S | - |
+| [K-25](https://github.com/dex-it/cyborg-harness/issues/85) | net.fetch не ведёт на локальные и частные адреса | S | [T-07](https://github.com/dex-it/cyborg-harness/issues/14), [K-14](https://github.com/dex-it/cyborg-harness/issues/58) |
+| [K-26](https://github.com/dex-it/cyborg-harness/issues/86) | Окно не открывает новых окон и не уходит со своих адресов | S | - |
 
 ### Итерация 2. Пакеты и форма API
 
@@ -92,6 +95,9 @@ flowchart LR
 | [P-09](https://github.com/dex-it/cyborg-harness/issues/9) | Проверка плагина вне репозитория: checkPlugin | M | [P-02](https://github.com/dex-it/cyborg-harness/issues/34) |
 | [T-08](https://github.com/dex-it/cyborg-harness/issues/16) | Разбить loader.ts на части без смены поведения | M | - |
 | [T-09](https://github.com/dex-it/cyborg-harness/issues/20) | Публичный экспорт ядра для встраивающего приложения | S | [P-02](https://github.com/dex-it/cyborg-harness/issues/34) |
+| [K-22](https://github.com/dex-it/cyborg-harness/issues/82) | Права вызывающего у команд: кому открыта команда | S | - |
+| [K-23](https://github.com/dex-it/cyborg-harness/issues/83) | Агент в модели доверия: текст агенту, инструменты MCP, граница prompt injection | S | [K-15](https://github.com/dex-it/cyborg-harness/issues/53) |
+| [K-27](https://github.com/dex-it/cyborg-harness/issues/87) | Доверие к воркспейсу: значения, расширяющие права, не из файла воркспейса | M | [D-00](https://github.com/dex-it/cyborg-harness/issues/21) |
 
 ### Итерация 3. Крупные узлы
 
@@ -112,25 +118,33 @@ flowchart LR
 | [P-07](https://github.com/dex-it/cyborg-harness/issues/43) | Загрузка встроенных плагинов из каталога поставки | M | [P-03](https://github.com/dex-it/cyborg-harness/issues/35), [P-06](https://github.com/dex-it/cyborg-harness/issues/42) |
 | [PL-05](https://github.com/dex-it/cyborg-harness/issues/25) | Пилот: Monaco и xterm в iframe на cyborg-plugin:// | M | - |
 | [T-10](https://github.com/dex-it/cyborg-harness/issues/22) | Загрузка .ts/.js плагинов вне репозитория и из упакованной сборки | M | [P-06](https://github.com/dex-it/cyborg-harness/issues/42), [P-07](https://github.com/dex-it/cyborg-harness/issues/43) |
+| [T-06](https://github.com/dex-it/cyborg-harness/issues/12) | Снимок публичного API под тестом | M | - |
+| [P-10](https://github.com/dex-it/cyborg-harness/issues/11) | CI и релизы: публикация пакетов, бюджеты, проверка ссылок | M | [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-03](https://github.com/dex-it/cyborg-harness/issues/35), [T-07](https://github.com/dex-it/cyborg-harness/issues/14) |
+| [PL-02](https://github.com/dex-it/cyborg-harness/issues/18) | Пилот: цепочка хук - статус - уведомление в другом плагине | M | [K-19](https://github.com/dex-it/cyborg-harness/issues/57) |
+| [PL-04](https://github.com/dex-it/cyborg-harness/issues/23) | Пилот: дерево файлов и git через границу плагинов, fs.watch вместо опроса | L | [K-12](https://github.com/dex-it/cyborg-harness/issues/59), [T-07](https://github.com/dex-it/cyborg-harness/issues/14) |
+| [K-28](https://github.com/dex-it/cyborg-harness/issues/116) | Трасса операций на границах Г1 - Г5 | L | [T-08](https://github.com/dex-it/cyborg-harness/issues/16), [P-03](https://github.com/dex-it/cyborg-harness/issues/35) |
+| [K-29](https://github.com/dex-it/cyborg-harness/issues/117) | ctx.log с уровнем, вывод хоста по плагину, предел строк | M | [T-08](https://github.com/dex-it/cyborg-harness/issues/16), [P-01](https://github.com/dex-it/cyborg-harness/issues/29) |
+| [K-30](https://github.com/dex-it/cyborg-harness/issues/118) | Хранение диагностики: кольцо, файл с ротацией, выгрузка | L | [K-29](https://github.com/dex-it/cyborg-harness/issues/117), [P-03](https://github.com/dex-it/cyborg-harness/issues/35) |
+| [T-12](https://github.com/dex-it/cyborg-harness/issues/128) | enable поставщика поднимает зависимого и после склеенной записи denied | S | [T-08](https://github.com/dex-it/cyborg-harness/issues/16) |
+| [T-13](https://github.com/dex-it/cyborg-harness/issues/129) | Стабильные по времени тесты на macOS CI: ожидание условия вместо пауз, предел времени на файл | M | - |
+| [T-14](https://github.com/dex-it/cyborg-harness/issues/130) | Smoke: два вида одного плагина в живом окне | S | [P-03](https://github.com/dex-it/cyborg-harness/issues/35), [K-03](https://github.com/dex-it/cyborg-harness/issues/33) |
 
 ### Итерация 4. Пилоты Cyborg и заморозка API
 
 Доказать сценарии Cyborg на ядре пилотами и зафиксировать API 1.0.
 
+Состояние на 2026-11-11 по GitHub: K-21 закрыта (API заморожен кандидатом `1.0.0-rc.1`, до `1.0.0` остаётся закрытие угрозы У-42), закрыты P-11, PL-01, PL-03, PL-06, PL-07, PL-08; P-04 на ревью. T-06, P-10, PL-02 и PL-04 перенесены в итерацию 3 (так записано в реестре эпика и в заголовках задач).
+
 | Задача | Название | Размер | Зависит от |
 |---|---|---|---|
 | [K-21](https://github.com/dex-it/cyborg-harness/issues/62) | Заморозка API 1.0 | S | [K-03](https://github.com/dex-it/cyborg-harness/issues/33), [K-06](https://github.com/dex-it/cyborg-harness/issues/41), [K-07](https://github.com/dex-it/cyborg-harness/issues/44), [K-08](https://github.com/dex-it/cyborg-harness/issues/45), [K-09](https://github.com/dex-it/cyborg-harness/issues/46), [K-12](https://github.com/dex-it/cyborg-harness/issues/59), [K-13](https://github.com/dex-it/cyborg-harness/issues/60), [T-06](https://github.com/dex-it/cyborg-harness/issues/12) |
 | [P-04](https://github.com/dex-it/cyborg-harness/issues/38) | Документация автору плагина: руководство, справочники, схема манифеста | L | [K-17](https://github.com/dex-it/cyborg-harness/issues/55), [K-21](https://github.com/dex-it/cyborg-harness/issues/62) |
-| [P-10](https://github.com/dex-it/cyborg-harness/issues/11) | CI и релизы: публикация пакетов, бюджеты, проверка ссылок | M | [P-01](https://github.com/dex-it/cyborg-harness/issues/29), [P-02](https://github.com/dex-it/cyborg-harness/issues/34), [P-03](https://github.com/dex-it/cyborg-harness/issues/35), [T-07](https://github.com/dex-it/cyborg-harness/issues/14) |
 | [P-11](https://github.com/dex-it/cyborg-harness/issues/13) | Приёмка документов владельцем и план миграции Cyborg в репозитории ai-cyborg | S | [D-00](https://github.com/dex-it/cyborg-harness/issues/21) |
 | [PL-01](https://github.com/dex-it/cyborg-harness/issues/17) | Пилот: настоящая сессия claude через sessions и agent-claude-code под нагрузкой | L | [K-01](https://github.com/dex-it/cyborg-harness/issues/27), [K-14](https://github.com/dex-it/cyborg-harness/issues/58) |
-| [PL-02](https://github.com/dex-it/cyborg-harness/issues/18) | Пилот: цепочка хук - статус - уведомление в другом плагине | M | [K-19](https://github.com/dex-it/cyborg-harness/issues/57) |
 | [PL-03](https://github.com/dex-it/cyborg-harness/issues/19) | Пилот: единый реестр сочетаний на macOS | M | [K-07](https://github.com/dex-it/cyborg-harness/issues/44), [K-08](https://github.com/dex-it/cyborg-harness/issues/45) |
-| [PL-04](https://github.com/dex-it/cyborg-harness/issues/23) | Пилот: дерево файлов и git через границу плагинов, fs.watch вместо опроса | L | [K-12](https://github.com/dex-it/cyborg-harness/issues/59), [T-07](https://github.com/dex-it/cyborg-harness/issues/14) |
 | [PL-06](https://github.com/dex-it/cyborg-harness/issues/28) | Пилот: миграция данных воркспейса и localStorage | M | [T-02](https://github.com/dex-it/cyborg-harness/issues/49), [K-13](https://github.com/dex-it/cyborg-harness/issues/60) |
 | [PL-07](https://github.com/dex-it/cyborg-harness/issues/30) | Пилот: CLI-плагин с отменой и пулом процессов (срез трекеров) | M | [K-09](https://github.com/dex-it/cyborg-harness/issues/46), [K-12](https://github.com/dex-it/cyborg-harness/issues/59) |
 | [PL-08](https://github.com/dex-it/cyborg-harness/issues/32) | Пилот: раскладка окна Cyborg на областях и вкладах в меню | L | [K-03](https://github.com/dex-it/cyborg-harness/issues/33), [K-08](https://github.com/dex-it/cyborg-harness/issues/45), [K-19](https://github.com/dex-it/cyborg-harness/issues/57) |
-| [T-06](https://github.com/dex-it/cyborg-harness/issues/12) | Снимок публичного API под тестом | M | - |
 
 Размеры: S - до 2 человеко-дней, M - 3-8, L - больше 8 (оценки составителя, не обязательства).
 
