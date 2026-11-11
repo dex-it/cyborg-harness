@@ -58,8 +58,8 @@ describe('согласованность версий (K-21)', () => {
       assert.equal(typeof range, 'string', `${rel}: нет engines.cyborg`);
       assert.ok(isValidRange(String(range)), `${rel}: «${String(range)}» ядро не разбирает`);
       assert.ok(satisfies(PLUGIN_API_VERSION, String(range)), `${rel}: «${String(range)}» не принимает API ${PLUGIN_API_VERSION}`);
-      assert.ok(allowsMajor(String(range), major ?? 0), `${rel}: «${String(range)}» не допускает мажор ${String(major)}`);
-      assert.ok(!allowsMajor(String(range), (major ?? 0) + 1), `${rel}: «${String(range)}» допускает и следующий мажор`);
+      assert.ok(allowsMajor(String(range), major), `${rel}: «${String(range)}» не допускает мажор ${String(major)}`);
+      assert.ok(!allowsMajor(String(range), major + 1), `${rel}: «${String(range)}» допускает и следующий мажор`);
     }
   });
 
