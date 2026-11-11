@@ -76,7 +76,7 @@ export interface ProcessOptions {
   readonly timeoutMs?: number;
   /** Предел вывода, байт на `stdout` и на `stderr` отдельно: целое от 1 до 64 МиБ, по умолчанию 16 МиБ. Превышение не ошибка вызова, а `truncated` в ответе. */
   readonly maxOutputBytes?: number;
-  /** Отмена: сигнал сработал - программе и её группе `SIGTERM`, вызов отклоняется `Cancelled`. Сработал до вызова - программа не запускается. */
+  /** Отмена: сигнал сработал - программе и её группе `SIGTERM` (глухой к нему - `SIGKILL` через 2 с, как по `timeoutMs`), вызов отклоняется `Cancelled`. Сработал до вызова - программа не запускается. */
   readonly signal?: AbortSignal;
 }
 
@@ -231,7 +231,7 @@ export interface PluginOs {
   readonly paths: { readonly data: string; readonly temp: string; readonly home: string };
   readonly fs: OsFs;
   readonly pty?: OsPty;
-  /** Программы нет в системе (или нет `cwd`) - `NotFound`; ненулевой код выхода ошибкой не считается и приходит в `ProcessResult.code`. */
+  /** Программы нет в системе (или нет `cwd`) - `NotFound`; ненулевой код выхода ошибкой не считается и приходит в `ProcessResult.code`. Одновременных программ у плагина не больше 16, сверх - `Invalid`: очереди у ядра нет, пул ведёт плагин. */
   readonly process?: { run(program: string, args: readonly string[], options?: ProcessOptions): Promise<ProcessResult> };
   readonly net?: { fetch(url: string, request?: HttpRequest): Promise<HttpResponse> };
   readonly env?: { get(name: string): Promise<string | undefined> };
