@@ -96,6 +96,7 @@ button:focus-visible {
 
 .pane-session {
   grid-area: session;
+  overflow-y: auto;
 }
 
 .side {
@@ -153,16 +154,23 @@ button:focus-visible {
   display: flex;
   flex: 1;
   flex-direction: column;
-  min-height: 0;
+  /* В маленьком окне терминалу остаётся не меньше 11 строк, колонка прокручивается: полоса и панель инструментов не отнимают у него место. */
+  min-height: 252px;
 }
 
 /* Основная область выкладывает виды друг под другом по order: первый (терминал) занимает всё место, следующие (полоса кнопок под ним) - полосу. */
 .views-main .view {
-  flex: 0 0 72px;
+  flex: 0 0 52px;
 }
 
 .views-main .view[data-slot='0'] {
-  flex: 1;
+  flex: 1 0 200px;
+}
+
+/* Адрес фрейма нужен только крупным видам: у полосы и кнопок панели инструментов подпись занимает место. */
+.views-main .view:not([data-slot='0']) .view-origin,
+.views-toolbar .view-origin {
+  display: none;
 }
 
 .side .views-side-page {
@@ -182,7 +190,7 @@ button:focus-visible {
 
 .views-toolbar .view {
   flex: 1;
-  height: 110px;
+  height: 84px;
 }
 
 /* Выезжающая панель: справа во всю высоту окна, закрыта - за краем и недоступна для фокуса (inert). */
@@ -235,7 +243,7 @@ button:focus-visible {
 
 .session-strip [role='tab'] {
   margin-bottom: -1px;
-  padding: 4px 10px;
+  padding: 2px 10px;
   border: 0;
   border-bottom: 2px solid transparent;
   border-radius: 0;
