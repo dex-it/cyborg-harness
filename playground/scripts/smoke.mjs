@@ -1324,6 +1324,11 @@ async function main() {
   } else near(shrunk.window, ceiling, 'окно выше потолка 80vh');
   await inForm("document.getElementById('grow').click()");
   await waitFor('вид получил ответ на просьбу выше экрана', async () => (await fitted()) === 'высота: 4000');
+  // Окно хоста перестраивается по сообщению моста после ответа виду: читать размер надо, дождавшись его, а не сразу (нестабильность на macOS CI, PR #220).
+  await waitFor('окно по просьбе 4000 дошло до потолка 80vh', async () => {
+    const box = await fitBox();
+    return Math.abs(box.window - box.vh * 0.8) <= 4;
+  });
   const grown = await fitBox();
   near(grown.window, grown.vh * 0.8, 'окно по просьбе 4000 не упёрлось в потолок 80vh');
   assert.ok(grown.frame <= grown.window, 'область вида вылезла из окна');
