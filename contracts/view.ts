@@ -4,21 +4,29 @@ import type { Disposable, ModalResize, ViewChannel } from './plugin.ts';
 
 /** Строка ленты, которую ядро показывает виду его плагина. */
 export interface FeedLine {
+  /** Время строки, мс от начала эпохи. */
   readonly at: number;
   /** `log` - сообщение плагина, `key` - нажатие, перехваченное ядром, `window` - нажатие, дошедшее до страницы, `error` - отказ команды. */
   readonly kind: 'log' | 'key' | 'window' | 'error';
+  /** О чём строка: имя команды, сочетание или источник. */
   readonly subject: string;
+  /** Текст строки. */
   readonly text: string;
 }
 
+/** Ответ ядра на вызов из вида: либо `error`, либо `value`. */
 export interface Reply {
+  /** Текст отказа. */
   readonly error?: string;
   /** Ответ команды или метода контракта - данные, прошедшие structured clone. */
   readonly value?: unknown;
 }
 
+/** Путь, сброшенный в вид перетаскиванием. */
 export interface ViewDrop {
+  /** Плагин-источник перетаскивания. */
   readonly from: string;
+  /** Сброшенный путь от корня рабочей папки. */
   readonly path: string;
 }
 
@@ -36,23 +44,33 @@ export interface UiTerminal extends PtyInfo {
   readonly backlog: string;
   /** Вывод до первой подписки копится и отдаётся ей. */
   onData(listener: (chunk: string) => void): Disposable;
+  /** Процесс завершился: слушатель получает код выхода. */
   onExit(listener: (exit: PtyExit) => void): Disposable;
+  /** Ввод в терминал. */
   write(data: string): Promise<void>;
+  /** Размер терминала в столбцах и строках. */
   resize(cols: number, rows: number): Promise<void>;
   /** Перестать смотреть; процесс живёт дальше - завершает его главная часть. */
   close(): void;
 }
 
+/** Пункт диалога: кнопка вопроса или строка меню. */
 export interface DialogChoice {
+  /** Идентификатор, который вернёт диалог при выборе. */
   readonly id: string;
+  /** Подпись. */
   readonly label: string;
 }
 
 /** Вопрос с кнопками: то, что видам и главной части одинаково доступно (`ctx.dialogs.show`). */
 export interface AskDialog {
+  /** Вид диалога: вопрос с кнопками. */
   readonly kind: 'ask';
+  /** Заголовок вопроса. */
   readonly title: string;
+  /** Пояснение под заголовком. */
   readonly message?: string;
+  /** Кнопки по порядку. */
   readonly buttons: readonly DialogChoice[];
 }
 
@@ -78,37 +96,48 @@ export interface ViewModal {
 
 /** Урезанный `ctx` для UI плагина (SAD §3.8): права - те же, что у главной части, но `ctx.os` нет. */
 export interface UiContext {
+  /** Идентификатор плагина, которому принадлежит вид. */
   readonly pluginId: string;
   /** Имя вида из `ui.views` манифеста. */
   readonly view: string;
+  /** Команды своего плагина. */
   readonly commands: {
     /** Свои команды плагина; чужую ядро отклонит. Отказ - исключение с текстом ядра. */
     run(command: string, ...args: unknown[]): Promise<unknown>;
   };
+  /** Контракты, которые вид берёт через границу фрейма. */
   readonly contracts: {
     /** Контракт из `requires` или `optional` своего плагина; поставщика нет - undefined, контракта нет в манифесте - исключение. */
     get<K extends ContractName, M extends Major<K>>(contract: K, major: M): Promise<UiRemote<ContractType<K, M>> | undefined>;
   };
+  /** Тема окна. */
   readonly theme: {
+    /** Текущие CSS-переменные темы. */
     readonly tokens: ThemeTokens;
+    /** Тема сменилась: слушатель получает новые переменные. */
     onChange(listener: (tokens: ThemeTokens) => void): Disposable;
   };
   /** Скрытая область не отмонтируется: DOM, прокрутка и выделение живут, а `document.visibilityState` фрейма об этом не знает. */
   readonly visible: boolean;
+  /** Вид показали или скрыли. */
   onVisibilityChange(listener: (visible: boolean) => void): Disposable;
   /** Сообщения своего плагина, накопленные до открытия вида. */
   logs(): Promise<readonly FeedLine[]>;
+  /** Новая строка ленты журнала своего плагина. */
   onLog(listener: (line: FeedLine) => void): Disposable;
+  /** Терминалы, которые главная часть показала виду. */
   readonly terminal: {
     /** Билет от `PtyHandle.share()` своей главной части; чужой, просроченный или использованный - исключение. */
     open(ticket: PtyTicket): Promise<UiTerminal>;
   };
+  /** Память вида в состоянии воркспейса. */
   readonly state: {
     /** Память вида в state воркспейса, какой её оставил прошлый документ; не писали - undefined. Схемы и миграций нет: формат - забота плагина. */
     readonly value: unknown;
     /** JSON до 64 КБ; undefined - забыть. У каждого воркспейса своя память, поэтому не localStorage origin плагина. */
     set(value: unknown): Promise<void>;
   };
+  /** Диалоги ядра поверх всех фреймов. */
   readonly dialogs: {
     /** Окно показывает диалоги по одному, под замком чужие ждут; ответ - id выбранного пункта, отмена или выгрузка плагина - undefined. */
     show(spec: DialogSpec): Promise<string | undefined>;
@@ -117,10 +146,12 @@ export interface UiContext {
   readonly modal: ViewModal | undefined;
   /** Канал с главной частью плагина по имени этого вида: сообщения, которые она шлёт виду, и ответы ей. Правила и лимит - у `ViewChannel`. */
   readonly channel: ViewChannel;
+  /** Сочетания клавиш своих команд. */
   readonly keys: {
     /** Сочетание своей команды, как оно сейчас привязано (с правками человека, под платформу): `Ctrl+Shift+F`; не привязана - undefined. Нажатие ловит ядро, вид его не видит. */
     of(command: string): string | undefined;
   };
+  /** Перетаскивание файлов между видами и приложением. */
   readonly drag: {
     /** Перетаскивание файла ведёт ядро: Chromium не пускает перетаскивание из страницы во фрейм другого процесса. Путь - от корня рабочей папки. */
     start(path: string): void;
@@ -134,5 +165,6 @@ export interface UiContext {
  * `mount` зовётся один раз на документ вида, `dispose` - когда ядро снимает вид.
  */
 export interface UiModule<Root> {
+  /** Монтирует вид в `root`. Зовётся один раз на документ вида; возвращаемый `Disposable` снимается, когда ядро снимает вид. */
   mount(root: Root, ctx: UiContext): Disposable | undefined;
 }

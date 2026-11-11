@@ -111,7 +111,7 @@ export default defineConfig({
         },
         {
           label: 'Справка',
-          items: ['reference/manifest', 'reference/permissions', 'reference/contracts-catalog', 'reference/journal', 'reference/errors', 'reference/hotkeys', 'reference/platforms', 'reference/packages'],
+          items: ['reference/manifest', 'reference/ctx-api', 'reference/permissions', 'reference/contracts-catalog', 'reference/journal', 'reference/errors', 'reference/hotkeys', 'reference/platforms', 'reference/packages'],
         },
         {
           label: 'Разработка',

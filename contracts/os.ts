@@ -11,6 +11,7 @@ export interface PluginPermissions {
   readonly 'fs.write'?: readonly string[];
   /** Открыть в системе: области путей, как у `fs.read`, `any` - любой существующий документ или каталог, и схемы URL с двоеточием (`https:`, `mailto:`). */
   readonly shell?: readonly string[];
+  /** Программы, которые плагин запускает через `ctx.os.process`: имя или правило `{ program, args, env? }` с закреплёнными первыми аргументами. Даёт программе все права пользователя ОС. */
   readonly process?: readonly ProgramRule[];
   /** Программы в псевдотерминале; правило той же формы, что у `process`. */
   readonly pty?: readonly ProgramRule[];
@@ -18,8 +19,11 @@ export interface PluginPermissions {
   readonly launch?: readonly ProgramRule[];
   /** Хосты HTTP; `config:<поле>` - хост из своего раздела config. */
   readonly net?: readonly string[];
+  /** Имена переменных окружения, которые плагин читает через `ctx.os.env`. */
   readonly env?: readonly string[];
+  /** Системные уведомления (`ctx.os.notify`). */
   readonly notify?: boolean;
+  /** Буфер обмена: `read`, `write` или оба. */
   readonly clipboard?: readonly ('read' | 'write')[];
   /** Маски ссылок на секреты внешнего источника: `vault://kv/data/jira*`. */
   readonly 'secrets.ref'?: readonly string[];
@@ -31,29 +35,43 @@ export interface PluginPermissions {
   readonly serve?: boolean;
 }
 
+/** Запись каталога. */
 export interface DirEntry {
+  /** Имя без пути. */
   readonly name: string;
+  /** Что это: файл, каталог, ссылка или другое. */
   readonly kind: 'file' | 'dir' | 'link' | 'other';
 }
 
+/** Сведения о файле или каталоге. */
 export interface FileStat {
+  /** Что это: файл, каталог или другое. */
   readonly kind: 'file' | 'dir' | 'other';
+  /** Размер в байтах. */
   readonly size: number;
+  /** Время последней правки, мс от начала эпохи. */
   readonly mtimeMs: number;
 }
 
+/** Кусок файла, прочитанный `readSlice`. */
 export interface FileSlice {
+  /** Прочитанный текст. */
   readonly text: string;
   /** Сколько байт файла покрывает `text`: незаконченный символ UTF-8 на конце куска не входит - на столько сдвинуть `offset`. */
   readonly bytes: number;
+  /** Размер всего файла в байтах. */
   readonly size: number;
 }
 
+/** Итог запущенной программы. */
 export interface ProcessResult {
+  /** Код выхода; `null`, если программу остановил сигнал. */
   readonly code: number | null;
+  /** Сигнал, остановивший программу, или `null`. */
   readonly signal: string | null;
   /** Вывод до предела; обрезанный по `truncated` на границе символа. */
   readonly stdout: string;
+  /** Вывод ошибок с теми же пределами, что у `stdout`. */
   readonly stderr: string;
   /** Вывод `stdout` или `stderr` дошёл до предела (`maxOutputBytes`, по умолчанию 16 МиБ): программа остановлена (`SIGTERM`, через 2 с глухой к нему - `SIGKILL`), а в ответе только прочитанное. Ошибка это или неполные данные, решает плагин: трекер отказывает («ответ больше N»), поиск берёт совпадения из прочитанного. */
   readonly truncated: boolean;
@@ -67,10 +85,13 @@ declare global {
   }
 }
 
+/** Параметры запуска программы. */
 export interface ProcessOptions {
+  /** Рабочий каталог; должен лежать в области, доступной плагину. */
   readonly cwd?: string;
   /** Только имена из `env` правила `process`; база - PATH, HOME, локаль. Значения - данные, а не ссылки `$secret`. */
   readonly env?: Readonly<Record<string, string>>;
+  /** Текст, который подаётся программе на стандартный ввод. */
   readonly input?: string;
   /** Срок программы, мс; истёк - `SIGTERM` всей группе, в ответе `signal: 'SIGTERM'`; не остановилась за 2 с (глушит сигнал) - `SIGKILL`, `signal: 'SIGKILL'`. */
   readonly timeoutMs?: number;
@@ -80,42 +101,59 @@ export interface ProcessOptions {
   readonly signal?: AbortSignal;
 }
 
+/** Параметры запроса `ctx.os.net.fetch`. */
 export interface HttpRequest {
+  /** Метод HTTP; по умолчанию `GET`. */
   readonly method?: string;
+  /** Заголовки запроса. */
   readonly headers?: Readonly<Record<string, string>>;
+  /** Тело запроса, текст. */
   readonly body?: string;
   /** Срок всего запроса вместе с телом, мс; по умолчанию 30 с, дольше - `Timeout`. Тело ответа больше 16 МиБ - `Remote`. */
   readonly timeoutMs?: number;
 }
 
+/** Ответ `ctx.os.net.fetch`. */
 export interface HttpResponse {
+  /** Код ответа HTTP. */
   readonly status: number;
+  /** Заголовки ответа, имена в нижнем регистре. */
   readonly headers: Readonly<Record<string, string>>;
+  /** Тело ответа, текст. */
   readonly body: string;
 }
 
 /** Запрос к серверу плагина: имена заголовков в нижнем регистре, тело - текст до 1 МиБ. */
 export interface ServeRequest {
+  /** Метод HTTP. */
   readonly method: string;
   /** Путь с запросом, как в первой строке HTTP: `/mcp?x=1`. */
   readonly path: string;
+  /** Заголовки запроса, имена в нижнем регистре. */
   readonly headers: Readonly<Record<string, string>>;
+  /** Тело запроса, текст до 1 МиБ. */
   readonly body: string;
 }
 
 /** Ответ обработчика; не ответил за 30 с - клиент получит 504, чужая форма - 502. */
 export interface ServeResponse {
+  /** Код ответа HTTP. */
   readonly status: number;
+  /** Заголовки ответа. */
   readonly headers?: Readonly<Record<string, string>>;
+  /** Тело ответа, текст. */
   readonly body?: string;
 }
 
+/** Запущенный сервер плагина. */
 export interface HttpServer {
   /** `http://127.0.0.1:<порт>`; порт выбирает ОС. */
   readonly url: string;
+  /** Останавливает сервер. */
   dispose(): void;
 }
 
+/** Параметры слежения за файлами. */
 export interface WatchOptions {
   /**
    * Следить за всем деревом под каталогом, а не за его детьми. Для файла - `Invalid`.
@@ -128,8 +166,11 @@ export interface WatchOptions {
 
 /** Файлы: без права - только свои каталоги `paths`; чтение шире - по `fs.read`, запись - по `fs.write`. Путь вне области - `PermissionDenied`, никогда `NotFound`; нет файла или каталога внутри области в `readText`, `readSlice`, `list`, `stat`, `watch`, `realpath` - `NotFound` (проверка существования - `stat` и ловля `NotFound`); `list` существующего файла - `Invalid`. Ни код, ни текст ошибки ОС не выдают путь вне области, названный плагином: ошибка раскрытия пути (`ENOTDIR`, `ELOOP`, `EACCES`) там тоже `PermissionDenied`. Путь через ссылку внутри области - путь внутри области, и ответ зависит от цели ссылки: цель вне области есть - `PermissionDenied`, ссылка висячая - `NotFound` (или ошибка операции), цель под закрытым снаружи каталогом - ошибка самой операции; ссылку создаёт человек или другая программа, плагин с `fs` её создать не может. */
 export interface OsFs {
+  /** Читает файл целиком как текст UTF-8. */
   readText(path: string): Promise<string>;
+  /** Список записей каталога. */
   list(dir: string): Promise<DirEntry[]>;
+  /** Сведения о файле или каталоге; нет пути внутри области - `NotFound`. */
   stat(path: string): Promise<FileStat>;
   /** Настоящий путь: ссылки раскрыты, как `realpath` ОС. Нужен, чтобы сверять пути по имени (ключи `~/.claude.json`, корни проектов): `/tmp/x` и `/private/tmp/x` - один каталог. Ссылка наружу области - `PermissionDenied`, нет пути - `NotFound`. */
   realpath(path: string): Promise<string>;
@@ -139,24 +180,35 @@ export interface OsFs {
   watch(path: string, listener: (names: readonly string[]) => void, onClose?: (reason: string) => void, options?: WatchOptions): Promise<Disposable>;
   /** Атомарно: текст пишется во временный файл рядом (`<файл>.<hex>.tmp`) и переименовывается, читатель и оборванная запись видят прежний файл или новый целиком; режим существующего файла сохраняется; файл без права записи (0444) не заменяется - `EACCES`, как при записи на месте, так что `chmod a-w` защищает файл. Без `fsync`: падение процесса не страшно, потеря питания - не гарантия. Наблюдатель каталога видит имя временного файла. Временному файлу нужно право записи на его имя: если `fs.write` называет один файл или маску под имя (`*.json`), либо каталог цели закрыт для создания файлов, запись идёт на месте, без защиты от обрыва, зато ничего вне права не создаётся. Не обычный файл (каталог, ссылка, FIFO) - `Invalid`. */
   writeText(path: string, text: string): Promise<void>;
+  /** Создаёт каталог, в том числе недостающие родительские. */
   mkdir(path: string): Promise<void>;
+  /** Удаляет файл или каталог с содержимым; пути, которого нет, - не ошибка. */
   remove(path: string): Promise<void>;
 }
 
 /** Своё хранилище секретов ядра: ключи видны только своему плагину; без шифрования ОС - `Unavailable`. */
 export interface OsSecrets {
+  /** Значение секрета по ключу своего плагина; нет - `undefined`. */
   get(key: string): Promise<string | undefined>;
+  /** Сохраняет секрет в хранилище ядра. */
   set(key: string, value: string): Promise<void>;
+  /** Удаляет секрет. */
   delete(key: string): Promise<void>;
 }
 
+/** Параметры запуска программы в псевдотерминале. */
 export interface PtySpawnOptions {
+  /** Программа; должна подходить под правило `pty` манифеста. */
   readonly program: string;
+  /** Аргументы программы. */
   readonly args?: readonly string[];
+  /** Рабочий каталог. */
   readonly cwd?: string;
   /** Только имена из `env` правила `pty`; база - PATH, HOME, локаль. */
   readonly env?: Readonly<Record<string, string>>;
+  /** Число столбцов. */
   readonly cols?: number;
+  /** Число строк. */
   readonly rows?: number;
   /** Пережить перезапуск хоста: процесс ждёт, пока владелец вернётся через `attach`. */
   readonly persist?: boolean;
@@ -164,29 +216,43 @@ export interface PtySpawnOptions {
   readonly describedBy?: string;
 }
 
+/** Завершение процесса в терминале. */
 export interface PtyExit {
+  /** Код выхода; `-1`, если хост потерял процесс. */
   readonly code: number;
+  /** Номер сигнала, если процесс остановлен им. */
   readonly signal?: number;
 }
 
+/** Сведения о процессе в терминале. */
 export interface PtyInfo {
+  /** Идентификатор терминала. */
   readonly id: string;
+  /** Номер процесса в ОС. */
   readonly pid: number;
+  /** Запущенная программа. */
   readonly program: string;
+  /** Аргументы запуска. */
   readonly args: readonly string[];
+  /** Процесс переживает перезапуск хоста. */
   readonly persist: boolean;
   /** Есть, если процесс завершился, пока владельца не было. */
   readonly exit?: PtyExit;
 }
 
+/** Терминал, которым владеет плагин. */
 export interface PtyHandle extends PtyInfo {
   /** Хвост вывода до `attach`; у только что запущенного пуст. Может начинаться посреди escape-последовательности. */
   readonly backlog: string;
+  /** Слушатель вывода терминала. */
   onData(listener: (chunk: string) => void): Disposable;
   /** Завершился до подписки - слушатель получит выход сразу. */
   onExit(listener: (exit: PtyExit) => void): Disposable;
+  /** Ввод в терминал. */
   write(data: string): Promise<void>;
+  /** Размер терминала в столбцах и строках. */
   resize(cols: number, rows: number): Promise<void>;
+  /** Посылает сигнал процессу; без аргумента процесс завершается. */
   kill(signal?: 'SIGTERM' | 'SIGKILL' | 'SIGINT' | 'SIGHUP'): Promise<void>;
   /** Одноразовый билет для своего UI (`ctx.terminal.open` в виде): живёт 30 с, чужой плагин его не откроет. */
   share(): Promise<PtyTicket>;
@@ -197,6 +263,7 @@ export type PtyTicket = string;
 
 /** Процесс держит ядро: он переживает хост плагина, если просили `persist`. */
 export interface OsPty {
+  /** Запускает программу в терминале по правилу `pty` манифеста. */
   spawn(options: PtySpawnOptions): Promise<PtyHandle>;
   /** Только свои pty. */
   list(): Promise<PtyInfo[]>;
@@ -206,10 +273,13 @@ export interface OsPty {
 
 /** Клик по уведомлению: своя команда из манифеста, аргументы сверяются её схемой. Команда, а не колбэк: клик переживёт перезапуск хоста. */
 export interface NotifyClick {
+  /** Своя команда из манифеста. */
   readonly command: string;
+  /** Аргументы команды. */
   readonly args?: readonly unknown[];
 }
 
+/** Параметры уведомления. */
 export interface NotifyOptions {
   /** Клик поднимает окно, закрывает уведомление и запускает команду. */
   readonly onClick?: NotifyClick;
@@ -223,37 +293,84 @@ export interface OsNotify {
   close(id: string): Promise<void>;
 }
 
+/** Доступ плагина к ОС через шлюз ядра; члены, на которые нет права в манифесте, отсутствуют. */
 export interface PluginOs {
   /**
    * Свои каталоги: данные и временный; читать и писать в них можно без права. Каталоги общие для всех процессов приложения с этим `userData`
    * (несколько воркспейсов - несколько процессов, K-20): `fs.writeText` пишет файл целиком через временный файл и `rename`, поэтому соседний процесс видит прежний файл или новый, но не недописанный; потерю обновления при цикле «прочитал - изменил - записал» двух процессов ядро не снимает (замка для плагинов нет), её плагин исключает сам (отдельные файлы на процесс или своя блокировка).
    */
-  readonly paths: { readonly data: string; readonly temp: string; readonly home: string };
+  readonly paths: {
+    /** Каталог данных плагина: переживает перезапуск, общий для процессов приложения с этим `userData`. */
+    readonly data: string;
+    /** Временный каталог плагина. */
+    readonly temp: string;
+    /** Домашний каталог человека; читать в нём можно только то, что разрешило право `fs.read`. */
+    readonly home: string;
+  };
+  /** Файлы. */
   readonly fs: OsFs;
+  /** Терминалы; есть при праве `pty`. */
   readonly pty?: OsPty;
   /** Программы нет в системе (или нет `cwd`) - `NotFound`; ненулевой код выхода ошибкой не считается и приходит в `ProcessResult.code`. Одновременных программ у плагина не больше 16, сверх - `Invalid`: очереди у ядра нет, пул ведёт плагин. */
-  readonly process?: { run(program: string, args: readonly string[], options?: ProcessOptions): Promise<ProcessResult> };
-  readonly net?: { fetch(url: string, request?: HttpRequest): Promise<HttpResponse> };
-  readonly env?: { get(name: string): Promise<string | undefined> };
+  readonly process?: {
+    /** Запускает программу без оболочки, ждёт завершения и возвращает вывод и код выхода. Программа и первые аргументы должны подходить под правило `process` манифеста. */
+    run(program: string, args: readonly string[], options?: ProcessOptions): Promise<ProcessResult>;
+  };
+  /** Сеть; есть при праве `net`. */
+  readonly net?: {
+    /** HTTP-запрос к хосту из права `net` (`config:<поле>` - хост из своего раздела `config`). Метод по умолчанию `GET`; срок и предел тела - в `HttpRequest`. */
+    fetch(url: string, request?: HttpRequest): Promise<HttpResponse>;
+  };
+  /** Переменные окружения; есть при праве `env`. */
+  readonly env?: {
+    /** Значение переменной окружения, названной в праве `env`; переменной нет - `undefined`. */
+    get(name: string): Promise<string | undefined>;
+  };
+  /** Системные уведомления; есть при праве `notify`. */
   readonly notify?: OsNotify;
-  readonly clipboard?: { readText?(): Promise<string>; writeText?(text: string): Promise<void> };
+  /** Буфер обмена; члены есть по праву `clipboard`. */
+  readonly clipboard?: {
+    /** Читает текст из буфера; есть при праве `clipboard: ["read"]`. */
+    readText?(): Promise<string>;
+    /** Пишет текст в буфер; есть при праве `clipboard: ["write"]`. */
+    writeText?(text: string): Promise<void>;
+  };
+  /** Своё хранилище секретов ядра; права не нужно. */
   readonly secrets: OsSecrets;
-  readonly security?: { setRoots(paths: readonly string[]): Promise<void> };
+  /** Настройки безопасности; есть при праве `security.roots`. */
+  readonly security?: {
+    /** Задаёт корни проектов: область `workspace` для всех плагинов. Корни, названные только в файле воркспейса, подтверждает человек. */
+    setRoots(paths: readonly string[]): Promise<void>;
+  };
+  /** Замок окна; есть при праве `ui.lock`. */
   readonly ui?: OsUi;
   /** Слушает только 127.0.0.1; запрос с чужим Host или с Origin (страница в браузере) до обработчика не доходит. Выгрузка плагина закрывает его серверы. */
-  readonly serve?: { http(handler: (request: ServeRequest) => ServeResponse | Promise<ServeResponse>): Promise<HttpServer> };
+  readonly serve?: {
+    /** Запускает сервер HTTP на 127.0.0.1 с портом от ОС; обработчик получает запрос и отвечает (не ответил за 30 с - клиент получит 504). */
+    http(handler: (request: ServeRequest) => ServeResponse | Promise<ServeResponse>): Promise<HttpServer>;
+  };
   /** Открыть путь или URL программой ОС; исполняемый файл не открывается - это был бы запуск в обход `process`. */
-  readonly shell?: { openPath?(path: string): Promise<void>; openExternal?(url: string): Promise<void> };
+  readonly shell?: {
+    /** Открывает документ или каталог программой ОС по умолчанию; путь должен лежать в области права `shell`. */
+    openPath?(path: string): Promise<void>;
+    /** Открывает URL, схема которого названа в праве `shell` (`https:`, `mailto:`). */
+    openExternal?(url: string): Promise<void>;
+  };
   /** Права не нужно: выбор человека сам становится областью `granted` и хранится в state воркспейса. */
   readonly dialog: OsDialog;
 }
 
+/** Параметры диалога выбора пути. */
 export interface OpenDialogOptions {
+  /** Заголовок диалога. */
   readonly title?: string;
+  /** Выбирать каталоги. */
   readonly directory?: boolean;
+  /** Разрешить несколько путей. */
   readonly multiple?: boolean;
 }
 
+/** Диалог выбора пути, который показывает ядро. */
 export interface OsDialog {
   /** Отмена - пустой список; окно закрыто чужим замком - `Unavailable`. */
   open(options?: OpenDialogOptions): Promise<string[]>;
@@ -265,12 +382,15 @@ export interface OsUi {
   lock(options?: { readonly hideNotifications?: boolean }): Promise<UiLock>;
 }
 
+/** Замок, взятый плагином. */
 export interface UiLock {
   /** Снимает только свой замок; два замка - окно откроется, когда сняты оба. */
   release(): Promise<void>;
 }
 
+/** Раскрытое значение секрета. */
 export interface SecretValue {
+  /** Значение. */
   readonly value: string;
   /** Аренда источника: после этого значение надо спросить заново. */
   readonly expiresAt?: number;
@@ -278,9 +398,12 @@ export interface SecretValue {
 
 /** Ссылка на секрет в `config`: без схемы - своё хранилище ядра, со схемой - источник секретов. */
 export interface SecretRef {
+  /** Ключ секрета: без схемы - свой ключ в хранилище ядра, со схемой - ссылка на внешний источник. */
   readonly $secret: string;
 }
 
+/** Раскрытие ссылок на секреты. */
 export interface PluginSecrets {
+  /** Раскрывает ссылку: ключ (строка) или `{ "$secret": "..." }`. Значение не попадает в журнал. */
   resolve(ref: string | SecretRef): Promise<SecretValue>;
 }

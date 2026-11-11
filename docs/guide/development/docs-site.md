@@ -40,6 +40,18 @@ npm run check      # типы страниц и конфига
 
 Страницы пишутся простым языком: короткие разделы, таблицы, врезки Starlight (`:::note[Заголовок]`, `:::tip`, `:::caution`). Дефис с пробелами вместо длинного тире, без эмодзи.
 
+## Сгенерированные страницы
+
+Страница [Справочник ctx и UiContext](/reference/ctx-api/) (`docs/guide/reference/ctx-api.md`) не пишется руками: её собирает `scripts/api-reference.ts` из TSDoc `contracts/plugin.ts`, `contracts/view.ts` и `contracts/os.ts`. Версия API и дата в её шапке берутся из `contracts/package.json` и записи этой версии в `contracts/CHANGELOG.md`.
+
+| Команда | Что делает |
+|---|---|
+| `npm run docs:api` (корень) | Пересобирает страницу; запускайте после правки описаний в контрактах и закоммитьте результат |
+| `npm run check:docs-api` (корень) | Сверяет страницу с TSDoc, устарела - код 1 |
+| `npm run api:check` (`site/`) | Та же сверка; её вызывают `npm run build` и `npm run check` сайта, поэтому устаревшая страница не соберётся |
+
+Сверка идёт и в `npm test` (`scripts/test/api-reference.test.ts`: страница свежая, у каждого члена есть описание) и отдельным шагом CI. Член контракта без TSDoc краснит тест: описание пишется в контракте, а не в странице.
+
 ## Схемы
 
 Схемы пишутся на [Mermaid](https://mermaid.js.org/) блоком кода с языком `mermaid`:
