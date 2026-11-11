@@ -33,6 +33,8 @@
 | База Cyborg: старт, память, терминал, панели, бандлы и записанные сессии S1-S18 для сравнения с ядром | [05-verification/cyborg-baseline.md](05-verification/cyborg-baseline.md) |
 | Пилот PL-06: перенос файла воркспейса и `localStorage` Cyborg, таблица «поле - куда», потери, откат на старую версию | [05-verification/pilot-legacy-data.md](05-verification/pilot-legacy-data.md) |
 | Эпик «Микроядро»: цель, карта, итерации, реестр задач | [06-plans/epic-microkernel.md](06-plans/epic-microkernel.md) |
+| Приёмка документов владельцем (P-11): статусы, что сверено, что осталось решить | [06-plans/acceptance-checklist.md](06-plans/acceptance-checklist.md) |
+| План переезда Cyborg на ядро: 61 канал, 16 событий, данные, тугие узлы, метрики; скрипт сверки с кодом ai-cyborg | [06-plans/migration-plan-cyborg.md](06-plans/migration-plan-cyborg.md), [migration-plan-cyborg.check.sh](06-plans/migration-plan-cyborg.check.sh) |
 | Анализ готовности ядра и инвентарь Cyborg | [research/microkernel-readiness.md](research/microkernel-readiness.md), [research/cyborg-migration-inventory.md](research/cyborg-migration-inventory.md) |
 | Сайт документации (источник страниц - `guide/`) | [guide/](guide/index.mdx), сборка - `site/` |
 | Дорожная карта по направлениям ядра (безопасность, надёжность, наблюдаемость, производительность, совместимость и другие): сводка норм - что выполнено, что нет; что закрываем сейчас и что позже | [06-plans/roadmap.md](06-plans/roadmap.md) |
