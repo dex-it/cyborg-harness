@@ -51,6 +51,23 @@ export function withFileLock<T>(file: string, run: () => T, options: FileLockOpt
   }
 }
 
+/** Побайтная копия файла через временный файл и rename: ни пересериализации, ни полупустой копии при обрыве. */
+function copyFileAtomic(from: string, to: string): void {
+  const tmp = `${to}.${process.pid}.tmp`;
+  fs.copyFileSync(from, tmp);
+  fs.renameSync(tmp, to);
+}
+
+/** Файла нет - писать можно (создадим сами); есть, но без права записи - нет: `rename` проверяет права на каталог, а не на файл, и молча заменил бы файл, закрытый человеком. */
+function writable(file: string): boolean {
+  try {
+    fs.accessSync(file, fs.constants.W_OK);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT';
+  }
+}
+
 /** Нет файла - undefined; битый файл - ошибка: его нельзя молча считать пустым и перезаписать. */
 export function readJson(file: string): Record<string, unknown> | undefined {
   let text: string;
@@ -378,15 +395,31 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
       }
     };
     const doc = tolerant(file);
-    const legacy = doc && !('cyborg' in doc) ? options.migrate?.(doc) : undefined;
+    // Формат новее известного: что в нём лежит, ядро не знает, поэтому читает, но не записывает (отказ - в `persist`).
+    const formatOf = (f: string): unknown => {
+      try {
+        return readJson(f)?.cyborg;
+      } catch {
+        return undefined;
+      }
+    };
+    const isNewer = (format: unknown): format is number => typeof format === 'number' && format > CONFIG_FORMAT;
+    if (isNewer(doc?.cyborg)) problems.push(`${file}: формат cyborg ${doc.cyborg} новее известного ${CONFIG_FORMAT}, файл читается, но не перезаписывается`);
+    let legacy = doc && !('cyborg' in doc) ? options.migrate?.(doc) : undefined;
+    if (legacy && !writable(file)) {
+      problems.push(`${file}: файл только для чтения, перенос старого формата не выполнен`);
+      legacy = undefined;
+    }
     if (legacy) {
-      writeJsonAtomic(`${file}.v1.bak`, doc);
-      writeJsonAtomic(file, { ...legacy.config, cyborg: CONFIG_FORMAT });
-      migrated.push(`${file}: старый формат переведён в cyborg ${CONFIG_FORMAT}, копия - ${path.basename(file)}.v1.bak`);
+      // Порядок важен: поле `cyborg` в файле означает «перенос закончен» и повторно хук не зовётся, поэтому файл пишется последним.
+      // Сбой на любом шаге раньше оставляет прежний файл, и следующее открытие повторит перенос целиком (запись копии и state идемпотентна).
+      copyFileAtomic(file, `${file}.v1.bak`);
       if (Object.keys(legacy.state).length > 0) {
         writeJsonAtomic(stateFile, { ...readJson(stateFile), ...legacy.state });
         migrated.push(`state: ${Object.keys(legacy.state).join(', ')}`);
       }
+      writeJsonAtomic(file, { ...legacy.config, cyborg: CONFIG_FORMAT });
+      migrated.unshift(`${file}: старый формат переведён в cyborg ${CONFIG_FORMAT}, копия - ${path.basename(file)}.v1.bak`);
     } else if (!doc && !broken(file)) {
       writeJsonAtomic(file, { cyborg: CONFIG_FORMAT, plugins: {}, settings: {} });
     }
@@ -407,6 +440,8 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
       if (!target) throw new Error(`слоя ${layer} нет`);
       const f = layer === 'user' ? options.userFile : file;
       const write = (): T => {
+        if (isNewer(formatOf(f))) throw new Error(`${f}: формат cyborg новее известного ${CONFIG_FORMAT}, запись отменена`);
+        if (!writable(f)) throw new Error(`${f}: файл только для чтения, запись отменена`);
         let before: string | undefined;
         try {
           before = fs.readFileSync(f, 'utf8');
