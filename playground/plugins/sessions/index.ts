@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentToolsEndpoint, PluginContext, PluginModule, PtyHandle, SessionAction, SessionChange, SessionEvent } from '@cyborg-harness/contracts';
+import type { AgentEvent, AgentFacts, AgentToolsEndpoint, PluginContext, PluginModule, PtyHandle, SessionAction, SessionChange, SessionEvent } from '@cyborg-harness/contracts';
 import { MCP_PATH, mcpHandler } from './mcp.ts';
 
 interface Actions {
@@ -64,6 +64,17 @@ const field = (data: unknown, key: string): string | undefined => {
   return typeof value === 'string' ? value : undefined;
 };
 
+/**
+ * Данные документа сессии. `pty` («id:pid») по документу находит оставленный процесс при активации: id в таблице ядра считает с нуля при каждом запуске приложения,
+ * и без pid документ прошлого запуска мог бы подхватить чужой процесс с тем же id.
+ */
+interface Saved {
+  readonly agent: string;
+  readonly sessionId: string;
+  readonly pty: string;
+  readonly resumeId?: string;
+}
+
 // Потребитель cyborg.agent в playground: агент описывает запуск, pty запускает и держит этот плагин по своему праву.
 const plugin: PluginModule = {
   async activate(ctx: PluginContext) {
@@ -77,6 +88,7 @@ const plugin: PluginModule = {
     // Вкладка сессии по id сессии: живёт, пока вкладку не закрыл человек, и после выхода процесса (вкладка ждёт restore).
     const tabs = new Map<string, string>();
     const agents = () => ctx.contracts.all('cyborg.agent', 1);
+    type Provider = ReturnType<typeof agents>[number];
     // Порядок по id поставщика: тот же набор плагинов - тот же промпт; сломанный вклад не мешает запуску.
     const fragments = async (): Promise<string[]> => {
       const all = ctx.contracts.all('cyborg.session-prompt', 1).toSorted((a, b) => a.pluginId.localeCompare(b.pluginId));
@@ -161,6 +173,68 @@ const plugin: PluginModule = {
       return { url, token };
     };
 
+    const dataOf = (saved: Saved) => ({ agent: saved.agent, sessionId: saved.sessionId, pty: saved.pty, ...(saved.resumeId !== undefined && { resumeId: saved.resumeId }) });
+    // Билет вида на идущую сессию: вид после перезагрузки окна просит новый, прежний одноразовый и ушёл вместе с окном.
+    const present = async (sessionId: string, handle: PtyHandle): Promise<string> => {
+      const ticket = await handle.share();
+      // Сессия могла выйти, пока выдавался билет: тогда сообщать по нему нечего. Что накопилось до билета, уходит виду теперь.
+      if (actions.has(sessionId)) {
+        tickets.set(sessionId, ticket);
+        publish(sessionId);
+      }
+      return ticket;
+    };
+    /**
+     * Сессия за вкладкой `doc`: вкладка, события агента, выход процесса. Общее у нового запуска и у подхвата оставленного pty.
+     * Возвращает запуск слежения за событиями: он ждёт фактов поставщика, а подхват не должен ждать их, пока идёт льготный срок ядра.
+     */
+    const track = (s: { doc: string; sessionId: string; handle: PtyHandle; title: string; agent: string; provider: Provider | undefined; resumeId: string | undefined; forget: () => void }): ((facts: AgentFacts) => void) => {
+      const { doc, sessionId, handle, title, agent, provider } = s;
+      live.set(doc, handle);
+      tabs.set(sessionId, doc);
+      let name = agent;
+      let over = false;
+      let unwatch: (() => void) | undefined;
+      handle.onExit((exit) => {
+        over = true;
+        if (live.get(doc) === handle) live.delete(doc);
+        s.forget();
+        emit({ sessionId, title, change: { type: 'exit', code: exit.code } });
+        unwatch?.();
+        if (!provider) return;
+        void provider.impl.ended(sessionId, exit).then(
+          (hint) => ctx.log(`${name} ${sessionId}: вышла с ${String(exit.code)}${hint ? ` - ${hint.message}` : ''}`),
+          () => ctx.log(`${name} ${sessionId}: вышла с ${String(exit.code)}`),
+        );
+      });
+      return (facts) => {
+        name = facts.id;
+        if (over || !provider || !facts.capabilities.events) return;
+        const watch = provider.impl.watch(sessionId, (e) => {
+          ctx.log(`${facts.id} ${sessionId}: ${describe(e)}`);
+          onEvent(sessionId, e);
+          const change = sessionChange(e);
+          if (change) emit({ sessionId, title, change });
+          // Человек написал сам или нажал кнопку: прежние предложения к новому ходу не относятся.
+          if (e.type === 'prompt') setActions(sessionId, []);
+          // Документ закрыт человеком - сохранять некуда.
+          if (e.type === 'session' && live.has(doc)) {
+            const saved: Saved = { agent, sessionId, pty: `${handle.id}:${String(handle.pid)}`, resumeId: e.resumeId };
+            void ctx.documents.save(doc, { data: dataOf(saved) }).catch(() => undefined);
+          }
+        });
+        unwatch = () => void watch.then((w) => w.dispose());
+      };
+    };
+    // Сессия кончилась: вид снимает кнопки и забывает билет.
+    const endedFor = (sessionId: string, tokenToDrop?: string) => () => {
+      if (tokenToDrop !== undefined) tokens.delete(tokenToDrop);
+      actions.delete(sessionId);
+      const ticket = tickets.get(sessionId);
+      tickets.delete(sessionId);
+      if (ticket !== undefined) send({ ticket, actions: [], ready: false, ended: true });
+    };
+
     const launch = async (pluginId: unknown, documentId?: string, resumeId?: string): Promise<string> => {
       const provider = agents().find((p) => p.pluginId === pluginId);
       if (!provider) throw new Error(`агента ${String(pluginId)} нет`);
@@ -171,14 +245,7 @@ const plugin: PluginModule = {
       const resume = facts.capabilities.resume ? resumeId : undefined;
       const promptFragments = await fragments();
       const tools = await endpoint(sessionId);
-      const forget = () => {
-        if (tools) tokens.delete(tools.token);
-        actions.delete(sessionId);
-        // Сессия кончилась: вид снимает кнопки и забывает билет.
-        const ticket = tickets.get(sessionId);
-        tickets.delete(sessionId);
-        if (ticket !== undefined) send({ ticket, actions: [], ready: false, ended: true });
-      };
+      const forget = endedFor(sessionId, tools?.token);
       actions.set(sessionId, { list: [], ready: false, turnOver: false });
       let handle: PtyHandle;
       try {
@@ -190,45 +257,45 @@ const plugin: PluginModule = {
       }
       const title = `${facts.title} ${sessionId}`;
       const agent = provider.pluginId;
-      const doc = documentId ?? (await ctx.documents.open('session', { title, data: { agent } }));
-      if (documentId !== undefined) await ctx.documents.save(doc, { title, data: { agent, ...(resume !== undefined && { resumeId: resume }) } });
-      live.set(doc, handle);
-      tabs.set(sessionId, doc);
-      const watch = facts.capabilities.events
-        ? provider.impl.watch(sessionId, (e) => {
-            ctx.log(`${facts.id} ${sessionId}: ${describe(e)}`);
-            onEvent(sessionId, e);
-            const change = sessionChange(e);
-            if (change) emit({ sessionId, title, change });
-            // Человек написал сам или нажал кнопку: прежние предложения к новому ходу не относятся.
-            if (e.type === 'prompt') setActions(sessionId, []);
-            // Документ закрыт человеком - сохранять некуда.
-            if (e.type === 'session' && live.has(doc)) void ctx.documents.save(doc, { data: { agent, resumeId: e.resumeId } }).catch(() => undefined);
-          })
-        : undefined;
-      handle.onExit((exit) => {
-        if (live.get(doc) === handle) live.delete(doc);
-        forget();
-        emit({ sessionId, title, change: { type: 'exit', code: exit.code } });
-        void watch?.then((s) => s.dispose());
-        void provider.impl.ended(sessionId, exit).then(
-          (hint) => ctx.log(`${facts.id} ${sessionId}: вышла с ${String(exit.code)}${hint ? ` - ${hint.message}` : ''}`),
-          () => ctx.log(`${facts.id} ${sessionId}: вышла с ${String(exit.code)}`),
-        );
-      });
+      const saved: Saved = { agent, sessionId, pty: `${handle.id}:${String(handle.pid)}`, ...(resume !== undefined && { resumeId: resume }) };
+      const doc = documentId ?? (await ctx.documents.open('session', { title, data: dataOf(saved) }));
+      if (documentId !== undefined) await ctx.documents.save(doc, { title, data: dataOf(saved) });
+      track({ doc, sessionId, handle, title, agent, provider, resumeId: resume, forget })(facts);
       ctx.log(`${facts.title}: сессия ${sessionId}, pid ${String(handle.pid)}`);
-      const ticket = await handle.share();
-      // Сессия могла выйти, пока выдавался билет: тогда сообщать по нему нечего. Что накопилось до билета, уходит виду теперь.
-      if (actions.has(sessionId)) {
-        tickets.set(sessionId, ticket);
-        publish(sessionId);
+      return present(sessionId, handle);
+    };
+
+    /**
+     * Оставленные pty (хост плагина перезапущен или человек выключил плагин с «Оставить работать»): с активации идёт льготный срок ядра,
+     * и не взятый через `attach` процесс по его концу завершается (K-02, #90). Документ сессии помнит свой pty, по нему сессия возвращается на вкладку.
+     */
+    const adopt = async (): Promise<void> => {
+      const [docs, left] = await Promise.all([ctx.documents.list(), pty.list()]);
+      for (const info of left) {
+        const doc = docs.find((d) => field(d.data, 'pty') === `${info.id}:${String(info.pid)}`);
+        const sessionId = field(doc?.data, 'sessionId');
+        const agent = field(doc?.data, 'agent');
+        if (doc === undefined || sessionId === undefined || agent === undefined) continue;
+        const handle = await pty.attach(info.id);
+        const provider = agents().find((p) => p.pluginId === agent);
+        actions.set(sessionId, { list: [], ready: false, turnOver: false });
+        const watching = track({ doc: doc.id, sessionId, handle, title: doc.title, agent, provider, resumeId: field(doc.data, 'resumeId'), forget: endedFor(sessionId) });
+        ctx.log(`${doc.title}: подхвачена оставленная сессия, pid ${String(handle.pid)}`);
+        void provider?.impl.facts().then(watching, (e: unknown) => ctx.log(`${agent}: факты подхваченной сессии - ${String(e)}`, 'warn'));
       }
-      return ticket;
     };
 
     ctx.commands.register('sessions.agents', () => Promise.all(agents().map(async (p) => ({ pluginId: p.pluginId, ...(await p.impl.facts()) }))));
     ctx.commands.register('sessions.new', (pluginId) => launch(pluginId));
     ctx.commands.register('sessions.previous', async () => (await ctx.documents.list()).filter((d) => !live.has(d.id)).map((d) => ({ id: d.id, title: d.title, agent: field(d.data, 'agent'), resumable: field(d.data, 'resumeId') !== undefined })));
+    // Идущие сессии: окно после перезагрузки (и подхваченные при активации) открывает их заново по новому билету.
+    ctx.commands.register('sessions.running', async () => (await ctx.documents.list()).filter((d) => live.has(d.id)).map((d) => ({ id: d.id, title: d.title, pid: live.get(d.id)?.pid })));
+    ctx.commands.register('sessions.reopen', async (id) => {
+      const handle = typeof id === 'string' ? live.get(id) : undefined;
+      const sessionId = [...tabs].find(([, doc]) => doc === id)?.[0];
+      if (handle === undefined || sessionId === undefined) throw new Error(`сессии ${String(id)} нет`);
+      return present(sessionId, handle);
+    });
     ctx.commands.register('sessions.restore', async (id) => {
       const doc = (await ctx.documents.list()).find((d) => d.id === id);
       if (!doc) throw new Error(`документа ${String(id)} нет`);
@@ -242,6 +309,7 @@ const plugin: PluginModule = {
       for (const [sessionId, doc] of tabs) if (doc === id) tabs.delete(sessionId);
       void handle?.kill().catch(() => undefined);
     });
+    await adopt().catch((e: unknown) => ctx.log(`подхват оставленных сессий: ${String(e)}`, 'warn'));
     const kept = await ctx.documents.list();
     if (kept.length > 0) ctx.log(`с прошлого запуска: ${String(kept.length)} сессий к восстановлению`);
     return undefined;
