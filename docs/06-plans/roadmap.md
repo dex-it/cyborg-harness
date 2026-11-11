@@ -244,7 +244,7 @@ origin: derived
 | [K-09 #46](https://github.com/dex-it/cyborg-harness/issues/46) | отмена запросов между плагинами | влита, PR #122: `AbortSignal` последним аргументом; форма ждёт подтверждения владельца (строка 8 D-00) |
 | [K-13 #60](https://github.com/dex-it/cyborg-harness/issues/60) | канал «главная часть - вид», модальные окна плагина | итерация 3, на ревью, PR #159: канал, `modal` как род области, `ctx.dialogs.show` (только `ask`); буфер обмена - через команду главной части, `UiContext.clipboard` не вводится |
 | [PL-02 #18](https://github.com/dex-it/cyborg-harness/issues/18) | пилот: хук - статус - уведомление в другом плагине | на ревью: автоматикой закрыто всё, кроме клика по настоящему уведомлению ОС (ручная проверка владельцем), [замер и инструкция](../05-verification/notify-chain.md) |
-| [PL-07 #30](https://github.com/dex-it/cyborg-harness/issues/30) | пилот: CLI-плагин с отменой и пулом процессов (срез трекеров) | не начато |
+| [PL-07 #30](https://github.com/dex-it/cyborg-harness/issues/30) | пилот: CLI-плагин с отменой и пулом процессов (срез трекеров) | сделано: [замер](../05-verification/pilot-trackers.md) - пул 6 держит пик 6 процессов, сирот после тайм-аута, отмены и выгрузки нет; отмена `process.run` теперь добивает `SIGKILL`; вопрос про флаги в хвосте argv остаётся владельцу |
 | [PL-08 #32](https://github.com/dex-it/cyborg-harness/issues/32) | пилот: раскладка окна Cyborg на областях и меню | сделан, ждёт слияния: [результат](../05-verification/pl08-window-layout.md); новый род области не понадобился, решения - SAD, раздел 8, п. 23 |
 | [T-14 #130](https://github.com/dex-it/cyborg-harness/issues/130) | smoke: два вида одного плагина в живом окне, свёртка и привязка диалога | итерация 3, в работе |
 

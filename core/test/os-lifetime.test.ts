@@ -159,6 +159,29 @@ test('process.run: signal в options - отмена завершает прог�
   }
 });
 
+test('process.run: signal - программа, глушащая SIGTERM, добивается SIGKILL через 2 с, место в пределе освобождается (как при timeoutMs)', { skip: !posix && 'группы процессов - POSIX' }, async () => {
+  await using box = await sandbox();
+  const { k, ctx } = await kernel({ a: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp }, { runs: 1 });
+  const file = path.join(box.work, 'deaf');
+  const deaf = `process.on('SIGTERM',()=>{});require('fs').writeFileSync(${JSON.stringify(file)},String(process.pid));setInterval(()=>{},1e3)`;
+  let pid: number | undefined;
+  try {
+    const abort = new AbortController();
+    const run = ctx('a').os.process!.run(process.execPath, ['-e', deaf], { signal: abort.signal });
+    run.catch(() => undefined);
+    await waitFor('pid программы', async () => (await readFile(file, 'utf8').catch(() => '')) !== '');
+    pid = Number(await readFile(file, 'utf8'));
+    abort.abort();
+    await assert.rejects(run, { code: 'Cancelled' });
+    // Без добивания глухая к SIGTERM программа жила бы до выгрузки плагина и держала единственное место предела.
+    await waitFor('глухая к SIGTERM программа добита после отмены', () => !alive(pid!), { timeout: 8000 });
+    assert.equal((await ctx('a').os.process!.run(process.execPath, ['-e', '0'])).code, 0, 'место в пределе runs освободилось');
+  } finally {
+    if (pid !== undefined && alive(pid)) process.kill(pid, 'SIGKILL');
+    await k.unload();
+  }
+});
+
 test('pty: kill бьёт по группе процесса - потомки оболочки агента не остаются сиротами', { skip: !posix && 'группы процессов - POSIX' }, async () => {
   // node-pty делает процесс лидером своей сессии и группы; detached даёт то же без псевдотерминала.
   const leader = spawn('/bin/sh', ['-c', 'sleep 30 & echo $!; wait'], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });

@@ -1230,11 +1230,11 @@ export class OsGateway {
       };
       const timer = timeout > 0 ? setTimeout(terminate, timeout) : undefined;
       const untrack = this.#track(pluginId, () => stop('SIGKILL'));
-      // Отмена вызывающего: SIGTERM всей группе, как по тайм-ауту; вызывающий уже получил Cancelled от канала, здесь ждём close и освобождаем место в пределе runs.
+      // Отмена вызывающего: SIGTERM всей группе и SIGKILL через 2 с, как по тайм-ауту (программа, глухая к SIGTERM, иначе держала бы место в пределе runs до выгрузки плагина); вызывающий уже получил Cancelled от канала, здесь ждём close.
       let cancelled = false;
       const onAbort = () => {
         cancelled = true;
-        stop('SIGTERM');
+        terminate();
       };
       signal?.addEventListener('abort', onAbort, { once: true });
       const done = () => {
