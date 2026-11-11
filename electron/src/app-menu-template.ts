@@ -39,3 +39,34 @@ export function appMenuTemplate(base: readonly AppMenuItem[], entries: readonly 
   const extra = MENU_NAMES.filter((m) => !placed.has(m) && entries.some((e) => e.menu === m));
   return [...top, ...extra.map((menu): MenuItemConstructorOptions => ({ label: FALLBACK_LABELS[menu], submenu: withPlugins(menu, []) }))];
 }
+
+/** Пункт построенного меню Electron в той части, что нужна обходу: `Menu.items` и `MenuItem` её удовлетворяют. */
+export interface BuiltMenuItem {
+  readonly label?: string | undefined;
+  readonly role?: string | undefined;
+  readonly accelerator?: string | null | undefined;
+  readonly submenu?: { readonly items: readonly BuiltMenuItem[] } | null | undefined;
+}
+
+/**
+ * Сочетания меню ОС: путь пункта (`Меню/Подменю/Пункт`, без подписи - роль) -> сочетание, в том числе то, что Electron дал роли сам (`copy` - `CommandOrControl+C`).
+ * Это `LoadOptions.menuKeys` ядра: реестр знает настоящие акселераторы, а не список, который приложение ведёт руками (D-27). Чистая функция: меню строит `baseAccelerators`.
+ */
+export function acceleratorsOf(items: readonly BuiltMenuItem[]): Record<string, string> {
+  const found: Record<string, string> = {};
+  const walk = (list: readonly BuiltMenuItem[], path: string): void => {
+    for (const item of list) {
+      const name = item.label ?? item.role;
+      const here = name === undefined ? path : path === '' ? name : `${path}/${name}`;
+      if (typeof item.accelerator === 'string' && name !== undefined) {
+        let key = here;
+        // Два пункта с одним именем - два сочетания, а не одно затёртое.
+        for (let n = 2; Object.hasOwn(found, key); n++) key = `${here}#${String(n)}`;
+        found[key] = item.accelerator;
+      }
+      if (item.submenu) walk(item.submenu.items, here);
+    }
+  };
+  walk(items, '');
+  return found;
+}
