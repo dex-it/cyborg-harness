@@ -50,8 +50,8 @@ cpSync(join(root, '..', 'node_modules', '@xterm', 'xterm', 'css', 'xterm.css'), 
 // P-07: те же плагины в виде поставки приложения - `dist/delivery`: собраны в index.mjs, рядом delivery.json с хешами. Её грузит запуск с `--delivery` и упакованная проба
 // (pack-delivery.mjs). Файлы, которые стенд кладёт рядом с видами выше (таблица xterm, воркеры Monaco), в поставке нужны тем же видам; хеши считаются после их копирования.
 const delivery = join(dist, 'delivery');
-// Пилоты PL-04 (files, git, viewer) и PL-06 (legacy-prefs) - плагины для тестов ядра: не включены в DEFAULT_CONFIG, окна не имеют, и проверка упакованной поставки ждёт, что каждый плагин поставки активен.
-const PILOT_ONLY = new Set(['files', 'git', 'viewer', 'legacy-prefs']);
+// Пилоты PL-04 (files, git, viewer), PL-06 (legacy-prefs) и PL-07 (trackers) - плагины для тестов ядра: не включены в DEFAULT_CONFIG, окна не имеют, и проверка упакованной поставки ждёт, что каждый плагин поставки активен.
+const PILOT_ONLY = new Set(['files', 'git', 'viewer', 'legacy-prefs', 'trackers']);
 const built = await buildDelivery(readdirSync(plugins, { withFileTypes: true }).filter((e) => e.isDirectory() && !PILOT_ONLY.has(e.name)).map((e) => join(plugins, e.name)), { out: delivery, declarations: [join(plugins, 'contracts.ts')] });
 for (const warning of built.warnings) console.warn(`delivery: ${warning}`);
 if (!built.ok) throw new Error(`поставка стенда: ${built.problems.map((p) => `${p.file}${p.line === undefined ? '' : `:${String(p.line)}`}: ${p.message}`).join('; ')}`);
