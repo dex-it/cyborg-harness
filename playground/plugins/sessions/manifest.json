@@ -20,6 +20,12 @@
       ]
     },
     "sessions.previous": {},
+    "sessions.running": {},
+    "sessions.reopen": {
+      "args": [
+        "string"
+      ]
+    },
     "sessions.restore": {
       "args": [
         "string"

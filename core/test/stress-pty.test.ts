@@ -205,6 +205,82 @@ test('stress-pty: вывод идёт без остановки, хост пад
   );
 });
 
+/** Номера `[000123]` подряд: каждая запись ровно один раз, от первой до последней. */
+const contiguous = (text: string): number[] => {
+  const numbers = (text.match(/\[\d{6}\]/g) ?? []).map((p) => Number(p.slice(1, -1)));
+  const start = numbers[0] ?? 0;
+  assert.deepEqual(numbers, Array.from({ length: numbers.length }, (_, i) => start + i), 'номера идут подряд, без дыр и повторов');
+  return numbers;
+};
+
+test('PL-01: окно перезагружено под потоком - новый вид получает хвост и продолжение без дыр и повторов, без стыка потери между старым и новым видом', async () => {
+  const { t, backend } = table(256 * 1024);
+  const wire = await t.spawn('p', spawnOpts);
+  const proc = backend.procs[0]!;
+  let seq = 0;
+  const emit = (n: number) => {
+    for (let i = 0; i < n; i++) proc.emit(`[${String(seq++).padStart(6, '0')}]`);
+  };
+  const before = fakeView();
+  await t.openTerminal('p', t.share('p', wire.id), before.channel);
+  emit(300);
+  await settle();
+  // Окно перезагружается: порт старого вида закрыт, а процесс пишет дальше, пока новое окно просит билет и открывает терминал.
+  before.close();
+  emit(150);
+  const after = fakeView();
+  const opening = t.openTerminal('p', t.share('p', wire.id), after.channel);
+  emit(150);
+  const terminal = await opening;
+  emit(300);
+  const last = `[${String(seq - 1).padStart(6, '0')}]`;
+  await waitFor('новый вид получил последний кусок', () => (terminal.backlog + after.data.join('')).endsWith(last));
+  const seen = before.data.join('');
+  const text = terminal.backlog + after.data.join('');
+  const numbers = contiguous(text);
+  assert.equal(numbers.at(-1), seq - 1, 'последний кусок не дошёл до нового вида');
+  const lastOld = contiguous(seen).at(-1) ?? -1;
+  assert.ok((numbers[0] ?? Infinity) <= lastOld + 1, `между старым видом (до ${String(lastOld)}) и хвостом нового (с ${String(numbers[0])}) дыра`);
+  assert.equal(numbers[0], 0, 'хвост 256 КиБ вмещает весь поток, он должен начинаться с нуля');
+  await t.releaseAll();
+});
+
+test('PL-01: хост плагина упал и окно перезагружено при живом pty - attach и новый вид получают хвост без дыр и повторов, поток идёт дальше', async () => {
+  let ctx!: PluginContext;
+  await using s = await kernelWithPty({ term: (c) => void (ctx = c) });
+  const h0 = await ctx.os.pty!.spawn({ program: 'sh', args: [], cols: 80, rows: 24, persist: true });
+  const proc = s.backend.procs[0]!;
+  let seq = 0;
+  const emit = (n: number) => {
+    for (let i = 0; i < n; i++) proc.emit(`[${String(seq++).padStart(6, '0')}]`);
+  };
+  const before = fakeView();
+  await s.k.openTerminal('term', await h0.share(), before.channel);
+  emit(200);
+  await waitFor('старый вид получил первые 200', () => before.data.join('').endsWith('[000199]'));
+  // Хост упал и окно перезагрузилось одновременно: вид потерян, плагин вернулся, процесс жил и писал.
+  s.handles[0]?.kill();
+  before.close();
+  emit(200);
+  await s.k.idle();
+  const id = await waitFor('pty пережил падение хоста', async () => (await ctx.os.pty!.list())[0]?.id);
+  // Последние куски лежат в пачке pty-хоста, когда приходит attach: хвост и пачка не должны дать повтор.
+  const attaching = ctx.os.pty!.attach(id);
+  emit(50);
+  const owner: PtyHandle = await attaching;
+  let owned = '';
+  owner.onData((c) => void (owned += c));
+  const after = fakeView();
+  const view = await s.k.openTerminal('term', await owner.share(), after.channel);
+  emit(200);
+  const last = `[${String(seq - 1).padStart(6, '0')}]`;
+  await waitFor('и владелец, и новый вид получили последний кусок', () => (owner.backlog + owned).endsWith(last) && (view.backlog + after.data.join('')).endsWith(last));
+  const ownerNumbers = contiguous(owner.backlog + owned);
+  const viewNumbers = contiguous(view.backlog + after.data.join(''));
+  assert.deepEqual([ownerNumbers[0], viewNumbers[0]], [0, 0], 'хвост 256 КиБ вмещает весь поток');
+  assert.equal(viewNumbers.length, seq, 'новый вид получил не весь поток');
+});
+
 test('stress-pty: плагин spawn-ит pty и не подписывается на вывод - хост не копит вывод без предела', async () => {
   let ctx!: PluginContext;
   await using s = await kernelWithPty({ term: (c) => void (ctx = c) });
