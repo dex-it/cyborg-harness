@@ -210,7 +210,7 @@ origin: derived
 | [P-01 #29](https://github.com/dex-it/cyborg-harness/issues/29) | версионирование и публикация `@cyborg-harness/contracts`, журнал изменений | влита, PR #102: свой снимок API пакета контрактов; публикация - P-10 |
 | [K-06 #41](https://github.com/dex-it/cyborg-harness/issues/41) | журнал вызовов членов с `@deprecated` | влита, PR #107: строка 10 D-00 |
 | [T-06 #12](https://github.com/dex-it/cyborg-harness/issues/12) | снимок публичного API под тестом: ломающее изменение роняет CI | сделана, PR #158: `core/test/api-snapshot.test.ts`, эталон `core/test/api-snapshot/1.0.0.txt`; поверх снимка пакета контрактов (P-01); ломающее изменение требует мажора после заморозки (K-21), до неё тест просит обновить эталон |
-| [PL-06 #28](https://github.com/dex-it/cyborg-harness/issues/28) | миграция данных воркспейса и `localStorage` Cyborg | не начато |
+| [PL-06 #28](https://github.com/dex-it/cyborg-harness/issues/28) | миграция данных воркспейса и `localStorage` Cyborg | на ревью: [результат](../05-verification/pilot-legacy-data.md) - `commands`, неизвестные поля и невалидные записи проектов переносятся, `.v1.bak` побайтно, state раньше файла, файл новее формата и только для чтения не перезаписываются, ключи `localStorage` -> память видов; откат на старую версию без копии стирает формат 2 (нужна правка ai-cyborg), настоящие файл и `localStorage` не проверялись |
 | [K-21 #62](https://github.com/dex-it/cyborg-harness/issues/62) | заморозка API 1.0 - итог направлений 6 и 7 | не начато |
 
 ## 7. Форма API и расширяемость

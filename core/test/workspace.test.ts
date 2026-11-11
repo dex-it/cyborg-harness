@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, PluginModule } from '@cyborg-harness/contracts';
@@ -82,6 +82,103 @@ test('перенос старого формата хуком приложени
   assert.deepEqual(second.workspace.migrated, [], 'перенос повторился');
   assert.equal(seen.length, 1, 'хук позван для документа с полем cyborg');
   second.workspace.close();
+});
+
+// PL-06: копия `.v1.bak` - защита пользователя от потери данных, поэтому она байты исходника, а не его пересериализация (приложение пишет файл без перевода строки в конце).
+test('перенос: .v1.bak побайтно равна исходному файлу, даже если его формат отличается от записи ядра', async () => {
+  await using box = await sandbox();
+  const original = Buffer.from('{"items":[ "a" ,"b"],\r\n  "current":"b",  "n": 1.0, "текст": "\\u0041"}');
+  await writeFile(box.file, original);
+  const migrate: MigrateWorkspace = (doc) => ({ config: { settings: { list: { items: doc.items } } }, state: {} });
+  const opened = await openWorkspace({ file: box.file, userFile: box.userFile, stateDir: box.stateDir, migrate });
+  assert.ok(opened.ok);
+  opened.workspace.close();
+  assert.ok(original.equals(await readFile(`${box.file}.v1.bak`)), 'копия не равна исходнику побайтно');
+  assert.deepEqual(await json(box.file), { cyborg: 2, settings: { list: { items: ['a', 'b'] } } });
+});
+
+test('перенос: сбой записи state оставляет файл прежним, и следующее открытие переносит всё, включая state', async () => {
+  await using box = await sandbox();
+  const original = JSON.stringify({ items: ['a'], current: 'a' });
+  await writeFile(box.file, original);
+  // На месте каталога state лежит файл: запись раздела state невозможна.
+  await writeFile(box.stateDir, 'не каталог');
+  const migrate: MigrateWorkspace = (doc) => ({ config: { settings: { list: { items: doc.items } } }, state: { list: { current: doc.current } } });
+  await assert.rejects(openWorkspace({ file: box.file, userFile: box.userFile, stateDir: box.stateDir, migrate }));
+  assert.equal(await readFile(box.file, 'utf8'), original, 'файл переведён раньше, чем записан state: перенос уже не повторится');
+  await rm(box.stateDir);
+  const again = await openWorkspace({ file: box.file, userFile: box.userFile, stateDir: box.stateDir, migrate });
+  assert.ok(again.ok);
+  assert.deepEqual(await json(again.workspace.stateFile), { list: { current: 'a' } });
+  assert.deepEqual(await json(box.file), { cyborg: 2, settings: { list: { items: ['a'] } } });
+  again.workspace.close();
+});
+
+test('файл новее известного формата (cyborg 3): читается, но не перезаписывается, причина в problems', async () => {
+  await using box = await sandbox();
+  const future = JSON.stringify({ cyborg: 3, plugins: { enabled: ['a'] }, settings: { a: { $version: 1, x: 1 } }, ещё: { новое: true } });
+  await writeFile(box.file, future);
+  let called = false;
+  const opened = await openWorkspace({ file: box.file, userFile: box.userFile, stateDir: box.stateDir, migrate: () => ((called = true), undefined) });
+  assert.ok(opened.ok);
+  const ws = opened.workspace;
+  assert.equal(called, false, 'хук позван для документа с полем cyborg');
+  assert.deepEqual(ws.plugins.enabled, ['a']);
+  assert.match(ws.problems.join('\n'), /cyborg 3.*новее.*2/);
+  await assert.rejects(ws.config.write('workspace', 'a', 1, { x: 2 }), /новее|запись отменена/);
+  ws.close();
+  assert.equal(await readFile(box.file, 'utf8'), future);
+  assert.equal((await readdir(box.root)).some((n) => n.includes('.v1.bak') || n.includes('.corrupt-')), false, 'копий не должно быть');
+});
+
+test('пустой файл и корень не объект: не стираются и не переводятся, рядом копия; запись в них отменена', async () => {
+  for (const content of ['', '[1]', 'null']) {
+    await using box = await sandbox();
+    await writeFile(box.file, content);
+    let called = false;
+    const opened = await openWorkspace({ file: box.file, userFile: box.userFile, stateDir: box.stateDir, migrate: () => ((called = true), undefined) });
+    assert.ok(opened.ok);
+    assert.equal(called, false, `хук позван для ${JSON.stringify(content)}`);
+    assert.equal(opened.workspace.problems.length, 1);
+    await assert.rejects(opened.workspace.config.write('workspace', 'a', 1, { x: 1 }));
+    opened.workspace.close();
+    assert.equal(await readFile(box.file, 'utf8'), content);
+    assert.equal((await readdir(box.root)).filter((n) => n.startsWith('team.cyborg.json.corrupt-')).length, 1);
+    assert.equal((await readdir(box.root)).some((n) => n.endsWith('.v1.bak')), false);
+  }
+});
+
+// Права: под root проверка доступа ничего не запрещает.
+const asRoot = process.getuid?.() === 0;
+
+test('файл только для чтения: старый формат не переводится, запись разделов отменена, файл и его права на месте', { skip: asRoot }, async () => {
+  await using box = await sandbox();
+  const original = JSON.stringify({ items: ['a'] });
+  await writeFile(box.file, original);
+  await chmod(box.file, 0o444);
+  const migrate: MigrateWorkspace = (doc) => ({ config: { settings: { list: { items: doc.items } } }, state: {} });
+  const opened = await openWorkspace({ file: box.file, userFile: box.userFile, stateDir: box.stateDir, migrate });
+  assert.ok(opened.ok);
+  assert.equal(opened.workspace.migrated.length, 0);
+  assert.match(opened.workspace.problems.join('\n'), /только для чтения/);
+  await assert.rejects(opened.workspace.config.write('workspace', 'list', 1, { items: [] }), /только для чтения/);
+  opened.workspace.close();
+  assert.equal(await readFile(box.file, 'utf8'), original);
+  assert.equal((await stat(box.file)).mode & 0o777, 0o444, 'права файла заменены записью ядра');
+  assert.equal((await readdir(box.root)).some((n) => n.endsWith('.v1.bak')), false, 'копия без переноса не нужна');
+});
+
+test('каталог только для чтения: открытие отказывает ошибкой доступа, файл не тронут', { skip: asRoot }, async () => {
+  await using box = await sandbox();
+  const original = JSON.stringify({ items: ['a'] });
+  await writeFile(box.file, original);
+  await chmod(box.root, 0o555);
+  try {
+    await assert.rejects(openWorkspace({ file: box.file, userFile: box.userFile, stateDir: box.stateDir, migrate: () => ({ config: {}, state: {} }) }), { code: 'EACCES' });
+    assert.equal(await readFile(box.file, 'utf8'), original);
+  } finally {
+    await chmod(box.root, 0o755);
+  }
 });
 
 test('хук вернул undefined или его нет: файл не тронут, копии нет', async () => {
