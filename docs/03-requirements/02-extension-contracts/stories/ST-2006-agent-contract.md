@@ -12,11 +12,11 @@ traced from: BR-CH-003, BR-CH-005
 
 Как автор поставщика агента, я хочу подключить свою программу как плагин `cyborg.agent`, чтобы она появилась рядом с Claude Code и ядро и `sessions` не менялись.
 
-Нормы: FR-CH-1015, FR-CH-2007, FR-CH-2009, FR-CH-2010, FR-CH-2015, FR-CH-2016, FR-CH-2017, FR-CH-2018, FR-CH-2019, FR-CH-2020. Сценарии: UC-COMPATIBILITY-5001, UC-EXTENSION-CONTRACTS-2002. SRS - [srs.md](../srs.md).
+Нормы: FR-CH-1015, FR-CH-2007, FR-CH-2009, FR-CH-2010, FR-CH-2012, FR-CH-2015, FR-CH-2016, FR-CH-2017, FR-CH-2018, FR-CH-2019, FR-CH-2020. Сценарии: UC-COMPATIBILITY-5001, UC-EXTENSION-CONTRACTS-2002. SRS - [srs.md](../srs.md).
 
 ## Критерии приёмки
 
-1. [FR-CH-2009] [UC-EXTENSION-CONTRACTS-2002#1] [UC-EXTENSION-CONTRACTS-2002#2]
+1. [FR-CH-2009] [FR-CH-2012] [UC-EXTENSION-CONTRACTS-2002#1] [UC-EXTENSION-CONTRACTS-2002#2]
    - Дано манифест поставщика с `"provides": { "cyborg.agent": "1.0" }` и правом `launch` на программу
    - Когда автор подключает плагин
    - Тогда поставщик отдаёт `facts`, `launch`, `watch`, `ended`, `history`; прав `pty` ему не нужно, процесс запускает потребитель; регистрации агента в ядре нет
@@ -36,7 +36,7 @@ traced from: BR-CH-003, BR-CH-005
    - Дано человек нажал кнопку агента
    - Когда `sessions` спрашивает `facts`
    - Тогда `launch` отдаёт описание запуска с фрагментами промпта от `cyborg.session-prompt`, процесс запускает `ctx.os.pty.spawn` с `persist` и `describedBy`
-6. [FR-CH-2009] [UC-EXTENSION-CONTRACTS-2002#7]
+6. [FR-CH-2009] [FR-CH-1015] [UC-EXTENSION-CONTRACTS-2002#7]
    - Дано процесс агента запущен
    - Когда вид `sessions` открывает терминал
    - Тогда терминал открыт по билету, события `watch` (`cwd`, `session`, `activity`, `prompt`, `turnEnd`, `waiting`) приходят от поставщика
