@@ -9,6 +9,7 @@ import { workspaceKey } from '@cyborg-harness/core';
 import { buildPlugin } from 'cyborg-plugin';
 import { transformSync } from 'esbuild';
 import { crashOf } from './crash-reports.mjs';
+import { sessionUnderLoad } from './smoke-session-load.mjs';
 
 const repo = resolve(import.meta.dirname, '..', '..');
 const electronArgs = process.argv.slice(2);
@@ -44,6 +45,8 @@ async function waitFor(what, probe, timeout = TIMEOUT_MS) {
 }
 
 const liveClaude = process.env.CYBORG_SMOKE_CLAUDE === '1';
+// PL-01: шаг «сессия под нагрузкой» (предел ввода, размеры, перезагрузка окна, перезапуск хоста sessions); с живым claude идёт сам, с подставным - по CYBORG_SMOKE_LOAD=1. В CI его нет.
+const loadStep = liveClaude || process.env.CYBORG_SMOKE_LOAD === '1';
 // Без живого claude оболочка входа находит подставной (fake-claude.mjs): профиль человека с его PATH в smoke не нужен.
 const fakeBin = join(userData, 'fake-bin');
 mkdirSync(fakeBin);
@@ -988,6 +991,7 @@ async function main() {
       reached = 'вопрос о доверии к каталогу, стрелка с экрана меняет выбор';
     }
     await waitFor('вкладка сессии claude в панели «Документы»', async () => (await docRows()) === 'sessions · session:true');
+    if (loadStep) await sessionUnderLoad({ assert, ev, main, inView, waitFor, log, screen, expect: /trust\s*this\s*folder|Claude Code|claude/i });
     await ev("document.querySelector('#documents-list .document-row button').click()");
     await waitFor('сессия claude закрыта', async () => (await docRows()) === '' && /вышла/.test(await inView('sessions', "document.getElementById('session-state').textContent")));
     log(`живой claude: оболочка входа по праву launch поставщика, ${reached}; вкладка закрывает сессию`);
@@ -1009,6 +1013,7 @@ async function main() {
     assert.equal(await inView('sessions', "document.getElementById('line').value"), 'smoke-reply', 'реплика не встала в строку ввода');
     await sleep(300);
     assert.equal(await received(), 1, 'кнопка ответила на вопрос агента за человека');
+    if (loadStep) await sessionUnderLoad({ assert, ev, main, inView, waitFor, log, screen: sessionScreen, expect: /fake claude: готов/ });
     await waitFor('вкладка сессии подставного claude в панели «Документы»', async () => (await docRows()) === 'sessions · session:true');
     // #194: просьба плагина активировать вкладку (ctx.documents.reveal) доходит до окна по каналу documents:reveal. Ядро и службу проверяют тесты;
     // здесь последний шаг цепочки в настоящем окне: мост preload, панель «Документы» выходит вперёд, строка документа помечена активной.
