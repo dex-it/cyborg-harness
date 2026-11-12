@@ -295,3 +295,58 @@ test('цикл и каскад вместе: зависящие от цикла 
   assert.deepEqual([...g.rejected.keys()].sort(), ['a', 'b', 'c', 'd', 'p', 'q']);
   assert.deepEqual(g.order, ['ok']);
 });
+
+// Поставщик контракта - только плагин, остающийся в графе: отвергнутый каскадом не делает потребителя неоднозначным
+// (FR-CH-1004: «два поставщика при кратности one» считаются среди тех, кто загружается).
+test('поставщик, отвергнутый каскадом, не делает потребителя неоднозначным: p2 отвергнут своим requires, c связан с p1', () => {
+  const g = resolveGraph(
+    [
+      m('c', { requires: { 'x.s': '^1' } }),
+      m('p1', { provides: { 'x.s': '1.0' } }),
+      m('p2', { provides: { 'x.s': '1.0' }, requires: { 'x.none': '^1' } }),
+    ],
+    '1.0.0',
+  );
+  assert.deepEqual([...g.rejected], [['p2', [{ kind: 'missing', contract: 'x.none', range: '^1' }]]]);
+  assert.equal(g.bindings.get('c')?.get('x.s'), 'p1');
+  assert.deepEqual(g.order, ['p1', 'c']);
+});
+
+test('неоднозначность считается среди оставшихся и не зависит от порядка входа: отказ второго поставщика через два звена, optional-потребитель', () => {
+  const plugins = [
+    m('c', { requires: { 'x.s': '^1' } }),
+    m('o', { optional: { 'x.s': '^1' } }),
+    m('p1', { provides: { 'x.s': '1.0' } }),
+    m('p2', { provides: { 'x.s': '1.0' }, requires: { 'x.q': '^1' } }),
+    m('q', { provides: { 'x.q': '1.0' }, requires: { 'x.none': '^1' } }),
+  ];
+  const perms = (xs: PluginManifest[]): PluginManifest[][] => (xs.length < 2 ? [xs] : xs.flatMap((x, i) => perms([...xs.slice(0, i), ...xs.slice(i + 1)]).map((rest) => [x, ...rest])));
+  for (const input of perms(plugins)) {
+    const g = resolveGraph(input, '1.0.0');
+    const label = input.map((p) => p.id).join(',');
+    assert.deepEqual([...g.rejected.keys()].sort(), ['p2', 'q'], label);
+    assert.equal(g.bindings.get('c')?.get('x.s'), 'p1', label);
+    assert.equal(g.bindings.get('o')?.get('x.s'), 'p1', label);
+    assert.deepEqual([...g.order].sort(), ['c', 'o', 'p1'], label);
+  }
+});
+
+test('потребитель с живыми двумя поставщиками остаётся неоднозначным, а поставщик, сам отвергнутый за неоднозначность, потребителя не снимает', () => {
+  const g = resolveGraph(
+    [
+      m('c', { requires: { 'x.s': '^1' } }),
+      m('p1', { provides: { 'x.s': '1.0' }, requires: { 'x.lock': '^1' } }),
+      m('p2', { provides: { 'x.s': '1.0' } }),
+      m('lock-1', { provides: { 'x.lock': '1.0' } }),
+      m('lock-2', { provides: { 'x.lock': '1.0' } }),
+      m('d', { requires: { 'x.t': '^1' } }),
+      m('t1', { provides: { 'x.t': '1.0' } }),
+      m('t2', { provides: { 'x.t': '1.0' } }),
+    ],
+    '1.0.0',
+  );
+  assert.equal(g.rejected.get('p1')?.[0]?.kind, 'ambiguous');
+  assert.equal(g.bindings.get('c')?.get('x.s'), 'p2');
+  assert.deepEqual(g.rejected.get('d'), [{ kind: 'ambiguous', contract: 'x.t', providers: ['t1', 't2'] }]);
+  assert.deepEqual([...g.rejected.keys()].sort(), ['d', 'p1']);
+});
