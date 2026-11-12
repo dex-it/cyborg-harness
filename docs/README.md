@@ -15,6 +15,7 @@
 | Сценарии: обновление, сбой плагина, разбор сбоя по трассе, обновление ядра, встраивание ядра, автор плагина, автор встроенного плагина, второй агент, установка стороннего плагина | [02-use-cases/](02-use-cases/README.md) |
 | Нормы: SRS семи фич - FR и NFR с методом проверки, какая фича закрывает какое BR; истории с критериями приёмки (`stories/` каждой фичи) | [03-requirements/](03-requirements/README.md) |
 | Покрытие: какой критерий приёмки закрывает какую норму и какую ветку сценария (собрано `npm run check:docs-trace -- --write`) | [03-requirements/coverage.md](03-requirements/coverage.md) |
+| Приёмка тестами: какой тест (ключ `ST-NNNN/k` в имени) закрывает какой критерий, какие критерии без теста и почему (собрано `npm run check:acceptance -- --write`) | [05-verification/acceptance-coverage.md](05-verification/acceptance-coverage.md), исключения - [05-verification/acceptance.md](05-verification/acceptance.md) |
 | SAD - архитектура: цели ядра, взаимодействие плагинов, базовая часть как пример, этапы, открытые вопросы, риски | [04-architecture/design/sad.md](04-architecture/design/sad.md) |
 | Модель угроз: активы, нарушители, границы доверия, угрозы со статусом и задачами | [04-architecture/design/threat-model.md](04-architecture/design/threat-model.md) |
 | Решения ADR-CH; где они расходятся с SAD, действует SAD ([раздел 7](04-architecture/design/sad.md#7-расхождения-с-первой-редакцией-пакета)) | [04-architecture/adr/](04-architecture/adr/) |

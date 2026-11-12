@@ -10,12 +10,13 @@ Cyborg Harness - микроядро для настольных приложен
 - Проверка типов - `npm run typecheck` (строгий tsconfig; TS 7 из алиаса `typescript7`, а `typescript` - TS 6 под API typescript-eslint, поэтому `npx tsc` - не тот компилятор)
 - Линтер - `npm run lint` (ESLint с strictTypeChecked по процессу на пакет, `scripts/lint.mjs`; ноль предупреждений; отключение правила - только директивой с `-- причина`)
 - Тесты - `npm test` (node --test, Node 24 снимает типы сам); подделки сообщений хоста - `core/test/trust.test.ts`; снимок API плагина - `core/test/api-snapshot.test.ts`, эталон `core/test/api-snapshot/<версия>.txt`, обновление `npm run snapshot:api` (правила - `contracts/README.md`)
+- Приёмка - `npm run check:acceptance` (у каждого критерия историй `docs/03-requirements/*/stories/` тест с ключом `ST-NNNN/k` в имени или исключение в `docs/05-verification/acceptance.md`; шаг CI `docs-links`, сводка `docs/05-verification/acceptance-coverage.md` пересобирается `-- --write`) и `npm run test:acceptance` (только размеченные тесты, до 30 с)
 - Дымовой тест окна - `npm run smoke` (нужен дисплей; на Linux `xvfb-run`)
 - CI - `.github/workflows/ci.yml`: сборка, типы, линтер, тесты и smoke на macOS и Linux
 
 ## Карта
 
-- `docs/` - проект Cyborg Harness: ресёрч, BRD продукта, SRS и истории с критериями приёмки фич (`CH-`), сценарии (`UC-{ФИЧА}-NNNN`), SAD и ADR-CH, замеры хостов и фреймов, дорожная карта; вход - docs/README.md
+- `docs/` - проект Cyborg Harness: ресёрч, BRD продукта, SRS и истории с критериями приёмки фич (`CH-`), сценарии (`UC-{ФИЧА}-NNNN`), SAD и ADR-CH, замеры хостов и фреймов, дорожная карта; критерии приёмки связаны с тестами ключом `ST-NNNN/k` в имени теста (исключения - `docs/05-verification/acceptance.md`); вход - docs/README.md
 - `core/` - ядро плагинов по SAD без зависимостей: загрузчик, граф контрактов, хосты со сторожем, журнал и состояние плагинов; тесты `core/test`, сценарии `core/examples`
 - `contracts/` - пакет объявлений `@cyborg-harness/contracts`: карта контрактов имя -> мажорная версия -> тип; правила и пример - `contracts/README.md`, проверки компилятора - `core/test/contracts-types.ts`
 - `electron/` - пакет адаптера `@cyborg-harness/electron`: всё, что связывает ядро с Electron (служба PluginsService, хосты в utilityProcess и вход хоста, среда ctx.os, схема cyborg-plugin и мост видов, каналы IPC, preload, слой окна, оболочка вида); граница «что даёт пакет, что делает приложение» и пример - `electron/README.md`, тесты `electron/test`
