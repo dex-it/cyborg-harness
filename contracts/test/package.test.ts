@@ -167,7 +167,7 @@ export const view: UiModule<{ innerHTML: string }> = {
 `;
 
   for (const [name, module, resolution] of [['NodeNext', 'NodeNext', 'NodeNext'], ['Bundler', 'ESNext', 'Bundler']] as const) {
-    it(`пустой проект (${name}) ставит tarball и собирает плагин на PluginModule и declare module`, () => {
+    it(`ST-7002/1: пустой проект (${name}) ставит tarball и собирает плагин на PluginModule и declare module`, () => {
       const project = path.join(work, `consumer-${name}`);
       fs.mkdirSync(project);
       fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'consumer', private: true, type: 'module' }));

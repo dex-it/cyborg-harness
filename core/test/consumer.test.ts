@@ -73,7 +73,7 @@ describe('потребитель вне репозитория', { timeout: 180_
     run('npm', ['ls', '--all', '--offline'], other);
   });
 
-  it('ST-6001/1: import { load } из пакета собирается tsc: типы читаются из .d.ts', () => {
+  it('ST-7002/1: ST-6001/1: import { load } из пакета собирается tsc: типы читаются из .d.ts', () => {
     fs.writeFileSync(
       path.join(project, 'check.ts'),
       "import { load, forkHosts, PLUGIN_API_VERSION, type Kernel } from '@cyborg-harness/core';\nimport { runHost } from '@cyborg-harness/core/host';\nconst k: Promise<Kernel> = load({ apiVersion: PLUGIN_API_VERSION, enabled: [], manifests: [], spawnHost: forkHosts() });\nexport { k, runHost };\n",

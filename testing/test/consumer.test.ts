@@ -79,7 +79,7 @@ describe('потребитель вне репозитория', { timeout: 180_
     assert.match(out, /# fail 0/);
   });
 
-  it('общий набор поставщика из пакета идёт у стороннего автора: его плагин проходит agentContractSuite', () => {
+  it('ST-7003/2: общий набор поставщика из пакета идёт у стороннего автора: его плагин проходит agentContractSuite', () => {
     fs.mkdirSync(path.join(project, 'my-agent'));
     fs.writeFileSync(
       path.join(project, 'my-agent', 'manifest.json'),

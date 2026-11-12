@@ -9,9 +9,9 @@ origin: derived
 
 Таблица собрана из критериев историй, имён тестов и `acceptance.md` командой `npm run check:acceptance -- --write`; руками не правится. `npm run check:acceptance` падает, если у критерия нет ни теста с ключом `ST-NNNN/k` в имени, ни исключения в [acceptance.md](acceptance.md), если есть и то и другое, если ключ указывает на несуществующий критерий или эта таблица расходится с собранной. Исход критерия: «тест» - в имени хотя бы одного включённого теста ключ критерия (запуск - `npm run test:acceptance`); «исключение» - категория из [acceptance.md](acceptance.md); «целевое поведение» - критерий на то, чего ещё нет, проверки не требует. В ячейке «Проверка» путь файла и число тестов с ключом.
 
-Итог: историй 39, критериев 248: тест 204 (тестов с ключом 481), исключение 6, целевое поведение 22, без исхода 16.
+Итог: историй 39, критериев 248: тест 213 (тестов с ключом 512), исключение 13, целевое поведение 22.
 
-Исключения по категориям: замеры 2, окно 3, ручная 1.
+Исключения по категориям: документы 3, замеры 2, инструменты автора 1, окно 3, ручная 3, ручная, дефект 1.
 
 ## ST-1001 Манифест и обнаружение: плагин с ошибками не запускается, остальные работают
 
@@ -368,7 +368,7 @@ origin: derived
 | ST-5002/4 | целевое поведение |  |
 | ST-5002/5 | тест | contracts/test/package.test.ts (3), core/test/api-snapshot.test.ts (2) |
 | ST-5002/6 | тест | core/test/external-plugins.test.ts (1), core/test/loader.test.ts (1) |
-| ST-5002/7 | тест | scripts/test/release.test.ts (2) |
+| ST-5002/7 | исключение | ручная |
 | ST-5002/8 | тест | core/test/loader.test.ts (1), core/test/semver-manifest.test.ts (2) |
 
 ## ST-5003 Вызовы устаревших членов видны автору
@@ -412,7 +412,7 @@ origin: derived
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-6002/1 | тест | contracts/test/api.test.ts (2), core/test/semver-manifest.test.ts (1), scripts/test/release.test.ts (1) |
+| ST-6002/1 | тест | contracts/test/api.test.ts (2), core/test/semver-manifest.test.ts (1), scripts/test/release.test.ts (2) |
 | ST-6002/2 | тест | core/test/api-snapshot.test.ts (2) |
 | ST-6002/3 | целевое поведение |  |
 | ST-6002/4 | тест | scripts/test/workflows.test.ts (2) |
@@ -421,37 +421,37 @@ origin: derived
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-7001/1 | нет |  |
-| ST-7001/2 | нет |  |
-| ST-7001/3 | нет |  |
-| ST-7001/4 | нет |  |
+| ST-7001/1 | тест | core/test/plugin-template.test.ts (1), testing/test/template.test.ts (1), tools/cyborg-plugin/test/template.test.ts (1) |
+| ST-7001/2 | тест | tools/cyborg-plugin/test/build.test.ts (2), tools/cyborg-plugin/test/stand.test.ts (1) |
+| ST-7001/3 | тест | tools/cyborg-plugin/test/build.test.ts (5) |
+| ST-7001/4 | исключение | ручная, дефект #? |
 
 ## ST-7002 Пакет объявлений и checkPlugin: типы, импорты, права словами
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-7002/1 | нет |  |
-| ST-7002/2 | нет |  |
+| ST-7002/1 | тест | contracts/test/package.test.ts (1), core/test/consumer.test.ts (1) |
+| ST-7002/2 | тест | core/test/plugin-check.test.ts (3) |
 | ST-7002/3 | тест | core/test/plugin-check.test.ts (1), tools/cyborg-plugin/test/cli.test.ts (1) |
-| ST-7002/4 | нет |  |
+| ST-7002/4 | тест | core/test/plugin-check.test.ts (2), core/test/plugin-scan.test.ts (1) |
 | ST-7002/5 | целевое поведение |  |
-| ST-7002/6 | нет |  |
+| ST-7002/6 | тест | core/test/plugin-imports.test.ts (2) |
 
 ## ST-7003 Автор проверяет плагин на тест-ките без окна
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-7003/1 | нет |  |
-| ST-7003/2 | нет |  |
-| ST-7003/3 | нет |  |
-| ST-7003/4 | нет |  |
+| ST-7003/1 | тест | testing/test/kit.test.ts (4) |
+| ST-7003/2 | тест | testing/test/agent-suite.test.ts (2), testing/test/consumer.test.ts (1) |
+| ST-7003/3 | тест | testing/test/agent-suite.test.ts (4) |
+| ST-7003/4 | исключение | инструменты автора |
 | ST-7003/5 | целевое поведение |  |
 
 ## ST-7004 Автор проходит путь по руководству, не читая код ядра
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-7004/1 | нет |  |
-| ST-7004/2 | нет |  |
-| ST-7004/3 | нет |  |
-| ST-7004/4 | нет |  |
+| ST-7004/1 | исключение | документы |
+| ST-7004/2 | исключение | документы |
+| ST-7004/3 | исключение | документы |
+| ST-7004/4 | исключение | ручная |

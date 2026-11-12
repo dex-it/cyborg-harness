@@ -23,7 +23,7 @@ function probe(id: string, extra: Record<string, unknown> = {}): { plugin: Inlin
 }
 
 describe('startKernel', () => {
-  it('плагин из каталога: манифест и точка входа найдены, команда отвечает, активация в журнале', async () => {
+  it('ST-7003/1: плагин из каталога: манифест и точка входа найдены, команда отвечает, активация в журнале', async () => {
     await using k = await startKernel({ plugins: [ECHO] });
     assert.deepEqual(k.active, ['echo']);
     assert.equal((await k.waitForJournal({ kind: 'activated', pluginId: 'echo' })).hostId.length > 0, true);
@@ -89,7 +89,7 @@ describe('startKernel', () => {
     assert.equal((await k.waitForJournal({ kind: 'disabled', pluginId: 'other' })).kind, 'disabled');
   });
 
-  it('среда по умолчанию: песочница после realpath, поддельный pty, секреты в памяти; запуск идёт в fakePty', async () => {
+  it('ST-7003/1: среда по умолчанию: песочница после realpath, поддельный pty, секреты в памяти; запуск идёт в fakePty', async () => {
     const p = probe('term', { permissions: { pty: ['/bin/sh'] } });
     await using k = await startKernel({ plugins: [p.plugin] });
     assert.equal(k.sandbox.root, await realpath(k.sandbox.root));
@@ -133,7 +133,7 @@ describe('startKernel', () => {
     assert.ok(seen.includes('activated'));
   });
 
-  it('waitForJournal: предикат, запись, появившаяся позже, и отказ по сроку с перечнем записей', async () => {
+  it('ST-7003/1: waitForJournal: предикат, запись, появившаяся позже, и отказ по сроку с перечнем записей', async () => {
     const late = probe('later', { activation: 'lazy', commands: { 'later.go': {} } });
     late.plugin.module.activate = (ctx) => void ctx.commands.register('later.go', () => 'ok');
     await using k = await startKernel({ plugins: [late.plugin] });
@@ -164,7 +164,7 @@ describe('startKernel', () => {
     assert.equal(k.journal.filter((e) => e.kind === 'deprecated-call').length, 1, 'непомеченный член записи не даёт');
   });
 
-  it('unload через Symbol.asyncDispose: плагины сняты, песочница удалена, повторный вызов безвреден', async () => {
+  it('ST-7003/1: unload через Symbol.asyncDispose: плагины сняты, песочница удалена, повторный вызов безвреден', async () => {
     const down: string[] = [];
     const k = await startKernel({ plugins: [{ manifest: manifest('x'), module: { activate: () => ({ dispose: () => void down.push('x') }) } }] });
     const root = k.sandbox.root;

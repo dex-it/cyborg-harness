@@ -16,7 +16,7 @@ const template = path.resolve(import.meta.dirname, '..', '..', '..', 'templates'
 const problems = (r: { problems: readonly Parameters<typeof formatProblem>[0][] }) => r.problems.map(formatProblem);
 
 describe('templates/plugin на сборщике (P-06)', () => {
-  it('сборка: состав результата, проверка собранного каталога, упаковка', async () => {
+  it('ST-7001/1: сборка: состав результата, проверка собранного каталога, упаковка', async () => {
     const out = fresh('template');
     const report = await buildPlugin(template, { out });
     assert.deepEqual(problems(report), []);

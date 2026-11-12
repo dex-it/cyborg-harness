@@ -32,8 +32,8 @@ async function start(layers: Record<string, Record<string, unknown>> = {}): Prom
   });
 }
 
-describe('шаблон плагина templates/plugin', () => {
-  it('checkPlugin: замечаний нет ни как есть, ни как под сборку; прав не просит', async () => {
+describe('ST-7001/1: шаблон плагина templates/plugin', () => {
+  it('ST-7001/1: checkPlugin: замечаний нет ни как есть, ни как под сборку; прав не просит', async () => {
     for (const bundled of [false, true]) {
       const report = await checkPlugin(home, { bundled, ignore: ['dist'] });
       assert.deepEqual(report.problems, [], `bundled: ${String(bundled)}`);
