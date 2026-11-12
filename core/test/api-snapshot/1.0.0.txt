@@ -545,7 +545,7 @@ variant ProcessResult.code | number
 variant ProcessResult.signal | null
 variant ProcessResult.signal | string
 variant ProgramRule | string
-variant ProgramRule | { readonly program: string; readonly args: readonly string[]; readonly env?: readonly string[] }
+variant ProgramRule | { readonly program: string; readonly args: readonly string[]; readonly env?: readonly string[]; readonly deny?: readonly string[] }
 variant SectionResult | { readonly status: 'invalid'; readonly errors: readonly string[] }
 variant SectionResult | { readonly status: 'migrate-error'; readonly layer: Layer; readonly from: number; readonly error: string }
 variant SectionResult | { readonly status: 'newer'; readonly layer: Layer; readonly found: number; readonly expected: number }

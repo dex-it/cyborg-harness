@@ -7,7 +7,7 @@ import { byId, el } from './dom.ts';
 import { ViewsPanel } from './views-panel.ts';
 import { moveFocus } from './focus.ts';
 import { SideTabs } from './side-tabs.ts';
-import { actionsFor, clock, conflictText, diagnosticsLine, exportMessage, groupLabel, groupNote, journalFor, keyStatus, mergeFeed, originNote, previousNote, sortedPlugins, STATE_LABEL, summary, userPluginsNotice, workspaceActionError, type ActionButton } from './plugins-model.ts';
+import { actionsFor, clock, conflictText, diagnosticsLine, exportMessage, groupLabel, groupNote, journalFor, keyStatus, mergeFeed, originNote, previousNote, sortedPlugins, STATE_LABEL, summary, traceArgsNotice, userPluginsNotice, workspaceActionError, type ActionButton } from './plugins-model.ts';
 import { SessionStrip } from './session-strip.ts';
 import { windowPlan } from './window-plan.ts';
 
@@ -51,6 +51,7 @@ export class PluginsPanel {
   private readonly workspaceErrorEl = byId('workspace-error', HTMLElement);
   private readonly safeModeEl = byId('safe-mode', HTMLElement);
   private readonly userPluginsEl = byId('user-plugins', HTMLElement);
+  private readonly traceArgsEl = byId('trace-args', HTMLElement);
   private readonly safeModeEnter = byId('safe-mode-enter', HTMLButtonElement);
   private readonly diagnosticsEl = byId('diagnostics', HTMLElement);
   private readonly diagnosticsStatusEl = byId('diagnostics-status', HTMLElement);
@@ -186,6 +187,9 @@ export class PluginsPanel {
     const notice = userPluginsNotice(snapshot);
     this.userPluginsEl.textContent = notice ?? '';
     this.userPluginsEl.hidden = notice === undefined;
+    const traceNotice = traceArgsNotice(snapshot);
+    this.traceArgsEl.textContent = traceNotice ?? '';
+    this.traceArgsEl.hidden = traceNotice === undefined;
     this.safeModeEnter.hidden = snapshot.safeMode || snapshot.phase === 'no-workspace';
     const diagnostics = diagnosticsLine(snapshot.diagnostics);
     this.diagnosticsEl.hidden = diagnostics === undefined;

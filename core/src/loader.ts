@@ -39,6 +39,8 @@ const createParts = (ctx: KernelContext): Parts => ({
 
 export async function load(options: LoadOptions): Promise<Kernel> {
   const ctx = await createContext(options, createParts);
+  // Запись о флаге идёт первой в журнале запуска: она нужна, чтобы человек видел включённую запись данных, даже если дальше всё сломалось.
+  if (options.traceArgs === true && options.onTrace !== undefined) ctx.record({ kind: 'trace-args', limit: ctx.limits.traceArgsBytes });
   await ctx.parts.activation.start();
   await ctx.parts.menus.start();
   return buildKernel(ctx);

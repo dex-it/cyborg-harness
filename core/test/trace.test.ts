@@ -560,3 +560,161 @@ test('мост вида (K-13): канал, модальное окно, его 
   const [command] = byTarget('command:v.form');
   assert.equal(modal!.chain, command!.chain, 'окно открыла команда: одна цепочка');
 });
+
+// K-33 (#224): аргументы операций в записи по флагу запуска `traceArgs` (`--trace-args`).
+
+test('без флага запись не несёт поля args, хотя аргументы есть (K-33)', async () => {
+  const r = await rig(pair, pairManifests, pairOptions);
+  const app = r.ctx.app!;
+  r.take();
+  await app.contracts.get('trace.files', 1)!.read!('МАРКЕР-без-флага');
+  await app.commands.run('files.go', 'МАРКЕР-команда');
+  await app.os.env!.get('TRACE_ENV');
+  const ops = r.take();
+  assert.ok(ops.length >= 3);
+  for (const op of ops) assert.ok(!('args' in op), `${op.target}: args без флага`);
+  assert.ok(!JSON.stringify(r.records).includes('МАРКЕР'));
+  assert.ok(!r.k.journal.some((e) => e.kind === 'trace-args'), 'записи журнала о флаге нет');
+});
+
+test('с флагом запись несёт аргументы: член контракта, команда, вызов ctx.os, событие, вызов моста (K-33)', async () => {
+  const r = await rig(pair, pairManifests, { ...pairOptions, traceArgs: true });
+  const app = r.ctx.app!;
+  r.take();
+
+  await app.contracts.get('trace.files', 1)!.read!('путь/к/файлу');
+  await app.commands.run('files.go', 'y');
+  await app.os.env!.get('TRACE_ENV');
+  await r.k.callAs('app', 'trace.files', 1, 'read', ['из-вида']);
+  await r.k.run('files.go', { a: 1 });
+  const byTarget = (target: string) => r.ops().filter((o) => o.target === target).map((o) => o.args);
+  assert.deepEqual(byTarget('contract:trace.files@1#read'), ['["путь/к/файлу"]', '["из-вида"]']);
+  assert.deepEqual(byTarget('command:files.go'), ['["y"]', '[{"a":1}]']);
+  assert.deepEqual(byTarget('os:env.get'), ['["TRACE_ENV"]']);
+  for (const op of r.ops().filter((o) => o.target.startsWith('contract:') || o.target.startsWith('command:'))) assert.equal(op.argsBytes > 0, true);
+});
+
+test('с флагом отказавшая операция тоже несёт аргументы (K-33)', async () => {
+  const r = await rig(pair, pairManifests, { ...pairOptions, traceArgs: true });
+  r.take();
+  await assert.rejects(r.k.run('нет.такой', 'арг'), { code: 'CommandNotFound' });
+  const [op] = r.take();
+  assert.deepEqual([op!.outcome, op!.args], ['error', '["арг"]']);
+});
+
+test('с флагом событие контракта несёт аргументы события (K-33)', async () => {
+  let fire: (n: number) => void = () => undefined;
+  const table: Record<string, PluginModule> = {
+    ticker: {
+      activate(ctx) {
+        const listeners = new Set<(n: number) => void>();
+        fire = (n) => listeners.forEach((l) => l(n));
+        ctx.contracts.provide('trace.ticker', '1.0', {
+          onTick(listener: (n: number) => void) {
+            listeners.add(listener);
+            return { dispose: () => void listeners.delete(listener) };
+          },
+        });
+      },
+    },
+    user: { activate: (ctx) => void ctx.contracts.get('trace.ticker', 1)!.onTick(() => undefined) },
+  };
+  const r = await rig(table, [manifest('ticker', { provides: { 'trace.ticker': '1.0' } }), manifest('user', { optional: { 'trace.ticker': '^1' } })], { hosts: { t: ['ticker'], u: ['user'] }, traceArgs: true });
+  await sleep(30);
+  r.take();
+  fire(42);
+  await waitFor('запись события', () => r.ops().find((o) => o.target.startsWith('event:')));
+  assert.equal(r.ops().find((o) => o.target.startsWith('event:'))!.args, '[42]');
+});
+
+test('предел: длинные аргументы обрезаны по LIMITS.traceArgsBytes с пометкой и размером; по умолчанию 4 КиБ (K-33)', async () => {
+  const { LIMITS } = await import('../src/limits.ts');
+  assert.equal(LIMITS.traceArgsBytes, 4 * 1024);
+  const long = 'я'.repeat(10_000);
+  const r = await rig(pair, pairManifests, { ...pairOptions, traceArgs: true });
+  r.take();
+  await r.ctx.app!.contracts.get('trace.files', 1)!.read!(long);
+  const [op] = r.take();
+  const head = op!.args!.replace(/ \[обрезано: всего (\d+) Б\]$/, '');
+  assert.notEqual(head, op!.args, 'пометка есть');
+  assert.ok(Buffer.byteLength(head) <= LIMITS.traceArgsBytes, `голова ${String(Buffer.byteLength(head))} Б`);
+  assert.match(op!.args!, /\[обрезано: всего \d+ Б\]$/);
+  assert.equal(op!.argsBytes, Buffer.byteLength(long), 'размер в argsBytes прежний');
+
+  const small = await rig(pair, pairManifests, { ...pairOptions, traceArgs: true, limits: { traceArgsBytes: 16 } });
+  small.take();
+  await small.ctx.app!.contracts.get('trace.files', 1)!.read!('abcdefghijklmnopqrstuvwxyz');
+  const [cut] = small.take();
+  assert.ok(cut!.args!.length < 60 && cut!.args!.includes('обрезано'), cut!.args!);
+});
+
+test('секрет: значение, полученное плагином через шлюз, вычёркнуто из аргументов; чужой секрет и не прошедшее шлюз значение - нет (K-33, K-29)', async () => {
+  const secret = `s3cr3t-${randomUUID()}`;
+  const stranger = `chuzhoj-${randomUUID()}`;
+  const r = await rig(pair, pairManifests, { ...pairOptions, traceArgs: true, os: { ...pairOptions.os, secrets: memorySecrets() } });
+  const app = r.ctx.app!;
+  r.take();
+
+  await app.os.secrets.set('token', secret);
+  const got = await app.os.secrets.get('token');
+  assert.equal(got, secret);
+  await app.contracts.get('trace.files', 1)!.read!(`Bearer ${got}`);
+  await app.commands.run('files.go', { header: `Authorization: ${secret}`, other: stranger });
+
+  const ops = r.take();
+  const text = JSON.stringify(ops);
+  assert.ok(!text.includes(secret), 'секрет в записях');
+  const set = ops.find((o) => o.target === 'os:secrets.set')!;
+  assert.equal(set.args, '["token","[секрет]"]', 'значение, которое плагин кладёт в хранилище, вычёркнуто уже в записи этой операции');
+  assert.equal(ops.find((o) => o.target === 'contract:trace.files@1#read')!.args, '["Bearer [секрет]"]');
+  assert.equal(ops.find((o) => o.target === 'command:files.go')!.args, `[{"header":"Authorization: [секрет]","other":"${stranger}"}]`, 'значение, которого шлюз не выдавал, остаётся: это граница механизма K-29');
+});
+
+test('секрет одного плагина в аргументах операции другого не вычёркивается по чужому значению, пока он не вызывающий и не адресат (K-33)', async () => {
+  const secret = `s3cr3t-${randomUUID()}`;
+  const table: Record<string, PluginModule> = { a: { activate() {} }, b: { activate() {} } };
+  const r = await rig(table, [manifest('a'), manifest('b')], { traceArgs: true, os: { dataDir: '/nonexistent/d', tempDir: '/nonexistent/t', secrets: memorySecrets() } });
+  await r.ctx.a!.os.secrets.set('k', secret);
+  r.take();
+  await r.ctx.b!.os.secrets.get(`k-${secret}`);
+  const get = r.ops().find((o) => o.caller === 'plugin:b' && o.target === 'os:secrets.get');
+  assert.ok(get?.args?.includes(secret), 'секрет a не вычёркивается из вызова b');
+});
+
+test('журнал: с флагом при запуске есть запись trace-args с пределом; без onTrace флаг ничего не включает и не пишется (K-33)', async () => {
+  const on = await rig(pair, pairManifests, { ...pairOptions, traceArgs: true });
+  const entries = on.k.journal.filter((e) => e.kind === 'trace-args');
+  assert.deepEqual(entries, [{ kind: 'trace-args', limit: 4096 }]);
+
+  const noSink = await rig(pair, pairManifests, { ...pairOptions, traceArgs: true, trace: false });
+  assert.ok(!noSink.k.journal.some((e) => e.kind === 'trace-args'));
+  assert.deepEqual(noSink.records, []);
+});
+
+test('секрет: значение в os:secrets.set пишется меткой при любой длине (1-3 знака, 4 знака, длинное), ключ остаётся; get и resolve аргументов не теряют (K-33)', async () => {
+  const r = await rig(pair, pairManifests, { ...pairOptions, traceArgs: true, os: { ...pairOptions.os, secrets: memorySecrets() } });
+  const app = r.ctx.app!;
+  r.take();
+
+  const values = ['1', 'ab', 'abc', 'abcd', `long-${randomUUID()}`];
+  for (const [i, value] of values.entries()) await app.os.secrets.set(`k${String(i)}`, value);
+  await app.os.secrets.get('k0');
+  await app.secrets.resolve({ $secret: 'k4' });
+  await app.os.secrets.delete('k0');
+
+  const ops = r.take();
+  const byTarget = (target: string) => ops.filter((o) => o.target === target);
+  assert.deepEqual(
+    byTarget('os:secrets.set').map((o) => o.args),
+    values.map((_, i) => `["k${String(i)}","[секрет]"]`),
+    'значение вычеркнуто безусловно, ключ остался',
+  );
+  assert.equal(byTarget('os:secrets.get')[0]!.args, '["k0"]');
+  assert.equal(byTarget('os:secrets.resolve')[0]!.args, '[{"$secret":"k4"}]');
+  assert.equal(byTarget('os:secrets.delete')[0]!.args, '["k0"]');
+  const text = JSON.stringify(ops);
+  for (const value of values) assert.ok(!text.includes(`"${value}"`), `значение ${value.slice(0, 6)} в записях`);
+  // Не-секрет, совпавший по длине с правилом K-29, в обычном вызове остаётся: безусловно скрывается только значение, которое ядро опознаёт само.
+  await app.contracts.get('trace.files', 1)!.read!('abc');
+  assert.equal(r.take().find((o) => o.target.startsWith('contract:'))!.args, '["abc"]');
+});

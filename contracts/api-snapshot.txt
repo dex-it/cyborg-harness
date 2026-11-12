@@ -1,4 +1,4 @@
-// @cyborg-harness/contracts 1.0.0-rc.1
+// @cyborg-harness/contracts 1.0.0-rc.3
 // Снимок публичных деклараций без комментариев; правила - README.md, раздел «Установка и версии». Обновление: npm run snapshot:contracts после повышения версии в package.json.
 // ---- agent.d.ts
 import type { PtyExit } from './os.js';
@@ -188,6 +188,7 @@ export type ProgramRule = string | {
     readonly program: string;
     readonly args: readonly string[];
     readonly env?: readonly string[];
+    readonly deny?: readonly string[];
 };
 export interface PluginPermissions {
     readonly 'fs.read'?: readonly string[];

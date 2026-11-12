@@ -43,6 +43,7 @@ const LIFECYCLE: Record<JournalEntry['kind'], boolean> = {
   'host-abandoned': true,
   'key-conflict': false,
   'key-ignored': false,
+  'trace-args': false,
   'menu-source': false,
   denied: false,
   'deprecated-call': false,
@@ -64,7 +65,7 @@ const REVIVABLE = new Set<JournalEntry['kind']>(['switched-off', 'failed', 'skip
 export function entryPlugins(entry: JournalEntry): readonly string[] {
   if (entry.kind === 'deprecated-call') return [entry.pluginId, entry.provider];
   if (entry.pluginId !== undefined) return [entry.pluginId];
-  if (entry.kind === 'key-ignored') return [];
+  if (entry.kind === 'key-ignored' || entry.kind === 'trace-args') return [];
   return entry.kind === 'host-down' ? [...new Set([...entry.plugins, ...entry.culprits])] : entry.plugins;
 }
 
@@ -189,6 +190,8 @@ export function describeEntry(e: JournalEntry): string {
       return `сочетание ${e.key} (${e.command}) уже у ${e.winner}: нажатие получает ${e.winner}`;
     case 'key-ignored':
       return `plugins.keybindings: ${e.key} -> ${String(e.command)} не применено: ${e.reason}`;
+    case 'trace-args':
+      return `запуск с --trace-args: записи трассы несут аргументы операций (до ${String(e.limit)} Б на запись, значения секретов вычеркнуты); в файле диагностики и в выгрузке будут пути и данные человека`;
     case 'menu-source':
       return `пункт меню ${e.item}: ${e.field} не прочитан, пункт недоступен: ${e.error}`;
     case 'host-isolated':
@@ -235,6 +238,7 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
       return e.error ? 'error' : 'info';
     case 'key-conflict':
     case 'key-ignored':
+    case 'trace-args':
     case 'menu-source':
     case 'denied':
     case 'deprecated-call':

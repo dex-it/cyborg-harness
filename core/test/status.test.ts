@@ -82,10 +82,19 @@ test('isLifecycleEntry: записи о работе плагина - да, от
     { pluginId: 'a', kind: 'host-own-grouped', group: 'g', neighbours: ['b'] },
     { pluginId: 'a', kind: 'third-party' },
     { kind: 'key-ignored', key: 'mod+x', command: null, reason: 'нет команды' },
+    { kind: 'trace-args', limit: 4096 },
   ];
   assert.deepEqual(lifecycle.filter((e) => !isLifecycleEntry(e)), []);
   assert.deepEqual(aside.filter(isLifecycleEntry), []);
   // Состояние по журналу прежнее: запись не жизненного цикла после unloaded не будит плагин и не меняет причину остановки.
   const stopped = pluginStatuses([lifecycle[0]!, lifecycle[2]!, ...aside]);
   assert.deepEqual(stopped.map((s) => [s.id, s.state, s.cause?.kind]), [['a', 'stopped', 'unloaded']]);
+});
+
+test('запись trace-args (K-33): предупреждение словами с пределом, плагинов не касается, жизненным циклом не является', () => {
+  const entry: JournalEntry = { kind: 'trace-args', limit: 4096 };
+  assert.match(describeEntry(entry), /--trace-args.*4096 Б.*секретов вычеркнуты/);
+  assert.equal(entryLevel(entry), 'warn');
+  assert.deepEqual(entryPlugins(entry), []);
+  assert.equal(isLifecycleEntry(entry), false);
 });

@@ -3,10 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import type { LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot } from '@cyborg-harness/electron/window';
-import { actionsFor, conflictText, diagnosticsLine, exportMessage, groupLabel, groupNote, journalFor, keyStatus, mergeFeed, originNote, previousNote, sortedPlugins, summary, userPluginsNotice, viewMode, viewSlots, workspaceActionError } from '../src/renderer/plugins-model.ts';
+import { actionsFor, conflictText, diagnosticsLine, exportMessage, groupLabel, groupNote, journalFor, keyStatus, mergeFeed, originNote, previousNote, sortedPlugins, summary, traceArgsNotice, userPluginsNotice, viewMode, viewSlots, workspaceActionError } from '../src/renderer/plugins-model.ts';
 
 const row = (id: string, state: PluginRow['state'], over: Partial<PluginRow> = {}): PluginRow => ({ id, state, revivable: state === 'stopped', unloaded: false, commands: [], permissions: [], ...over });
-const snapshot = (plugins: PluginRow[], over: Partial<PluginsSnapshot> = {}): PluginsSnapshot => ({ phase: 'ready', safeMode: false, userPlugins: false, problems: [], plugins, layout: [], keys: [], feed: [], journal: [], canHang: true, window: { title: '', queued: 0, locks: [] }, documents: [], workspace: { current: '/w.cyborg.json', recent: [] }, ...over });
+const snapshot = (plugins: PluginRow[], over: Partial<PluginsSnapshot> = {}): PluginsSnapshot => ({ phase: 'ready', safeMode: false, userPlugins: false, traceArgs: false, problems: [], plugins, layout: [], keys: [], feed: [], journal: [], canHang: true, window: { title: '', queued: 0, locks: [] }, documents: [], workspace: { current: '/w.cyborg.json', recent: [] }, ...over });
 
 describe('окно «Плагины Cyborg»: модель', () => {
   it('выключенные сверху, затем ждущие перезапуска, работающие и невключённые; внутри - по имени', () => {
@@ -69,6 +69,15 @@ describe('окно «Плагины Cyborg»: модель', () => {
     assert.equal(originNote(row('ghost', 'disabled')), undefined);
     assert.equal(userPluginsNotice(snapshot([], { userPlugins: false })), undefined);
     assert.match(userPluginsNotice(snapshot([], { userPlugins: true })) ?? '', /--user-plugins/);
+  });
+
+  it('плашка аргументов в трассе (K-33): только с --trace-args, называет флаг, предел-смысл записи и выгрузку', () => {
+    assert.equal(traceArgsNotice(snapshot([], { traceArgs: false })), undefined);
+    const text = traceArgsNotice(snapshot([], { traceArgs: true })) ?? '';
+    assert.match(text, /--trace-args/);
+    assert.match(text, /аргументы операций/);
+    assert.match(text, /выгрузк/);
+    assert.match(text, /без флага/i);
   });
 
   it('группа рендера: метка только у плагина в чужой группе, предупреждение - слова записи ядра', () => {

@@ -31,6 +31,20 @@ function defaultOs(): OsEnvironment {
   return { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp') };
 }
 
+/**
+ * Значения секретов для записи трассы с аргументами (K-33): плагины, чьи значения могли попасть в аргументы, - вызывающий и адресат (`plugin:<id>`, `view:<id>`).
+ * Человек (`user`) и `host:<id>` секретов не имеют: сообщение хоста с аргументами всегда называет плагин, без имени оно отвергается до записи аргументов.
+ * Чужие секреты не вычёркиваются: плагин, записавший в хранилище короткое слово, портил бы чужую диагностику.
+ */
+function traceSecrets(ctx: KernelContext, caller: string, callee: string | undefined): string[] {
+  const ids = new Set<string>();
+  for (const who of [caller, callee]) {
+    const id = /^(?:plugin|view):(.+)$/.exec(who ?? '')?.[1];
+    if (id !== undefined) ids.add(id);
+  }
+  return ctx.gateway.secretValues(ids);
+}
+
 /** Сообщения шлюза плагину: вывод pty и события `fs.watch` считаются счётчиком за интервал (FR-CH-4005), выход pty пишется записью (FR-CH-4007). */
 function traceStream(trace: Trace, pluginId: string, method: string, params: unknown): void {
   if (!trace.enabled || !isRecord(params)) return;
@@ -78,6 +92,8 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
     hostOf: (pluginId) => ctx.hostOf(pluginId),
     // Через PluginLog, как все строки ядра: текст исключения приёмника идёт под пределами длины и частоты.
     failed: (error) => ctx.parts.logs.hostLine('трасса', `onTrace бросил, записи трассы могут теряться: ${errorMessage(error)}`, 'error'),
+    // Аргументы пишутся только по флагу запуска и только если есть кому записи читать (K-33).
+    ...(options.traceArgs === true && options.onTrace !== undefined && { args: { limit: limits.traceArgsBytes, secrets: (caller: string, callee: string | undefined) => traceSecrets(ctx, caller, callee) } }),
   });
   const notices = new Notices(
     () => {

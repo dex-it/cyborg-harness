@@ -45,6 +45,8 @@ test('сессия Chromium по воркспейсу: у каждого сво�
 test('новое окно: аргументы текущего процесса, воркспейс заменён, отладочные порты не наследуются', () => {
   const argv = ['/app', '--inspect=0', '--user-data-dir=/u', '--remote-debugging-port=9222', '--workspace=/old.json', '--safe-mode', '--user-plugins'];
   assert.deepEqual(newWindowArgs(argv, '/new.json', FLAGS), ['/app', '--user-data-dir=/u', '--safe-mode', '--user-plugins', '--workspace=/new.json']);
+  // K-33: флаг записи аргументов в трассу - выбор человека за машиной, новое окно его сохраняет (как --user-plugins).
+  assert.deepEqual(newWindowArgs(['/app', '--trace-args', '--workspace=/old.json'], '/new.json', FLAGS), ['/app', '--trace-args', '--workspace=/new.json']);
   assert.deepEqual(newWindowArgs(['/app', '--no-workspace'], '/new.json', FLAGS), ['/app', '--workspace=/new.json']);
   assert.deepEqual(newWindowArgs(['/app', '--inspect-brk=9229', '--remote-debugging-pipe'], '/new.json', FLAGS), ['/app', '--workspace=/new.json']);
 });

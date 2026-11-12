@@ -36,6 +36,13 @@ export function userPluginsNotice(snapshot: PluginsSnapshot): string | undefined
   return snapshot.userPlugins ? 'Запуск с --user-plugins: плагины из каталога пользователя загружаются, их код не проверен. Без флага они не читаются.' : undefined;
 }
 
+/** Плашка над списком: трасса пишет аргументы операций (K-33), в файле диагностики и выгрузке окажутся пути и данные человека. */
+export function traceArgsNotice(snapshot: PluginsSnapshot): string | undefined {
+  return snapshot.traceArgs
+    ? 'Запуск с --trace-args: записи трассы несут аргументы операций (пути, имена, данные), значения секретов из хранилища вычеркнуты. Они попадают в файл диагностики и в её выгрузку: просмотрите выгрузку, прежде чем отправлять. Без флага аргументов в записях нет.'
+    : undefined;
+}
+
 /** Что показать на месте вида: фрейм, фрейм под плашкой или заглушку. */
 export function viewMode(row: PluginRow, entry: LayoutRow): 'frame' | 'restarting' | 'placeholder' | undefined {
   if (entry.url === undefined) return undefined;

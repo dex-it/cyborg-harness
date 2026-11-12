@@ -22,6 +22,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'DEFAULT_RESTART_FLAGS',
       'NO_WORKSPACE_KEY',
       'PluginsService',
+      'TRACE_ARGS_FLAG',
       'USER_PLUGINS_FLAG',
       'VIEW_CSP',
       'alertNotification',

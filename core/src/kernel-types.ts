@@ -63,6 +63,8 @@ export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'key-conflict'; readonly key: string; readonly command: string; readonly winner: string }
   /** Привязка `plugins.keybindings` не применена: сочетание не разобралось или команды нет ни у одного плагина. */
   | { readonly pluginId?: undefined; readonly kind: 'key-ignored'; readonly key: string; readonly command: string | null; readonly reason: string }
+  /** Ядро запущено с `LoadOptions.traceArgs` (`--trace-args`) и приёмником трассы: записи трассы несут аргументы операций, не длиннее `limit` байт (K-33). Пишется один раз при запуске. */
+  | { readonly pluginId?: undefined; readonly kind: 'trace-args'; readonly limit: number }
   /** Сторонний плагин назван в группе plugins.hosts с другими - ядро всё равно дало ему свой хост. */
   | { readonly pluginId: string; readonly kind: 'host-isolated'; readonly group: string; readonly hostId: string }
   /** Сторонний плагин назван в группе рендера с другими (`plugins.uiGroups`, `ui.group`) - ядро всё равно дало ему свою `renderGroup` (id плагина; origin его видов - `Kernel.groupOf`). */
@@ -174,10 +176,15 @@ export interface LoadOptions {
   /** Строка плагина (`ctx.log`) или хоста, с уровнем; `pluginId` у строки хоста, чей плагин определить нельзя, - `хост <id>`. */
   readonly onLog?: ((pluginId: string, message: string, level: LogLevel) => void) | undefined;
   /**
-   * Запись трассы операций на границах Г1 - Г5 (FR-CH-4001…4008): операция, счётчик частого потока или выход запущенной программы. Содержимого аргументов и результатов в записях нет.
+   * Запись трассы операций на границах Г1 - Г5 (FR-CH-4001…4008): операция, счётчик частого потока или выход запущенной программы. Содержимого результатов в записях нет, содержимого аргументов - без `traceArgs` тоже.
    * Без обработчика трасса выключена и ничего не стоит. Записи читает окно ядра; плагину они не отдаются ни через `ctx`, ни через контракт. Хранит их приложение или K-30.
    */
   readonly onTrace?: ((record: TraceRecord) => void) | undefined;
+  /**
+   * Записывать аргументы операций в записи трассы (K-33, флаг запуска `--trace-args`): текст не длиннее `ResourceLimits.traceArgsBytes`, значения секретов, прошедшие через шлюз, вычеркнуты.
+   * Включает человек за машиной командной строкой приложения: из файлов настроек и воркспейса это поле не берётся. Без `onTrace` ничего не делает.
+   */
+  readonly traceArgs?: boolean | undefined;
   /** Из чего ядро собирает заголовок окна вокруг фрагментов плагинов. */
   readonly windowTitle?: WindowTitle | undefined;
   /**
