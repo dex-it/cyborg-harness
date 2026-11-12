@@ -11,9 +11,9 @@ export interface PluginPermissions {
   readonly 'fs.write'?: readonly string[];
   /** Открыть в системе: области путей, как у `fs.read`, `any` - любой существующий документ или каталог, и схемы URL с двоеточием (`https:`, `mailto:`). */
   readonly shell?: readonly string[];
-  /** Программы, которые плагин запускает через `ctx.os.process`: имя или правило `{ program, args, env? }` с закреплёнными первыми аргументами. Даёт программе все права пользователя ОС. */
+  /** Программы, которые плагин запускает через `ctx.os.process`: имя или правило `{ program, args, env?, deny? }` с закреплёнными первыми аргументами и запретом флагов в хвосте argv (`deny`). Даёт программе все права пользователя ОС. */
   readonly process?: readonly ProgramRule[];
-  /** Программы в псевдотерминале; правило той же формы, что у `process`. */
+  /** Программы в псевдотерминале; правило той же формы, что у `process`, в том числе `deny`. */
   readonly pty?: readonly ProgramRule[];
   /** Запуски, которые поставщик описывает потребителю (`cyborg.agent`); члена в `ctx.os` не даёт, pty потребителя с `describedBy` сверяется и с ними. */
   readonly launch?: readonly ProgramRule[];

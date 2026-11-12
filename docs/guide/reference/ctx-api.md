@@ -4,7 +4,7 @@ description: "Все члены ctx главной части, ctx вида и c
 ---
 
 :::note[Страница сгенерирована]
-Версия API: 1.0.0-rc.1. Дата: 2026-11-11 (запись версии в `contracts/CHANGELOG.md`). Источник - TSDoc файлов `contracts/plugin.ts`, `contracts/view.ts`, `contracts/os.ts`; правьте описания там, а страницу пересоберите командой `npm run docs:api`. CI падает, если страница устарела. Правила стабильности членов - раздел «Что стабильно, а что нет» в [README пакета контрактов](https://github.com/dex-it/cyborg-harness/blob/master/contracts/README.md).
+Версия API: 1.0.0-rc.2. Дата: 2026-11-12 (запись версии в `contracts/CHANGELOG.md`). Источник - TSDoc файлов `contracts/plugin.ts`, `contracts/view.ts`, `contracts/os.ts`; правьте описания там, а страницу пересоберите командой `npm run docs:api`. CI падает, если страница устарела. Правила стабильности членов - раздел «Что стабильно, а что нет» в [README пакета контрактов](https://github.com/dex-it/cyborg-harness/blob/master/contracts/README.md).
 :::
 
 Справочник отвечает на вопрос «что делает этот член и что он принимает». Как ими пользоваться, написано в [главной части](/authors/main-api/), [виде](/authors/view-api/) и [рецептах](/authors/recipes/); права `ctx.os` - в [справочнике прав](/reference/permissions/).
@@ -423,8 +423,8 @@ type DialogSpec = | AskDialog | { readonly kind: 'menu'; readonly items: readonl
 - `'fs.read'?: readonly string[]` - Области путей: `workspace`, `plugin-data`, `plugin-temp`, `granted` (выбор человека в `dialog`), абсолютный путь (каталог с поддеревом, `~` - домашний) или маска: `*` - часть имени, `**` - любые каталоги.
 - `'fs.write'?: readonly string[]` - Те же области и `workspace.git` - корни воркспейса вместе с записью в `.git`.
 - `shell?: readonly string[]` - Открыть в системе: области путей, как у `fs.read`, `any` - любой существующий документ или каталог, и схемы URL с двоеточием (`https:`, `mailto:`).
-- `process?: readonly ProgramRule[]` - Программы, которые плагин запускает через `ctx.os.process`: имя или правило `{ program, args, env? }` с закреплёнными первыми аргументами. Даёт программе все права пользователя ОС.
-- `pty?: readonly ProgramRule[]` - Программы в псевдотерминале; правило той же формы, что у `process`.
+- `process?: readonly ProgramRule[]` - Программы, которые плагин запускает через `ctx.os.process`: имя или правило `{ program, args, env?, deny? }` с закреплёнными первыми аргументами и запретом флагов в хвосте argv (`deny`). Даёт программе все права пользователя ОС.
+- `pty?: readonly ProgramRule[]` - Программы в псевдотерминале; правило той же формы, что у `process`, в том числе `deny`.
 - `launch?: readonly ProgramRule[]` - Запуски, которые поставщик описывает потребителю (`cyborg.agent`); члена в `ctx.os` не даёт, pty потребителя с `describedBy` сверяется и с ними.
 - `net?: readonly string[]` - Хосты HTTP; `config:<поле>` - хост из своего раздела config.
 - `env?: readonly string[]` - Имена переменных окружения, которые плагин читает через `ctx.os.env`.
@@ -437,10 +437,10 @@ type DialogSpec = | AskDialog | { readonly kind: 'menu'; readonly items: readonl
 
 ### ProgramRule
 
-Программа или программа с первыми аргументами; `env` - имена переменных, которые плагин может ей передать: точное имя или маска `ПРЕФИКС_*` для номерных: хвост после префикса - только десятичные цифры (`GIT_CONFIG_KEY_*` покрывает `GIT_CONFIG_KEY_0`, `GIT_CONFIG_KEY_12`, но не `GIT_CONFIG_KEY_X`; `GIT_*` не покрывает `GIT_SSH_COMMAND`).
+Программа или программа с первыми аргументами; `env` - имена переменных, которые плагин может ей передать: точное имя или маска `ПРЕФИКС_*` для номерных: хвост после префикса - только десятичные цифры (`GIT_CONFIG_KEY_*` покрывает `GIT_CONFIG_KEY_0`, `GIT_CONFIG_KEY_12`, но не `GIT_CONFIG_KEY_X`; `GIT_*` не покрывает `GIT_SSH_COMMAND`). `deny` - флаги, запрещённые в хвосте argv после закреплённых `args`: запуск отклоняется, если элемент хвоста равен флагу или начинается с `флаг=` (`--output` ловит `--output` и `--output=путь`). Поле только у `process` и `pty`; список ведёт автор плагина, ядро своего не имеет. Склеенные короткие флаги (`-xD`) запрет не ловит: автор называет и их. Запрет смягчает правило, а не отменяет «полный доступ через программу».
 
 ```ts
-type ProgramRule = string | { readonly program: string; readonly args: readonly string[]; readonly env?: readonly string[] };
+type ProgramRule = string | { readonly program: string; readonly args: readonly string[]; readonly env?: readonly string[]; readonly deny?: readonly string[] };
 ```
 
 ### DirEntry
