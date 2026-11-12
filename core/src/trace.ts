@@ -126,7 +126,7 @@ class RealOp implements OpHandle {
 
   #argsText(): string | undefined {
     const options = this.#trace.argsOptions;
-    return options !== undefined && this.#hasArgs ? describeArgs(this.#argsValue, options.limit, options.secrets(this.#caller, this.#callee), this.#argsBytes) : undefined;
+    return options !== undefined && this.#hasArgs ? describeArgs(this.#argsValue, options.limit, options.secrets(this.#caller, this.#callee), this.#argsBytes, this.#target) : undefined;
   }
 
   /** Запись об итоге: успех с размером результата либо отказ с кодом ядра, как его увидел вызывающий. */

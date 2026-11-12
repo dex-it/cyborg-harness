@@ -1,4 +1,4 @@
-import { clipLine, MIN_SECRET_LENGTH, redactSecrets } from './log-text.ts';
+import { clipLine, MIN_SECRET_LENGTH, redactSecrets, SECRET_MARK } from './log-text.ts';
 
 /*
  * Аргументы операции в записи трассы (K-33, решение владельца 2026-11-11): только по флагу запуска `--trace-args` (`LoadOptions.traceArgs`).
@@ -8,6 +8,13 @@ import { clipLine, MIN_SECRET_LENGTH, redactSecrets } from './log-text.ts';
 
 const MAX_NODES = 1000;
 const MAX_DEPTH = 8;
+
+/**
+ * Вызовы шлюза, у которых аргумент - значение секрета, а не ключ: цель записи -> номер аргумента. Значение здесь ядро опознаёт само, поэтому оно пишется меткой
+ * при любой длине, а порог `MIN_SECRET_LENGTH` (правило K-29 для значений, которых ядро опознать не может) на него не распространяется. Остальные вызовы
+ * `ctx.os.secrets.*` несут только ключ или ссылку, значение секрета приходит в их результате, а результат в запись не идёт.
+ */
+const SECRET_VALUE_ARG: Readonly<Record<string, number>> = { 'os:secrets.set': 1 };
 
 interface Walk {
   readonly parts: string[];
@@ -85,9 +92,12 @@ function walk(w: Walk, value: unknown, depth: number): void {
 
 /**
  * Текст аргументов для записи трассы. `limit` - предел в байтах (`LIMITS.traceArgsBytes`), `secrets` - значения, которые нельзя оставлять
- * (`OsGateway.secretValues`), `sizeBytes` - размер аргументов из `bytesOf` для пометки, когда обход остановился раньше конца.
+ * (`OsGateway.secretValues`), `sizeBytes` - размер аргументов из `bytesOf` для пометки, когда обход остановился раньше конца,
+ * `target` - цель записи: у `os:secrets.set` значение секрета заменяется меткой безусловно (`SECRET_VALUE_ARG`).
  */
-export function describeArgs(value: unknown, limit: number, secrets: readonly string[], sizeBytes: number): string {
+export function describeArgs(value: unknown, limit: number, secrets: readonly string[], sizeBytes: number, target?: string): string {
+  const at = target === undefined ? undefined : SECRET_VALUE_ARG[target];
+  if (at !== undefined && Array.isArray(value) && at < value.length) value = value.map((item: unknown, i) => (i === at ? SECRET_MARK : item));
   const slack = secrets.reduce((n, s) => (s.length >= MIN_SECRET_LENGTH ? Math.max(n, s.length) : n), 0);
   const w: Walk = { parts: [], used: 0, limit, slack, secrets, nodes: MAX_NODES, complete: true };
   walk(w, value, 0);

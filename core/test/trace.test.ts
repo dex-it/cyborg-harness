@@ -655,3 +655,31 @@ test('журнал: с флагом при запуске есть запись 
   assert.ok(!noSink.k.journal.some((e) => e.kind === 'trace-args'));
   assert.deepEqual(noSink.records, []);
 });
+
+test('секрет: значение в os:secrets.set пишется меткой при любой длине (1-3 знака, 4 знака, длинное), ключ остаётся; get и resolve аргументов не теряют (K-33)', async () => {
+  const r = await rig(pair, pairManifests, { ...pairOptions, traceArgs: true, os: { ...pairOptions.os, secrets: memorySecrets() } });
+  const app = r.ctx.app!;
+  r.take();
+
+  const values = ['1', 'ab', 'abc', 'abcd', `long-${randomUUID()}`];
+  for (const [i, value] of values.entries()) await app.os.secrets.set(`k${String(i)}`, value);
+  await app.os.secrets.get('k0');
+  await app.secrets.resolve({ $secret: 'k4' });
+  await app.os.secrets.delete('k0');
+
+  const ops = r.take();
+  const byTarget = (target: string) => ops.filter((o) => o.target === target);
+  assert.deepEqual(
+    byTarget('os:secrets.set').map((o) => o.args),
+    values.map((_, i) => `["k${String(i)}","[секрет]"]`),
+    'значение вычеркнуто безусловно, ключ остался',
+  );
+  assert.equal(byTarget('os:secrets.get')[0]!.args, '["k0"]');
+  assert.equal(byTarget('os:secrets.resolve')[0]!.args, '[{"$secret":"k4"}]');
+  assert.equal(byTarget('os:secrets.delete')[0]!.args, '["k0"]');
+  const text = JSON.stringify(ops);
+  for (const value of values) assert.ok(!text.includes(`"${value}"`), `значение ${value.slice(0, 6)} в записях`);
+  // Не-секрет, совпавший по длине с правилом K-29, в обычном вызове остаётся: безусловно скрывается только значение, которое ядро опознаёт само.
+  await app.contracts.get('trace.files', 1)!.read!('abc');
+  assert.equal(r.take().find((o) => o.target.startsWith('contract:'))!.args, '["abc"]');
+});

@@ -74,3 +74,12 @@ test('форма: цикл, глубина и число узлов ограни
   assert.match(wide, /\[обрезано/, 'число узлов ограничено, запись помечена обрезанной');
   assert.ok(wide.length < 20_000, `длина ${String(wide.length)}`);
 });
+
+test('значение секрета: аргумент os:secrets.set с номером 1 пишется меткой без порога длины, прочие цели и номера не затронуты (K-33)', () => {
+  assert.equal(describeArgs(['key', 'a'], 4096, [], 0, 'os:secrets.set'), `["key","${SECRET_MARK}"]`);
+  assert.equal(describeArgs(['key', { v: 1 }], 4096, [], 0, 'os:secrets.set'), `["key","${SECRET_MARK}"]`);
+  assert.equal(describeArgs(['key'], 4096, [], 0, 'os:secrets.set'), '["key"]', 'значения нет - нечего скрывать');
+  assert.equal(describeArgs(['key', 'a'], 4096, [], 0, 'os:secrets.get'), '["key","a"]');
+  assert.equal(describeArgs(['key', 'a'], 4096, [], 0), '["key","a"]');
+  assert.equal(describeArgs('строка', 4096, [], 0, 'os:secrets.set'), '"строка"', 'не массив - форма не та, что у шлюза, не трогаем');
+});
