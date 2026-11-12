@@ -111,6 +111,22 @@ test('pty.spawn с describedBy: описание поставщика прохо
   assert.deepEqual(describePermissions({ launch: [rule] }), ['предлагает запуск в терминале: /bin/bash -c exec agent (окружение: AGENT_FILE) - его выполнит потребитель']);
 });
 
+test('deny правила pty: флаг в хвосте argv, в том числе `флаг=значение`, - PermissionDenied и запись denied с именем флага без значения; процесс не создан', async () => {
+  const rule = { program: '/bin/bash', args: ['-l'], deny: ['--rcfile', '--dangerously-skip-permissions'] };
+  await using s = await setup({ term: { pty: [rule] }, plain: { pty: [{ program: '/bin/bash', args: ['-l'] }] } });
+  for (const tail of [['--rcfile'], ['--rcfile=/tmp/evil-rc'], ['x', '--dangerously-skip-permissions'], ['--dangerously-skip-permissions=1']]) {
+    await assert.rejects(s.pty('term').spawn({ program: '/bin/bash', args: ['-l', ...tail] }), { code: 'PermissionDenied' }, tail.join(' '));
+  }
+  assert.equal(s.backend.procs.length, 0, 'процесс не создан');
+  const denied = s.k.journal.flatMap((e) => (e.kind === 'denied' && e.method === 'pty.spawn' ? [e.detail] : []));
+  // Одинаковые отказы за окно журнал склеивает: записей две - по флагу.
+  assert.deepEqual(denied, ['запрещён флаг --rcfile в правиле pty: /bin/bash', 'запрещён флаг --dangerously-skip-permissions в правиле pty: /bin/bash'], 'имя флага из deny, значение в журнал не идёт');
+  await s.pty('term').spawn({ program: '/bin/bash', args: ['-l', '--rcfiles', '--rcfile-x=1'] });
+  assert.equal(s.backend.procs.length, 1, 'близкие по написанию аргументы не запрещены');
+  await s.pty('plain').spawn({ program: '/bin/bash', args: ['-l', '--rcfile=/tmp/rc'] });
+  assert.equal(s.backend.procs.length, 2, 'правило без deny работает как раньше');
+});
+
 test('pty: чужие не видны и не трогаются; cwd вне права - отказ; без бэкенда - Unavailable; без права - нет члена', async () => {
   await using s = await setup({ a: shell, b: shell, plain: undefined });
   const mine = await s.pty('a').spawn({ program: '/bin/bash' });

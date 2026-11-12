@@ -29,6 +29,16 @@ export const envNameAllowed = (entry: string, name: string): boolean => (entry.e
 
 /** Программа правила `process` и `pty`: оболочка входа человека; ядро подставляет её путь само. */
 export const LOGIN_SHELL = '$SHELL';
+/** Первый флаг из `deny` правила, который стоит в argv после закреплённых `args`: элемент равен флагу или начинается с `флаг=`. Возвращает запись из `deny` (без значения аргумента). Склеенные короткие флаги (`-xD`) и значения других флагов (`--header --output`) эта проверка не отличает и не разбирает. */
+export function deniedFlag(rule: { readonly args: readonly string[]; readonly deny?: readonly string[] }, argv: readonly string[]): string | undefined {
+  if (rule.deny === undefined) return undefined;
+  for (const arg of argv.slice(rule.args.length)) {
+    const hit = rule.deny.find((flag) => arg === flag || arg.startsWith(`${flag}=`));
+    if (hit !== undefined) return hit;
+  }
+  return undefined;
+}
+
 const HOST = /^(?:config:[A-Za-z][\w.]*|[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d+)?)$/i;
 
 function strings(field: string, raw: unknown, errors: string[], ok: (v: string) => boolean, expected: string): string[] | undefined {
@@ -80,8 +90,17 @@ export function readPermissions(raw: unknown, errors: string[]): PluginPermissio
           r.args.every((a) => typeof a === 'string') &&
           (r.env === undefined || (Array.isArray(r.env) && r.env.every((v) => typeof v === 'string' && ENV_RULE_NAME.test(v))))),
     );
-    if (!ok) errors.push(`permissions.${key}: ожидается список программ или {program, args, env?}, имя в env - точное или ПРЕФИКС_*; ${LOGIN_SHELL} - только с флагом и скриптом в args`);
-    else set(key, rules);
+    if (!ok) errors.push(`permissions.${key}: ожидается список программ или {program, args, env?${key === 'launch' ? '' : ', deny?'}}, имя в env - точное или ПРЕФИКС_*; ${LOGIN_SHELL} - только с флагом и скриптом в args`);
+    else {
+      // Запрет флагов - у запуска самого плагина; `launch` описывает запуск потребителя, и молчаливое «запрещено» там ничего бы не держало.
+      const badDeny = (rules ?? []).flatMap((r, i) => {
+        if (!isRecord(r) || r.deny === undefined) return [];
+        if (key === 'launch') return [`permissions.${key}[${i}].deny: поле только у process и pty`];
+        return Array.isArray(r.deny) && r.deny.every((f) => typeof f === 'string' && f.length > 0) ? [] : [`permissions.${key}[${i}].deny: ожидается список непустых строк - флаги, например "--output"`];
+      });
+      errors.push(...badDeny);
+      if (badDeny.length === 0) set(key, rules);
+    }
   }
   return out;
 }
@@ -111,7 +130,8 @@ export function describePermissions(p: PluginPermissions): string[] {
   const writes = p['fs.write'] !== undefined || p.shell?.some((a) => a === 'plugin-data' || a === 'plugin-temp' || a === ANY_PATH);
   if (p.shell) out.push(`открывает в системе: ${areaWords(p.shell)} - кроме программ и скриптов${writes ? '; где сам пишет - только документы' : ''}`);
   const program = (p: string) => (p === LOGIN_SHELL ? 'оболочка входа' : p);
-  const programs = (rules: PluginPermissions['process']) => (rules ?? []).map((r) => (typeof r === 'string' ? r : [program(r.program), ...r.args].join(' ') + (r.env?.length ? ` (окружение: ${r.env.join(', ')})` : ''))).join(', ');
+  const programs = (rules: PluginPermissions['process']) =>
+    (rules ?? []).map((r) => (typeof r === 'string' ? r : [program(r.program), ...r.args].join(' ') + (r.env?.length ? ` (окружение: ${r.env.join(', ')})` : '') + (r.deny?.length ? ` (запрещены флаги: ${r.deny.join(', ')})` : ''))).join(', ');
   if (p.process) out.push(`запускает программы: ${programs(p.process)} - полный доступ через программу`);
   if (p.pty) out.push(`запускает в терминале: ${programs(p.pty)} - полный доступ через программу`);
   if (p.launch) out.push(`предлагает запуск в терминале: ${programs(p.launch)} - его выполнит потребитель`);
