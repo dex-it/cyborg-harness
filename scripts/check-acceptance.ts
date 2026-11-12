@@ -142,7 +142,7 @@ export function collectAcceptance(root: string): AcceptanceReport {
   return { criteria, tests, exceptions, parts, problems };
 }
 
-const HEAD = ['---', 'level: verification', 'status: review', 'date: 2026-11-11', 'origin: derived', '---', ''].join('\n');
+const HEAD = ['---', 'level: verification', 'status: review', 'date: 2026-11-12', 'origin: derived', '---', ''].join('\n');
 
 function sortKey(key: string): string {
   const [story = '', n = '0'] = key.split('/');
