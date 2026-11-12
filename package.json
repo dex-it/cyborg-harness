@@ -35,6 +35,7 @@
     "spike:monaco": "npm run build && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON playground/scripts/spike-monaco.mjs",
     "spike:pty": "node playground/scripts/spike-pty.mjs",
     "pilot:files": "npm run build:packages && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON playground/scripts/pilot-files.mjs",
+    "pilot:trackers-http": "npm run build:packages && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON playground/scripts/pilot-trackers-http.mjs",
     "pilot:sessions": "npm run build && node playground/scripts/pilot-sessions.mjs",
     "spike:pty-stream": "npm run build && node playground/scripts/spike-pty-stream.mjs",
     "spike:pty-restore": "node playground/scripts/spike-pty-restore.mjs",
