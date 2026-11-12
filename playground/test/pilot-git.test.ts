@@ -210,7 +210,7 @@ export default {
 };
 `;
 
-test('git: deny правил process отклоняет -c, --output и --exec-path в хвосте argv, в том числе в форме флаг=значение; чтение без них проходит', async () => {
+test('ST-3002/2: git: deny правил process отклоняет -c, --output и --exec-path в хвосте argv, в том числе в форме флаг=значение; чтение без них проходит', async () => {
   await using box = await sandbox('cyborg-k34-');
   const repo = await makeRepo(box, FILES);
   const manifest = JSON.parse(readFileSync(path.join(import.meta.dirname, '..', 'plugins', 'git', 'manifest.json'), 'utf8')) as { permissions: { process: { args: string[]; deny?: string[] }[] } };

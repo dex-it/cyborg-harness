@@ -563,7 +563,7 @@ test('мост вида (K-13): канал, модальное окно, его 
 
 // K-33 (#224): аргументы операций в записи по флагу запуска `traceArgs` (`--trace-args`).
 
-test('без флага запись не несёт поля args, хотя аргументы есть (K-33)', async () => {
+test('ST-4001/5: без флага запись не несёт поля args, хотя аргументы есть (K-33)', async () => {
   const r = await rig(pair, pairManifests, pairOptions);
   const app = r.ctx.app!;
   r.take();
@@ -648,7 +648,7 @@ test('предел: длинные аргументы обрезаны по LIMI
   assert.ok(cut!.args!.length < 60 && cut!.args!.includes('обрезано'), cut!.args!);
 });
 
-test('секрет: значение, полученное плагином через шлюз, вычёркнуто из аргументов; чужой секрет и не прошедшее шлюз значение - нет (K-33, K-29)', async () => {
+test('ST-4001/11: секрет: значение, полученное плагином через шлюз, вычёркнуто из аргументов; чужой секрет и не прошедшее шлюз значение - нет (K-33, K-29)', async () => {
   const secret = `s3cr3t-${randomUUID()}`;
   const stranger = `chuzhoj-${randomUUID()}`;
   const r = await rig(pair, pairManifests, { ...pairOptions, traceArgs: true, os: { ...pairOptions.os, secrets: memorySecrets() } });
@@ -691,7 +691,7 @@ test('журнал: с флагом при запуске есть запись 
   assert.deepEqual(noSink.records, []);
 });
 
-test('секрет: значение в os:secrets.set пишется меткой при любой длине (1-3 знака, 4 знака, длинное), ключ остаётся; get и resolve аргументов не теряют (K-33)', async () => {
+test('ST-4001/11: секрет: значение в os:secrets.set пишется меткой при любой длине (1-3 знака, 4 знака, длинное), ключ остаётся; get и resolve аргументов не теряют (K-33)', async () => {
   const r = await rig(pair, pairManifests, { ...pairOptions, traceArgs: true, os: { ...pairOptions.os, secrets: memorySecrets() } });
   const app = r.ctx.app!;
   r.take();

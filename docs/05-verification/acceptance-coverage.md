@@ -9,7 +9,7 @@ origin: derived
 
 Таблица собрана из критериев историй, имён тестов и `acceptance.md` командой `npm run check:acceptance -- --write`; руками не правится. `npm run check:acceptance` падает, если у критерия нет ни теста с ключом `ST-NNNN/k` в имени, ни исключения в [acceptance.md](acceptance.md), если есть и то и другое, если ключ указывает на несуществующий критерий или эта таблица расходится с собранной. Исход критерия: «тест» - в имени хотя бы одного включённого теста ключ критерия (запуск - `npm run test:acceptance`); «исключение» - категория из [acceptance.md](acceptance.md); «целевое поведение» - критерий на то, чего ещё нет, проверки не требует. В ячейке «Проверка» путь файла и число тестов с ключом.
 
-Итог: историй 39, критериев 248: тест 212 (тестов с ключом 511), исключение 14, целевое поведение 22.
+Итог: историй 39, критериев 248: тест 212 (тестов с ключом 535), исключение 14, целевое поведение 22.
 
 Исключения по категориям: документы 3, замеры 2, инструменты автора 1, окно 3, ручная 3, ручная, дефект 2.
 
@@ -34,9 +34,9 @@ origin: derived
 | Критерий | Исход | Проверка |
 |---|---|---|
 | ST-1002/1 | тест | core/test/loader.test.ts (1) |
-| ST-1002/2 | тест | core/test/graph.test.ts (1) |
+| ST-1002/2 | тест | core/test/graph.test.ts (4) |
 | ST-1002/3 | тест | core/test/graph.test.ts (1) |
-| ST-1002/4 | тест | core/test/graph.test.ts (2) |
+| ST-1002/4 | тест | core/test/graph.test.ts (3) |
 | ST-1002/5 | тест | core/test/graph.test.ts (1) |
 | ST-1002/6 | тест | core/test/graph.test.ts (3) |
 | ST-1002/7 | тест | core/test/graph.test.ts (1), core/test/loader.test.ts (1) |
@@ -211,8 +211,8 @@ origin: derived
 | ST-3001/4 | тест | core/test/os.test.ts (2) |
 | ST-3001/5 | тест | core/test/os.test.ts (2) |
 | ST-3001/6 | тест | core/test/os.test.ts (1) |
-| ST-3001/7 | тест | core/test/os.test.ts (1) |
-| ST-3001/8 | тест | core/test/os.test.ts (1), core/test/plugin-check.test.ts (1) |
+| ST-3001/7 | тест | core/test/os.test.ts (2) |
+| ST-3001/8 | тест | core/test/os.test.ts (2), core/test/plugin-check.test.ts (1) |
 | ST-3001/9 | тест | core/test/plugin-check.test.ts (1), core/test/trust.test.ts (1), core/test/workspace-trust.test.ts (1) |
 | ST-3001/10 | целевое поведение |  |
 
@@ -221,10 +221,10 @@ origin: derived
 | Критерий | Исход | Проверка |
 |---|---|---|
 | ST-3002/1 | тест | core/test/os.test.ts (2) |
-| ST-3002/2 | тест | core/test/os-lifetime.test.ts (1), core/test/os.test.ts (4), core/test/security-gateway.test.ts (1) |
-| ST-3002/3 | тест | core/test/os.test.ts (2), core/test/workspace-trust.test.ts (2) |
-| ST-3002/4 | тест | core/test/net-fetch.test.ts (1), core/test/os.test.ts (1) |
-| ST-3002/5 | тест | core/test/net-fetch.test.ts (2) |
+| ST-3002/2 | тест | core/test/os-lifetime.test.ts (1), core/test/os.test.ts (6), core/test/security-gateway.test.ts (1), playground/test/pilot-git.test.ts (1) |
+| ST-3002/3 | тест | core/test/os.test.ts (2), core/test/workspace-trust.test.ts (4) |
+| ST-3002/4 | тест | core/test/net-fetch.test.ts (2), core/test/os.test.ts (1) |
+| ST-3002/5 | тест | core/test/net-fetch.test.ts (6) |
 | ST-3002/6 | тест | core/test/serve.test.ts (4) |
 | ST-3002/7 | тест | core/test/os-lifetime.test.ts (4), core/test/os.test.ts (4) |
 
@@ -244,7 +244,7 @@ origin: derived
 |---|---|---|
 | ST-3004/1 | тест | core/test/os.test.ts (1) |
 | ST-3004/2 | тест | core/test/os.test.ts (1) |
-| ST-3004/3 | тест | core/test/diagnostics.test.ts (1), core/test/plugin-log.test.ts (1), core/test/secrets-journal.test.ts (1) |
+| ST-3004/3 | тест | core/test/diagnostics.test.ts (2), core/test/plugin-log.test.ts (1), core/test/secrets-journal.test.ts (1), playground/test/pilot-trackers-http.test.ts (1) |
 | ST-3004/4 | тест | core/test/uninstall.test.ts (2) |
 | ST-3004/5 | тест | core/test/plugin-log.test.ts (3) |
 
@@ -299,13 +299,13 @@ origin: derived
 | ST-4001/2 | тест | core/test/trace.test.ts (1) |
 | ST-4001/3 | тест | core/test/trace.test.ts (2) |
 | ST-4001/4 | тест | core/test/trace.test.ts (1) |
-| ST-4001/5 | тест | core/test/trace.test.ts (1) |
+| ST-4001/5 | тест | core/test/trace.test.ts (2), electron/test/trace-args.test.ts (1) |
 | ST-4001/6 | тест | core/test/trace.test.ts (3) |
 | ST-4001/7 | тест | core/test/trace.test.ts (1) |
 | ST-4001/8 | тест | core/test/trace.test.ts (1) |
 | ST-4001/9 | тест | core/test/trace.test.ts (1) |
 | ST-4001/10 | исключение | замеры |
-| ST-4001/11 | тест | core/test/diagnostics.test.ts (1), core/test/secrets-journal.test.ts (1), core/test/trace.test.ts (2) |
+| ST-4001/11 | тест | core/test/diagnostics.test.ts (2), core/test/secrets-journal.test.ts (1), core/test/trace-args.test.ts (1), core/test/trace.test.ts (4) |
 
 ## ST-4002 Журнал плагина: строки ctx.log, вывод хоста и пределы
 

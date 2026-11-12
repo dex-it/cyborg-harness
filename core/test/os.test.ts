@@ -953,7 +953,7 @@ test('ST-3001/7, ST-3001/8, ST-3007/7: права в манифесте: неи�
   ]);
 });
 
-test('deny правила process: флаг в хвосте argv, в том числе `флаг=значение`, - PermissionDenied и запись denied с именем флага без значения; программа не запускалась', async () => {
+test('ST-3002/2: deny правила process: флаг в хвосте argv, в том числе `флаг=значение`, - PermissionDenied и запись denied с именем флага без значения; программа не запускалась', async () => {
   await using box = await sandbox();
   const rule = { program: process.execPath, args: ['-e'], deny: ['--output', '-X'] };
   const { k, os, denied } = await kernel({ runner: { process: [rule] } }, { dataDir: box.data, tempDir: box.temp });
@@ -976,7 +976,7 @@ test('deny правила process: флаг в хвосте argv, в том чи
   await k.unload();
 });
 
-test('deny правила process: другое правило той же программы без deny разрешает запуск; запрет держит правило, а не программу', async () => {
+test('ST-3002/2: deny правила process: другое правило той же программы без deny разрешает запуск; запрет держит правило, а не программу', async () => {
   await using box = await sandbox();
   const strict = { program: process.execPath, args: ['-e'], deny: ['--output'] };
   const { k, os } = await kernel(
@@ -1001,7 +1001,7 @@ test('правило process без deny работает как раньше: �
   await k.unload();
 });
 
-test('deny в манифесте: не список строк и пустая строка отвергают манифест с именем поля; у launch поля нет; права словами называют запрещённые флаги', () => {
+test('ST-3001/7, ST-3001/8: deny в манифесте: не список строк и пустая строка отвергают манифест с именем поля; у launch поля нет; права словами называют запрещённые флаги', () => {
   for (const key of ['process', 'pty'] as const) {
     const rule = (deny: unknown) => manifest('p', { [key]: [{ program: 'git', args: ['log'], deny }] });
     for (const bad of ['--output', {}, 5, [''], ['--output', ''], ['--output', 1], [['--output']], null]) {

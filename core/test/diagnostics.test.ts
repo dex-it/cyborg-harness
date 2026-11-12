@@ -454,7 +454,7 @@ test('выгрузка без флага --trace-args: заголовок гов
   await k.unload();
 });
 
-test('выгрузка с флагом --trace-args: предупреждение в заголовке, аргументы в строках операций, значение секрета вычеркнуто, файл хранилища тоже с аргументами (K-33)', async () => {
+test('ST-3004/3, ST-4001/11: выгрузка с флагом --trace-args: предупреждение в заголовке, аргументы в строках операций, значение секрета вычеркнуто, файл хранилища тоже с аргументами (K-33)', async () => {
   const { fsys, d, k, marker, secret, ctx } = await scenario({ traceArgs: true });
   await ctx.os.secrets.set('token', secret);
   await ctx.os.secrets.get('token');
