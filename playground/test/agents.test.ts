@@ -50,9 +50,10 @@ async function setup(store?: LayerStore, extra: readonly string[] = [], rogue?: 
     manifest: { id: 'probe', version: '1.0.0', engines: { cyborg: '^1' }, consumes: { 'cyborg.agent': '^1' } },
     module: { activate: (ctx) => void (probe = ctx) },
   };
-  const ids = [...PROVIDERS, ...extra, 'session-isolation', 'sessions', ...inline.map((p) => p.manifest.id)];
+  const inlineIds = inline.map((p) => (typeof p.manifest.id === 'string' ? p.manifest.id : ''));
+  const ids = [...PROVIDERS, ...extra, 'session-isolation', 'sessions', ...inlineIds];
   const k = await startKernel({
-    plugins: [...ids.filter((id) => !inline.some((p) => p.manifest.id === id)).map((id) => path.join(PLUGINS, id)), ...inline, probePlugin, ...(rogue ? [rogue] : [])],
+    plugins: [...ids.filter((id) => !inlineIds.includes(id)).map((id) => path.join(PLUGINS, id)), ...inline, probePlugin, ...(rogue ? [rogue] : [])],
     os: { ...os, ...osExtra },
     ...(store && { state: store }),
     // Как в приложении: поставка - плагины каталога, пространство cyborg.* закрыто всем остальным (K-15).

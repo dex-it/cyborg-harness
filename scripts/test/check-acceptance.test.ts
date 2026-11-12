@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { collectAcceptance, main, readExceptions, renderMatrix, scanSource } from '../check-acceptance.ts';
+import { acceptanceFiles } from '../test-acceptance.ts';
 
 // #230: связь «критерий -> тест». Деревья-образцы собираются во временном каталоге; вызовы тестов в исходниках-образцах строятся через `call`,
 // чтобы сам этот файл не содержал литералов вида «it('ST-...')», которые скрипт принял бы за разметку.
@@ -177,5 +178,17 @@ describe('main: таблица покрытия и код выхода', () => {
 
   it('renderMatrix без исходов «нет» не пишет «без исхода»', () => {
     assert.doesNotMatch(renderMatrix(collectAcceptance(tree(closed))), /без исхода/);
+  });
+});
+
+describe('acceptanceFiles: файлы для test:acceptance', () => {
+  it('только файлы с включёнными тестами с ключом, без повторов; describe, skip и тесты без ключа файл не называют', () => {
+    const root = tree({
+      'core/test/a.test.ts': call('it', 'ST-1001/1: первый') + call('it', 'ST-1001/1: второй'),
+      'core/test/b.test.ts': call('describe', 'ST-1001/2: группа'),
+      'core/test/c.test.ts': call('it', 'ST-1001/2: отключён', ', { skip: true }'),
+      'core/test/d.test.ts': call('it', 'без ключа'),
+    });
+    assert.deepEqual(acceptanceFiles(root), ['core/test/a.test.ts']);
   });
 });
