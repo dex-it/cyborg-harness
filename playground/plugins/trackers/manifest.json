@@ -11,8 +11,8 @@
   },
   "permissions": {
     "process": [
-      { "program": "gh", "args": ["api", "--method", "GET"], "env": ["GH_PROMPT_DISABLED", "NO_COLOR"] },
-      { "program": "glab", "args": ["api", "--method", "GET"], "env": ["NO_COLOR"] },
+      { "program": "gh", "args": ["api", "--method", "GET"], "env": ["GH_PROMPT_DISABLED", "NO_COLOR"], "deny": ["--method", "-X", "--input", "--field", "-F", "--raw-field", "-f", "--hostname", "--header", "-H"] },
+      { "program": "glab", "args": ["api", "--method", "GET"], "env": ["NO_COLOR"], "deny": ["--method", "-X", "--input", "--field", "-F", "--raw-field", "-f", "--hostname", "--header", "-H"] },
       { "program": "jira", "args": ["issue", "list", "--raw"], "env": ["NO_COLOR"] }
     ]
   }
