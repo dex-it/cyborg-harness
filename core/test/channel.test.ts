@@ -80,13 +80,14 @@ test('канал: вид, которого нет в манифесте, - Inval
   await k.unload();
 });
 
-test('канал: сообщение сверх лимита - Invalid, не данные - NotCloneable, канал работает дальше', async () => {
+test('ST-2001/9: канал: сообщение сверх лимита - Invalid, не данные - NotCloneable, канал работает дальше', async () => {
   const s = stand();
   const k = await s.start();
   const big = 'я'.repeat(40 * 1024);
   await assert.rejects(s.chans.a?.post(big) ?? Promise.reject(new Error('нет канала')), { code: 'Invalid' }, 'лимит считается в байтах, а не в символах');
   await assert.rejects(s.chans.a?.post(() => 1) ?? Promise.reject(new Error('нет канала')), { code: 'NotCloneable' });
   await assert.rejects(k.viewPost('a', 'main', big), { code: 'Invalid' }, 'в обратную сторону тот же предел');
+  await assert.rejects(k.viewPost('a', 'main', () => 1), { code: 'NotCloneable' }, 'и та же граница клонирования');
   await s.chans.a?.post('после отказов');
   await k.viewPost('a', 'main', 'и вид тоже');
   assert.deepEqual(s.sent, [['a', 'main', 'после отказов']]);

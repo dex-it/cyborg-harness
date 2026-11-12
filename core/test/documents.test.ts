@@ -34,7 +34,7 @@ async function start(saved: unknown[]) {
   return { k, ctx, revealed, disk: () => (doc.$documents as { list: { id: string; type: string }[] }).list, changes: () => changes };
 }
 
-test('документы: тип с restorable переживает перезапуск, без владельца вкладка недоступна, убранный тип отсеян', async () => {
+test('ST-2003/6: документы: тип с restorable переживает перезапуск, без владельца вкладка недоступна, убранный тип отсеян', async () => {
   const { k, ctx, disk, changes } = await start([
     { id: 'n1', pluginId: 'ed', type: 'note', title: 'Заметка', data: { path: 'a.md' } },
     { id: 'o1', pluginId: 'ed', type: 'old', title: 'Тип убран' },

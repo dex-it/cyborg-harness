@@ -113,7 +113,7 @@ test('ctx.keys.register: недоверенный вход - отказ с ко�
   await k.unload();
 });
 
-test('ctx.keys.register: условие visible у плагина без вида - Invalid, лимит регистраций на плагин', async () => {
+test('ST-2002/5: ctx.keys.register: условие visible у плагина без вида - Invalid, лимит регистраций на плагин', async () => {
   const noView = manifest('plain', { commands: ['plain.go'] });
   const { start, keys } = harness({ plain: idle }, { enabled: ['plain'], manifests: [noView] });
   const k = await start();
@@ -428,7 +428,7 @@ test('статические сочетания и команды окна ав�
   await k.unload();
 });
 
-test('замок окна: динамическое сочетание чужого плагина под замком не работает', async () => {
+test('ST-2004/3: замок окна: динамическое сочетание чужого плагина под замком не работает', async () => {
   const lock = manifest('lock', { commands: ['lock.go'], permissions: { 'ui.lock': true }, ui: { overlay: './lock.js' } });
   const locker: PluginModule = {
     activate(ctx) {
