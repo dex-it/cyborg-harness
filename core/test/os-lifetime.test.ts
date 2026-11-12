@@ -60,7 +60,7 @@ async function pidsOf(file: string): Promise<number[]> {
   return (await readFile(file, 'utf8')).split(' ').map(Number);
 }
 
-test('process.run: выключение плагина и выгрузка ядра завершают программу вместе с её потомками', { skip: !posix && 'группы процессов - POSIX' }, async () => {
+test('ST-1005/1: process.run: выключение плагина и выгрузка ядра завершают программу вместе с её потомками', { skip: !posix && 'группы процессов - POSIX' }, async () => {
   await using box = await sandbox();
   const { k, ctx } = await kernel(
     { a: { process: [{ program: process.execPath, args: ['-e'] }] }, b: { process: [{ program: process.execPath, args: ['-e'] }] } },
@@ -223,7 +223,7 @@ test('net.fetch: тело ответа ограничено, бесконечн�
   await k.unload();
 });
 
-test('net.fetch: зависший сервер - Timeout по timeoutMs; выгрузка плагина обрывает запрос', async () => {
+test('ST-1005/1: net.fetch: зависший сервер - Timeout по timeoutMs; выгрузка плагина обрывает запрос', async () => {
   await using box = await sandbox();
   const signals: AbortSignal[] = [];
   const hanging = ((_url: URL, init: RequestInit) =>

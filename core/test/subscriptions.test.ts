@@ -86,7 +86,7 @@ test('подписка через границу хоста: колбэк пол
   await kernel.unload();
 });
 
-test('подписка снимается, когда выгружен потребитель', async () => {
+test('ST-1005/2: подписка снимается, когда выгружен потребитель', async () => {
   const { kernel, api, listen } = await start();
   await listen('a');
   await listen('b');
@@ -97,7 +97,7 @@ test('подписка снимается, когда выгружен потр�
   await kernel.unload();
 });
 
-test('хост потребителя упал: подписку снимает ядро, отписаться хосту уже некому', async () => {
+test('ST-1005/2: хост потребителя упал: подписку снимает ядро, отписаться хосту уже некому', async () => {
   const { kernel, listen, handles } = await start();
   await listen('a');
   assert.equal(await kernel.run('ticker.count'), 1);
@@ -107,7 +107,7 @@ test('хост потребителя упал: подписку снимает 
   await kernel.unload();
 });
 
-test('поставщик выгружен: колбэки потребителя забыты, после возврата подписка берётся заново', async () => {
+test('ST-1005/2: поставщик выгружен: колбэки потребителя забыты, после возврата подписка берётся заново', async () => {
   const { kernel, got, listen, ctx } = await start();
   let changes = 0;
   ctx.contracts.onChange('test.ticker', () => changes++);

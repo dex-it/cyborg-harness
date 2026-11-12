@@ -31,7 +31,7 @@ function kernel(table: Record<string, PluginModule>, options: Omit<LoadOptions, 
 
 const kinds = (k: { journal: readonly { pluginId?: string | undefined; kind: string }[] }) => k.journal.map((e) => `${e.pluginId ?? '-'}:${e.kind}`);
 
-test('активация по графу, вызов чужого контракта через ядро, снятие в обратном порядке', async () => {
+test('ST-1002/7, ST-1006/4: активация по графу, вызов чужого контракта через ядро, снятие в обратном порядке', async () => {
   const events: string[] = [];
   const k = await kernel(
     {
@@ -62,7 +62,7 @@ test('активация по графу, вызов чужого контрак
   assert.deepEqual(events, ['files:up', 'sessions:/w:data:a', 'sessions:down', 'files:down']);
 });
 
-test('журнал: невалидный, выключенный, не найденный, отказ графа, сбой и пропуск зависимого', async () => {
+test('ST-1001/1, ST-1001/7, ST-1002/1, ST-1003/1, ST-1004/1: журнал: невалидный, выключенный, не найденный, отказ графа, сбой и пропуск зависимого', async () => {
   const k = await kernel(
     { files: { activate() { throw new Error('диск недоступен'); } }, sessions: { activate() {} } },
     {
@@ -81,7 +81,7 @@ test('журнал: невалидный, выключенный, не найд�
   await k.unload();
 });
 
-test('сбой активации снимает уже отданное плагином', async () => {
+test('ST-1003/1, ST-1004/1, ST-1005/1: сбой активации снимает уже отданное плагином', async () => {
   const k = await kernel(
     {
       files: {
@@ -147,7 +147,7 @@ test('функция в результате контракта - NotCloneable �
   await k.unload();
 });
 
-test('битый манифест невключённого плагина - disabled, а не invalid', async () => {
+test('ST-1001/1, ST-1001/7: битый манифест невключённого плагина - disabled, а не invalid', async () => {
   const k = await kernel({}, { enabled: [], manifests: [{ id: 'old', version: 'latest' }] });
   assert.deepEqual(k.journal, [{ pluginId: 'old', kind: 'disabled' }]);
 });
@@ -236,7 +236,7 @@ test('миграция config идёт в хосте, ядро записыва�
   await k.unload();
 });
 
-test('хост упал без виновника: журнал называет задетых через consumes, хост поднимается, после лимита брошен', async () => {
+test('ST-1003/7: хост упал без виновника: журнал называет задетых через consumes, хост поднимается, после лимита брошен', async () => {
   const handles = new Map<string, HostHandle>();
   const spawn = inlineHosts(async (entry) => ({
     activate(ctx) {
@@ -265,7 +265,7 @@ test('хост упал без виновника: журнал называет
   await k.unload();
 });
 
-test('«Включить снова»: не поднявшийся плагин и потребитель следом, затем выключенный сторожем', async () => {
+test('ST-1004/2, ST-1004/3, ST-1004/4: «Включить снова»: не поднявшийся плагин и потребитель следом, затем выключенный сторожем', async () => {
   const handles = new Map<string, HostHandle>();
   let broken = true;
   const spawn = inlineHosts(async (entry) =>
@@ -430,7 +430,7 @@ test('группы рендера: origin стороннего в своём п�
   for (const k of [first, second, alone]) await k.unload();
 });
 
-test('хосты: из поставки - по группам, сторонний всегда один в своём хосте', async () => {
+test('ST-1003/2: хосты: из поставки - по группам, сторонний всегда один в своём хосте', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const ids = ['a', 'b', 'x', 'y', 'z', 'w'];
   const k = await kernel(Object.fromEntries(ids.map((id) => [id, noop])), {
@@ -462,7 +462,7 @@ test('хосты: из поставки - по группам, сторонни�
   await unknown.unload();
 });
 
-test('журнал: загруженный сторонний плагин получает запись third-party, плагин поставки, выключенный и загрузка без bundled - нет', async () => {
+test('ST-1001/7: журнал: загруженный сторонний плагин получает запись third-party, плагин поставки, выключенный и загрузка без bundled - нет', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const ids = ['a', 'x', 'y'];
   const k = await kernel(Object.fromEntries(ids.map((id) => [id, noop])), {
@@ -482,7 +482,7 @@ test('журнал: загруженный сторонний плагин по�
   await unknown.unload();
 });
 
-test('хосты: host own у плагина поставки - свой хост без группы; в группе с соседом - хост группы и предупреждение host-own-grouped', async () => {
+test('ST-1001/9, ST-1001/10: хосты: host own у плагина поставки - свой хост без группы; в группе с соседом - хост группы и предупреждение host-own-grouped', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const ids = ['solo', 'grouped', 'mate', 'alone', 'guest', 'rogue'];
   const own = { host: 'own' };
@@ -510,7 +510,7 @@ test('хосты: host own у плагина поставки - свой хос�
   await k.unload();
 });
 
-test('схема раздела из манифеста: значение не по схеме - отказ плагину, правка извне не по схеме - значение прежнее', async () => {
+test('ST-1007/8: схема раздела из манифеста: значение не по схеме - отказ плагину, правка извне не по схеме - значение прежнее', async () => {
   const { docs, store } = memory({ user: { timer: { $version: 1, minutes: 'пять' } } });
   const schema = { type: 'object', properties: { minutes: { type: 'integer', minimum: 1 } }, additionalProperties: false };
   const files: Record<string, unknown> = { './config.schema.json': schema, './broken.json': { type: 'date' } };

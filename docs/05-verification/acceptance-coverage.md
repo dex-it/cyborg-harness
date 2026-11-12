@@ -9,113 +9,113 @@ origin: derived
 
 Таблица собрана из критериев историй, имён тестов и `acceptance.md` командой `npm run check:acceptance -- --write`; руками не правится. `npm run check:acceptance` падает, если у критерия нет ни теста с ключом `ST-NNNN/k` в имени, ни исключения в [acceptance.md](acceptance.md), если есть и то и другое, если ключ указывает на несуществующий критерий или эта таблица расходится с собранной. Исход критерия: «тест» - в имени хотя бы одного включённого теста ключ критерия (запуск - `npm run test:acceptance`); «исключение» - категория из [acceptance.md](acceptance.md); «целевое поведение» - критерий на то, чего ещё нет, проверки не требует. В ячейке «Проверка» путь файла и число тестов с ключом.
 
-Итог: историй 39, критериев 248: тест 2 (тестов с ключом 3), исключение 0, целевое поведение 22, без исхода 224.
+Итог: историй 39, критериев 248: тест 56 (тестов с ключом 118), исключение 3, целевое поведение 22, без исхода 167.
 
-Исключения по категориям: нет.
+Исключения по категориям: замеры 1, окно 1, ручная 1.
 
 ## ST-1001 Манифест и обнаружение: плагин с ошибками не запускается, остальные работают
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-1001/1 | нет |  |
-| ST-1001/2 | нет |  |
-| ST-1001/3 | нет |  |
-| ST-1001/4 | нет |  |
-| ST-1001/5 | нет |  |
-| ST-1001/6 | нет |  |
-| ST-1001/7 | нет |  |
-| ST-1001/8 | нет |  |
-| ST-1001/9 | нет |  |
-| ST-1001/10 | нет |  |
-| ST-1001/11 | нет |  |
+| ST-1001/1 | тест | core/test/loader.test.ts (2), core/test/semver-manifest.test.ts (1) |
+| ST-1001/2 | тест | core/test/window.test.ts (1) |
+| ST-1001/3 | тест | core/test/manifest-schema.test.ts (1), core/test/plugin-template.test.ts (1) |
+| ST-1001/4 | тест | electron/test/plugins.test.ts (2) |
+| ST-1001/5 | тест | core/test/graph.test.ts (1), electron/test/plugins.test.ts (2) |
+| ST-1001/6 | тест | electron/test/plugins.test.ts (2) |
+| ST-1001/7 | тест | core/test/loader.test.ts (3), electron/test/plugins.test.ts (1), playground/test/plugins-model.test.ts (1) |
+| ST-1001/8 | тест | core/test/status.test.ts (1) |
+| ST-1001/9 | тест | core/test/loader.test.ts (1), core/test/manifest-schema.test.ts (1) |
+| ST-1001/10 | тест | core/test/loader.test.ts (1) |
+| ST-1001/11 | тест | electron/test/plugins.test.ts (1) |
 
 ## ST-1002 Граф контрактов разрешается до запуска кода
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-1002/1 | нет |  |
-| ST-1002/2 | нет |  |
-| ST-1002/3 | нет |  |
-| ST-1002/4 | тест | core/test/graph.test.ts (1) |
-| ST-1002/5 | нет |  |
-| ST-1002/6 | нет |  |
-| ST-1002/7 | нет |  |
+| ST-1002/1 | тест | core/test/loader.test.ts (1) |
+| ST-1002/2 | тест | core/test/graph.test.ts (1) |
+| ST-1002/3 | тест | core/test/graph.test.ts (1) |
+| ST-1002/4 | тест | core/test/graph.test.ts (2) |
+| ST-1002/5 | тест | core/test/graph.test.ts (1) |
+| ST-1002/6 | тест | core/test/graph.test.ts (3) |
+| ST-1002/7 | тест | core/test/graph.test.ts (1), core/test/loader.test.ts (1) |
 
 ## ST-1003 Сбой плагина остаётся у плагина: хосты и сторож
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-1003/1 | нет |  |
-| ST-1003/2 | нет |  |
-| ST-1003/3 | нет |  |
-| ST-1003/4 | нет |  |
-| ST-1003/5 | нет |  |
-| ST-1003/6 | нет |  |
-| ST-1003/7 | нет |  |
-| ST-1003/8 | нет |  |
+| ST-1003/1 | тест | core/test/external-plugins.test.ts (1), core/test/loader.test.ts (2) |
+| ST-1003/2 | тест | core/test/loader.test.ts (1), electron/test/plugins.test.ts (1) |
+| ST-1003/3 | тест | core/test/hosts.test.ts (1), core/test/stress-lifecycle.test.ts (1), core/test/watchdog-stall.test.ts (1) |
+| ST-1003/4 | тест | core/test/hosts.test.ts (1), core/test/stress-lifecycle.test.ts (1) |
+| ST-1003/5 | тест | core/test/hosts.test.ts (3) |
+| ST-1003/6 | тест | core/test/hosts.test.ts (3) |
+| ST-1003/7 | тест | core/test/loader.test.ts (1), core/test/stress-hosts.test.ts (1) |
+| ST-1003/8 | тест | core/test/ui-shell.test.ts (1) |
 
 ## ST-1004 Человек видит причину сбоя и включает плагин снова
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-1004/1 | нет |  |
-| ST-1004/2 | нет |  |
-| ST-1004/3 | нет |  |
-| ST-1004/4 | нет |  |
+| ST-1004/1 | тест | core/test/loader.test.ts (2) |
+| ST-1004/2 | тест | core/test/loader.test.ts (1) |
+| ST-1004/3 | тест | core/test/loader.test.ts (1), core/test/stress-lifecycle.test.ts (1) |
+| ST-1004/4 | тест | core/test/loader.test.ts (1) |
 
 ## ST-1005 Выгрузка и откат регистраций без перезапуска окна
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-1005/1 | нет |  |
-| ST-1005/2 | нет |  |
-| ST-1005/3 | нет |  |
-| ST-1005/4 | нет |  |
-| ST-1005/5 | нет |  |
-| ST-1005/6 | нет |  |
+| ST-1005/1 | тест | core/test/loader.test.ts (1), core/test/os-lifetime.test.ts (2), core/test/os.test.ts (1), core/test/serve.test.ts (1), core/test/stress-lifecycle.test.ts (1), core/test/window.test.ts (1) |
+| ST-1005/2 | тест | core/test/subscriptions.test.ts (3) |
+| ST-1005/3 | тест | core/test/lifecycle.test.ts (1), core/test/stress-lifecycle.test.ts (1) |
+| ST-1005/4 | тест | core/test/lifecycle.test.ts (1) |
+| ST-1005/5 | тест | core/test/lifecycle.test.ts (1), core/test/stress-lifecycle.test.ts (1) |
+| ST-1005/6 | тест | electron/test/plugins.test.ts (1) |
 
 ## ST-1006 Ленивая активация и бюджет накладных расходов
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-1006/1 | нет |  |
-| ST-1006/2 | нет |  |
-| ST-1006/3 | нет |  |
-| ST-1006/4 | нет |  |
-| ST-1006/5 | нет |  |
+| ST-1006/1 | тест | core/test/events.test.ts (1) |
+| ST-1006/2 | тест | core/test/events.test.ts (2) |
+| ST-1006/3 | тест | core/test/events.test.ts (1) |
+| ST-1006/4 | тест | core/test/loader.test.ts (1), core/test/window.test.ts (1) |
+| ST-1006/5 | исключение | замеры |
 | ST-1006/6 | целевое поведение |  |
 
 ## ST-1007 Воркспейс как главная сессия: замок, «Недавние», битый файл
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-1007/1 | нет |  |
-| ST-1007/2 | нет |  |
-| ST-1007/3 | нет |  |
-| ST-1007/4 | нет |  |
-| ST-1007/5 | нет |  |
-| ST-1007/6 | нет |  |
-| ST-1007/7 | нет |  |
-| ST-1007/8 | нет |  |
-| ST-1007/9 | нет |  |
+| ST-1007/1 | тест | core/test/instance.test.ts (3), core/test/stress-workspace.test.ts (1), core/test/workspace.test.ts (1) |
+| ST-1007/2 | тест | core/test/instance.test.ts (1), electron/test/instances.test.ts (1) |
+| ST-1007/3 | тест | core/test/config.test.ts (1), core/test/workspace.test.ts (2) |
+| ST-1007/4 | тест | core/test/stress-workspace.test.ts (1), core/test/workspace.test.ts (1) |
+| ST-1007/5 | тест | core/test/workspace.test.ts (2) |
+| ST-1007/6 | тест | core/test/stress-workspace.test.ts (1), core/test/workspace.test.ts (1) |
+| ST-1007/7 | исключение | окно |
+| ST-1007/8 | тест | core/test/loader.test.ts (1), core/test/workspace.test.ts (1) |
+| ST-1007/9 | тест | core/test/os.test.ts (1) |
 
 ## ST-1008 Терминальные процессы переживают сбои хостов
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-1008/1 | нет |  |
-| ST-1008/2 | нет |  |
-| ST-1008/3 | нет |  |
-| ST-1008/4 | нет |  |
-| ST-1008/5 | нет |  |
-| ST-1008/6 | нет |  |
+| ST-1008/1 | тест | core/test/pty.test.ts (1), core/test/stress-pty.test.ts (2) |
+| ST-1008/2 | тест | core/test/pty.test.ts (1), core/test/stress-pty.test.ts (1) |
+| ST-1008/3 | тест | core/test/pty.test.ts (2), core/test/stress-pty.test.ts (1) |
+| ST-1008/4 | тест | core/test/pty.test.ts (1) |
+| ST-1008/5 | тест | core/test/pty-host.test.ts (2) |
+| ST-1008/6 | тест | core/test/pty.test.ts (1), core/test/stress-pty.test.ts (2) |
 
 ## ST-1009 Ядро остаётся компактным: функция добавляется плагином
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-1009/1 | нет |  |
-| ST-1009/2 | нет |  |
+| ST-1009/1 | тест | core/test/purity.test.ts (2) |
+| ST-1009/2 | исключение | ручная |
 
 ## ST-2001 Плагины связываются контрактами по объявлению, без общей шины
 

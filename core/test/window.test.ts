@@ -46,7 +46,7 @@ test('parseDialog: описание вида проверяется, в окно
   }
 });
 
-test('слой окна: диалоги по одному и по порядку, ответ - только пункт показанного диалога, выгрузка закрывает свои', async () => {
+test('ST-1005/1: слой окна: диалоги по одному и по порядку, ответ - только пункт показанного диалога, выгрузка закрывает свои', async () => {
   const snaps: WindowSnapshot[] = [];
   const layer = new WindowLayer((s) => snaps.push(s));
   const first = layer.show('a', 'main', ask('yes', 'no'));
@@ -212,7 +212,7 @@ test('диалог вида: только объявленный вид, отв�
   await k.unload();
 });
 
-test('lock.onStart: окно закрыто до активации, ленивый плагин замка активируется сразу; безопасный режим не запирает', async () => {
+test('ST-1006/4: lock.onStart: окно закрыто до активации, ленивый плагин замка активируется сразу; безопасный режим не запирает', async () => {
   const order: string[] = [];
   const watched: PluginModule = {
     activate(ctx) {
@@ -283,7 +283,7 @@ test('команды окна: F6 и Shift+F6 у ядра, плагин их н�
   await k.unload();
 });
 
-test('манифест: id, в пространстве которого лежат команды окна, занят', () => {
+test('ST-1001/2: манифест: id, в пространстве которого лежат команды окна, занят', () => {
   for (const id of ['cyborg', 'cyborg.window', 'cyborg.workspace']) assert.equal(reservedId(id), true, id);
   for (const id of ['cyborg.files', 'cyborg.window.focus-next', 'window']) assert.equal(reservedId(id), false, id);
   const r = parseManifest(manifest('cyborg.window'));

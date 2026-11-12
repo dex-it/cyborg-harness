@@ -111,7 +111,7 @@ test('pty.spawn с describedBy: описание поставщика прохо
   assert.deepEqual(describePermissions({ launch: [rule] }), ['предлагает запуск в терминале: /bin/bash -c exec agent (окружение: AGENT_FILE) - его выполнит потребитель']);
 });
 
-test('pty: чужие не видны и не трогаются; cwd вне права - отказ; без бэкенда - Unavailable; без права - нет члена', async () => {
+test('ST-1008/4: pty: чужие не видны и не трогаются; cwd вне права - отказ; без бэкенда - Unavailable; без права - нет члена', async () => {
   await using s = await setup({ a: shell, b: shell, plain: undefined });
   const mine = await s.pty('a').spawn({ program: '/bin/bash' });
   assert.deepEqual((await s.pty('b').list()).map((i) => i.id), []);
@@ -125,7 +125,7 @@ test('pty: чужие не видны и не трогаются; cwd вне п�
   await assert.rejects(bare.pty('a').spawn({ program: '/bin/bash' }), { code: 'Unavailable' });
 });
 
-test('падение хоста: pty с persist живёт и копит вывод, вернувшийся плагин забирает его через attach; без persist - завершён', async () => {
+test('ST-1008/1: падение хоста: pty с persist живёт и копит вывод, вернувшийся плагин забирает его через attach; без persist - завершён', async () => {
   await using s = await setup({ agent: shell });
   const kept = await s.pty('agent').spawn({ program: '/bin/bash', persist: true, cols: 90, rows: 20 });
   await s.pty('agent').spawn({ program: '/bin/bash' });
@@ -151,7 +151,7 @@ test('падение хоста: pty с persist живёт и копит выв�
   await waitFor('выключенный плагин не оставил pty', () => keptProc.killed === 'SIGHUP');
 });
 
-test('сирота: плагин вернулся после падения хоста, но не взял pty за срок - процесс завершён, журнал называет срок', async () => {
+test('ST-1008/2: сирота: плагин вернулся после падения хоста, но не взял pty за срок - процесс завершён, журнал называет срок', async () => {
   await using s = await setup({ agent: shell }, true, undefined, 100);
   const taken = await s.pty('agent').spawn({ program: '/bin/bash', persist: true });
   await s.pty('agent').spawn({ program: '/bin/bash', persist: true });
@@ -242,7 +242,7 @@ test('share: просроченный билет не открывается', a
   }
 });
 
-test('выключение: preview называет живые pty; keepPty оставляет их ждать attach вернувшегося плагина; без keepPty и при выгрузке - завершены', async () => {
+test('ST-1008/3: выключение: preview называет живые pty; keepPty оставляет их ждать attach вернувшегося плагина; без keepPty и при выгрузке - завершены', async () => {
   await using s = await setup({ agent: shell, quiet: shell });
   const term = await s.pty('agent').spawn({ program: '/bin/bash', cols: 90, rows: 20 });
   await s.pty('agent').spawn({ program: '/bin/bash' });
@@ -272,7 +272,7 @@ test('выключение: preview называет живые pty; keepPty о�
   assert.equal(s.backend.procs.find((p) => p.pid === parked.pid)?.killed, 'SIGHUP', 'припаркованный pty пережил выгрузку ядра');
 });
 
-test('оставленный: ждёт без срока, пока плагин выключен, виден приложению и завершается человеком; вернувшийся плагин без attach теряет его по сроку', async () => {
+test('ST-1008/3: оставленный: ждёт без срока, пока плагин выключен, виден приложению и завершается человеком; вернувшийся плагин без attach теряет его по сроку', async () => {
   let changes = 0;
   await using s = await setup({ agent: shell }, true, undefined, 100, () => {
     changes++;
@@ -356,7 +356,7 @@ test('пределы pty: ввод больше предела - Invalid, pty ж
   await s.pty('term').spawn({ program: '/bin/bash' });
 });
 
-test('пределы pty по умолчанию (PL-01): ввод ровно 1 МиБ проходит, на байт больше - Invalid; размер 1 и 1000 проходит, 0 и 1001 нет - из хоста плагина и из вида', async () => {
+test('ST-1008/6: пределы pty по умолчанию (PL-01): ввод ровно 1 МиБ проходит, на байт больше - Invalid; размер 1 и 1000 проходит, 0 и 1001 нет - из хоста плагина и из вида', async () => {
   const MIB = 1024 * 1024;
   await using s = await setup({ term: shell });
   const a = await s.pty('term').spawn({ program: '/bin/bash', persist: true });

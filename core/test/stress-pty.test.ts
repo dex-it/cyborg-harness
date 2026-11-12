@@ -50,7 +50,7 @@ test('stress-pty: 300 pty за цикл (spawn, вывод, выход, release)
   await t.releaseAll();
 });
 
-test('stress-pty: кольцевой буфер - 5 МБ мелкими кусками не выходит за предел, хвост точный; граница ровно по размеру', async () => {
+test('ST-1008/6: stress-pty: кольцевой буфер - 5 МБ мелкими кусками не выходит за предел, хвост точный; граница ровно по размеру', async () => {
   const { t, backend } = table(1000);
   const wire = await t.spawn('p', spawnOpts);
   const proc = backend.procs[0];
@@ -166,7 +166,7 @@ async function kernelWithPty(plugins: Record<string, (ctx: PluginContext) => voi
   return { k, backend, handles, [Symbol.asyncDispose]: async () => { await k.unload(); await rm(root, { recursive: true, force: true }); } };
 }
 
-test('stress-pty: вывод идёт без остановки, хост падает и возвращается - attach отдаёт хвост без дыр и повторов, поток продолжается', async () => {
+test('ST-1008/1: stress-pty: вывод идёт без остановки, хост падает и возвращается - attach отдаёт хвост без дыр и повторов, поток продолжается', async () => {
   let ctx!: PluginContext;
   await using s = await kernelWithPty({ term: (c) => void (ctx = c) });
   const h0 = await ctx.os.pty!.spawn({ program: 'sh', args: [], cols: 80, rows: 24, persist: true });
@@ -245,7 +245,7 @@ test('PL-01: окно перезагружено под потоком - нов�
   await t.releaseAll();
 });
 
-test('PL-01: хост плагина упал и окно перезагружено при живом pty - attach и новый вид получают хвост без дыр и повторов, поток идёт дальше', async () => {
+test('ST-1008/1: PL-01: хост плагина упал и окно перезагружено при живом pty - attach и новый вид получают хвост без дыр и повторов, поток идёт дальше', async () => {
   let ctx!: PluginContext;
   await using s = await kernelWithPty({ term: (c) => void (ctx = c) });
   const h0 = await ctx.os.pty!.spawn({ program: 'sh', args: [], cols: 80, rows: 24, persist: true });
@@ -281,7 +281,7 @@ test('PL-01: хост плагина упал и окно перезагруже
   assert.equal(viewNumbers.length, seq, 'новый вид получил не весь поток');
 });
 
-test('stress-pty: плагин spawn-ит pty и не подписывается на вывод - хост не копит вывод без предела', async () => {
+test('ST-1008/6: stress-pty: плагин spawn-ит pty и не подписывается на вывод - хост не копит вывод без предела', async () => {
   let ctx!: PluginContext;
   await using s = await kernelWithPty({ term: (c) => void (ctx = c) });
   const h = await ctx.os.pty!.spawn({ program: 'sh', args: [], cols: 80, rows: 24, persist: false });
@@ -299,7 +299,7 @@ test('stress-pty: плагин spawn-ит pty и не подписывается
   assert.ok(got <= 256 * 1024 + 64 * 1024, `хост накопил ${String(got)} символов до первой подписки`);
 });
 
-test('сирота: pty с persist без attach завершается по сроку; attach, release и park срок снимают', async (t) => {
+test('ST-1008/2: сирота: pty с persist без attach завершается по сроку; attach, release и park срок снимают', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const backend = fakePty();
   const expired: PtyExpiry[] = [];
@@ -329,7 +329,7 @@ test('сирота: pty с persist без attach завершается по с�
   await table.releaseAll();
 });
 
-test('оставленный: release и detach его не трогают; claim вернувшегося плагина даёт срок на attach; endKept - только оставленным', async (t) => {
+test('ST-1008/3: оставленный: release и detach его не трогают; claim вернувшегося плагина даёт срок на attach; endKept - только оставленным', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const backend = fakePty();
   const expired: PtyExpiry[] = [];

@@ -43,7 +43,7 @@ const settle = async () => {
 const files: PluginModule = { activate: (ctx) => ctx.contracts.provide('test.files', '1.0', { read: (p: string) => p }) };
 const idle: PluginModule = { activate: () => undefined };
 
-test('disable: требующие выгружаются вместе с поставщиком, необязательный остаётся; enable поднимает их в порядке графа', async () => {
+test('ST-1005/3, ST-1005/4: disable: требующие выгружаются вместе с поставщиком, необязательный остаётся; enable поднимает их в порядке графа', async () => {
   let changes = 0;
   const { start, spawned } = kernel(
     {
@@ -88,7 +88,7 @@ test('disable: требующие выгружаются вместе с пос�
   await k.unload();
 });
 
-test('disable: выключенного человеком enable соседа не поднимает', async () => {
+test('ST-1005/5: disable: выключенного человеком enable соседа не поднимает', async () => {
   const { start } = kernel({ files, reader: idle }, {
     enabled: ['files', 'reader'],
     manifests: [manifest('files', { provides: { 'test.files': '1.0' } }), manifest('reader', { requires: { 'test.files': '^1' } })],

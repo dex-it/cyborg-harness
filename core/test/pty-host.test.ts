@@ -132,7 +132,7 @@ test('pty-хост запускается при первом pty, а не пр�
   assert.equal(s.hosts[0]?.killedByCore, true);
 });
 
-test('pty-хост упал: владельцы получают onExit, журнал пишет host-down и host-restart, новый spawn работает на новом хосте', async () => {
+test('ST-1008/5: pty-хост упал: владельцы получают onExit, журнал пишет host-down и host-restart, новый spawn работает на новом хосте', async () => {
   await using s = await setup();
   const exits: PtyExit[] = [];
   const first = await s.pty().spawn({ program: '/bin/bash', persist: true });
@@ -156,7 +156,7 @@ test('pty-хост упал: владельцы получают onExit, жур�
   assert.equal(s.backend.procs.length, 2);
 });
 
-test('pty-хост завис: сторож убивает его по порогу, а не по падению; pty потеряны, новый spawn работает', async () => {
+test('ST-1008/5: pty-хост завис: сторож убивает его по порогу, а не по падению; pty потеряны, новый spawn работает', async () => {
   await using s = await setup();
   const h = await s.pty().spawn({ program: '/bin/bash', persist: true });
   const exits: PtyExit[] = [];

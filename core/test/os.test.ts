@@ -607,7 +607,7 @@ async function armed(touch: (n: number) => Promise<unknown>, heard: () => boolea
 
 const ARMED = '.armed';
 
-test('fs.watch: имена изменённых в каталоге склеены, снятие и выгрузка закрывают наблюдение, вне области - отказ', async () => {
+test('ST-1005/1: fs.watch: имена изменённых в каталоге склеены, снятие и выгрузка закрывают наблюдение, вне области - отказ', async () => {
   await using box = await sandbox();
   const { k, os } = await kernel({ reader: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
   const fs = os('reader').fs;
@@ -1214,7 +1214,7 @@ test('команда ядра cyborg.workspace.reveal: среда показыв
   await bare.k.unload();
 });
 
-test('granted: выбор в dialog лежит в state воркспейса и действует после перезапуска; кривые записи и сбой записи не мешают', async () => {
+test('ST-1007/9: granted: выбор в dialog лежит в state воркспейса и действует после перезапуска; кривые записи и сбой записи не мешают', async () => {
   await using box = await sandbox();
   const [picked, kept, late] = ['picked.txt', 'kept.txt', 'late.txt'].map((name) => path.join(box.outside, name));
   for (const f of [picked!, kept!, late!]) await writeFile(f, 'текст');

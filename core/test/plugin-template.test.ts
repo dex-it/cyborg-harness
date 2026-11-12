@@ -44,7 +44,7 @@ describe('шаблон плагина templates/plugin', () => {
     }
   });
 
-  it('на forkHosts: оба плагина активны в разных процессах, команда отвечает, вид объявлен, потребитель зовёт контракт', async () => {
+  it('ST-1001/3: на forkHosts: оба плагина активны в разных процессах, команда отвечает, вид объявлен, потребитель зовёт контракт', async () => {
     const k = await start();
     try {
       assert.deepEqual(pluginStatuses(k.journal).map((s) => [s.id, s.state]).sort(), [['consumer', 'active'], ['example', 'active']]);

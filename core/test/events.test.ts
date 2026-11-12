@@ -147,7 +147,7 @@ test('beforeQuit: ждёт асинхронных слушателей всех 
   await k.unload();
 });
 
-test('activation lazy: ждёт; будит команда, сочетание, wake и потребитель контракта; встречные consumes не виснут', async () => {
+test('ST-1006/1, ST-1006/2, ST-1006/3: activation lazy: ждёт; будит команда, сочетание, wake и потребитель контракта; встречные consumes не виснут', async () => {
   const activated: string[] = [];
   const mod = (id: string, body?: (ctx: PluginContext) => void): PluginModule => ({
     activate(ctx) {
@@ -206,7 +206,7 @@ test('activation lazy: ждёт; будит команда, сочетание, 
   await k.unload();
 });
 
-test('activation lazy: enable ждущего поднимает его один раз, wake после enable не активирует повторно', async () => {
+test('ST-1006/2: activation lazy: enable ждущего поднимает его один раз, wake после enable не активирует повторно', async () => {
   let activated = 0;
   const k = await start(
     {

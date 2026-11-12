@@ -5,7 +5,7 @@ import { describeEntry, entryLevel, entryPlugins, isLifecycleEntry, pluginStatus
 
 const view = (journal: JournalEntry[]) => pluginStatuses(journal).map((s) => `${s.id}:${s.state}:${s.cause?.kind}:${s.revivable ? 'R' : '-'}`);
 
-test('состояние по журналу: работает, перезапуск хоста, выключен сторожем, брошенный хост, не включён', () => {
+test('ST-1001/8: состояние по журналу: работает, перезапуск хоста, выключен сторожем, брошенный хост, не включён', () => {
   const journal: JournalEntry[] = [
     { pluginId: 'old', kind: 'disabled' },
     { pluginId: 'bad', kind: 'rejected', reasons: [{ kind: 'missing', contract: 'x', range: '^1' }] },

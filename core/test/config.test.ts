@@ -7,7 +7,7 @@ test('слияние: объекты по ключам, массивы цели�
   assert.deepEqual(deepMerge({ a: { x: 1, y: 2 }, list: [1, 2] }, { a: { y: 3 }, list: [9] }), { a: { x: 1, y: 3 }, list: [9] });
 });
 
-test('воркспейс перекрывает пользователя поверх defaults', () => {
+test('ST-1007/3: воркспейс перекрывает пользователя поверх defaults', () => {
   const { result } = resolveSection({ version: 1, defaults: { idleMinutes: 10, keys: ['Mod+L'] } }, [
     ['user', { $version: 1, idleMinutes: 5 }],
     ['workspace', { $version: 1, keys: ['Mod+Shift+L'] }],

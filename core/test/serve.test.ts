@@ -100,7 +100,7 @@ test('serve: чужой Host, Origin и тело больше предела д�
   assert.equal(calls, 0);
 });
 
-test('serve: падение обработчика и чужая форма ответа - 502; без права члена нет, dispose и выгрузка закрывают сервер', async () => {
+test('ST-1005/1: serve: падение обработчика и чужая форма ответа - 502; без права члена нет, dispose и выгрузка закрывают сервер', async () => {
   await using s = await kernel({ serve: true });
   const answers: (() => unknown)[] = [
     () => Promise.reject(new Error('упал')),
