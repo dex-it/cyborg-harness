@@ -301,7 +301,7 @@
         "launch": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/programRule"
+            "$ref": "#/definitions/launchRule"
           }
         },
         "net": {
@@ -680,6 +680,14 @@
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:_\\*)?$"
               }
+            },
+            "deny": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Флаги, запрещённые в хвосте argv после закреплённых args: элемент равен флагу или начинается с `флаг=`. Склеенные короткие флаги (-xD) не ловятся."
             }
           }
         },
@@ -706,12 +714,36 @@
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:_\\*)?$"
               }
+            },
+            "deny": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Флаги, запрещённые в хвосте argv после закреплённых args: элемент равен флагу или начинается с `флаг=`. Склеенные короткие флаги (-xD) не ловятся."
             }
           },
           "description": "Оболочка входа только с флагом и скриптом в args."
         }
       ],
-      "description": "Программа или {program, args, env?}; \"$SHELL\" - оболочка входа, только с флагом и скриптом."
+      "description": "Программа или {program, args, env?, deny?}; \"$SHELL\" - оболочка входа, только с флагом и скриптом."
+    },
+    "launchRule": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/programRule"
+        },
+        {
+          "not": {
+            "type": "object",
+            "required": [
+              "deny"
+            ]
+          }
+        }
+      ],
+      "description": "Правило запуска для потребителя: те же поля, кроме deny (запрет флагов - только у process и pty)."
     },
     "stateSource": {
       "type": "object",
