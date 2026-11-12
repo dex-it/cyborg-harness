@@ -13,7 +13,7 @@ import { limitsOf, type ResourceLimits } from './limits.ts';
 import { isValidId } from './manifest-fields.ts';
 import { namedPaths } from './named-paths.ts';
 import type { PluginManifest } from './manifest.ts';
-import { closePools, guardedLookup, isLocalAddress, transport } from './net-transport.ts';
+import { closePools, guardedLookup, isForbiddenAddress, isLocalAddress, transport } from './net-transport.ts';
 import type { NotifyLimits, ShowNotice } from './notices.ts';
 import { ANY_PATH, deniedFlag, envNameAllowed, LOGIN_SHELL } from './permissions.ts';
 import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type KeptPty, type PtyExpiry, type PtyHostEvents, type TerminalChannel, type TerminalView } from './pty.ts';
@@ -1328,6 +1328,15 @@ export class OsGateway {
     // Локальный адрес открыт там, где его назвали: IP-адрес и localhost в праве, хост из настройки человека.
     const bare = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
     const local = right.named || net.isIP(bare) !== 0 || bare === 'localhost' || bare.endsWith('.localhost');
+    // Link-local и метаданные облака закрыты и названному хосту; проверка одна на всех путях: адрес-литерал здесь (DNS ему не нужен), имя - в соединении.
+    const refuse = (address: string): Error | undefined => {
+      if (isForbiddenAddress(address)) return this.#denied(m, method, `адрес ${address} локальный (link-local или метаданные облака закрыты даже названному хосту): ${url.host}`);
+      return !local && isLocalAddress(address) ? this.#denied(m, method, `адрес ${address} локальный: ${url.host}`) : undefined;
+    };
+    if (net.isIP(bare) !== 0) {
+      const refusal = refuse(bare);
+      if (refusal) throw refusal;
+    }
     const request = isRecord(args[1]) ? args[1] : {};
     const headers = isRecord(request.headers) ? Object.fromEntries(Object.entries(request.headers).filter((e): e is [string, string] => typeof e[1] === 'string')) : {};
     const timeout = typeof request.timeoutMs === 'number' && request.timeoutMs > 0 ? request.timeoutMs : FETCH_TIMEOUT_MS;
@@ -1348,7 +1357,7 @@ export class OsGateway {
             local,
             owner: m.id,
             // Проверка на том же резолве, по которому идёт соединение: отдельный `dns.lookup` до запроса мог бы получить другой ответ.
-            lookup: local ? real : guardedLookup(real, (address) => (isLocalAddress(address) ? this.#denied(m, method, `адрес ${address} локальный: ${url.host}`) : undefined)),
+            lookup: guardedLookup(real, refuse),
             ...body,
           });
       return { status: response.status, headers: Object.fromEntries(response.headers), body: await readBody(response, MAX_BODY) };

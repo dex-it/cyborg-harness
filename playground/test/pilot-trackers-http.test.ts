@@ -154,6 +154,21 @@ test('PL-10, У-35: частный адрес корпоративного ха�
   assert.ok(reasons.some((x) => x.startsWith('bare:') && x.includes('хост не в net')), reasons.join('\n'));
 });
 
+test('PL-10, У-35: хаб, названный человеком, но резолвящийся в link-local или адрес метаданных облака, получает отказ; частный адрес хаба по-прежнему пускает', async () => {
+  await using box = await sandbox();
+  const addresses = { 'meta.corp.example': '169.254.169.254', 'll6.corp.example': 'fe80::1', 'mapped.corp.example': '::ffff:169.254.169.254', 'azure.corp.example': '168.63.129.16' };
+  await using r = await rig({ box, layers: { user: [...Object.keys(addresses), CORP].map(HUB) }, resolve: [CORP], addresses });
+  r.fake.accept.set(hostPort(r, CORP), TOKEN);
+  await r.run('trackers-http.set-token', r.hub(CORP), TOKEN);
+  for (const name of Object.keys(addresses)) {
+    await r.run('trackers-http.set-token', r.hub(name), TOKEN);
+    await assert.rejects(list(r, name, 'issues', 'a/b'), { code: 'PermissionDenied', message: /link-local или метаданные облака закрыты даже названному хосту/ }, name);
+  }
+  assert.equal(r.fake.seen.length, 0, 'запросы на закрытые адреса не ушли, токен не выходил из процесса');
+  assert.equal((await list(r, CORP, 'issues', 'a/b')).items.length, 3, 'частный (здесь loopback) адрес названного хаба пускает');
+  assert.equal(r.denied().length, Object.keys(addresses).length);
+});
+
 test('PL-10: токен вводит человек; плагин другого автора команду ввода не вызовет, токен не попадает в журнал, строки плагина, трассу и слои config', async () => {
   await using box = await sandbox();
   await using r = await rig({ box, layers: { user: [HUB(CORP)] }, resolve: [CORP], probes: [{ id: 'snoop' }] });

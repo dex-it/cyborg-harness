@@ -131,6 +131,8 @@ export interface RigOptions {
   readonly layers?: Layers;
   /** Имена хостов, которые резолвятся в 127.0.0.1 (корпоративные имена с частным адресом в проде); прочие - как есть. */
   readonly resolve?: readonly string[];
+  /** Имена с заданным адресом (link-local, метаданные облака); поверх `resolve`. */
+  readonly addresses?: Readonly<Record<string, string>>;
   readonly probes?: readonly Probe[];
 }
 
@@ -162,7 +164,7 @@ export async function rig(options: RigOptions): Promise<Rig> {
   const resolve = new Set(options.resolve ?? []);
   const lookup = ((hostname: string, lookupOptions: { all?: boolean }, callback: (error: Error | null, result?: unknown, family?: number) => void) => {
     // Корпоративные имена ведут на подставной сервер; публичные адреса в тесте недоступны, остальное - как есть, отказом.
-    const address = resolve.has(hostname) || hostname === 'localhost' ? '127.0.0.1' : undefined;
+    const address = options.addresses?.[hostname] ?? (resolve.has(hostname) || hostname === 'localhost' ? '127.0.0.1' : undefined);
     if (address === undefined) callback(Object.assign(new Error(`${hostname}: нет`), { code: 'ENOTFOUND' }));
     else if (lookupOptions.all) callback(null, [{ address, family: 4 }]);
     else callback(null, address, 4);
