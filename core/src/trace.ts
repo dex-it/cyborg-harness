@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { toWire } from './errors.ts';
 import type { Owner } from './rpc.ts';
 import { REASONS, type Boundary, type ExitRecord, type OperationRecord, type StreamRecord, type TraceRecord } from './trace-record.ts';
+import { describeArgs } from './trace-args.ts';
 import { bytesOf } from './trace-size.ts';
 
 /*
@@ -21,7 +22,7 @@ export interface OpHandle {
   caller(caller: string, hostId?: string): void;
   /** Что вызвано; `callee` - плагин-адресат, `right` - право манифеста, которым допущена операция. */
   target(target: string, callee?: string, right?: string): void;
-  /** Размер аргументов в байтах; содержимое в запись не идёт. */
+  /** Размер аргументов в байтах; содержимое идёт в запись только при `TraceOptions.args` (K-33). */
   args(value: unknown): void;
 }
 
@@ -41,6 +42,14 @@ export interface TraceOptions {
   readonly hostOf: (pluginId: string) => string | undefined;
   /** Приёмник бросил: сообщается один раз, операция от этого не меняется. */
   readonly failed: (error: unknown) => void;
+  /**
+   * Аргументы в записях (`LoadOptions.traceArgs`, K-33); без поля записи несут только размер. `limit` - `LIMITS.traceArgsBytes`; `secrets` - значения, которые вычёркиваются,
+   * для вызывающего и адресата записи (`plugin:<id>`, `view:<id>`, `host:<id>`; прочие участники секретов не имеют).
+   */
+  readonly args?: {
+    readonly limit: number;
+    readonly secrets: (caller: string, callee: string | undefined) => readonly string[];
+  };
 }
 
 interface Scope {
@@ -75,6 +84,8 @@ class RealOp implements OpHandle {
   #callee: string | undefined;
   #right: string | undefined;
   #argsBytes = 0;
+  #argsValue: unknown;
+  #hasArgs = false;
 
   constructor(trace: Trace, id: number, chain: number, start: OpStart) {
     this.#trace = trace;
@@ -104,7 +115,18 @@ class RealOp implements OpHandle {
   }
 
   args(value: unknown): void {
-    if (!this.done) this.#argsBytes = bytesOf(value);
+    if (this.done) return;
+    this.#argsBytes = bytesOf(value);
+    // Текст строится в конце операции: значение секрета, которое операция сама кладёт в хранилище, шлюзу известно только к этому времени.
+    if (this.#trace.argsOptions !== undefined) {
+      this.#argsValue = value;
+      this.#hasArgs = true;
+    }
+  }
+
+  #argsText(): string | undefined {
+    const options = this.#trace.argsOptions;
+    return options !== undefined && this.#hasArgs ? describeArgs(this.#argsValue, options.limit, options.secrets(this.#caller, this.#callee), this.#argsBytes) : undefined;
   }
 
   /** Запись об итоге: успех с размером результата либо отказ с кодом ядра, как его увидел вызывающий. */
@@ -113,6 +135,8 @@ class RealOp implements OpHandle {
     this.done = true;
     const durationMs = round(performance.now() - this.#t0);
     const code = failure === undefined ? undefined : toWire(failure.error).code;
+    const args = this.#argsText();
+    this.#argsValue = undefined;
     const record: OperationRecord = {
       kind: 'operation',
       id: this.#id,
@@ -126,6 +150,7 @@ class RealOp implements OpHandle {
       ...(this.#right !== undefined && { right: this.#right }),
       durationMs,
       argsBytes: this.#argsBytes,
+      ...(args !== undefined && { args }),
       resultBytes: failure === undefined ? bytesOf(value) : 0,
       outcome: code === undefined ? 'ok' : 'error',
       ...(code !== undefined && { code, reason: REASONS[code] }),
@@ -165,6 +190,10 @@ export class Trace {
         return this.#scope.run(chain === undefined ? undefined : { chain, op: undefined }, run);
       },
     };
+  }
+
+  get argsOptions(): TraceOptions['args'] {
+    return this.#options.args;
   }
 
   get enabled(): boolean {

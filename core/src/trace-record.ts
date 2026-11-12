@@ -2,7 +2,7 @@ import type { CoreErrorCode } from '@cyborg-harness/contracts';
 
 /*
  * Записи трассы операций (K-28, FR-CH-4001…4008). Поля и значения - английские имена в нотации кода: поля camelCase, значения закрытых наборов kebab-case.
- * Содержимого аргументов и результатов в записях нет: только размеры в байтах (FR-CH-4004, NFR-CH-4002).
+ * Содержимого результатов в записях нет никогда, содержимого аргументов - пока приложение не запущено с `--trace-args` (K-33): иначе только размеры в байтах (FR-CH-4004, NFR-CH-4002).
  */
 
 /**
@@ -34,6 +34,12 @@ export interface OperationRecord {
   readonly right?: string;
   readonly durationMs: number;
   readonly argsBytes: number;
+  /**
+   * Аргументы вызова текстом (JSON-подобным): член контракта, команда, вызов `ctx.os`, сообщение хоста, событие. Есть только при `LoadOptions.traceArgs`
+   * (флаг запуска `--trace-args`; из файлов настроек его включить нельзя). Значения секретов, прошедшие через шлюз, заменены на `[секрет]`,
+   * длиннее `LIMITS.traceArgsBytes` отрезано с пометкой `[обрезано: всего N Б]`.
+   */
+  readonly args?: string;
   readonly resultBytes: number;
   readonly outcome: 'ok' | 'error';
   /** Код отказа ядра, как его видит вызывающий. */

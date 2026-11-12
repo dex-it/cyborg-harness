@@ -765,7 +765,7 @@ export class PluginsService implements ViewGroups {
     }));
     const journal: PluginJournalLine[] = this.entries.map(({ at, entry }) => ({
       at,
-      subject: entry.pluginId ?? (entry.kind === 'key-ignored' ? 'сочетания' : `хост ${entry.hostId}`),
+      subject: entry.pluginId ?? (entry.kind === 'key-ignored' ? 'сочетания' : entry.kind === 'trace-args' ? 'трасса' : `хост ${entry.hostId}`),
       // Задетые потребители тоже: в журнале плагина видно, что его поставщик пропадал.
       plugins: [...new Set([...entryPlugins(entry), ...('affects' in entry ? entry.affects : [])])],
       text: describeEntry(entry),
