@@ -56,7 +56,7 @@ describe('checkPlugin: плагины репозитория', () => {
     });
   }
 
-  it('права плагина названы словами, как в окне «Плагины Cyborg»', async () => {
+  it('ST-3007/7: права плагина названы словами, как в окне «Плагины Cyborg»', async () => {
     const report = await checkPlugin(path.join(repo, 'playground/plugins/pin-lock'), { declarations: [path.join(repo, 'playground/plugins/contracts.ts')] });
     assert.deepEqual(strings(report), []);
     assert.ok(report.permissions.includes('может закрыть окно Cyborg'), report.permissions.join('; '));
@@ -72,7 +72,7 @@ describe('checkPlugin: плагин вне репозитория', () => {
     assert.deepEqual(report.permissions, ['показывает системные уведомления']);
   });
 
-  it('запрещённые импорты дают файл:строка и причину', async () => {
+  it('ST-7002/1, ST-7002/2, ST-7002/4: запрещённые импорты дают файл:строка и причину', async () => {
     const dir = plugin({
       'index.ts': ["import fs from 'node:fs';", "import { app } from 'electron';", "import other from '../other/index.ts';", "import x from 'lodash';", 'export default await import(name);'].join('\n'),
       'lib/util.ts': "const m = require('node:child_process');\n",
