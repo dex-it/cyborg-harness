@@ -1,7 +1,7 @@
 ---
 feature: 07-author-kit
 status: review
-date: 2026-11-11
+date: 2026-11-12
 origin: derived
 ---
 
@@ -58,7 +58,7 @@ origin: derived
 - **Требование:** `checkPlugin(dir, options)` проверяет каталог плагина вне репозитория ядра: манифест (все ошибки сразу строками «файл:строка: причина»), `engines.cyborg`, существование точки входа, модулей видов и файлов схем внутри каталога, правило импортов (`node:*`, `electron`, чужой плагин и `import()` с вычисляемым путём - нарушение) и выводит права словами. Результат - структура и код возврата 0 без нарушений, 1 с нарушениями; те же проверки выполняет `cyborg-plugin check`.
 - **traced from:** BR-CH-004, BR-CH-010; `UC-AUTHOR-KIT-7001`, шаг 7, расширения 2а, 4б, 7а.
 - **источник:** P-09; У-42; `core/src` (проверка импортов, `core/test/plugin-imports.test.ts`).
-- **verification:** испытание - `core/test/plugin-check.test.ts` (`checkPlugin` на плагине вне репозитория, манифест, символические ссылки, `bundled`), `core/test/plugin-imports.test.ts` («проверка ловит то, что запрещает»), `tools/cyborg-plugin/test/cli.test.ts` (`cyborg-plugin check`); P-09, PR #114.
+- **verification:** испытание - `core/test/plugin-check.test.ts` (`checkPlugin` на плагине вне репозитория, манифест, символические ссылки, `bundled`), `core/test/plugin-imports.test.ts` («проверка ловит то, что запрещает»), `tools/cyborg-plugin/test/cli.test.ts` (`cyborg-plugin check`), `core/test/manifest-lines.test.ts` (строка ошибки манифеста против `JSON.parse` и независимого счёта строк; критерий ST-7002/3: каждая ошибка манифеста - `manifest.json:<строка>: причина`, у несуществующего файла строки нет); P-09, PR #114.
 - **класс:** Functions.
 
 ### FR-CH-7006 Руководство под API 1.0
