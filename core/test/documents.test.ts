@@ -34,7 +34,7 @@ async function start(saved: unknown[]) {
   return { k, ctx, revealed, disk: () => (doc.$documents as { list: { id: string; type: string }[] }).list, changes: () => changes };
 }
 
-test('документы: тип с restorable переживает перезапуск, без владельца вкладка недоступна, убранный тип отсеян', async () => {
+test('ST-2003/6: документы: тип с restorable переживает перезапуск, без владельца вкладка недоступна, убранный тип отсеян', async () => {
   const { k, ctx, disk, changes } = await start([
     { id: 'n1', pluginId: 'ed', type: 'note', title: 'Заметка', data: { path: 'a.md' } },
     { id: 'o1', pluginId: 'ed', type: 'old', title: 'Тип убран' },
@@ -75,7 +75,7 @@ test('документы: отказы - чужой и незнакомый до
 });
 
 // #194: у плагина не было способа сделать вкладку активной, клик по уведомлению открывал окно, но не сессию.
-test('документы: reveal просит окно активировать вкладку своего документа; чужой, закрытый и незнакомый - NotFound, окно не тронуто', async () => {
+test('ST-2001/10: документы: reveal просит окно активировать вкладку своего документа; чужой, закрытый и незнакомый - NotFound, окно не тронуто', async () => {
   const { k, ctx, revealed } = await start([{ id: 'g1', pluginId: 'ghost', type: 'x', title: 'Чужой' }]);
   const a = await ctx.documents.open('note', { title: 'A' });
   const b = await ctx.documents.open('scratch', { title: 'B' });

@@ -24,7 +24,7 @@ const shownId = (layer: WindowLayer): number => {
 const modalOf = (w: { readonly snapshot: WindowSnapshot }) => w.snapshot.modal;
 const ask = (...ids: string[]) => ({ kind: 'ask', title: 'Вопрос', buttons: ids.map((id) => ({ id, label: id })) });
 
-test('parseDialog: описание вида проверяется, в окно уходит разобранная копия', () => {
+test('ST-2004/1: parseDialog: описание вида проверяется, в окно уходит разобранная копия', () => {
   assert.deepEqual(parseDialog({ kind: 'ask', title: 'Удалить?', message: 'Файл', buttons: [{ id: 'yes', label: 'Да', extra: 1 }] }), {
     kind: 'ask',
     title: 'Удалить?',
@@ -46,7 +46,7 @@ test('parseDialog: описание вида проверяется, в окно
   }
 });
 
-test('ST-1005/1: слой окна: диалоги по одному и по порядку, ответ - только пункт показанного диалога, выгрузка закрывает свои', async () => {
+test('ST-2004/1, ST-2004/2: ST-1005/1: слой окна: диалоги по одному и по порядку, ответ - только пункт показанного диалога, выгрузка закрывает свои', async () => {
   const snaps: WindowSnapshot[] = [];
   const layer = new WindowLayer((s) => snaps.push(s));
   const first = layer.show('a', 'main', ask('yes', 'no'));
@@ -71,7 +71,7 @@ test('ST-1005/1: слой окна: диалоги по одному и по п�
   layer.clear();
 });
 
-test('слой окна под замком: чужой диалог уходит в очередь, свои у владельца идут первыми; окно открыто, когда сняты все замки', async () => {
+test('ST-2004/3: слой окна под замком: чужой диалог уходит в очередь, свои у владельца идут первыми; окно открыто, когда сняты все замки', async () => {
   const layer = new WindowLayer(() => undefined);
   const other = layer.show('chat', 'main', ask('ok'));
   assert.equal(shown(layer)?.pluginId, 'chat');
@@ -141,7 +141,7 @@ function kernel(table: Record<string, PluginModule>, options: Omit<LoadOptions, 
   };
 }
 
-test('замок окна: только с правом, сочетания и выключение - только у владельца, падение хоста окно не открывает, уведомления без текста', async () => {
+test('ST-2004/3: замок окна: только с правом, сочетания и выключение - только у владельца, падение хоста окно не открывает, уведомления без текста', async () => {
   const chat: PluginModule = {
     activate(ctx) {
       ctx.commands.register('chat.go', () => 'go');
@@ -192,7 +192,7 @@ test('замок окна: только с правом, сочетания и �
   await k.unload();
 });
 
-test('диалог вида: только объявленный вид, ответ человека доходит, выключение плагина закрывает его диалог', async () => {
+test('ST-2004/2: диалог вида: только объявленный вид, ответ человека доходит, выключение плагина закрывает его диалог', async () => {
   const { start, snaps } = kernel(
     { chat: { activate: () => undefined } },
     { enabled: ['chat'], manifests: [manifest('chat', { ui: { views: { main: './ui.js' } } })] },
@@ -212,7 +212,7 @@ test('диалог вида: только объявленный вид, отв�
   await k.unload();
 });
 
-test('ST-1006/4: lock.onStart: окно закрыто до активации, ленивый плагин замка активируется сразу; безопасный режим не запирает', async () => {
+test('ST-2004/3: ST-1006/4: lock.onStart: окно закрыто до активации, ленивый плагин замка активируется сразу; безопасный режим не запирает', async () => {
   const order: string[] = [];
   const watched: PluginModule = {
     activate(ctx) {
@@ -249,7 +249,7 @@ test('манифест: ui.lock только с ui.overlay, overlay и lock.onSt
   assert.match(errors({ permissions: { 'ui.lock': true }, ui: { overlay: '../lock.js' } }).join(), /ui.overlay: ожидается путь/);
 });
 
-test('команды окна: F6 и Shift+F6 у ядра, плагин их не перехватит, человек переназначит и даст сочетание команде ядра; под замком не работают', async () => {
+test('ST-2005/2: команды окна: F6 и Shift+F6 у ядра, плагин их не перехватит, человек переназначит и даст сочетание команде ядра; под замком не работают', async () => {
   const pad: PluginModule = {
     activate(ctx) {
       ctx.commands.register('pad.open', () => 'open');
@@ -290,7 +290,7 @@ test('ST-1001/2: манифест: id, в пространстве которо�
   assert.ok(!r.ok && r.errors.join().includes('занято командами окна'));
 });
 
-test('keepFocus: фокус, пришедший во фрейм, ложится на autofocus или первый элемент, но не сбивает запомненный', () => {
+test('ST-2005/2: keepFocus: фокус, пришедший во фрейм, ложится на autofocus или первый элемент, но не сбивает запомненный', () => {
   const focused: string[] = [];
   const el = (name: string) => ({ focus: () => void focused.push(name) });
   const listeners = new Set<() => void>();
@@ -314,7 +314,7 @@ test('keepFocus: фокус, пришедший во фрейм, ложится 
   assert.equal(listeners.size, 0);
 });
 
-test('замок окна: системный диалог чужого плагина не встаёт поверх экрана замка', async () => {
+test('ST-2004/3: замок окна: системный диалог чужого плагина не встаёт поверх экрана замка', async () => {
   const picker: PluginModule = {
     activate(ctx) {
       ctx.commands.register('picker.pick', () => ctx.os.dialog.open());
@@ -339,7 +339,7 @@ test('замок окна: системный диалог чужого плаг
   await k.unload();
 });
 
-test('заголовок окна: воркспейс, фрагменты по id плагина, приложение; undefined и выгрузка снимают, управляющие символы убираются, длинный - Invalid, под замком только свои', async () => {
+test('ST-2004/4: заголовок окна: воркспейс, фрагменты по id плагина, приложение; undefined и выгрузка снимают, управляющие символы убираются, длинный - Invalid, под замком только свои', async () => {
   const contexts = new Map<string, PluginContext>();
   const titled: PluginModule = {
     activate(ctx) {
@@ -565,7 +565,7 @@ const until = async (condition: () => boolean): Promise<void> => {
 const formKernel = () =>
   kernel({ chat: formPlugin }, { enabled: ['chat'], manifests: [formManifest('chat', { commands: { 'chat.form': {}, 'chat.badview': {}, 'chat.raw': { rest: 'any' }, 'chat.sure': {}, 'chat.menu': {} } })] });
 
-test('ctx.views.modal: вид с area modal показан слоем окна, данные видят только он, результат доходит владельцу, Escape и выгрузка дают undefined', async () => {
+test('ST-2001/9: ctx.views.modal: вид с area modal показан слоем окна, данные видят только он, результат доходит владельцу, Escape и выгрузка дают undefined', async () => {
   const { start, snaps } = formKernel();
   const k = await start();
   const result = k.run('chat.form');

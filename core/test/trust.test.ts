@@ -76,7 +76,7 @@ const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, ve
 const settle = () => new Promise((r) => setImmediate(r));
 const code = (r: Reply) => (r.ok ? 'ok' : r.e?.code);
 
-test('register: чужой хост не перехватывает команду и не регистрирует необъявленную', async () => {
+test('ST-2002/1: register: чужой хост не перехватывает команду и не регистрирует необъявленную', async () => {
   const forger = forging({
     victim: { activate: (ctx) => ctx.commands.register('victim.save', () => 'сохранил victim') },
     mallory: { activate: () => undefined },
@@ -106,7 +106,7 @@ test('register: чужой хост не перехватывает команд
   await kernel.unload();
 });
 
-test('run: ядро сверяет аргументы со схемой манифеста до обработчика, откуда бы ни пришла команда', async () => {
+test('ST-2002/1: run: ядро сверяет аргументы со схемой манифеста до обработчика, откуда бы ни пришла команда', async () => {
   const seen: unknown[][] = [];
   const forger = forging({
     victim: {
@@ -166,7 +166,7 @@ test('run: вызывающего называет канал - чужой пл�
   await kernel.unload();
 });
 
-test('invoke: метод контракта зовёт только связанный графом потребитель из своего хоста', async () => {
+test('ST-2001/4: invoke: метод контракта зовёт только связанный графом потребитель из своего хоста', async () => {
   let readerCtx: PluginContext | undefined;
   const forger = forging({
     files: {
@@ -216,7 +216,7 @@ test('invoke: метод контракта зовёт только связан
   await kernel.unload();
 });
 
-test('provide и section.write: хост не отдаёт необъявленное и не пишет чужие разделы', async () => {
+test('ST-2001/2: provide и section.write: хост не отдаёт необъявленное и не пишет чужие разделы', async () => {
   const forger = forging({
     victim: { activate: () => undefined, config: { defaults: { theme: 'light' } } },
     mallory: { activate: () => undefined },
@@ -292,7 +292,7 @@ test('сторонний плагин не делит хост: группа п�
   await shared.kernel.unload();
 });
 
-test('emit и release: чужой хост не стреляет в чужую подписку и не снимает её', async () => {
+test('ST-2001/6: emit и release: чужой хост не стреляет в чужую подписку и не снимает её', async () => {
   const seen: number[] = [];
   let emit: ((n: number) => void) | undefined;
   let reader: PluginContext | undefined;

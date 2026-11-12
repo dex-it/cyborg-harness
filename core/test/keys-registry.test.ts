@@ -113,7 +113,7 @@ test('ctx.keys.register: недоверенный вход - отказ с ко�
   await k.unload();
 });
 
-test('ctx.keys.register: условие visible у плагина без вида - Invalid, лимит регистраций на плагин', async () => {
+test('ST-2002/5: ctx.keys.register: условие visible у плагина без вида - Invalid, лимит регистраций на плагин', async () => {
   const noView = manifest('plain', { commands: ['plain.go'] });
   const { start, keys } = harness({ plain: idle }, { enabled: ['plain'], manifests: [noView] });
   const k = await start();
@@ -179,7 +179,7 @@ test('два динамических на одно сочетание: перв
   await k.unload();
 });
 
-test('сочетание команды окна динамически занять нельзя, и сочетание меню тоже: отказ CommandConflict с названием владельца', async () => {
+test('ST-2002/5: сочетание команды окна динамически занять нельзя, и сочетание меню тоже: отказ CommandConflict с названием владельца', async () => {
   const { start, keys } = harness({ buttons: idle }, { enabled: ['buttons'], manifests: [buttons], menuKeys: { 'menu.print': 'CmdOrCtrl+P', 'menu.broken': 'Hyper+Q' } });
   const k = await start();
   await assert.rejects(keys('buttons').register({ key: 'F6', command: 'buttons.plain' }), { code: 'CommandConflict', message: /cyborg\.window\.focus-next/ });
@@ -275,7 +275,7 @@ test('плагин дважды регистрирует одно сочетан
   await k.unload();
 });
 
-test('выгрузка плагина снимает его динамические регистрации, остальные остаются', async () => {
+test('ST-2002/5: выгрузка плагина снимает его динамические регистрации, остальные остаются', async () => {
   const other = manifest('other', { commands: ['other.go'] });
   const { start, keys } = harness({ buttons: idle, other: idle }, { enabled: ['buttons', 'other'], manifests: [buttons, other] });
   const k = await start();
@@ -295,7 +295,7 @@ test('выгрузка плагина снимает его динамическ
   await k.unload();
 });
 
-test('падение хоста снимает динамические регистрации плагина без его участия: после возвращения сочетание свободно', async () => {
+test('ST-2002/5: падение хоста снимает динамические регистрации плагина без его участия: после возвращения сочетание свободно', async () => {
   const { start, keys, handles } = harness({ buttons: idle }, { enabled: ['buttons'], manifests: [buttons], watchdog: { interval: 20, timeout: 1000, strikes: 3 } });
   const k = await start();
   await keys('buttons').register({ key: 'F3', command: 'buttons.plain' });
@@ -309,7 +309,7 @@ test('падение хоста снимает динамические реги
   await k.unload();
 });
 
-test('откат активации: плагин зарегистрировал сочетание и упал - сочетания нет, ядро без хвоста', async () => {
+test('ST-2002/5: откат активации: плагин зарегистрировал сочетание и упал - сочетания нет, ядро без хвоста', async () => {
   let registered: Promise<KeyRegistration> | undefined;
   const failing: PluginModule = {
     async activate(ctx) {
@@ -337,7 +337,7 @@ test('ленивый (lazy) плагин: динамическое сочета�
   await k.unload();
 });
 
-test('when: по умолчанию не при автоповторе, не в поле ввода, не при открытом диалоге; поле условия снимает запрет', async () => {
+test('ST-2002/5: when: по умолчанию не при автоповторе, не в поле ввода, не при открытом диалоге; поле условия снимает запрет', async () => {
   const { start, keys } = harness({ buttons: idle }, { enabled: ['buttons'], manifests: [buttons] });
   const k = await start();
   await keys('buttons').register({ key: 'F1', command: 'buttons.plain' });

@@ -31,7 +31,7 @@ function kernel(table: Record<string, PluginModule>, options: Omit<LoadOptions, 
 
 const kinds = (k: { journal: readonly { pluginId?: string | undefined; kind: string }[] }) => k.journal.map((e) => `${e.pluginId ?? '-'}:${e.kind}`);
 
-test('ST-1002/7, ST-1006/4: активация по графу, вызов чужого контракта через ядро, снятие в обратном порядке', async () => {
+test('ST-2001/1: ST-1002/7, ST-1006/4: активация по графу, вызов чужого контракта через ядро, снятие в обратном порядке', async () => {
   const events: string[] = [];
   const k = await kernel(
     {
@@ -102,7 +102,7 @@ test('ST-1003/1, ST-1004/1, ST-1005/1: сбой активации снимае�
   await k.unload();
 });
 
-test('команды: запуск из ядра и из другого плагина, необъявленная команда отклоняется', async () => {
+test('ST-2002/1: команды: запуск из ядра и из другого плагина, необъявленная команда отклоняется', async () => {
   const k = await kernel(
     {
       lock: { activate: (ctx) => void ctx.commands.register('lock.now', (reason) => `locked:${String(reason)}`) },
@@ -121,7 +121,7 @@ test('команды: запуск из ядра и из другого плаг
   await k.unload();
 });
 
-test('функция в результате контракта - NotCloneable у вызывающего', async () => {
+test('ST-2001/5: функция в результате контракта - NotCloneable у вызывающего', async () => {
   let error: unknown;
   const k = await kernel(
     {
@@ -312,7 +312,7 @@ test('ST-1004/2, ST-1004/3, ST-1004/4: «Включить снова»: не п�
   await k.unload();
 });
 
-test('пространство поставки: отказ стороннему поставщику идёт в журнал, без bundled проверки нет', async () => {
+test('ST-2004/5: пространство поставки: отказ стороннему поставщику идёт в журнал, без bundled проверки нет', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const table = { claude: noop, rogue: noop, sessions: noop };
   const options = {
@@ -562,7 +562,7 @@ test('ST-1007/8: схема раздела из манифеста: значен
 // Пауза - только для проверки «ничего не произошло»; то, что должно произойти, ждётся по условию (`waitFor`), а не срокам в 60 мс.
 const pause = (ms = 60) => new Promise((r) => setTimeout(r, ms));
 
-test('отмена вызова контракта: поставщик получает сигнал, вызывающий - Cancelled, вызовы без сигнала целы', async () => {
+test('ST-2001/8: отмена вызова контракта: поставщик получает сигнал, вызывающий - Cancelled, вызовы без сигнала целы', async () => {
   const { kernel, api, log } = await startCancel();
   const abort = new AbortController();
   const call = api.slow('a', abort.signal);
@@ -630,7 +630,7 @@ const quiet: PluginModule = { activate() {} };
 const view = (module: string, area?: string, order?: number, title?: string) => ({ module, ...(area && { area }), ...(order !== undefined && { order }), ...(title && { title }) });
 const layoutOf = (k: { layout: readonly { pluginId: string; kind: string; name: string }[] }) => k.layout.map((e) => `${e.pluginId}/${e.name}`);
 
-test('раскладка: по order, при равенстве по id плагина, затем по имени; не зависит от порядка манифестов', async () => {
+test('ST-2003/1: раскладка: по order, при равенстве по id плагина, затем по имени; не зависит от порядка манифестов', async () => {
   const set = [
     manifest('zeta', { ui: { views: { main: view('./z.js', 'main', 100) } } }),
     manifest('alpha', { ui: { views: { b: view('./b.js', 'sidebar', 200), a: view('./a.js', 'sidebar', 200) } } }),
@@ -648,7 +648,7 @@ test('раскладка: по order, при равенстве по id плаг
   await backward.unload();
 });
 
-test('раскладка: вид без размещения - боковая колонка и order 1000, документ - основная область и после вида того же плагина; заголовок доходит до снимка', async () => {
+test('ST-2003/1: раскладка: вид без размещения - боковая колонка и order 1000, документ - основная область и после вида того же плагина; заголовок доходит до снимка', async () => {
   const k = await kernel(
     { a: quiet, b: quiet },
     {
@@ -664,7 +664,7 @@ test('раскладка: вид без размещения - боковая к
   await k.unload();
 });
 
-test('раскладка: невключённые, выключенные и плагины вне графа помечены, а не пропадают', async () => {
+test('ST-2003/1, ST-2003/5: раскладка: невключённые, выключенные и плагины вне графа помечены, а не пропадают', async () => {
   const ui = { views: { main: view('./m.js', 'main', 100) } };
   const k = await kernel(
     { on: quiet, user: quiet, orphan: quiet },
@@ -770,7 +770,7 @@ test('меню: снимок упорядочен по меню, order, id пл�
   await second.unload();
 });
 
-test('меню: выключение плагина делает его пункты недоступными, а не убирает; включение возвращает', async () => {
+test('ST-2002/6: меню: выключение плагина делает его пункты недоступными, а не убирает; включение возвращает', async () => {
   const flags = { open: true, project: true };
   const k = await kernel({ owner: stateOwner(flags), menu: menuPlugin }, { enabled: ['owner', 'menu'], manifests: [ownerManifest, menuManifest()] });
   assert.deepEqual(brief(k), ['menu/open:on+']);
@@ -807,7 +807,7 @@ test('меню: ленивый плагин виден и доступен до 
   await k.unload();
 });
 
-test('меню: нажатие недоступного или неизвестного пункта - отказ, чужую команду пункт не запускает', async () => {
+test('ST-2002/6: меню: нажатие недоступного или неизвестного пункта - отказ, чужую команду пункт не запускает', async () => {
   opened.length = 0;
   const flags = { open: false, project: false };
   const k = await kernel({ owner: stateOwner(flags), menu: menuPlugin }, { enabled: ['owner', 'menu'], manifests: [ownerManifest, menuManifest()] });
@@ -850,7 +850,7 @@ test('меню: источник - член собственного контр�
   await k.unload();
 });
 
-test('меню: сочетание пункта занято в едином реестре клавиш - манифест проигрывает, динамическое отказано, оба видны в журнале', async () => {
+test('ST-2002/6: меню: сочетание пункта занято в едином реестре клавиш - манифест проигрывает, динамическое отказано, оба видны в журнале', async () => {
   const flags = { open: false, project: true };
   const item = { ...open, accelerator: 'CmdOrCtrl+Shift+O' };
   const rival = manifest('rival', { commands: ['rival.run'], keybindings: [{ key: 'CmdOrCtrl+Shift+O', command: 'rival.run' }] });

@@ -38,7 +38,7 @@ describe('окно «Плагины Cyborg»: модель', () => {
     assert.equal(summary(snapshot([row('a', 'stopped'), row('b', 'stopped'), row('d', 'disabled')], { safeMode: true })), 'Безопасный режим: включённых плагинов 2, их код не запускается.');
   });
 
-  it('кнопки: у работающего - команды, выгрузка и хост; у выгруженного - «Загрузить», у упавшего - «Включить снова»', () => {
+  it('ST-2003/5: кнопки: у работающего - команды, выгрузка и хост; у выгруженного - «Загрузить», у упавшего - «Включить снова»', () => {
     const labels = (r: PluginRow, canHang = true) => actionsFor(r, canHang).map((a) => a.label);
     assert.deepEqual(labels(row('bob', 'active', { commands: ['bob.hello'], pid: 7 })), ['bob.hello', 'Выгрузить', 'Уронить хост', 'Повесить хост', 'Журнал']);
     assert.deepEqual(labels(row('bob', 'active', { pid: 7 }), false), ['Выгрузить', 'Уронить хост', 'Журнал']);

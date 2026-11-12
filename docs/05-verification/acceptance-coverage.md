@@ -9,9 +9,9 @@ origin: derived
 
 Таблица собрана из критериев историй, имён тестов и `acceptance.md` командой `npm run check:acceptance -- --write`; руками не правится. `npm run check:acceptance` падает, если у критерия нет ни теста с ключом `ST-NNNN/k` в имени, ни исключения в [acceptance.md](acceptance.md), если есть и то и другое, если ключ указывает на несуществующий критерий или эта таблица расходится с собранной. Исход критерия: «тест» - в имени хотя бы одного включённого теста ключ критерия (запуск - `npm run test:acceptance`); «исключение» - категория из [acceptance.md](acceptance.md); «целевое поведение» - критерий на то, чего ещё нет, проверки не требует. В ячейке «Проверка» путь файла и число тестов с ключом.
 
-Итог: историй 39, критериев 248: тест 56 (тестов с ключом 118), исключение 3, целевое поведение 22, без исхода 167.
+Итог: историй 39, критериев 248: тест 101 (тестов с ключом 214), исключение 5, целевое поведение 22, без исхода 120.
 
-Исключения по категориям: замеры 1, окно 1, ручная 1.
+Исключения по категориям: замеры 1, окно 3, ручная 1.
 
 ## ST-1001 Манифест и обнаружение: плагин с ошибками не запускается, остальные работают
 
@@ -121,57 +121,57 @@ origin: derived
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-2001/1 | нет |  |
-| ST-2001/2 | нет |  |
-| ST-2001/3 | нет |  |
-| ST-2001/4 | нет |  |
-| ST-2001/5 | нет |  |
-| ST-2001/6 | нет |  |
-| ST-2001/7 | нет |  |
-| ST-2001/8 | нет |  |
-| ST-2001/9 | нет |  |
-| ST-2001/10 | нет |  |
+| ST-2001/1 | тест | core/test/loader.test.ts (1), core/test/registry.test.ts (1) |
+| ST-2001/2 | тест | core/test/registry.test.ts (1), core/test/trust.test.ts (1) |
+| ST-2001/3 | тест | core/test/registry.test.ts (2) |
+| ST-2001/4 | тест | core/test/trust.test.ts (1) |
+| ST-2001/5 | тест | core/test/loader.test.ts (1), core/test/rpc.test.ts (1) |
+| ST-2001/6 | тест | core/test/subscriptions.test.ts (4), core/test/trust.test.ts (1) |
+| ST-2001/7 | тест | core/test/events.test.ts (2) |
+| ST-2001/8 | тест | core/test/loader.test.ts (1), core/test/rpc.test.ts (1) |
+| ST-2001/9 | тест | core/test/channel.test.ts (1), core/test/window.test.ts (1) |
+| ST-2001/10 | тест | core/test/documents.test.ts (1), playground/test/session-notifications.test.ts (1) |
 
 ## ST-2002 Команды, сочетания клавиш и пункты меню объявляются плагином
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-2002/1 | нет |  |
-| ST-2002/2 | нет |  |
-| ST-2002/3 | нет |  |
-| ST-2002/4 | нет |  |
-| ST-2002/5 | нет |  |
-| ST-2002/6 | нет |  |
+| ST-2002/1 | тест | core/test/loader.test.ts (1), core/test/trust.test.ts (2) |
+| ST-2002/2 | тест | core/test/command-callers.test.ts (2), core/test/graph.test.ts (1) |
+| ST-2002/3 | тест | core/test/lifecycle.test.ts (1), electron/test/key-route.test.ts (1) |
+| ST-2002/4 | тест | core/test/lifecycle.test.ts (2) |
+| ST-2002/5 | тест | core/test/keys-registry.test.ts (6) |
+| ST-2002/6 | тест | core/test/loader.test.ts (3) |
 
 ## ST-2003 Виды и документы плагина: области, порядок, заглушка при сбое
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-2003/1 | нет |  |
-| ST-2003/2 | нет |  |
-| ST-2003/3 | нет |  |
-| ST-2003/4 | нет |  |
-| ST-2003/5 | нет |  |
-| ST-2003/6 | нет |  |
+| ST-2003/1 | тест | core/test/loader.test.ts (3) |
+| ST-2003/2 | тест | electron/test/view-files.test.ts (3) |
+| ST-2003/3 | тест | electron/test/view-frames.test.ts (3) |
+| ST-2003/4 | исключение | окно |
+| ST-2003/5 | тест | core/test/loader.test.ts (1), playground/test/pilot-shell.test.ts (1), playground/test/plugins-model.test.ts (1) |
+| ST-2003/6 | тест | core/test/documents.test.ts (1) |
 | ST-2003/7 | целевое поведение |  |
-| ST-2003/8 | нет |  |
+| ST-2003/8 | тест | core/test/semver-manifest.test.ts (1) |
 
 ## ST-2004 Слой окна: диалоги, замок, уведомления
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-2004/1 | нет |  |
-| ST-2004/2 | нет |  |
-| ST-2004/3 | нет |  |
-| ST-2004/4 | нет |  |
-| ST-2004/5 | нет |  |
+| ST-2004/1 | тест | core/test/window.test.ts (2) |
+| ST-2004/2 | тест | core/test/window.test.ts (2), electron/test/window-layer.test.ts (1) |
+| ST-2004/3 | тест | core/test/window.test.ts (4) |
+| ST-2004/4 | тест | core/test/events.test.ts (1), core/test/os.test.ts (1), core/test/window.test.ts (1) |
+| ST-2004/5 | тест | core/test/loader.test.ts (1), core/test/semver-manifest.test.ts (1) |
 
 ## ST-2005 Всё, что рисует ядро, доступно с клавиатуры и дикторам
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-2005/1 | нет |  |
-| ST-2005/2 | нет |  |
+| ST-2005/1 | исключение | окно |
+| ST-2005/2 | тест | core/test/window.test.ts (2) |
 | ST-2005/3 | целевое поведение |  |
 | ST-2005/4 | целевое поведение |  |
 
@@ -179,27 +179,27 @@ origin: derived
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-2006/1 | нет |  |
-| ST-2006/2 | нет |  |
-| ST-2006/3 | нет |  |
-| ST-2006/4 | нет |  |
-| ST-2006/5 | нет |  |
-| ST-2006/6 | нет |  |
-| ST-2006/7 | нет |  |
-| ST-2006/8 | нет |  |
-| ST-2006/9 | нет |  |
-| ST-2006/10 | нет |  |
-| ST-2006/11 | нет |  |
-| ST-2006/12 | нет |  |
-| ST-2006/13 | нет |  |
-| ST-2006/14 | нет |  |
+| ST-2006/1 | тест | playground/test/agents.test.ts (1), testing/test/agent-suite.test.ts (1) |
+| ST-2006/2 | тест | core/test/pty.test.ts (1), testing/test/agent-suite.test.ts (1) |
+| ST-2006/3 | тест | playground/test/agents.test.ts (1) |
+| ST-2006/4 | тест | playground/test/agents.test.ts (1) |
+| ST-2006/5 | тест | playground/test/agents.test.ts (1) |
+| ST-2006/6 | тест | core/test/pty.test.ts (1), playground/test/agents.test.ts (1), playground/test/session-notifications.test.ts (1) |
+| ST-2006/7 | тест | playground/test/agents.test.ts (1) |
+| ST-2006/8 | тест | testing/test/agent-suite.test.ts (1) |
+| ST-2006/9 | тест | playground/test/agents.test.ts (1) |
+| ST-2006/10 | тест | playground/test/agents.test.ts (1) |
+| ST-2006/11 | тест | playground/test/agents.test.ts (1) |
+| ST-2006/12 | тест | playground/test/agents.test.ts (2) |
+| ST-2006/13 | тест | playground/test/agents.test.ts (3) |
+| ST-2006/14 | тест | playground/test/agents.test.ts (1) |
 
 ## ST-2007 Ядро не называет плагины по именам
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-2007/1 | нет |  |
-| ST-2007/2 | нет |  |
+| ST-2007/1 | тест | core/test/purity.test.ts (1) |
+| ST-2007/2 | тест | core/test/plugin-imports.test.ts (2) |
 
 ## ST-3001 Права плагина проверяет шлюз ctx.os, у каждого отказа есть запись
 
@@ -255,7 +255,7 @@ origin: derived
 | ST-3005/1 | нет |  |
 | ST-3005/2 | нет |  |
 | ST-3005/3 | нет |  |
-| ST-3005/4 | нет |  |
+| ST-3005/4 | тест | electron/test/view-files.test.ts (1) |
 | ST-3005/5 | нет |  |
 | ST-3005/6 | нет |  |
 | ST-3005/7 | целевое поведение |  |

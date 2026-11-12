@@ -25,7 +25,7 @@ const uiOf = (id: string): PluginUi | undefined => {
   return id === 'carol' ? { dir: carolDir, group: 'carol', views: { main: './ui/ui.js' }, inlineStyles: true } : undefined;
 };
 
-test('вид: origin называет группу, адрес - плагин внутри неё, чужая схема и мусор - не вид', () => {
+test('ST-2003/2: вид: origin называет группу, адрес - плагин внутри неё, чужая схема и мусор - не вид', () => {
   assert.equal(viewOrigin('cyborg.panels'), 'cyborg-plugin://cyborg.panels');
   assert.equal(groupOfOrigin('cyborg-plugin://cyborg.panels'), 'cyborg.panels');
   assert.equal(groupOfOrigin('file://'), undefined);
@@ -46,7 +46,7 @@ test('вид: origin называет группу, адрес - плагин в
   assert.equal(viewOfUrl('не адрес'), undefined);
 });
 
-test('вид: корень плагина - оболочка с модулем из манифеста, .cyborg/ - файлы ядра, прочее - только из каталога своего плагина', () => {
+test('ST-2003/2: вид: корень плагина - оболочка с модулем из манифеста, .cyborg/ - файлы ядра, прочее - только из каталога своего плагина', () => {
   const shell = resolveViewRequest('cyborg-plugin://panels/alice/', uiOf);
   assert.ok(shell?.kind === 'shell');
   assert.match(shell.html, /<script src="\/alice\/\.cyborg\/shell\.js" data-plugin="alice" data-view="main" data-entry="\.\/ui\/ui\.js"><\/script>/);
@@ -122,7 +122,7 @@ test('тема: одинаковый набор токенов у светлой
 const directives = (csp: string) => Object.fromEntries(csp.split('; ').map((d) => { const [name = '', ...sources] = d.split(' '); return [name, sources]; }));
 
 // K-05: SAD 3.8 и ADR-CH-0007 п. 2 - закрытая CSP с явными источниками; инлайн-стили только по флагу манифеста.
-test('CSP вида: начинается с default-src \'none\' и несёт только перечисленные источники', () => {
+test('ST-2003/2, ST-3005/4: CSP вида: начинается с default-src \'none\' и несёт только перечисленные источники', () => {
   const csp = viewCsp(false);
   assert.ok(csp.startsWith("default-src 'none'; "), csp);
   assert.deepEqual(directives(csp), {

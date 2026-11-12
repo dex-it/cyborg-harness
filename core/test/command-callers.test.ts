@@ -210,7 +210,7 @@ test('guard команды: путь вне права вызывающего о
 });
 
 // Ревью K-22: `a` и `a.b` оба проходят проверку пространства имён для `a.b.run`.
-test('команда в двух манифестах: сторонний отвергнут, встроенный остаётся владельцем; runOwn не пускает к чужой команде', async () => {
+test('ST-2002/2: команда в двух манифестах: сторонний отвергнут, встроенный остаётся владельцем; runOwn не пускает к чужой команде', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'cyborg-callers-'));
   const contexts = new Map<string, PluginContext>();
   const ran: string[] = [];
@@ -253,7 +253,7 @@ test('команда в двух манифестах: сторонний отв
   }
 });
 
-test('команда в двух манифестах: встроенный остаётся владельцем и без reservedPrefixes - поставку задаёт bundled', async () => {
+test('ST-2002/2: команда в двух манифестах: встроенный остаётся владельцем и без reservedPrefixes - поставку задаёт bundled', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'cyborg-callers-'));
   const k = await load({
     apiVersion: PLUGIN_API_VERSION,

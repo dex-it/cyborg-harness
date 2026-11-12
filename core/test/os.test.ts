@@ -261,7 +261,7 @@ test('env, notify, clipboard: только названное в праве; н�
   await bare.k.unload();
 });
 
-test('notify: клик поднимает окно, закрывает уведомление и запускает свою команду; команда и аргументы сверяются при show; close, пределы и выгрузка', async () => {
+test('ST-2004/4: notify: клик поднимает окно, закрывает уведомление и запускает свою команду; команда и аргументы сверяются при show; close, пределы и выгрузка', async () => {
   await using box = await sandbox();
   const shown: { title: string; body: string | undefined; events: NoticeEvents; closed: boolean }[] = [];
   const ran: unknown[] = [];

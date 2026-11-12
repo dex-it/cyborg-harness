@@ -85,7 +85,7 @@ test('pty.spawn: программа, окружение и cwd по праву; 
   assert.equal(s.backend.procs.length, 1, 'запуск без права дошёл до бэкенда');
 });
 
-test('pty.spawn с describedBy: описание поставщика проходит, только если подходит и под его launch (confused deputy)', async () => {
+test('ST-2006/2: pty.spawn с describedBy: описание поставщика проходит, только если подходит и под его launch (confused deputy)', async () => {
   const rule = { program: '/bin/bash', args: ['-c', 'exec agent'], env: ['AGENT_FILE'] };
   await using s = await setup({
     consumer: { pty: [{ program: '/bin/bash', args: ['-c', 'exec agent'], env: ['AGENT_FILE', 'COLORTERM'] }] },
@@ -186,7 +186,7 @@ test('pty завершился без владельца: list показыва�
   assert.deepEqual(await s.pty('agent').list(), []);
 });
 
-test('share: билет одноразовый и только для своего UI; вид видит вывод и пишет мимо хоста, в том числе пока хоста нет', async () => {
+test('ST-2006/6: share: билет одноразовый и только для своего UI; вид видит вывод и пишет мимо хоста, в том числе пока хоста нет', async () => {
   await using s = await setup({ term: shell, other: shell });
   const h = await s.pty('term').spawn({ program: '/bin/bash', persist: true, cols: 80, rows: 24 });
   const proc = s.backend.procs[0]!;

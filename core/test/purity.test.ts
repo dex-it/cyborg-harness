@@ -81,7 +81,7 @@ describe('чистота ядра', () => {
     );
   });
 
-  it('ST-1009/1: в идентификаторах и строках core/src нет предметных слов', () => {
+  it('ST-2007/1: ST-1009/1: в идентификаторах и строках core/src нет предметных слов', () => {
     assert.deepEqual(
       sources().flatMap((f) => domainViolations(f, fs.readFileSync(f, 'utf8'))),
       [],

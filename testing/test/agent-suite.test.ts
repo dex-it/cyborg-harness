@@ -24,7 +24,7 @@ function provider(agent: Partial<Agent> = {}, launch: unknown[] = ['/bin/sh']): 
 agentContractSuite(provider());
 
 describe('набор cyborg.agent на плохих поставщиках', () => {
-  it('хороший поставщик проходит и через checkAgentContract', async () => {
+  it('ST-2006/1: хороший поставщик проходит и через checkAgentContract', async () => {
     await checkAgentContract(provider());
   });
 
@@ -33,7 +33,7 @@ describe('набор cyborg.agent на плохих поставщиках', () 
     await assert.rejects(checkAgentContract(bad), /fake-agent: launch - данные/);
   });
 
-  it('неверный код выхода: 127 не переведён в notFound', async () => {
+  it('ST-2006/8: неверный код выхода: 127 не переведён в notFound', async () => {
     await assert.rejects(checkAgentContract(provider({ ended: async () => null })), /ended: код 127.*127 - не найдена программа/);
   });
 
@@ -50,7 +50,7 @@ describe('набор cyborg.agent на плохих поставщиках', () 
     await assert.rejects(checkAgentContract(provider({ facts: async () => facts })), /capabilities\.resume/);
   });
 
-  it('запуск шире права launch: pty потребителя отказывает, запуск не доходит до бэкенда', async () => {
+  it('ST-2006/2: запуск шире права launch: pty потребителя отказывает, запуск не доходит до бэкенда', async () => {
     const bad = provider({ launch: async (request) => ({ program: '/bin/bash', args: [], cwd: request.cwd, env: {} }) });
     await assert.rejects(checkAgentContract(bad), /запуск через потребителя по его праву pty/);
   });

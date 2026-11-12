@@ -33,7 +33,7 @@ test('allowsMajor: есть ли в диапазоне версия этой м�
 
 const base = { id: 'pin-lock', version: '1.0.0', engines: { cyborg: '^1' } };
 
-test('манифест: незнакомое поле верхнего уровня - отказ с именем поля, $schema разрешён', () => {
+test('ST-2004/5: манифест: незнакомое поле верхнего уровня - отказ с именем поля, $schema разрешён', () => {
   const typo = parseManifest({ ...base, keybinding: [], lok: { onStart: true } });
   assert.deepEqual(typo, { ok: false, id: 'pin-lock', errors: ['keybinding: незнакомое поле манифеста', 'lok: незнакомое поле манифеста'] });
   assert.ok(parseManifest({ $schema: './manifest.schema.json', ...base }).ok);
@@ -152,7 +152,7 @@ test('вид: объект с module, area, order и title; строка ост�
   assert.equal(short.manifest.ui?.placement, undefined, 'старая форма манифеста не получает новых полей');
 });
 
-test('вид: неизвестная область и нечисловой order - отказ с именем поля', () => {
+test('ST-2003/8: вид: неизвестная область и нечисловой order - отказ с именем поля', () => {
   assert.deepEqual(uiErrors({ views: { a: { module: './a.js', area: 'basement' } } }), [`ui.views.a.area: ожидается ${AREAS}, получено "basement"`]);
   assert.deepEqual(uiErrors({ views: { a: { module: './a.js', area: 7 } } }), [`ui.views.a.area: ожидается ${AREAS}, получено 7`]);
   assert.deepEqual(uiErrors({ views: { a: { module: './a.js', order: '100' } } }), ['ui.views.a.order: ожидается число, получено "100"']);
