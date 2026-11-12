@@ -51,8 +51,12 @@ export function resolveGraph(manifests: readonly PluginManifest[], apiVersion: s
   let bindings: Map<string, Map<string, string>>;
 
   for (;;) {
-    bindings = bindAll(alive(), reject);
-    if (alive().length !== bindings.size) continue;
+    // Поставщики в проходе берутся из снимка живых на его начало. Кого проход отверг, на того уже могли указать привязки других,
+    // поэтому после любого отказа связи собираются заново (по множеству отвергнутых, а не по числу): иначе привязка к отвергнутому
+    // остаётся в графе, а отказ не доходит до зависящих.
+    const live = alive();
+    bindings = bindAll(live, reject);
+    if (live.some((m) => rejected.has(m.id))) continue;
     const cycles = findCycles(bindings);
     if (cycles.length === 0) break;
     for (const members of cycles) for (const id of members) reject(id, { kind: 'cycle', members });

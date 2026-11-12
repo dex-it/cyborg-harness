@@ -4,6 +4,7 @@ import { isBuiltin } from 'node:module';
 import path from 'node:path';
 import { PLUGIN_API_VERSION } from './api-version.ts';
 import { parseManifest, type PluginManifest } from './manifest.ts';
+import { layoutJson, manifestLines, type ManifestLines } from './manifest-lines.ts';
 import { describePermissions } from './permissions.ts';
 import { COMPUTED, declarationProblems, UNREADABLE, usesOf } from './plugin-scan.ts';
 import { satisfies } from './semver.ts';
@@ -245,18 +246,19 @@ async function locate(root: string, ref: string): Promise<'ok' | 'missing' | 'ou
   return 'missing';
 }
 
-/** Читает манифест; причина, если он не прочитан. */
-async function readManifest(root: string): Promise<{ raw: unknown } | { problem: string }> {
+/** Читает манифест; причина (и строка, если сбой в тексте), если он не прочитан. */
+async function readManifest(root: string): Promise<{ raw: unknown; lines: ManifestLines } | { problem: string; line?: number | undefined }> {
   let text: string;
   try {
     text = await fs.readFile(path.join(root, 'manifest.json'), 'utf8');
   } catch (error) {
     return { problem: errno(error) === 'ENOENT' ? 'файла нет' : `не прочитан - ${error instanceof Error ? error.message : String(error)}` };
   }
+  const layout = layoutJson(text);
   try {
-    return { raw: JSON.parse(text) as unknown };
+    return { raw: JSON.parse(text) as unknown, lines: manifestLines(layout.root) };
   } catch (error) {
-    return { problem: `не JSON - ${error instanceof Error ? error.message : String(error)}` };
+    return { problem: `не JSON - ${error instanceof Error ? error.message : String(error)}`, line: layout.errorLine };
   }
 }
 
@@ -281,7 +283,9 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
   let manifest: PluginManifest | undefined;
   let id: string | undefined;
   const read = await readManifest(root);
-  if ('problem' in read) at('manifest.json', read.problem);
+  // Номер строки в исходном JSON: ошибка в ключе - строка ключа, нет обязательного ключа - строка начала объекта (FR-CH-7005).
+  const lines: ManifestLines | undefined = 'problem' in read ? undefined : read.lines;
+  if ('problem' in read) at('manifest.json', read.problem, read.line);
   else {
     const parsed = parseManifest(read.raw, apiVersion);
     if (parsed.ok) {
@@ -289,11 +293,11 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
       id = manifest.id;
       // Манифест без ошибок, но под другой API: разбор этого не видит, загрузчик отвергнет плагин той же причиной.
       if (!satisfies(apiVersion, manifest.engines.cyborg)) {
-        at('manifest.json', `engines.cyborg: нужен API Cyborg ${manifest.engines.cyborg}, есть ${apiVersion}`);
+        at('manifest.json', `engines.cyborg: нужен API Cyborg ${manifest.engines.cyborg}, есть ${apiVersion}`, read.lines.forKey('engines.cyborg'));
       }
     } else {
       id = parsed.id;
-      for (const error of parsed.errors) at('manifest.json', error);
+      for (const error of parsed.errors) at('manifest.json', error, read.lines.forMessage(error));
     }
   }
 
@@ -301,8 +305,10 @@ export async function checkPlugin(dir: string, options: CheckOptions = {}): Prom
     for (const reader of Object.values(CHECKED_KEYS)) {
       for (const ref of reader(manifest)) {
         const state = await locate(root, ref.file);
-        if (state === 'missing') at('manifest.json', `${ref.field}: файла ${ref.file} нет`);
-        else if (state === 'outside') at('manifest.json', `${ref.field}: ${ref.file} ведёт за пределы каталога плагина`);
+        // Вид-объект называет модуль ключом `module`: строка этого ключа, а не имени вида.
+        const line = lines?.forKey(`${ref.field}.module`) ?? lines?.forKey(ref.field);
+        if (state === 'missing') at('manifest.json', `${ref.field}: файла ${ref.file} нет`, line);
+        else if (state === 'outside') at('manifest.json', `${ref.field}: ${ref.file} ведёт за пределы каталога плагина`, line);
       }
     }
   }
