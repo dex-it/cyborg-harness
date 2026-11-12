@@ -79,7 +79,7 @@ async function tree(root: string): Promise<Record<string, string>> {
   return out;
 }
 
-test('файл e4beb72: ни одно значение не потеряно, поля уходят по таблице, копия .v1.bak побайтно равна исходнику', async () => {
+test('ST-5004/5: файл e4beb72: ни одно значение не потеряно, поля уходят по таблице, копия .v1.bak побайтно равна исходнику', async () => {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-pl06-')));
   try {
     const original = await readFile(FIXTURE);

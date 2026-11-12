@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import { allowsMajor, satisfies, isValidRange } from '../src/semver.ts';
 import { checkArgs, parseManifest, type CommandSpec } from '../src/manifest.ts';
 
-test('диапазоны: каретка, тильда, префикс и звезда', () => {
+test('ST-5001/1, ST-5001/3, ST-6002/2: диапазоны: каретка, тильда, префикс и звезда', () => {
   assert.ok(satisfies('1.4.0', '^1'));
+  assert.ok(satisfies('1.4.0', '^1.3'));
+  assert.ok(!satisfies('1.3.0', '^1.5'));
   assert.ok(satisfies('1.9.9', '^1.4'));
   assert.ok(!satisfies('1.3.9', '^1.4'));
   assert.ok(!satisfies('2.0.0', '^1'));
@@ -39,7 +41,7 @@ test('манифест: незнакомое поле верхнего уров�
   assert.ok(parseManifest({ $schema: './manifest.schema.json', ...base }).ok);
 });
 
-test('манифест под другой API: при ошибках разбора одна причина - версия API', () => {
+test('ST-5001/3: манифест под другой API: при ошибках разбора одна причина - версия API', () => {
   const newer = { ...base, engines: { cyborg: '^1.3' }, layout: { kind: 'side' } };
   assert.deepEqual(parseManifest(newer, '1.2.0'), { ok: false, id: 'pin-lock', errors: ['engines.cyborg: нужен API Cyborg ^1.3, есть 1.2.0'] });
   assert.deepEqual(parseManifest(newer, '1.3.0'), { ok: false, id: 'pin-lock', errors: ['layout: незнакомое поле манифеста'] });
@@ -47,7 +49,7 @@ test('манифест под другой API: при ошибках разбо
   assert.ok(parseManifest({ ...base, engines: { cyborg: '^2' } }, '1.2.0').ok, 'без ошибок разбора версию судит граф');
 });
 
-test('манифест: минимальный приводится к полной форме', () => {
+test('ST-1001/3: манифест: минимальный приводится к полной форме', () => {
   const r = parseManifest({ ...base, provides: { 'cyborg.lock': '1.0' } });
   assert.ok(r.ok);
   assert.deepEqual(r.manifest.provides, { 'cyborg.lock': ['1.0'] });
@@ -55,7 +57,7 @@ test('манифест: минимальный приводится к полн�
   assert.deepEqual(r.manifest.commands, {});
 });
 
-test('манифест: ошибки собираются все сразу и id сохраняется для журнала', () => {
+test('ST-1001/1: манифест: ошибки собираются все сразу и id сохраняется для журнала', () => {
   const r = parseManifest({
     ...base,
     version: 'one',
@@ -138,7 +140,7 @@ const docErrors = (documents: unknown) => {
 };
 const AREAS = 'sidebar, main, toolbar, popup или modal';
 
-test('вид: объект с module, area, order и title; строка остаётся краткой записью и не получает размещения', () => {
+test('ST-2003/1: вид: объект с module, area, order и title; строка остаётся краткой записью и не получает размещения', () => {
   const r = parseManifest({
     ...base,
     ui: { views: { sessions: { module: './ui/s.js', area: 'main', order: 100, title: 'Сессии' }, tree: './ui/tree.js', bar: { module: './bar.js' } } },
@@ -152,7 +154,7 @@ test('вид: объект с module, area, order и title; строка ост�
   assert.equal(short.manifest.ui?.placement, undefined, 'старая форма манифеста не получает новых полей');
 });
 
-test('вид: неизвестная область и нечисловой order - отказ с именем поля', () => {
+test('ST-2003/8: вид: неизвестная область и нечисловой order - отказ с именем поля', () => {
   assert.deepEqual(uiErrors({ views: { a: { module: './a.js', area: 'basement' } } }), [`ui.views.a.area: ожидается ${AREAS}, получено "basement"`]);
   assert.deepEqual(uiErrors({ views: { a: { module: './a.js', area: 7 } } }), [`ui.views.a.area: ожидается ${AREAS}, получено 7`]);
   assert.deepEqual(uiErrors({ views: { a: { module: './a.js', order: '100' } } }), ['ui.views.a.order: ожидается число, получено "100"']);
@@ -192,7 +194,7 @@ test('ui.group: имя группы в манифесте разбирается
 });
 
 // K-05: ui.inlineStyles - только true включает инлайн-стили вида; без поля, как и с false, поля в разборе нет.
-test('ui.inlineStyles: только булев true включает инлайн-стили вида, прочее - отказ с именем поля', () => {
+test('ST-3005/5: ui.inlineStyles: только булев true включает инлайн-стили вида, прочее - отказ с именем поля', () => {
   const ok = parseManifest({ ...base, ui: { views: { main: './ui.js' }, inlineStyles: true } });
   assert.ok(ok.ok);
   assert.equal(ok.manifest.ui?.inlineStyles, true);

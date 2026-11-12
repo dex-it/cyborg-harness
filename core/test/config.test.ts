@@ -7,7 +7,7 @@ test('слияние: объекты по ключам, массивы цели�
   assert.deepEqual(deepMerge({ a: { x: 1, y: 2 }, list: [1, 2] }, { a: { y: 3 }, list: [9] }), { a: { x: 1, y: 3 }, list: [9] });
 });
 
-test('воркспейс перекрывает пользователя поверх defaults', () => {
+test('ST-5004/3: воркспейс перекрывает пользователя поверх defaults', () => {
   const { result } = resolveSection({ version: 1, defaults: { idleMinutes: 10, keys: ['Mod+L'] } }, [
     ['user', { $version: 1, idleMinutes: 5 }],
     ['workspace', { $version: 1, keys: ['Mod+Shift+L'] }],
@@ -39,7 +39,7 @@ test('каждый слой мигрирует от своей версии', ()
   assert.deepEqual(result.migrated, ['user', 'workspace']);
 });
 
-test('слой новее манифеста - откат версии, раздел не читается', () => {
+test('ST-5004/2: слой новее манифеста - откат версии, раздел не читается', () => {
   const { result } = resolveSection({ version: 2, migrate: () => ({}) }, [['user', { $version: 3 }]]);
   assert.deepEqual(result, { status: 'newer', layer: 'user', found: 3, expected: 2 });
 });
@@ -51,7 +51,7 @@ test('сбой migrate и отказ validate различаются', () => {
   assert.deepEqual(invalid.result, { status: 'invalid', errors: ['n не число'] });
 });
 
-test('хранилище: мигрированный слой записывается сразу, чужие разделы не трогаются', async () => {
+test('ST-5004/7: хранилище: мигрированный слой записывается сразу, чужие разделы не трогаются', async () => {
   const { store, docs, saves } = memory({ user: { other: { $version: 9, keep: true }, 'pin-lock': { $version: 1, idle: 5 } } });
   const s = await SectionStore.open(store, ['user', 'workspace']);
   const h = await s.section('pin-lock', { version: 2, migrate: (_, d) => ({ minutes: d.idle }) });

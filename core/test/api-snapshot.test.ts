@@ -44,7 +44,7 @@ function problemsOf(source: ReadFile, line: keyof typeof LINES): string[] {
   return checkSurface({ apiVersion, packageVersion: LINES[line], surface: extractSurface(source), etalons });
 }
 
-describe('эталон и исходники', () => {
+describe('ST-5002/1: эталон и исходники', () => {
   it('эталон текущей версии API совпадает с исходниками', () => {
     for (const line of ['dev', 'rc', 'final'] as const) assert.deepEqual(problemsOf(read, line), [], line);
     assert.deepEqual(checkSurface({ apiVersion, packageVersion: packageVersion(), surface: extractSurface(read), etalons }), [], 'версия пакета из репозитория');
@@ -126,7 +126,7 @@ describe('порча исходников: линия разработки, ка
   ];
 
   for (const c of cases) {
-    it(`${c.name}: после заморозки - ломающее, у кандидата - новый кандидат, на линии разработки - просьба обновить эталон`, () => {
+    it(`ST-5002/3, ST-6002/1: ${c.name}: после заморозки - ломающее, у кандидата - новый кандидат, на линии разработки - просьба обновить эталон`, () => {
       const frozen = problemsOf(c.source, 'final');
       assert.equal(frozen.length, 1, frozen.join('\n'));
       assert.match(frozen[0]!, /ломающее изменение публичного API плагина в пределах мажорной версии 1/);
@@ -211,7 +211,7 @@ describe('цепочка эталонов и версии', () => {
     assert.deepEqual(check('1.1.0', grown, { '1.0.0': v1, '1.1.0': grown }), []);
   });
 
-  it('минорная версия: эталон 1.1.0 с удалённым членом ломает 1.0.0 - ошибка, даже если исходники совпали с ним', () => {
+  it('ST-6002/2: минорная версия: эталон 1.1.0 с удалённым членом ломает 1.0.0 - ошибка, даже если исходники совпали с ним', () => {
     const problems = check('1.1.0', broken, { '1.0.0': v1, '1.1.0': broken });
     assert.equal(problems.length, 1);
     assert.match(problems[0]!, /эталон 1\.1\.0\.txt ломает 1\.0\.0\.txt при той же мажорной версии 1/);

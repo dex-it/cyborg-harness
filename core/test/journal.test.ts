@@ -133,7 +133,7 @@ test('журнал: цикл отказов CSP с разными адресам
 type DeprecatedCall = Extract<JournalEntry, { kind: 'deprecated-call' }>;
 const old = (caller: string, member = 'list', contract = 'test.old', provider = 'prov'): DeprecatedCall => ({ pluginId: caller, kind: 'deprecated-call', provider, contract, member });
 
-test('журнал: вызовы устаревшего члена за окно - первая запись сразу, повторы одной записью с repeats; пара (вызывающий, член) считается отдельно', () => {
+test('ST-5003/3: журнал: вызовы устаревшего члена за окно - первая запись сразу, повторы одной записью с repeats; пара (вызывающий, член) считается отдельно', () => {
   const out: JournalEntry[] = [];
   const c = new DeprecatedCollapse((e) => out.push(e), 60_000);
   for (let i = 0; i < 100; i++) c.record(old('a'));

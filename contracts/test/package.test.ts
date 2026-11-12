@@ -64,6 +64,34 @@ describe('package.json пакета контрактов', () => {
   });
 });
 
+/** Ключи интерфейсов `Contracts` файла: карта самого пакета или дополнение через `declare module`. */
+function contractKeys(file: string): string[] {
+  const source = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const found: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isInterfaceDeclaration(node) && node.name.text === 'Contracts') {
+      for (const member of node.members) if (member.name && ts.isStringLiteral(member.name)) found.push(member.name.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+describe('ST-5002/5: демо-контракты вне пакета и снимка', () => {
+  it('карта Contracts пакета - только cyborg.*; demo.* нет ни в исходниках пакета, ни в снимке деклараций, ни в эталоне API; демо дополняют карту в core/examples', () => {
+    const own = contractKeys(path.join(contracts, 'index.ts'));
+    assert.ok(own.length >= 6, `в карте только ${String(own.length)} ключей`);
+    assert.deepEqual(own.filter((k) => !k.startsWith('cyborg.')), []);
+    const etalons = fs.readdirSync(path.join(repo, 'core', 'test', 'api-snapshot')).map((name) => `core/test/api-snapshot/${name}`);
+    assert.ok(etalons.length > 0);
+    const files = [...SOURCES.map((s) => `contracts/${s}.ts`), 'contracts/api-snapshot.txt', ...etalons];
+    assert.deepEqual(files.filter((rel) => fs.readFileSync(path.join(repo, rel), 'utf8').includes('demo.')), []);
+    const demo = contractKeys(path.join(repo, 'core', 'examples', 'contracts.ts'));
+    assert.ok(demo.length > 0 && demo.every((k) => k.startsWith('demo.')), demo.join());
+  });
+});
+
 describe('сборка деклараций', () => {
   it('rewriteSpecifiers меняет .ts на .js только у относительных путей', () => {
     const text = [
@@ -167,7 +195,7 @@ export const view: UiModule<{ innerHTML: string }> = {
 `;
 
   for (const [name, module, resolution] of [['NodeNext', 'NodeNext', 'NodeNext'], ['Bundler', 'ESNext', 'Bundler']] as const) {
-    it(`пустой проект (${name}) ставит tarball и собирает плагин на PluginModule и declare module`, () => {
+    it(`ST-7002/1: пустой проект (${name}) ставит tarball и собирает плагин на PluginModule и declare module`, () => {
       const project = path.join(work, `consumer-${name}`);
       fs.mkdirSync(project);
       fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'consumer', private: true, type: 'module' }));
