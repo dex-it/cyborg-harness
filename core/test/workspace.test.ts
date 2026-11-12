@@ -194,7 +194,7 @@ test('хук вернул undefined или его нет: файл не трон
   await assert.rejects(readFile(`${box.file}.v1.bak`), { code: 'ENOENT' });
 });
 
-test('ST-1007/3: plugins: воркспейс перекрывает enabled пользователя, группы хостов сливаются; нет файла - пустой новый', async () => {
+test('ST-2002/4: ST-1007/3: plugins: воркспейс перекрывает enabled пользователя, группы хостов сливаются; нет файла - пустой новый', async () => {
   await using box = await sandbox();
   const fresh = await open(box);
   assert.deepEqual(fresh.plugins, { enabled: [], hosts: {}, uiGroups: {}, keybindings: [] });

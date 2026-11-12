@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
+import { fakePty } from '../../testing/src/fake-pty.ts';
 import { memorySecrets } from '../../testing/src/memory.ts';
 import { SectionStore, type LayerStore } from '../src/config.ts';
 import { CoreError } from '../src/errors.ts';
@@ -570,7 +571,7 @@ test('output: сводная строка хоста без плагина, не
   assert.deepEqual(logs, ['хост h [info]: строка 0', 'хост h [warn]: строк сверх предела за интервал: 3, из них error: 1; последняя error: строка 3']);
 });
 
-test('ST-3001/1: os: notify.show и notify.close плагина без права notify отклоняет шлюз ядра (PermissionDenied, запись denied), а не только отсутствие ctx.os.notify (PL-02)', async () => {
+test('os: notify.show и notify.close плагина без права notify отклоняет шлюз ядра (PermissionDenied, запись denied), а не только отсутствие ctx.os.notify (PL-02)', async () => {
   const shown: string[] = [];
   const forger = forging({
     mallory: {
@@ -600,5 +601,57 @@ test('ST-3001/1: os: notify.show и notify.close плагина без прав�
     ['mallory:notify.show', 'mallory:notify.close'],
     'каждый отказ - запись в журнале плагина',
   );
+  await kernel.unload();
+});
+
+// Члены, которым нужно право; каждый зовётся в обход ctx.os (прямой запрос хоста) плагином с пустыми permissions. Свои каталоги, свои секреты и dialog права не просят.
+// Не вошли семь членов, которые права не проверяют и отвечают без PermissionDenied: pty.share, pty.list, pty.attach, pty.write, pty.resize, pty.kill (NotFound или пустой список,
+// чужого pty у плагина нет) и serve.close (ok на чужой или неоткрытый сервер). Это расхождение с критерием ST-3001/1 записано в docs/05-verification/acceptance.md как дефект.
+const NEEDS_RIGHT: readonly (readonly [string, ...unknown[]])[] = [
+  ['fs.readText', '/etc/hosts'],
+  ['fs.readSlice', '/etc/hosts', 0, 16],
+  ['fs.list', '/etc'],
+  ['fs.stat', '/etc/hosts'],
+  ['fs.realpath', '/etc/hosts'],
+  ['fs.watch', '/etc', 'w1', { recursive: false }],
+  ['fs.writeText', '/etc/cyborg-hacked', 'x'],
+  ['fs.mkdir', '/etc/cyborg-hacked'],
+  ['fs.remove', '/etc/hosts'],
+  ['process.run', 'git', ['status'], {}],
+  ['pty.spawn', { program: '/bin/sh', args: [], cols: 80, rows: 24 }],
+  ['net.fetch', 'https://example.com/'],
+  ['serve.http', {}],
+  ['env.get', 'HOME'],
+  ['clipboard.readText'],
+  ['clipboard.writeText', 'x'],
+  ['shell.openPath', '/etc/hosts'],
+  ['shell.openExternal', 'https://example.com/'],
+  ['security.setRoots', ['/etc']],
+  ['notify.show', 'фишинг', 'нажми'],
+  ['notify.close', 'n1'],
+];
+
+test('прямой запрос хоста: плагин с пустыми permissions зовёт члены ctx.os с правом - PermissionDenied и запись denied на каждый, исполнения нет', async () => {
+  const forger = forging({ mallory: { activate: () => undefined } });
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['mallory'],
+    manifests: [manifest('mallory')],
+    spawnHost: forger.spawn,
+    hosts: { m: ['mallory'] },
+    os: { dataDir: tmpdir(), tempDir: tmpdir(), pty: fakePty() },
+  });
+  const outcomes: string[] = [];
+  for (const [method, ...args] of NEEDS_RIGHT) {
+    const reply = await forger.request('m', 'os', { pluginId: 'mallory', method, args });
+    outcomes.push(`${method}:${code(reply) ?? 'нет кода'}`);
+  }
+  assert.deepEqual(
+    outcomes,
+    NEEDS_RIGHT.map(([method]) => `${method}:PermissionDenied`),
+    'член вернул успех или иной код: проверка права обойдена прямым запросом',
+  );
+  const denied = kernel.journal.flatMap((e) => (e.kind === 'denied' ? [e.method] : []));
+  assert.deepEqual(denied, NEEDS_RIGHT.map(([method]) => method), 'на каждый отказ запись denied в журнале плагина');
   await kernel.unload();
 });

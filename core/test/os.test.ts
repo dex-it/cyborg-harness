@@ -53,7 +53,7 @@ async function kernel(plugins: Record<string, unknown>, env: Partial<OsEnvironme
   return { k, os, ctx: (id: string) => contexts.get(id)!, denied };
 }
 
-test('ST-3001/1: без прав: свои каталоги работают, чужой путь - PermissionDenied и запись в журнале', async () => {
+test('без прав: свои каталоги работают, чужой путь - PermissionDenied и запись в журнале', async () => {
   await using box = await sandbox();
   const { k, os, denied } = await kernel({ plain: undefined }, { dataDir: box.data, tempDir: box.temp });
   const own = os('plain');
