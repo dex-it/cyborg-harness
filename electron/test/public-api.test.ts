@@ -125,7 +125,7 @@ function exportsOf(entry: PublicEntry): { values: string[]; types: string[] } {
 }
 
 describe('публичный API адаптера Electron', () => {
-  it('точки входа package.json совпадают с перечнем, цели существуют после сборки', () => {
+  it('ST-6001/2: точки входа package.json совпадают с перечнем, цели существуют после сборки', () => {
     const declared = Object.keys(manifest.exports).filter((k) => k !== './package.json' && !FILES.includes(k));
     assert.deepEqual(sorted(declared), sorted(Object.keys(ENTRIES)));
     for (const [name, entry] of Object.entries(ENTRIES)) {
@@ -145,7 +145,7 @@ describe('публичный API адаптера Electron', () => {
     });
   }
 
-  it('входы написаны явными именованными экспортами: `export *` запрещён', () => {
+  it('ST-6001/2: входы написаны явными именованными экспортами: `export *` запрещён', () => {
     for (const [name, entry] of Object.entries(ENTRIES)) {
       const file = path.join(pkg, entry.source);
       const source = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);

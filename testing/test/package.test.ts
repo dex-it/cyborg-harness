@@ -39,7 +39,7 @@ describe('package.json тест-кита', () => {
     assert.equal(manifest.engines?.node, coreManifest.engines?.node);
   });
 
-  it('версия совпадает с версией ядра, а peer на ядро её допускает', () => {
+  it('ST-6001/8: версия совпадает с версией ядра, а peer на ядро её допускает', () => {
     assert.equal(manifest.version, coreManifest.version);
     const range = manifest.peerDependencies?.['@cyborg-harness/core'];
     assert.ok(range, 'нет peer на ядро');

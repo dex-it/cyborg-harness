@@ -62,7 +62,7 @@ test('ST-2001/1: ST-1002/7, ST-1006/4: активация по графу, вы�
   assert.deepEqual(events, ['files:up', 'sessions:/w:data:a', 'sessions:down', 'files:down']);
 });
 
-test('ST-1001/1, ST-1001/7, ST-1002/1, ST-1003/1, ST-1004/1: журнал: невалидный, выключенный, не найденный, отказ графа, сбой и пропуск зависимого', async () => {
+test('ST-6001/7: ST-1001/1, ST-1001/7, ST-1002/1, ST-1003/1, ST-1004/1: журнал: невалидный, выключенный, не найденный, отказ графа, сбой и пропуск зависимого', async () => {
   const k = await kernel(
     { files: { activate() { throw new Error('диск недоступен'); } }, sessions: { activate() {} } },
     {
@@ -152,7 +152,7 @@ test('ST-1001/1, ST-1001/7: битый манифест невключённог
   assert.deepEqual(k.journal, [{ pluginId: 'old', kind: 'disabled' }]);
 });
 
-test('ST-5001/2, ST-5002/8: манифест с полем новой версии API - в журнале причина версия, а не поле', async () => {
+test('ST-6001/7: ST-5001/2, ST-5002/8: манифест с полем новой версии API - в журнале причина версия, а не поле', async () => {
   const k = await kernel({}, { enabled: ['next', 'typo'], manifests: [manifest('next', { engines: { cyborg: '^1.3' }, layout: {} }), manifest('typo', { keybinding: [] })] });
   assert.deepEqual(k.journal, [
     { pluginId: 'next', kind: 'invalid', errors: [`engines.cyborg: нужен API Cyborg ^1.3, есть ${PLUGIN_API_VERSION}`] },

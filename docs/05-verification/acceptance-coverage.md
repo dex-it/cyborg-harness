@@ -9,7 +9,7 @@ origin: derived
 
 Таблица собрана из критериев историй, имён тестов и `acceptance.md` командой `npm run check:acceptance -- --write`; руками не правится. `npm run check:acceptance` падает, если у критерия нет ни теста с ключом `ST-NNNN/k` в имени, ни исключения в [acceptance.md](acceptance.md), если есть и то и другое, если ключ указывает на несуществующий критерий или эта таблица расходится с собранной. Исход критерия: «тест» - в имени хотя бы одного включённого теста ключ критерия (запуск - `npm run test:acceptance`); «исключение» - категория из [acceptance.md](acceptance.md); «целевое поведение» - критерий на то, чего ещё нет, проверки не требует. В ячейке «Проверка» путь файла и число тестов с ключом.
 
-Итог: историй 39, критериев 248: тест 194 (тестов с ключом 448), исключение 6, целевое поведение 22, без исхода 26.
+Итог: историй 39, критериев 248: тест 204 (тестов с ключом 481), исключение 6, целевое поведение 22, без исхода 16.
 
 Исключения по категориям: замеры 2, окно 3, ручная 1.
 
@@ -399,23 +399,23 @@ origin: derived
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-6001/1 | нет |  |
-| ST-6001/2 | нет |  |
-| ST-6001/3 | нет |  |
-| ST-6001/4 | нет |  |
-| ST-6001/5 | нет |  |
+| ST-6001/1 | тест | core/test/consumer.test.ts (3), core/test/public-api.test.ts (1), electron/test/consumer.test.ts (1), electron/test/example.test.ts (2) |
+| ST-6001/2 | тест | core/test/public-api.test.ts (2), electron/test/public-api.test.ts (2) |
+| ST-6001/3 | тест | core/test/delivery.test.ts (1), electron/test/plugins.test.ts (3) |
+| ST-6001/4 | тест | electron/test/plugins.test.ts (3) |
+| ST-6001/5 | тест | electron/test/plugins.test.ts (1) |
 | ST-6001/6 | целевое поведение |  |
-| ST-6001/7 | нет |  |
-| ST-6001/8 | нет |  |
+| ST-6001/7 | тест | core/test/loader.test.ts (2) |
+| ST-6001/8 | тест | core/test/api-version.test.ts (1), core/test/consumer.test.ts (1), electron/test/consumer.test.ts (1), testing/test/package.test.ts (1) |
 
 ## ST-6002 Выпуск пакетов проверен сборкой примера, ОС ведут себя одинаково
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-6002/1 | нет |  |
-| ST-6002/2 | нет |  |
+| ST-6002/1 | тест | contracts/test/api.test.ts (2), core/test/semver-manifest.test.ts (1), scripts/test/release.test.ts (1) |
+| ST-6002/2 | тест | core/test/api-snapshot.test.ts (2) |
 | ST-6002/3 | целевое поведение |  |
-| ST-6002/4 | нет |  |
+| ST-6002/4 | тест | scripts/test/workflows.test.ts (2) |
 
 ## ST-7001 Автор начинает с шаблона и собирает плагин с проверкой состава
 

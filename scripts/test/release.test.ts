@@ -99,7 +99,7 @@ describe('planRelease: тег и версия пакета', () => {
 });
 
 describe('planRelease: CHANGELOG, канал, закрытость', () => {
-  it('ST-5002/7: нет записи о версии в CHANGELOG - отказ; в репетиции предупреждение', () => {
+  it('ST-6002/1: ST-5002/7: нет записи о версии в CHANGELOG - отказ; в репетиции предупреждение', () => {
     const root = tree({ core: { version: '0.1.0', changelog: '# Журнал\n\n## Unreleased\n' } });
     assert.match(problemsOf(() => planRelease(root, 'v0.1.0'))[0] ?? '', /core\/CHANGELOG\.md нет заголовка «## 0\.1\.0 - ГГГГ-ММ-ДД»/);
     const rehearsal = planRelease(root, 'v0.1.0', { rehearsal: true });

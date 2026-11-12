@@ -240,7 +240,7 @@ function exportsOf(entry: PublicEntry): Exported {
 const sorted = (names: readonly string[]) => [...names].sort();
 
 describe('публичный API ядра: точки входа', () => {
-  it('точки входа package.json совпадают с перечнем, а цели - с исходниками входов', () => {
+  it('ST-6001/2: точки входа package.json совпадают с перечнем, а цели - с исходниками входов', () => {
     const declared = Object.keys(manifest.exports).filter((k) => k !== './package.json');
     assert.deepEqual(sorted(declared), sorted(Object.keys(ENTRIES)));
     for (const [name, entry] of Object.entries(ENTRIES)) {
@@ -257,7 +257,7 @@ describe('публичный API ядра: точки входа', () => {
     });
   }
 
-  it('входы написаны явными именованными экспортами: `export *` во входе запрещён', () => {
+  it('ST-6001/2: входы написаны явными именованными экспортами: `export *` во входе запрещён', () => {
     for (const [name, entry] of Object.entries(ENTRIES)) {
       const file = path.join(core, entry.source);
       const source = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
@@ -443,7 +443,7 @@ describe('публичный API ядра: потребители в репоз�
     });
   }
 
-  it('playground и адаптер Electron берут ядро только через точки входа пакета и только их именами', () => {
+  it('ST-6001/1: playground и адаптер Electron берут ядро только через точки входа пакета и только их именами', () => {
     const all = ['playground', 'electron'].flatMap((dir) => files(path.join(root, dir)));
     assert.ok(all.length > 70, `файлов playground и electron: ${all.length}`);
     const bad = all.flatMap((f) => (path.relative(root, f) in INTERNAL ? [] : boundaryViolations(f, fs.readFileSync(f, 'utf8'), path.relative(root, f))));

@@ -48,7 +48,7 @@ describe('потребитель вне репозитория', { timeout: 180_
     fs.rmSync(work, { recursive: true, force: true });
   });
 
-  it('архивы ставятся, ядро не принесло зависимостей, peer на контракты удовлетворён', () => {
+  it('ST-6001/1: архивы ставятся, ядро не принесло зависимостей, peer на контракты удовлетворён', () => {
     const lock = JSON.parse(fs.readFileSync(path.join(project, 'package-lock.json'), 'utf8')) as { packages: Record<string, { version?: string }> };
     const names = Object.keys(lock.packages).filter((k) => k !== '');
     assert.deepEqual(names.sort(), ['node_modules/@cyborg-harness/contracts', 'node_modules/@cyborg-harness/core']);
@@ -61,7 +61,7 @@ describe('потребитель вне репозитория', { timeout: 180_
     run('npm', ['ls', '--all', '--offline'], project);
   });
 
-  it('peer на контракты принимает предрелиз: 1.0.0-dev из P-01 (#102) ставится рядом с ядром без реестра', () => {
+  it('ST-6001/8: peer на контракты принимает предрелиз: 1.0.0-dev из P-01 (#102) ставится рядом с ядром без реестра', () => {
     const copy = path.join(work, 'contracts-prerelease');
     fs.cpSync(path.join(root, 'contracts'), copy, { recursive: true, filter: (src) => path.basename(src) !== 'node_modules' && path.basename(src) !== 'dist' });
     const file = path.join(copy, 'package.json');
@@ -73,7 +73,7 @@ describe('потребитель вне репозитория', { timeout: 180_
     run('npm', ['ls', '--all', '--offline'], other);
   });
 
-  it('import { load } из пакета собирается tsc: типы читаются из .d.ts', () => {
+  it('ST-6001/1: import { load } из пакета собирается tsc: типы читаются из .d.ts', () => {
     fs.writeFileSync(
       path.join(project, 'check.ts'),
       "import { load, forkHosts, PLUGIN_API_VERSION, type Kernel } from '@cyborg-harness/core';\nimport { runHost } from '@cyborg-harness/core/host';\nconst k: Promise<Kernel> = load({ apiVersion: PLUGIN_API_VERSION, enabled: [], manifests: [], spawnHost: forkHosts() });\nexport { k, runHost };\n",
@@ -85,7 +85,7 @@ describe('потребитель вне репозитория', { timeout: 180_
     run(process.execPath, [tsc, '-p', project], project);
   });
 
-  it('пример из README пакета запускается как написан', () => {
+  it('ST-6001/1: пример из README пакета запускается как написан', () => {
     const blocks = [...fs.readFileSync(path.join(core, 'README.md'), 'utf8').matchAll(/```ts\n([\s\S]*?)```/g)].map((m) => m[1] ?? '');
     const main = blocks.find((b) => b.includes('await load('));
     const plugin = blocks.find((b) => b.includes('export default plugin'));

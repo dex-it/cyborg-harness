@@ -63,7 +63,7 @@ describe('согласованность версий (K-21)', () => {
     }
   });
 
-  test('peer-зависимость на контракты у ядра, адаптера, тест-кита и шаблона принимает версию пакета контрактов', () => {
+  test('ST-6001/8: peer-зависимость на контракты у ядра, адаптера, тест-кита и шаблона принимает версию пакета контрактов', () => {
     for (const rel of ['core/package.json', 'electron/package.json', 'testing/package.json', 'templates/plugin/package.json']) {
       const peers = (json(rel).peerDependencies ?? json(rel).devDependencies) as Record<string, string> | undefined;
       const range = peers?.['@cyborg-harness/contracts'];

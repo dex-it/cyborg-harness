@@ -39,7 +39,7 @@ test('ST-2004/5: манифест: незнакомое поле верхнег�
   assert.ok(parseManifest({ $schema: './manifest.schema.json', ...base }).ok);
 });
 
-test('ST-5001/2: манифест под другой API: при ошибках разбора одна причина - версия API', () => {
+test('ST-6002/1: ST-5001/2: манифест под другой API: при ошибках разбора одна причина - версия API', () => {
   const newer = { ...base, engines: { cyborg: '^1.3' }, layout: { kind: 'side' } };
   assert.deepEqual(parseManifest(newer, '1.2.0'), { ok: false, id: 'pin-lock', errors: ['engines.cyborg: нужен API Cyborg ^1.3, есть 1.2.0'] });
   assert.deepEqual(parseManifest(newer, '1.3.0'), { ok: false, id: 'pin-lock', errors: ['layout: незнакомое поле манифеста'] });

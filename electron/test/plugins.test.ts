@@ -30,7 +30,7 @@ function plugin(dir: string, id: string, manifest: Record<string, unknown>, code
   if (code) fs.writeFileSync(path.join(dir, id, file), code);
 }
 
-test('поиск: встроенные раньше пользовательских, повтор id - второму не достаётся точка входа, битый JSON - в problems', () => {
+test('ST-6001/3: поиск: встроенные раньше пользовательских, повтор id - второму не достаётся точка входа, битый JSON - в problems', () => {
   const builtin = tmp();
   const user = tmp();
   plugin(builtin, 'files', {}, 'export default {}');
@@ -120,7 +120,7 @@ test('ST-1001/5: поиск: повтор id внутри одного ката�
   assert.deepEqual(found.problems, [`повтор id z в ${path.join(user, 'b')}: действует ${path.join(user, 'a')}`]);
 });
 
-test('ST-1001/5: старт с флагом: встроенный плагин активен при одноимённом пользовательском, второй пропущен с записью в problems', async (t) => {
+test('ST-6001/4: ST-1001/5: старт с флагом: встроенный плагин активен при одноимённом пользовательском, второй пропущен с записью в problems', async (t) => {
   const userData = tmp();
   const builtinDir = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['pin-lock', 'echo'] } }));
@@ -149,7 +149,7 @@ test('окно: повтор id пользовательского плагин�
   assert.deepEqual(snapshot.plugins.map((r) => [r.id, r.origin, r.state]), [['pin-lock', 'bundled', 'active']]);
 });
 
-test('ST-1003/2: старт: плагин из каталога пользователя - сторонний и не попадает в общую группу хоста', async () => {
+test('ST-6001/4: ST-1003/2: старт: плагин из каталога пользователя - сторонний и не попадает в общую группу хоста', async () => {
   const userData = tmp();
   const builtinDir = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['files', 'notes'], hosts: { ui: ['files', 'notes'] } } }));
@@ -908,7 +908,7 @@ async function delivery(ids: readonly string[]): Promise<string> {
 
 const inline = () => inlineHosts(async () => ({ activate() {} }));
 
-test('точка входа поставки: index.mjs; index.ts и index.js встроенного не угадываются, причина называет найденное; у каталога пользователя угадывание прежнее', () => {
+test('ST-6001/3: точка входа поставки: index.mjs; index.ts и index.js встроенного не угадываются, причина называет найденное; у каталога пользователя угадывание прежнее', () => {
   const builtin = tmp();
   const user = tmp();
   plugin(builtin, 'built', {}, 'export default {}');
@@ -957,7 +957,7 @@ test('режим стенда: точка входа встроенного уг
   assert.deepEqual(problems, []);
 });
 
-test('ST-1001/11: поставка = N плагинов: список каталога равен списку включённых, все активны в хосте builtin, ни одного пропущенного и лишнего; расхождений сумм нет', async (t) => {
+test('ST-6001/3: ST-1001/11: поставка = N плагинов: список каталога равен списку включённых, все активны в хосте builtin, ни одного пропущенного и лишнего; расхождений сумм нет', async (t) => {
   const ids = ['agent', 'files', 'notes', 'sessions', 'tasks', 'terminal'];
   const builtinDir = await delivery(ids);
   const userData = tmp();
@@ -973,7 +973,7 @@ test('ST-1001/11: поставка = N плагинов: список катал
   assert.deepEqual(problems, []);
 });
 
-test('подмена: плагин каталога пользователя с id встроенного отвергнут, встроенный активен и его код тот же, код подмены не выполнен', async (t) => {
+test('ST-6001/4: подмена: плагин каталога пользователя с id встроенного отвергнут, встроенный активен и его код тот же, код подмены не выполнен', async (t) => {
   const ids = ['files', 'notes'];
   const builtinDir = await delivery(ids);
   const userData = tmp();
@@ -1019,7 +1019,7 @@ test('ST-1001/6: контрольные суммы: изменённый, про
   assert.ok(lines.some((l) => l.startsWith('[plugins] контрольная сумма поставки: files/index.mjs')), 'и в лог главного процесса');
 });
 
-test('контрольные суммы: нет delivery.json у непустой поставки или он битый - жалоба, старт идёт; пустой и отсутствующий каталог поставки молчат', async () => {
+test('ST-6001/5: контрольные суммы: нет delivery.json у непустой поставки или он битый - жалоба, старт идёт; пустой и отсутствующий каталог поставки молчат', async () => {
   const builtinDir = tmp();
   plugin(builtinDir, 'files', {}, 'export default {}');
   const userData = tmp();
