@@ -46,7 +46,7 @@ test('ST-2003/2: вид: origin называет группу, адрес - пл
   assert.equal(viewOfUrl('не адрес'), undefined);
 });
 
-test('ST-2003/2: вид: корень плагина - оболочка с модулем из манифеста, .cyborg/ - файлы ядра, прочее - только из каталога своего плагина', () => {
+test('вид: корень плагина - оболочка с модулем из манифеста, .cyborg/ - файлы ядра, прочее - только из каталога своего плагина', () => {
   const shell = resolveViewRequest('cyborg-plugin://panels/alice/', uiOf);
   assert.ok(shell?.kind === 'shell');
   assert.match(shell.html, /<script src="\/alice\/\.cyborg\/shell\.js" data-plugin="alice" data-view="main" data-entry="\.\/ui\/ui\.js"><\/script>/);
@@ -139,7 +139,7 @@ test('ST-2003/2, ST-3005/4: CSP вида: начинается с default-src \'
   for (const bad of ['*', 'http:', 'https:', 'blob:', "'unsafe-eval'", "'unsafe-inline'", 'ws:']) assert.ok(!csp.includes(bad), `в строгой CSP есть ${bad}`);
 });
 
-test('ST-3005/4, ST-3005/5: CSP вида зависит от флага: \'unsafe-inline\' только в style-src и только при inlineStyles, остальное то же', () => {
+test('ST-3005/5: CSP вида зависит от флага: \'unsafe-inline\' только в style-src и только при inlineStyles, остальное то же', () => {
   const off = directives(viewCsp(false));
   const on = directives(viewCsp(true));
   assert.deepEqual(off['style-src'], ["'self'"]);
@@ -158,7 +158,7 @@ test('ST-3005/4: CSP вида: base-uri и form-action закрыты в обо�
   }
 });
 
-test('ST-3005/4: CSP вида: фреймы закрыты (frame-src берётся из default-src \'none\'), сосед по группе в <iframe> не встраивается', () => {
+test('ST-2001/10: CSP вида: фреймы закрыты (frame-src берётся из default-src \'none\'), сосед по группе в <iframe> не встраивается', () => {
   const d = directives(viewCsp(true));
   for (const name of ['frame-src', 'child-src', 'object-src', 'worker-src']) assert.equal(d[name], undefined, `${name} не задана: берётся из default-src или script-src`);
   assert.deepEqual(d['default-src'], ["'none'"]);

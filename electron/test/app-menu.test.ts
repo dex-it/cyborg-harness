@@ -16,7 +16,7 @@ const sub = (template: ReturnType<typeof appMenuTemplate>, label: string) => {
   return Array.isArray(found?.submenu) ? found.submenu : [];
 };
 
-test('меню ОС: пункты плагинов встают в меню приложения после его пунктов, через разделитель, по порядку снимка', () => {
+test('ST-2002/6: меню ОС: пункты плагинов встают в меню приложения после его пунктов, через разделитель, по порядку снимка', () => {
   const template = appMenuTemplate(base, [entry({ pluginId: 'a', id: 'one', menu: 'workspace', title: 'Один' }), entry({ pluginId: 'b', id: 'two', menu: 'workspace', title: 'Два' }), entry({ pluginId: 'a', id: 'view', menu: 'view', title: 'Вид плагина' })], () => undefined);
   assert.deepEqual(labels(sub(template, 'Воркспейс')), ['?', 'separator', 'Один', 'Два']);
   assert.deepEqual(labels(sub(template, 'Вид')), ['Вид плагина'], 'у меню без своих пунктов разделителя нет');

@@ -32,8 +32,8 @@ async function start(layers: Record<string, Record<string, unknown>> = {}): Prom
   });
 }
 
-describe('ST-7001/1: шаблон плагина templates/plugin', () => {
-  it('ST-7001/1: checkPlugin: замечаний нет ни как есть, ни как под сборку; прав не просит', async () => {
+describe('шаблон плагина templates/plugin', () => {
+  it('checkPlugin: замечаний нет ни как есть, ни как под сборку; прав не просит', async () => {
     for (const bundled of [false, true]) {
       const report = await checkPlugin(home, { bundled, ignore: ['dist'] });
       assert.deepEqual(report.problems, [], `bundled: ${String(bundled)}`);
@@ -44,7 +44,7 @@ describe('ST-7001/1: шаблон плагина templates/plugin', () => {
     }
   });
 
-  it('ST-1001/3: на forkHosts: оба плагина активны в разных процессах, команда отвечает, вид объявлен, потребитель зовёт контракт', async () => {
+  it('на forkHosts: оба плагина активны в разных процессах, команда отвечает, вид объявлен, потребитель зовёт контракт', async () => {
     const k = await start();
     try {
       assert.deepEqual(pluginStatuses(k.journal).map((s) => [s.id, s.state]).sort(), [['consumer', 'active'], ['example', 'active']]);

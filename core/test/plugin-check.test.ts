@@ -56,7 +56,7 @@ describe('checkPlugin: плагины репозитория', () => {
     });
   }
 
-  it('ST-3001/8, ST-3007/7: права плагина названы словами, как в окне «Плагины Cyborg»', async () => {
+  it('ST-3007/7: права плагина названы словами, как в окне «Плагины Cyborg»', async () => {
     const report = await checkPlugin(path.join(repo, 'playground/plugins/pin-lock'), { declarations: [path.join(repo, 'playground/plugins/contracts.ts')] });
     assert.deepEqual(strings(report), []);
     assert.ok(report.permissions.includes('может закрыть окно Cyborg'), report.permissions.join('; '));
@@ -72,7 +72,7 @@ describe('checkPlugin: плагин вне репозитория', () => {
     assert.deepEqual(report.permissions, ['показывает системные уведомления']);
   });
 
-  it('ST-7002/2, ST-7002/4: ST-3001/9: запрещённые импорты дают файл:строка и причину', async () => {
+  it('ST-7002/1, ST-7002/2, ST-7002/4: запрещённые импорты дают файл:строка и причину', async () => {
     const dir = plugin({
       'index.ts': ["import fs from 'node:fs';", "import { app } from 'electron';", "import other from '../other/index.ts';", "import x from 'lodash';", 'export default await import(name);'].join('\n'),
       'lib/util.ts': "const m = require('node:child_process');\n",
@@ -89,7 +89,7 @@ describe('checkPlugin: плагин вне репозитория', () => {
     ]);
   });
 
-  it('ST-7002/2: вид: npm-пакеты можно, node:* и electron нельзя', async () => {
+  it('вид: npm-пакеты можно, node:* и electron нельзя', async () => {
     const dir = plugin(
       { ...OK, 'ui/ui.ts': ["import { Terminal } from '@xterm/xterm';", "import fs from 'node:fs';", "import { ipcRenderer } from 'electron';"].join('\n') },
       { ui: { views: { main: './ui/ui.js' } } },
@@ -97,7 +97,7 @@ describe('checkPlugin: плагин вне репозитория', () => {
     assert.deepEqual(strings(await checkPlugin(dir)), ["ui/ui.ts:2: 'node:fs': только @cyborg-harness/contracts и свои модули (вид: без node:* и electron)", "ui/ui.ts:3: 'electron': только @cyborg-harness/contracts и свои модули (вид: без node:* и electron)"]);
   });
 
-  it('ST-7002/2: пакет объявлений по имени: только import type', async () => {
+  it('пакет объявлений по имени: только import type', async () => {
     const dir = plugin({ 'index.ts': ["import type { Clock } from '@acme/contracts';", "import { value } from '@acme/contracts';"].join('\n') });
     assert.deepEqual(strings(await checkPlugin(dir)), ["index.ts:1: '@acme/contracts': только @cyborg-harness/contracts и свои модули", "index.ts:2: '@acme/contracts': только @cyborg-harness/contracts и свои модули"]);
     assert.deepEqual(strings(await checkPlugin(dir, { declarationPackages: ['@acme/contracts'] })), ["index.ts:2: '@acme/contracts': пакет объявлений - только import type"]);
@@ -318,7 +318,7 @@ describe('checkPlugin: bundled (P-06) - главную часть соберут
     assert.deepEqual(strings(await checkPlugin(plugin(WITH_DEP), { bundled: true })), []);
   });
 
-  it('ST-7002/4: с bundled node:*, electron, модуль вне каталога, тестовый модуль и вычисляемый путь - по-прежнему нарушения', async () => {
+  it('с bundled node:*, electron, модуль вне каталога, тестовый модуль и вычисляемый путь - по-прежнему нарушения', async () => {
     const dir = plugin({
       'index.ts': [
         "import fs from 'node:fs';",
@@ -364,7 +364,7 @@ describe('checkPlugin: ignore (P-06) - каталог результата сб�
 });
 
 // ST-7002 критерий 3 (FR-CH-7005): ошибки манифеста идут строками «файл:строка: причина», строка - в исходном JSON.
-describe('ST-7002/3: ошибки манифеста с номером строки', () => {
+describe('ошибки манифеста с номером строки', () => {
   /** Каталог плагина с манифестом, записанным как есть (с переводами строк, какие в тексте). */
   const withManifest = (text: string, files: Record<string, string> = OK): string => {
     const dir = plugin(files, null);

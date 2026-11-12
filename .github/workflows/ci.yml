@@ -162,7 +162,7 @@ jobs:
       - run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-docs-links.ts docs README.md
       # Покрытие критериями приёмки (#186): каждая норма дала критерий, каждая ветка сценария покрыта или названа открытой, таблица docs/03-requirements/coverage.md собрана.
       - run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-docs-trace.ts
-      # Критерий приёмки -> тест (#230): у каждого критерия историй тест с ключом ST-NNNN/k в имени или исключение в docs/05-verification/acceptance.md, сводка acceptance-coverage.md собрана.
+      # Приёмка: у каждого критерия истории тест с ключом ST-NNNN/k в имени или исключение в docs/05-verification/acceptance.md.
       - run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-acceptance.ts
 
   # Уязвимости в продакшен-зависимостях (P-10). Дерево берётся из lock-файла, установка не нужна.

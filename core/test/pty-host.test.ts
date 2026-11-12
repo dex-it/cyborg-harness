@@ -188,7 +188,7 @@ test('pty-хост упал, пока pty ждал владельца: list по
   assert.deepEqual(await s.pty().list(), []);
 });
 
-test('вид: pty-хост упал - главный процесс получает closed с потерянным выходом; вид закрыл порт - closed без выхода', async () => {
+test('ST-1008/5: вид: pty-хост упал - главный процесс получает closed с потерянным выходом; вид закрыл порт - closed без выхода', async () => {
   await using s = await setup();
   const h = await s.pty().spawn({ program: '/bin/bash', persist: true });
   const lost = fakeView();

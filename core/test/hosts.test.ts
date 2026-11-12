@@ -41,7 +41,7 @@ const state = (k: Kernel) => k.run('consumer.state') as Promise<State>;
 const downs = (k: Kernel) =>
   k.journal.filter((e): e is Extract<JournalEntry, { kind: 'host-down' }> => e.kind === 'host-down').map((d) => [d.hostId, d.reason, d.culprits, d.affects]);
 
-test('вызов между процессами: данные, исключение и функция в результате', async () => {
+test('ST-1003/2: вызов между процессами: данные, исключение и функция в результате', async () => {
   const k = await start(3, forkHosts(), QUIET_MS);
   try {
     assert.equal(await k.run('consumer.call', 'read', 'a.txt'), 'data:a.txt');
@@ -69,7 +69,7 @@ test('ST-1003/3: зависание: сторож убивает хост, ви�
   }
 });
 
-test('ST-1003/6: падение процесса идёт тем же путём, что и зависание', async () => {
+test('падение процесса идёт тем же путём, что и зависание', async () => {
   const k = await start(3, forkHosts(), QUIET_MS);
   try {
     await assert.rejects(k.run('consumer.call', 'crash'), { code: 'HostGone' });
@@ -183,7 +183,7 @@ test('сторож: зависание без вызовов в полёте - �
   }
 });
 
-test('ST-1003/6: сторож: процесс упал в таймере плагина - страйк ему', async () => {
+test('сторож: процесс упал в таймере плагина - страйк ему', async () => {
   const k = await startShared(3, forkHosts(), QUIET_MS);
   try {
     await k.run('busy.exit');
@@ -194,7 +194,7 @@ test('ST-1003/6: сторож: процесс упал в таймере пла�
   }
 });
 
-test('ST-1003/6: сторож: процесс хоста убит снаружи - сбой не вменяется плагину, чей код шёл последним', async () => {
+test('сторож: процесс хоста убит снаружи - сбой не вменяется плагину, чей код шёл последним', async () => {
   const k = await startShared(3, forkHosts(), QUIET_MS);
   try {
     process.kill((await k.run('calm.pid')) as number, 'SIGKILL');

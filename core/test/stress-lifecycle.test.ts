@@ -84,7 +84,7 @@ declare module '@cyborg-harness/contracts' {
   }
 }
 
-test('ST-1005/1: stress-lifecycle: 300 циклов disable/enable поставщика с потребителями и подписками - ничего не копится, хосты не текут', async () => {
+test('stress-lifecycle: 300 циклов disable/enable поставщика с потребителями и подписками - ничего не копится, хосты не текут', async () => {
   let live = 0;
   const subs: Svc[] = [];
   let seen = 0;
@@ -198,7 +198,7 @@ test('stress-lifecycle: поставщики consumes приходят и ухо
   await k.unload();
 });
 
-test('ST-1005/3: stress-lifecycle: цепочка из 30 плагинов по requires - disable корня выгружает всех в обратном порядке, enable возвращает всех', async () => {
+test('stress-lifecycle: цепочка из 30 плагинов по requires - disable корня выгружает всех в обратном порядке, enable возвращает всех', async () => {
   const ids = Array.from({ length: 30 }, (_, i) => `n${String(i).padStart(2, '0')}`);
   const table: Record<string, PluginModule> = {};
   const manifests = ids.map((id, i) => {
@@ -222,7 +222,7 @@ test('ST-1005/3: stress-lifecycle: цепочка из 30 плагинов по 
   assert.equal(r.killed(), r.spawned.length);
 });
 
-test('ST-1003/3, ST-1003/4, ST-1004/3: stress-lifecycle: зависание хоста - сторож называет виновника, соседний хост жив, после третьего подряд плагин выключен, enable сбрасывает счёт', async () => {
+test('ST-1003/4, ST-1004/3: stress-lifecycle: зависание хоста - сторож называет виновника, соседний хост жив, после третьего подряд плагин выключен, enable сбрасывает счёт', async () => {
   const table: Record<string, PluginModule> = {
     bad: { activate: (ctx) => { ctx.commands.register('bad.run', () => new Promise(() => undefined)); ctx.commands.register('bad.ok', () => 'ran'); } },
     good: { activate: (ctx) => void ctx.commands.register('good.run', () => 'fine') },

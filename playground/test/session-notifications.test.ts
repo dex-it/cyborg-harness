@@ -14,7 +14,7 @@ const types = (heard: readonly Heard[]) => heard.map((h) => h.event.change.type)
 /** Дождаться, пока вся цепочка событий дошла до независимого подписчика: после него сообщения уже ушли и в session-notifications (порядок доставки один). */
 const heardCount = (s: Rig, n: number) => waitFor(`probe услышал ${String(n)} событий`, () => s.heard.length >= n);
 
-test('ST-2006/6: sessions отдаёт cyborg.sessions: хуки claude становятся событиями cwd, activity, waiting и exit подписчика в другом плагине', async () => {
+test('sessions отдаёт cyborg.sessions: хуки claude становятся событиями cwd, activity, waiting и exit подписчика в другом плагине', async () => {
   await using s = await chainRig({ notifier: false });
   const session = await s.newSession();
   const base = s.heard.length;
@@ -113,7 +113,7 @@ test('клик по уведомлению поднимает окно, откр
   assert.deepEqual(s.revealed, [tab.id], 'окно получило просьбу активировать вкладку кликнутой сессии, а не соседней');
 });
 
-test('ST-2001/10: cyborg.sessions.reveal: вкладка вышедшей сессии активируется, закрытая человеком и незнакомая сессия - отказ, окно не тронуто', async () => {
+test('cyborg.sessions.reveal: вкладка вышедшей сессии активируется, закрытая человеком и незнакомая сессия - отказ, окно не тронуто', async () => {
   await using s = await chainRig({ notifier: false });
   const session = await s.newSession();
   const reveal = (id: string) => s.k.callAs('probe', 'cyborg.sessions', 1, 'reveal', [id]);

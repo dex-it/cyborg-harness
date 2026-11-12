@@ -88,7 +88,7 @@ test('connectView: команда и контракт идут мостом, о�
   assert.deepEqual(calls, [['run', 'own.go', 1, 2], ['run', 'other.go'], ['call', 'test.files', 1, 'read', 'a.md'], ['drag', 'notes.md']]);
 });
 
-test('ST-1003/8: mountModule: модуль без mount отклонён с причиной, dispose результата зовётся один раз', async () => {
+test('ST-1003/8, ST-2003/2: mountModule: модуль без mount отклонён с причиной, dispose результата зовётся один раз', async () => {
   const ctx = await connectView(fakeBridge({}).bridge, { pluginId: 'own', view: 'main', applyTheme: () => undefined, report: () => undefined });
   assert.throws(() => mountModule({ default: () => undefined }, {}, ctx), /own: модуль вида main не экспортирует mount/);
   let disposed = 0;

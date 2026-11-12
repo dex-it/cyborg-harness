@@ -38,7 +38,7 @@ test('ST-1007/1: второй запуск того же воркспейса: �
   first.close();
 });
 
-test('разные воркспейсы - независимые владельцы', async () => {
+test('ST-1007/1: разные воркспейсы - независимые владельцы', async () => {
   await using box = await sandbox();
   const a = await claimInstance('aaaaaaaaaaaaaaaa', {}, () => undefined, { dir: box.dir });
   const b = await claimInstance('bbbbbbbbbbbbbbbb', {}, () => undefined, { dir: box.dir });
@@ -102,7 +102,7 @@ const until = async (what: string, probe: () => boolean, ms = 10_000) => {
   }
 };
 
-test('ST-1007/1: шесть процессов стартуют разом: владелец один, остальные его просили', async (t) => {
+test('шесть процессов стартуют разом: владелец один, остальные его просили', async (t) => {
   await using box = await sandbox();
   const procs = Array.from({ length: 6 }, (_, i) => start(box.dir, `p${String(i)}`));
   // Упавшая проверка не должна вешать прогон: лишний «владелец» ждёт stdin и держит тест живым.
@@ -120,7 +120,7 @@ test('ST-1007/1: шесть процессов стартуют разом: вл
   await Promise.all(procs.map((p) => p.exited));
 });
 
-test('ST-1007/1: сокет остался от убитого процесса: из шести стартующих владелец один, чужой живой сокет никто не удаляет', { skip: !posix }, async (t) => {
+test('сокет остался от убитого процесса: из шести стартующих владелец один, чужой живой сокет никто не удаляет', { skip: !posix }, async (t) => {
   await using box = await sandbox();
   const dead = start(box.dir, 'dead');
   await until('первый владелец', () => dead.lines.includes('owner'));

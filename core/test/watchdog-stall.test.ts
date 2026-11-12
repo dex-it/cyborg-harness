@@ -76,7 +76,7 @@ test('сторож: хост упал, пока цикл ядра стоял д�
   assert.deepEqual(downs(k).map((d) => d.reason), ['crash']);
 });
 
-test('ST-1003/3: сторож: хост, который молчит по-настоящему, по-прежнему записывается как hang', async () => {
+test('сторож: хост, который молчит по-настоящему, по-прежнему записывается как hang', async () => {
   const base = inlineHosts(async () => ({ activate: () => undefined }));
   const spawnHost: SpawnHost = (id) => {
     const real = base(id);

@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { fakePty } from '../../testing/src/fake-pty.ts';
 import { memorySecrets } from '../../testing/src/memory.ts';
 import { SectionStore, type LayerStore } from '../src/config.ts';
@@ -140,7 +142,7 @@ test('ST-2002/1: run: ядро сверяет аргументы со схемо
   await kernel.unload();
 });
 
-test('run: вызывающего называет канал - чужой плагин в caller и запрос без него отклоняются, команда без callers недоступна главной части', async () => {
+test('ST-3001/9: run: вызывающего называет канал - чужой плагин в caller и запрос без него отклоняются, команда без callers недоступна главной части', async () => {
   const seen: unknown[][] = [];
   const forger = forging({
     victim: { activate: (ctx) => void ctx.commands.register('victim.pin', (...args) => void seen.push(args)) },
@@ -217,7 +219,7 @@ test('ST-2001/4: invoke: метод контракта зовёт только �
   await kernel.unload();
 });
 
-test('ST-2001/2: provide и section.write: хост не отдаёт необъявленное и не пишет чужие разделы', async () => {
+test('ST-2001/2, ST-5004/3: provide и section.write: хост не отдаёт необъявленное и не пишет чужие разделы', async () => {
   const forger = forging({
     victim: { activate: () => undefined, config: { defaults: { theme: 'light' } } },
     mallory: { activate: () => undefined },
@@ -431,7 +433,7 @@ test('keys.register и keys.unregister: хост не занимает соче�
   await kernel.unload();
 });
 
-test('log и output: хост пишет строки только за свои плагины, неизвестный уровень отклоняется, строка без плагина идёт с меткой хоста', async () => {
+test('ST-4002/2: log и output: хост пишет строки только за свои плагины, неизвестный уровень отклоняется, строка без плагина идёт с меткой хоста', async () => {
   const forger = forging({ victim: { activate: () => undefined }, mallory: { activate: () => undefined } });
   const logs: string[] = [];
   const kernel = await load({
@@ -571,6 +573,85 @@ test('output: сводная строка хоста без плагина, не
   assert.deepEqual(logs, ['хост h [info]: строка 0', 'хост h [warn]: строк сверх предела за интервал: 3, из них error: 1; последняя error: строка 3']);
 });
 
+test('os: плагин без прав - у ctx.os нет членов под правом, а каждый запрос шлюзу в обход ctx.os (fs вне области, process, pty, net, serve, env, clipboard, secrets.ref, shell, notify, ui.lock, security.roots) - PermissionDenied и запись denied', async () => {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-trust-os-')));
+  const outside = path.join(root, 'outside');
+  const file = path.join(outside, 'secret.txt');
+  await mkdir(outside);
+  await writeFile(file, 'чужое');
+  let members: string[] = [];
+  const effects: string[] = [];
+  const pty = fakePty();
+  const forger = forging({
+    mallory: {
+      activate: (ctx) => {
+        members = Object.keys(ctx.os).sort();
+      },
+    },
+  });
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['mallory'],
+    manifests: [manifest('mallory')],
+    spawnHost: forger.spawn,
+    hosts: { m: ['mallory'] },
+    os: {
+      dataDir: path.join(root, 'data'),
+      tempDir: path.join(root, 'temp'),
+      pty,
+      env: { HOME: root, TOKEN: 't' },
+      secrets: memorySecrets(),
+      notify: (title) => void effects.push(`notify ${title}`),
+      fetch: (async () => {
+        effects.push('fetch');
+        return new Response('ok');
+      }) as unknown as typeof fetch,
+      clipboard: { readText: () => (effects.push('clipboard read'), 'буфер'), writeText: () => void effects.push('clipboard write') },
+      shell: { openPath: async (p) => void effects.push(`openPath ${p}`), openExternal: async (u) => void effects.push(`openExternal ${u}`) },
+    },
+  });
+  assert.deepEqual(members, ['dialog', 'fs', 'paths', 'secrets'], 'без права члена в ctx.os нет');
+  const calls: [string, ...unknown[]][] = [
+    ['fs.readText', file],
+    ['fs.readSlice', file, 0, 16],
+    ['fs.list', outside],
+    ['fs.stat', file],
+    ['fs.realpath', file],
+    ['fs.watch', outside, 'w1'],
+    ['fs.writeText', path.join(outside, 'new.txt'), 'x'],
+    ['fs.mkdir', path.join(outside, 'dir')],
+    ['fs.remove', file],
+    ['process.run', '/bin/sh', ['-c', 'id']],
+    ['pty.spawn', { program: '/bin/sh', args: [] }],
+    ['net.fetch', 'https://example.com/'],
+    ['serve.http', 's1'],
+    ['env.get', 'TOKEN'],
+    ['clipboard.readText'],
+    ['clipboard.writeText', 'x'],
+    ['secrets.resolve', 'vault://kv/jira'],
+    ['shell.openPath', file],
+    ['shell.openExternal', 'https://example.com/'],
+    ['notify.show', 'фишинг'],
+    ['notify.close', 'n1'],
+    ['ui.lock', {}],
+    ['ui.unlock'],
+    ['security.setRoots', [outside]],
+  ];
+  const codes: string[] = [];
+  for (const [method, ...args] of calls) codes.push(`${method} ${String(code(await forger.request('m', 'os', { pluginId: 'mallory', method, args })))}`);
+  assert.deepEqual(codes, calls.map(([method]) => `${method} PermissionDenied`));
+  assert.deepEqual(
+    kernel.journal.flatMap((e) => (e.kind === 'denied' ? [`${e.pluginId}:${e.method}`] : [])),
+    calls.map(([method]) => `mallory:${method}`),
+    'каждый отказ - запись denied',
+  );
+  assert.deepEqual(effects, [], 'до среды приложения не дошёл ни один вызов');
+  assert.deepEqual(pty.procs, []);
+  assert.equal(await readFile(file, 'utf8'), 'чужое');
+  await kernel.unload();
+  await rm(root, { recursive: true, force: true });
+});
+
 test('os: notify.show и notify.close плагина без права notify отклоняет шлюз ядра (PermissionDenied, запись denied), а не только отсутствие ctx.os.notify (PL-02)', async () => {
   const shown: string[] = [];
   const forger = forging({
@@ -601,57 +682,5 @@ test('os: notify.show и notify.close плагина без права notify о
     ['mallory:notify.show', 'mallory:notify.close'],
     'каждый отказ - запись в журнале плагина',
   );
-  await kernel.unload();
-});
-
-// Члены, которым нужно право; каждый зовётся в обход ctx.os (прямой запрос хоста) плагином с пустыми permissions. Свои каталоги, свои секреты и dialog права не просят.
-// Не вошли семь членов, которые права не проверяют и отвечают без PermissionDenied: pty.share, pty.list, pty.attach, pty.write, pty.resize, pty.kill (NotFound или пустой список,
-// чужого pty у плагина нет) и serve.close (ok на чужой или неоткрытый сервер). Это расхождение с критерием ST-3001/1 записано в docs/05-verification/acceptance.md как дефект.
-const NEEDS_RIGHT: readonly (readonly [string, ...unknown[]])[] = [
-  ['fs.readText', '/etc/hosts'],
-  ['fs.readSlice', '/etc/hosts', 0, 16],
-  ['fs.list', '/etc'],
-  ['fs.stat', '/etc/hosts'],
-  ['fs.realpath', '/etc/hosts'],
-  ['fs.watch', '/etc', 'w1', { recursive: false }],
-  ['fs.writeText', '/etc/cyborg-hacked', 'x'],
-  ['fs.mkdir', '/etc/cyborg-hacked'],
-  ['fs.remove', '/etc/hosts'],
-  ['process.run', 'git', ['status'], {}],
-  ['pty.spawn', { program: '/bin/sh', args: [], cols: 80, rows: 24 }],
-  ['net.fetch', 'https://example.com/'],
-  ['serve.http', {}],
-  ['env.get', 'HOME'],
-  ['clipboard.readText'],
-  ['clipboard.writeText', 'x'],
-  ['shell.openPath', '/etc/hosts'],
-  ['shell.openExternal', 'https://example.com/'],
-  ['security.setRoots', ['/etc']],
-  ['notify.show', 'фишинг', 'нажми'],
-  ['notify.close', 'n1'],
-];
-
-test('прямой запрос хоста: плагин с пустыми permissions зовёт члены ctx.os с правом - PermissionDenied и запись denied на каждый, исполнения нет', async () => {
-  const forger = forging({ mallory: { activate: () => undefined } });
-  const kernel = await load({
-    apiVersion: PLUGIN_API_VERSION,
-    enabled: ['mallory'],
-    manifests: [manifest('mallory')],
-    spawnHost: forger.spawn,
-    hosts: { m: ['mallory'] },
-    os: { dataDir: tmpdir(), tempDir: tmpdir(), pty: fakePty() },
-  });
-  const outcomes: string[] = [];
-  for (const [method, ...args] of NEEDS_RIGHT) {
-    const reply = await forger.request('m', 'os', { pluginId: 'mallory', method, args });
-    outcomes.push(`${method}:${code(reply) ?? 'нет кода'}`);
-  }
-  assert.deepEqual(
-    outcomes,
-    NEEDS_RIGHT.map(([method]) => `${method}:PermissionDenied`),
-    'член вернул успех или иной код: проверка права обойдена прямым запросом',
-  );
-  const denied = kernel.journal.flatMap((e) => (e.kind === 'denied' ? [e.method] : []));
-  assert.deepEqual(denied, NEEDS_RIGHT.map(([method]) => method), 'на каждый отказ запись denied в журнале плагина');
   await kernel.unload();
 });

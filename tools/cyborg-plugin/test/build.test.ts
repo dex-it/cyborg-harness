@@ -14,7 +14,7 @@ const problems = (r: { problems: readonly Parameters<typeof formatProblem>[0][] 
 const read = (...p: string[]) => fs.readFileSync(path.join(...p), 'utf8');
 
 describe('buildPlugin: bundle (P-06 п. 2)', () => {
-  it('ST-7001/2: плагин с npm-зависимостью: manifest.json + index.mjs + ui/*.js + схема, зависимость внутри', async () => {
+  it('плагин с npm-зависимостью: manifest.json + index.mjs + ui/*.js + схема, зависимость внутри', async () => {
     const dir = plugin();
     const out = fresh('out');
     const report = await buildPlugin(dir, { out });
@@ -51,7 +51,7 @@ describe('buildPlugin: bundle (P-06 п. 2)', () => {
     }
   });
 
-  it('ST-7001/3: исходник главной части с npm-пакетом без сборки в хосте не загрузился бы: проверка того, что тест выше ловит отсутствие бандла', async () => {
+  it('исходник главной части с npm-пакетом без сборки в хосте не загрузился бы: проверка того, что тест выше ловит отсутствие бандла', async () => {
     const dir = plugin({ 'index.mjs': "import { shout } from 'tiny-dep';\nexport default { activate(ctx) { ctx.commands.register('acme.dep.shout', shout); } };\n" });
     const home = fresh('home');
     fs.cpSync(dir, home, { recursive: true, filter: (from) => !from.includes('node_modules') });
@@ -69,7 +69,7 @@ describe('buildPlugin: bundle (P-06 п. 2)', () => {
     }
   });
 
-  it('ST-7001/2: вид: ui/*.ts собирается в ESM ui/*.js, прочие файлы ui/ едут как есть, вложенные исходники в результат не попадают', async () => {
+  it('вид: ui/*.ts собирается в ESM ui/*.js, прочие файлы ui/ едут как есть, вложенные исходники в результат не попадают', async () => {
     const dir = plugin({ 'ui/lib/extra.ts': "export const extra = 'x';\n", 'ui/ui.ts': "import { extra } from './lib/extra.ts';\nexport function mount(): string { return extra; }\n", 'ui/img/logo.svg': '<svg/>' });
     const out = fresh('out');
     const report = await buildPlugin(dir, { out });
@@ -128,7 +128,7 @@ describe('buildPlugin: bundle (P-06 п. 2)', () => {
 
 describe('buildPlugin: запрещённое и отказ до записи (P-06 п. 2, 3, 5)', () => {
   for (const spec of ['node:fs', 'fs', 'electron']) {
-    it(`ST-7001/3: ${spec} в исходнике главной части: отказ с файлом и строкой, результат не создан`, async () => {
+    it(`${spec} в исходнике главной части: отказ с файлом и строкой, результат не создан`, async () => {
       const dir = plugin({ 'index.ts': `import x from '${spec}';\nexport default { x };\n` });
       const out = fresh('out');
       const report = await buildPlugin(dir, { out });
@@ -138,7 +138,7 @@ describe('buildPlugin: запрещённое и отказ до записи (P
     });
   }
 
-  it('ST-7001/3: node:fs внутри зависимости: отказ называет файл зависимости, результат не создан', async () => {
+  it('node:fs внутри зависимости: отказ называет файл зависимости, результат не создан', async () => {
     const dir = plugin(
       { 'index.ts': "import { read } from 'leaky';\nexport default { read };\n", 'ui/ui.ts': 'export const x = 1;\n' },
       {},
@@ -151,7 +151,7 @@ describe('buildPlugin: запрещённое и отказ до записи (P
     assert.ok(!fs.existsSync(out));
   });
 
-  it('ST-7001/3: electron внутри зависимости: то же', async () => {
+  it('electron внутри зависимости: то же', async () => {
     const dir = plugin(
       { 'index.ts': "import { x } from 'greedy';\nexport default { x };\n", 'ui/ui.ts': 'export const x = 1;\n' },
       {},
@@ -248,7 +248,7 @@ describe('buildPlugin: source - стенд (P-06 п. 4)', () => {
     assert.match(problems(report)[0] ?? '', /index\.ts:1: 'node:fs'/);
   });
 
-  it('ST-7001/3: source: npm-пакет в главной части - нарушение, потому что бандла не будет', async () => {
+  it('source: npm-пакет в главной части - нарушение, потому что бандла не будет', async () => {
     const report = await buildPlugin(plugin(), { out: fresh('out'), main: 'source' });
     assert.deepEqual(problems(report), ["index.ts:1: 'tiny-dep': только @cyborg-harness/contracts и свои модули"]);
   });

@@ -68,7 +68,7 @@ async function start(extra: Partial<LoadOptions> = {}) {
   return { kernel, api, got, listen, ctx: ctx!, handles };
 }
 
-test('ST-2001/6: подписка через границу хоста: колбэк получает данные, dispose снимает его у поставщика', async () => {
+test('подписка через границу хоста: колбэк получает данные, dispose снимает его у поставщика', async () => {
   const { kernel, api, got, listen } = await start();
   const sub = await listen('a');
   assert.equal(typeof sub.dispose, 'function');
@@ -86,7 +86,7 @@ test('ST-2001/6: подписка через границу хоста: колб
   await kernel.unload();
 });
 
-test('ST-2001/6: ST-1005/2: подписка снимается, когда выгружен потребитель', async () => {
+test('ST-1005/2, ST-2001/6: подписка снимается, когда выгружен потребитель', async () => {
   const { kernel, api, listen } = await start();
   await listen('a');
   await listen('b');
@@ -97,7 +97,7 @@ test('ST-2001/6: ST-1005/2: подписка снимается, когда вы
   await kernel.unload();
 });
 
-test('ST-2001/6: ST-1005/2: хост потребителя упал: подписку снимает ядро, отписаться хосту уже некому', async () => {
+test('ST-1005/2, ST-2001/6: хост потребителя упал: подписку снимает ядро, отписаться хосту уже некому', async () => {
   const { kernel, listen, handles } = await start();
   await listen('a');
   assert.equal(await kernel.run('ticker.count'), 1);
@@ -107,7 +107,7 @@ test('ST-2001/6: ST-1005/2: хост потребителя упал: подпи
   await kernel.unload();
 });
 
-test('ST-2001/6: ST-1005/2: поставщик выгружен: колбэки потребителя забыты, после возврата подписка берётся заново', async () => {
+test('ST-1005/2, ST-2001/6: поставщик выгружен: колбэки потребителя забыты, после возврата подписка берётся заново', async () => {
   const { kernel, got, listen, ctx } = await start();
   let changes = 0;
   ctx.contracts.onChange('test.ticker', () => changes++);
@@ -124,6 +124,22 @@ test('ST-2001/6: ST-1005/2: поставщик выгружен: колбэки 
   await again.tick(5);
   await settle();
   assert.deepEqual(got, ['b:5']);
+  await kernel.unload();
+});
+
+test('ST-2001/6: хост поставщика упал: ядро снимает подписку и забывает колбэки потребителя, после возврата подписка берётся заново', async () => {
+  const { kernel, got, listen, ctx, handles } = await start({ limits: { subscriptions: 1 } });
+  await listen('a');
+  handles.get('t')!.kill();
+  await waitFor('поставщик ушёл вместе с хостом', () => ctx.contracts.get('test.ticker', 1) === undefined);
+  await kernel.enable('ticker');
+  await settle();
+  const again = ctx.contracts.get('test.ticker', 1)!;
+  assert.equal(await again.listeners(), 0, 'новый процесс поставщика старых подписок не знает');
+  await again.onTick((n) => void got.push(`b:${n}`));
+  await again.tick(5);
+  await settle();
+  assert.deepEqual(got, ['b:5'], 'подписка упавшего хоста не держит предел потребителя, её колбэк не зовётся');
   await kernel.unload();
 });
 

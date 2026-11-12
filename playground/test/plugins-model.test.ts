@@ -27,7 +27,7 @@ describe('окно «Плагины Cyborg»: модель', () => {
     assert.equal(journalFor(lines, null).length, 3);
   });
 
-  it('ST-4005/2: сводка: запуск, отказ ядра, пусто, счёт по состояниям без невключённых', () => {
+  it('сводка: запуск, отказ ядра, пусто, счёт по состояниям без невключённых', () => {
     assert.equal(summary(snapshot([], { phase: 'starting' })), 'Ядро плагинов запускается…');
     assert.equal(summary(snapshot([], { phase: 'failed', error: 'нет хоста' })), 'Ядро плагинов не запустилось: нет хоста');
     assert.match(summary(snapshot([row('off', 'disabled')])), /^Включённых плагинов нет/);
@@ -38,7 +38,7 @@ describe('окно «Плагины Cyborg»: модель', () => {
     assert.equal(summary(snapshot([row('a', 'stopped'), row('b', 'stopped'), row('d', 'disabled')], { safeMode: true })), 'Безопасный режим: включённых плагинов 2, их код не запускается.');
   });
 
-  it('ST-4005/1, ST-4005/2: ST-2003/5: кнопки: у работающего - команды, выгрузка и хост; у выгруженного - «Загрузить», у упавшего - «Включить снова»', () => {
+  it('ST-2003/5: кнопки: у работающего - команды, выгрузка и хост; у выгруженного - «Загрузить», у упавшего - «Включить снова»', () => {
     const labels = (r: PluginRow, canHang = true) => actionsFor(r, canHang).map((a) => a.label);
     assert.deepEqual(labels(row('bob', 'active', { commands: ['bob.hello'], pid: 7 })), ['bob.hello', 'Выгрузить', 'Уронить хост', 'Повесить хост', 'Журнал']);
     assert.deepEqual(labels(row('bob', 'active', { pid: 7 }), false), ['Выгрузить', 'Уронить хост', 'Журнал']);
@@ -154,7 +154,7 @@ describe('окно «Плагины Cyborg»: действия над воркс
 });
 
 describe('окно «Плагины Cyborg»: диагностика (K-30)', () => {
-  it('причина прошлого сбоя показана отдельно от причины текущего состояния; нет сбоя - нет строки', () => {
+  it('ST-4003/4: причина прошлого сбоя показана отдельно от причины текущего состояния; нет сбоя - нет строки', () => {
     assert.equal(previousNote(row('echo', 'active')), undefined);
     const text = previousNote(row('echo', 'active', { previousFailure: { at: Date.UTC(2026, 10, 9, 12, 0, 0), text: 'выключен, сбоев подряд: 3' } }));
     assert.match(text ?? '', /^В прошлом запуске, .*09\.11\.2026.*: выключен, сбоев подряд: 3$/);

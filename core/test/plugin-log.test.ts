@@ -59,7 +59,7 @@ async function until(what: string, ok: () => boolean, ms = 3000): Promise<void> 
   }
 }
 
-test('ST-4002/1: ctx.log: без уровня - info, с уровнем - он; в записи id плагина', async () => {
+test('ctx.log: без уровня - info, с уровнем - он; в записи id плагина', async () => {
   const { k, ctx, lines } = await rig(['a', 'b']);
   try {
     ctx.a?.log('x');
@@ -142,7 +142,7 @@ test('ST-4002/3: длина: предел по умолчанию - 8 КиБ', a
   }
 });
 
-test('ST-4002/3, ST-4005/4: частота: строк сверх предела за интервал в журнал по одной не идёт, в конце интервала - одна сводная с последней error; сосед и состояние целы', async () => {
+test('ST-4002/3: частота: строк сверх предела за интервал в журнал по одной не идёт, в конце интервала - одна сводная с последней error; сосед и состояние целы', async () => {
   const { k, ctx, lines, journal } = await rig(['a', 'b'], { limits: { logRate: 5, logWindowMs: 100 } });
   try {
     for (let i = 0; i < 12; i++) ctx.a?.log(`info ${String(i)}`);
@@ -215,7 +215,7 @@ function pour(write: (i: number) => void, perTick: number, every: number): () =>
   return () => clearInterval(timer);
 }
 
-test('ST-4002/4, ST-4005/4: поток: плагин выше предела частоты дольше срока выключается (switched-off, log-flood), строки после этого не идут, сосед пишет как прежде', async () => {
+test('поток: плагин выше предела частоты дольше срока выключается (switched-off, log-flood), строки после этого не идут, сосед пишет как прежде', async () => {
   const { k, ctx, lines, journal } = await rig(['a', 'b'], { limits: { logRate: 2, logWindowMs: 100, logFloodMs: 400 } });
   const stopA = pour((i) => ctx.a?.log(`поток ${String(i)}`), 10, 5);
   const stopB = pour((i) => ctx.b?.log(`сосед ${String(i)}`), 1, 60);
@@ -240,7 +240,7 @@ test('ST-4002/4, ST-4005/4: поток: плагин выше предела ч�
   }
 });
 
-test('ST-4002/4: поток: всплески выше предела с паузами дольше интервала плагин не выключают', async () => {
+test('поток: всплески выше предела с паузами дольше интервала плагин не выключают', async () => {
   const { k, ctx, journal } = await rig(['a'], { limits: { logRate: 2, logWindowMs: 40, logFloodMs: 160 } });
   try {
     for (let round = 0; round < 6; round++) {
@@ -281,7 +281,7 @@ async function burst(t: { mock: { timers: { setTime(ms: number): void } } }, ctx
   await sleep(25);
 }
 
-test('ST-4002/4: поток: всплески через паузу короче окна, но с частотой в среднем ниже предела, потоком не считаются (FR-CH-4018: «подряд» - без паузы)', async (t) => {
+test('поток: всплески через паузу короче окна, но с частотой в среднем ниже предела, потоком не считаются (FR-CH-4018: «подряд» - без паузы)', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
   // Предел 2 строки за 1 с, всплеск в 3 строки раз в 1990 мс: в среднем 1,5 строки/с. За 14 с набегает больше срока в 5 с, если паузу меньше окна считать продолжением.
   const { k, ctx, journal } = await rig(['a'], { limits: { logRate: 2, logWindowMs: 1000, logFloodMs: 5000 } });
@@ -335,6 +335,36 @@ test('поток: интервал закрывается строкой, при
   }
 });
 
+test('ST-4002/3, ST-4002/4: пределы по умолчанию на подставных часах - 100 строк за 1 с проходят, сверх - сводная; поток 10 с выключает плагин, после «Включить снова» строки идут', { timeout: 10_000 }, async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+  const { k, ctx, lines, journal } = await rig(['a', 'b']);
+  try {
+    for (let i = 0; i < 10; i++) await burst(t, () => ctx.a, 1_000_000 + i * 1000, 101);
+    assert.equal(lines.filter(([id]) => id === 'a').length, 1000, 'за каждую секунду прошло ровно 100 строк');
+    assert.deepEqual(summaries(journal, 'a').map((e) => e.skipped), Array(9).fill(1), 'каждая закрытая секунда - сводная с одной пропущенной');
+    assert.deepEqual(switchedOff(journal, 'a'), [], '9 с потока - ещё не выключен');
+    t.mock.timers.setTime(1_010_000);
+    ctx.a?.log('на десятой секунде');
+    ctx.b?.log('сосед');
+    await until('выключение', () => switchedOff(journal, 'a').length === 1);
+    assert.equal(switchedOff(journal, 'a')[0]?.reason, 'log-flood');
+    assert.match(describeEntry(switchedOff(journal, 'a')[0]!), /поток строк/);
+    await until('строка соседа', () => lines.some(([id]) => id === 'b'));
+    assert.equal(lines.filter(([id]) => id === 'a').length, 1000, 'строка, закрывшая десятую секунду, не прошла');
+    assert.deepEqual(pluginStatuses(k.journal).map((s) => [s.id, s.state, s.revivable]), [['a', 'stopped', true], ['b', 'active', false]]);
+    await k.idle();
+    await k.enable('a');
+    ctx.a?.log('вернулся');
+    await until('строка после enable', () => lines.some(([, m]) => m === 'вернулся'));
+    await burst(t, () => ctx.a, 1_010_000, 100);
+    await burst(t, () => ctx.a, 1_011_000, 1);
+    assert.equal(summaries(journal, 'a').length, 11, 'секунда сверх предела после «Включить снова» закрыта сводной');
+    assert.equal(switchedOff(journal, 'a').length, 1, 'счёт потока после «Включить снова» начат заново');
+  } finally {
+    await k.unload();
+  }
+});
+
 // FR-CH-4018, вопрос 7 SRS фичи 04: ядро вычёркивает из строк значения, лежащие в хранилище секретов.
 /** Среда ядра с хранилищем секретов в памяти из тест-кита; `map` - то, что в хранилище лежит. */
 function withSecrets(): { store: Map<string, string>; os: NonNullable<LoadOptions['os']> } {
@@ -342,7 +372,7 @@ function withSecrets(): { store: Map<string, string>; os: NonNullable<LoadOption
   return { store: secrets.map, os: { dataDir: tmpdir(), tempDir: tmpdir(), secrets } };
 }
 
-test('ST-3004/3, ST-3004/5: секреты: значение из хранилища (set, get, resolve) вычёркивается из строки ctx.log; чужому плагину оно не принадлежит', async () => {
+test('ST-3004/5: секреты: значение из хранилища (set, get, resolve) вычёркивается из строки ctx.log; чужому плагину оно не принадлежит', async () => {
   const { os } = withSecrets();
   const { k, ctx, lines } = await rig(['a', 'b'], { os });
   try {
@@ -374,7 +404,7 @@ test('ST-3004/3, ST-3004/5: секреты: значение из хранили
   }
 });
 
-test('ST-3004/5: секреты: прочитанное через get и resolve вычёркивается, в том числе из сводной записи', async () => {
+test('секреты: прочитанное через get и resolve вычёркивается, в том числе из сводной записи', async () => {
   const { store, os } = withSecrets();
   const secret = `s3cr3t-${randomUUID()}`;
   store.set('a/via-get', secret);

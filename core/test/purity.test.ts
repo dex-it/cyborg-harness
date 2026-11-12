@@ -11,7 +11,45 @@ const src = path.join(core, 'src');
 const CONTRACTS = '@cyborg-harness/contracts';
 
 // git и cyborg сюда не входят: .git и область workspace.git общие для любой VCS, cyborg - имя продукта в формате файла и командах окна.
-const DOMAIN = new Set(['session', 'tracker', 'jira', 'project', 'claude', 'agent', 'viewer', 'monaco']);
+// file и secret сюда не входят: шлюз ctx.os и хранилище секретов - механизмы ядра; предмет - дерево файлов и источники секретов.
+const DOMAIN = new Set(['session', 'tracker', 'jira', 'project', 'claude', 'agent', 'viewer', 'monaco', 'explorer', 'editor', 'chat', 'repo', 'repository', 'issue', 'github', 'gitlab', 'glab', 'keychain', 'keyring', 'vault', 'libsecret', 'onepassword']);
+
+// ADR-CH-0001: плагины связаны контрактами с версиями, а не общей шиной событий, реестром сервисов по ключу или внедрением зависимостей.
+const MECHANISM = new Set(['bus', 'inject', 'injector', 'injectable', 'service', 'locator']);
+
+const STAND_PLUGINS = new Set(
+  fs
+    .readdirSync(path.resolve(import.meta.dirname, '../../playground/plugins'), { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name),
+);
+
+/** id из манифестов плагинов репозитория: поставка стенда и примеры ядра. Имя каталога может не совпадать с id, поэтому читается манифест. */
+const PLUGIN_IDS = new Set(
+  ['../../playground/plugins', '../examples/plugins'].flatMap((rel) => {
+    const dir = path.resolve(import.meta.dirname, rel);
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .map((d) => path.join(dir, d.name, 'manifest.json'))
+      .filter((file) => fs.existsSync(file))
+      .map((file) => (JSON.parse(fs.readFileSync(file, 'utf8')) as { id?: unknown }).id)
+      .filter((id): id is string => typeof id === 'string');
+  }),
+);
+
+/** Строка кода ядра, которая называет плагин: сам id или его пространство (`sessions.new`, `files:x`, `git/…`). */
+export function pluginIdLiterals(file: string, text: string, ids: ReadonlySet<string>): string[] {
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const found: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if ((ts.isStringLiteralLike(node) || ts.isTemplateLiteralToken(node)) && (ids.has(node.text) || ids.has(node.text.split(/[.:/]/)[0] ?? ''))) {
+      found.push(`${path.relative(core, file)}:${String(source.getLineAndCharacterOfPosition(node.getStart()).line + 1)} '${node.text}'`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
 
 /** Слово из DOMAIN, которое в этом файле значит не предмет приложения. */
 const ALLOWED: readonly { readonly file: string; readonly token: string; readonly reason: string }[] = [
@@ -58,8 +96,15 @@ export function domainViolations(file: string, text: string): string[] {
   const visit = (node: ts.Node): void => {
     const token = ts.isIdentifier(node) || ts.isPrivateIdentifier(node) ? node.text : ts.isStringLiteralLike(node) || ts.isTemplateLiteralToken(node) ? node.text : undefined;
     if (token !== undefined && !ALLOWED.some((a) => a.file === base && a.token === token)) {
-      const hit = words(token).find((w) => DOMAIN.has(w));
-      if (hit) found.push(`${path.relative(core, file)}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1} '${token}': предметное слово ${hit}`);
+      const where = `${path.relative(core, file)}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1} '${token}'`;
+      const split = words(token);
+      const hit = split.find((w) => DOMAIN.has(w));
+      // words срезает конечное s: bus приходит как bu.
+      const mechanism = split.find((w) => MECHANISM.has(w) || MECHANISM.has(`${w}s`));
+      const plugin = ts.isIdentifier(node) || ts.isPrivateIdentifier(node) ? undefined : token.split(/[.:/]/)[0];
+      if (hit) found.push(`${where}: предметное слово ${hit}`);
+      else if (mechanism) found.push(`${where}: механизм в обход контрактов ${mechanism}`);
+      else if (plugin !== undefined && STAND_PLUGINS.has(plugin)) found.push(`${where}: имя плагина стенда ${plugin}`);
     }
     ts.forEachChild(node, visit);
   };
@@ -81,10 +126,22 @@ describe('чистота ядра', () => {
     );
   });
 
-  it('ST-2007/1: ST-1009/1: в идентификаторах и строках core/src нет предметных слов', () => {
+  it('ST-1009/1, ST-2006/1: в идентификаторах и строках core/src нет предметных слов, общей шины, реестра сервисов, inject и имён плагинов стенда', () => {
     assert.deepEqual(
       sources().flatMap((f) => domainViolations(f, fs.readFileSync(f, 'utf8'))),
       [],
+    );
+  });
+
+  it('ST-2007/1: в строках core/src нет id плагинов поставки стенда и примеров ядра', () => {
+    assert.ok(PLUGIN_IDS.has('sessions') && PLUGIN_IDS.has('clock-user'), 'манифесты плагинов не прочитаны');
+    assert.deepEqual(
+      sources().flatMap((f) => pluginIdLiterals(f, fs.readFileSync(f, 'utf8'), PLUGIN_IDS)),
+      [],
+    );
+    assert.deepEqual(
+      pluginIdLiterals(path.join(src, 'x.ts'), ["const a = 'clock-user';", "const b = 'later.run';", 'const c = `pin-lock/${x}`;', "const d = 'clock';", "const e = 'clocks';"].join('\n'), PLUGIN_IDS).map((v) => Number(/:(\d+) /.exec(v)?.[1])),
+      [1, 2, 3, 4],
     );
   });
 
@@ -126,6 +183,11 @@ describe('чистота ядра', () => {
     assert.deepEqual(
       domainViolations(file, named).map((v) => Number(/:(\d+) /.exec(v)?.[1])),
       [1, 2, 3, 4, 6],
+    );
+    const more = ['const eventBus = 1;', 'inject(token);', 'getService(key);', "const k = 'files.open';", "const m = 'git';", 'const fromKeychain = 1;', "const f = 'file';", 'const secrets = 1;'].join('\n');
+    assert.deepEqual(
+      domainViolations(file, more).map((v) => Number(/:(\d+) /.exec(v)?.[1])),
+      [1, 2, 3, 4, 5, 6],
     );
     assert.deepEqual(domainViolations(path.join(src, 'pty-host.ts'), 'const viewers = new Set();'), [], 'исключение не действует в своём файле');
     assert.deepEqual(importViolations(path.join(src, 'host-entry.ts'), 'const m = await import(entry);'), [], 'исключение не действует в своём файле');

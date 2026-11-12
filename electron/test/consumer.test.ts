@@ -50,7 +50,7 @@ describe('потребитель вне репозитория: peer-завис�
 
   for (const contracts of ['own', '1.0.0-dev']) {
     const skip = contracts !== 'own' && !coreTakesPrerelease ? `peer ядра на контракты ${corePeer} не покрывает предрелиз (правка в #103)` : false;
-    it(`ST-6001/1, ST-6001/8: контракты ${contracts === 'own' ? 'из репозитория' : contracts}: архивы ставятся, peer на контракты и ядро выполнены`, { skip }, () => {
+    it(`ST-6001/8: контракты ${contracts === 'own' ? 'из репозитория' : contracts}: архивы ставятся, peer на контракты и ядро выполнены`, { skip }, () => {
       const project = path.join(work, `app-${contracts}`);
       fs.mkdirSync(project);
       fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'consumer', private: true, type: 'module' }));

@@ -24,7 +24,7 @@ test('ST-1002/7: порядок: поставщик раньше потреби�
   assert.equal(g.rejected.size, 0);
 });
 
-test('ST-5001/2: отказ по engines каскадирует на зависимых, optional переживает', () => {
+test('ST-1002/1, ST-5001/2, ST-6001/7, ST-6002/1: отказ по engines каскадирует на зависимых, optional переживает', () => {
   const g = resolveGraph(
     [
       m('files', { engines: { cyborg: '^2' }, provides: { 'cyborg.files': '1.0' } }),
@@ -39,12 +39,34 @@ test('ST-5001/2: отказ по engines каскадирует на завис�
   assert.equal(g.bindings.get('tree')?.size, 0);
 });
 
-test('ST-5001/4: ST-1002/4: несовместимая мажорная версия поставщика - как отсутствие', () => {
-  const g = resolveGraph([m('files', { provides: { 'cyborg.files': '2.0' } }), m('sessions', { requires: { 'cyborg.files': '^1' } })], '1.0.0');
-  assert.equal(g.rejected.get('sessions')?.[0]?.kind, 'missing');
+test('ST-1002/4, ST-5001/4: несовместимая мажорная версия поставщика - как отсутствие', () => {
+  const g = resolveGraph(
+    [m('files', { provides: { 'cyborg.files': '2.0' } }), m('sessions', { requires: { 'cyborg.files': '^1' } }), m('tree', { optional: { 'cyborg.files': '^1' } })],
+    '1.0.0',
+  );
+  assert.deepEqual(g.rejected.get('sessions'), [{ kind: 'missing', contract: 'cyborg.files', range: '^1' }]);
+  assert.equal(g.rejected.has('tree'), false);
+  assert.deepEqual(g.order, ['files', 'tree']);
+  assert.equal(g.bindings.get('tree')?.get('cyborg.files'), undefined, 'optional работает без поставщика чужой мажорной');
 });
 
-test('ST-5001/6, ST-5002/2: поставщик с двумя мажорными версиями обслуживает старого и нового потребителя', () => {
+test('ST-5001/1, ST-5001/3: engines.cyborg сверяется с версией API ядра: ^1.3 на 1.4 проходит, ^1.5 на 1.3 - отказ той же причины, что и чужая мажорная, ^1 - без отказа', () => {
+  const minor = resolveGraph([m('old', { engines: { cyborg: '^1.3' } })], '1.4.0');
+  assert.deepEqual(minor.order, ['old']);
+  assert.equal(minor.rejected.size, 0);
+  const g = resolveGraph([m('newer', { engines: { cyborg: '^1.5' } }), m('other', { engines: { cyborg: '^2' } }), m('plain', { engines: { cyborg: '^1' } })], '1.3.0');
+  assert.deepEqual(g.rejected.get('newer'), [{ kind: 'engines', range: '^1.5', api: '1.3.0' }]);
+  assert.deepEqual(g.rejected.get('other'), [{ kind: 'engines', range: '^2', api: '1.3.0' }]);
+  assert.deepEqual(g.order, ['plain']);
+});
+
+test('ST-5002/8: ядро 2.0: плагин под 2.0 проходит сверку engines.cyborg, плагин под ^1 отвергнут', () => {
+  const g = resolveGraph([m('next', { engines: { cyborg: '^2' } }), m('old', { engines: { cyborg: '^1.0' } })], '2.0.0');
+  assert.deepEqual(g.order, ['next']);
+  assert.deepEqual(g.rejected.get('old'), [{ kind: 'engines', range: '^1.0', api: '2.0.0' }]);
+});
+
+test('ST-5001/6: поставщик с двумя мажорными версиями обслуживает старого и нового потребителя', () => {
   const g = resolveGraph(
     [
       m('files', { provides: { 'cyborg.files': ['1.4', '2.0'] } }),
@@ -85,6 +107,26 @@ test('ST-1002/3: цикл отказывает всем участникам и 
   assert.equal(g.rejected.get('c')?.[0]?.kind, 'missing');
 });
 
+test('ST-1002/3: цикл requires из трёх плагинов - отказ каждому, причина называет всех участников', () => {
+  const g = resolveGraph(
+    [
+      m('a', { provides: { 'x.a': '1.0' }, requires: { 'x.b': '^1' } }),
+      m('b', { provides: { 'x.b': '1.0' }, requires: { 'x.c': '^1' } }),
+      m('c', { provides: { 'x.c': '1.0' }, requires: { 'x.a': '^1' } }),
+      m('d'),
+    ],
+    '1.0.0',
+  );
+  assert.deepEqual(g.order, ['d']);
+  for (const id of ['a', 'b', 'c']) {
+    const reasons = g.rejected.get(id);
+    assert.equal(reasons?.length, 1, id);
+    const [reason] = reasons;
+    assert.ok(reason?.kind === 'cycle', id);
+    assert.deepEqual([...reason.members].sort(), ['a', 'b', 'c'], id);
+  }
+});
+
 test('ST-1002/5: consumes не создаёт ребра: циклические consumes допустимы', () => {
   const g = resolveGraph(
     [
@@ -107,7 +149,7 @@ test('ST-1001/5: повтор id в манифестах - отказ id, ни �
 // ADR-CH-0002 п. 6: без закрепления один сторонний манифест с provides cyborg.agent делал встроенного потребителя ambiguous.
 const reserved = (...bundled: string[]) => ({ prefixes: ['cyborg.'], bundled: new Set(bundled) });
 
-test('ST-3003/5: ST-1002/6: пространство поставки: сторонний поставщик cyborg.* отвергнут, встроенный и его потребитель работают', () => {
+test('ST-1002/6, ST-3003/5: пространство поставки: сторонний поставщик cyborg.* отвергнут, встроенный и его потребитель работают', () => {
   const plugins = [
     m('claude', { provides: { 'cyborg.agent': '1.0' } }),
     m('rogue', { provides: { 'cyborg.agent': '1.0', 'acme.x': '1.0' } }),
@@ -120,7 +162,7 @@ test('ST-3003/5: ST-1002/6: пространство поставки: стор�
   assert.deepEqual(g.order, ['claude', 'sessions']);
 });
 
-test('ST-3003/5: ST-1002/6: пространство поставки: встроенный с тем же provides принят, id cyborg.* у стороннего - отказ, потребление cyborg.* открыто', () => {
+test('ST-1002/6, ST-3003/5: пространство поставки: встроенный с тем же provides принят, id cyborg.* у стороннего - отказ, потребление cyborg.* открыто', () => {
   const g = resolveGraph(
     [
       m('rogue', { provides: { 'cyborg.agent': '1.0' } }),
@@ -135,7 +177,7 @@ test('ST-3003/5: ST-1002/6: пространство поставки: встр�
   assert.equal(g.bindings.get('reader')?.get('cyborg.agent'), 'rogue');
 });
 
-test('ST-1002/6: пространство поставки: префикс закрывает и id без точки (app для app.), и id внутри; соседнее имя не задето', () => {
+test('пространство поставки: префикс закрывает и id без точки (app для app.), и id внутри; соседнее имя не задето', () => {
   const g = resolveGraph([m('app'), m('app.x'), m('apple')], '1.0.0', { prefixes: ['app.'], bundled: new Set() });
   assert.deepEqual(
     [...g.rejected],
@@ -163,7 +205,7 @@ test('ST-2002/2: команда в двух манифестах - отказ о
   assert.deepEqual([...both.rejected.keys()].sort(), ['a', 'a.b'], 'оба встроенные - неоднозначность, отказ обоим');
 });
 
-// ST-1002/4 (FR-CH-1004): отказ в конце цепочки requires каскадирует по всей цепочке, а не на одно звено; ядро стартует.
+// Отказ в конце цепочки requires каскадирует по всей цепочке, а не на одно звено; ядро стартует (#228).
 test('ST-1002/4: цепочка A -> B -> C с ошибкой у C - отказ каскадирует на B и A, optional и независимые живы', () => {
   const g = resolveGraph(
     [
@@ -298,7 +340,7 @@ test('цикл и каскад вместе: зависящие от цикла 
 
 // Поставщик контракта - только плагин, остающийся в графе: отвергнутый каскадом не делает потребителя неоднозначным
 // (FR-CH-1004: «два поставщика при кратности one» считаются среди тех, кто загружается).
-test('ST-1002/2: поставщик, отвергнутый каскадом, не делает потребителя неоднозначным: p2 отвергнут своим requires, c связан с p1', () => {
+test('поставщик, отвергнутый каскадом, не делает потребителя неоднозначным: p2 отвергнут своим requires, c связан с p1', () => {
   const g = resolveGraph(
     [
       m('c', { requires: { 'x.s': '^1' } }),
@@ -312,7 +354,7 @@ test('ST-1002/2: поставщик, отвергнутый каскадом, н
   assert.deepEqual(g.order, ['p1', 'c']);
 });
 
-test('ST-1002/2, ST-1002/4: неоднозначность считается среди оставшихся и не зависит от порядка входа: отказ второго поставщика через два звена, optional-потребитель', () => {
+test('неоднозначность считается среди оставшихся и не зависит от порядка входа: отказ второго поставщика через два звена, optional-потребитель', () => {
   const plugins = [
     m('c', { requires: { 'x.s': '^1' } }),
     m('o', { optional: { 'x.s': '^1' } }),
@@ -331,7 +373,7 @@ test('ST-1002/2, ST-1002/4: неоднозначность считается с
   }
 });
 
-test('ST-1002/2: потребитель с живыми двумя поставщиками остаётся неоднозначным, а поставщик, сам отвергнутый за неоднозначность, потребителя не снимает', () => {
+test('потребитель с живыми двумя поставщиками остаётся неоднозначным, а поставщик, сам отвергнутый за неоднозначность, потребителя не снимает', () => {
   const g = resolveGraph(
     [
       m('c', { requires: { 'x.s': '^1' } }),

@@ -27,7 +27,7 @@ test('раскладка Cyborg: пять областей на пилотных
   assert.deepEqual(k.layout.filter((e) => e.mark !== undefined), [], 'в здоровом ядре ни у одного вида нет метки');
 });
 
-test('ST-2003/5: выгрузка плагина оставляет его вид в той же области с меткой disabled: окно ставит заглушку на место', async () => {
+test('выгрузка плагина оставляет его вид в той же области с меткой disabled: окно ставит заглушку на место', async () => {
   await using k = await startKernel({ plugins: dirs(SHELL) });
   await k.disable('stub-tracker');
   const marked = k.layout.filter((e) => e.pluginId === 'stub-tracker');

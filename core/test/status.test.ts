@@ -26,7 +26,7 @@ test('ST-1001/8: состояние по журналу: работает, пе�
   assert.equal(view(journal)[2], 'a:restarting:revived:-');
 });
 
-test('ST-4005/1, ST-4005/4: запись журнала словами и уровень', () => {
+test('ST-1002/3, ST-4005/1: запись журнала словами и уровень', () => {
   const down: JournalEntry = { kind: 'host-down', hostId: 'ui', reason: 'crash', culprits: ['echo'], plugins: ['echo'], affects: ['probe'] };
   assert.equal(describeEntry(down), 'хост ui упал, виновник: echo; сняты: echo; задеты: probe');
   assert.equal(entryLevel(down), 'warn');
@@ -48,7 +48,32 @@ test('ST-4005/1, ST-4005/4: запись журнала словами и уро
   );
 });
 
-test('ST-5003/4: вызов устаревшего члена: словами с вызывающим, поставщиком и повторами, уровень warn, состояние плагинов не меняет, виден обоим', () => {
+test('ST-4005/1: записи журнала из окна «Плагины Cyborg» - invalid, not-found, rejected, failed, denied, host-down, key-conflict - у каждой описание словами и уровень', () => {
+  const cases: [JournalEntry, string, 'info' | 'warn' | 'error'][] = [
+    [{ pluginId: 'a', kind: 'invalid', errors: ['нет поля version', 'id не строка'] }, 'манифест с ошибками: нет поля version; id не строка', 'error'],
+    [{ pluginId: 'a', kind: 'not-found' }, 'включён в настройках, но не найден в каталогах плагинов', 'error'],
+    [{ pluginId: 'a', kind: 'rejected', reasons: [{ kind: 'cycle', members: ['a', 'b', 'a'] }] }, 'цикл зависимостей: a → b → a', 'error'],
+    [{ pluginId: 'a', kind: 'failed', hostId: 'h', error: 'нет ключа' }, 'не поднялся в хосте h: нет ключа', 'error'],
+    [{ pluginId: 'a', kind: 'denied', method: 'fs.readText', detail: 'вне области fs.read: /etc/passwd' }, 'отказ ctx.os: вне области fs.read: /etc/passwd', 'warn'],
+    [{ kind: 'host-down', hostId: 'h', reason: 'hang', culprits: [], plugins: ['a'], affects: [] }, 'хост h завис, виновник не установлен; сняты: a', 'warn'],
+    [{ pluginId: 'a', kind: 'key-conflict', key: 'mod+k', command: 'a.go', winner: 'b' }, 'сочетание mod+k (a.go) уже у b: нажатие получает b', 'warn'],
+  ];
+  assert.deepEqual(
+    cases.map(([e]) => [e.kind, describeEntry(e), entryLevel(e)]),
+    cases.map(([e, text, level]) => [e.kind, text, level]),
+  );
+});
+
+test('ST-1001/10: host-own-grouped словами называет группу и соседей, уровень warn, состояния плагину не меняет', () => {
+  const grouped: JournalEntry = { pluginId: 'editor', kind: 'host-own-grouped', group: 'ui', neighbours: ['tabs', 'preview'] };
+  assert.equal(describeEntry(grouped), 'манифест просит свой хост, но группа ui из plugins.hosts сажает его к tabs, preview: его зависание перезапустит и их');
+  assert.equal(entryLevel(grouped), 'warn');
+  assert.deepEqual(entryPlugins(grouped), ['editor']);
+  assert.equal(isLifecycleEntry(grouped), false);
+  assert.deepEqual(view([{ pluginId: 'editor', kind: 'activated', hostId: 'ui', ms: 1 }, grouped]), ['editor:active:activated:-']);
+});
+
+test('ST-5003/3, ST-5003/4: вызов устаревшего члена: словами с вызывающим, поставщиком и повторами, уровень warn, состояние плагинов не меняет, виден обоим', () => {
   const call: JournalEntry = { pluginId: 'tabs', kind: 'deprecated-call', provider: 'sessions', contract: 'cyborg.sessions', member: 'list' };
   assert.equal(describeEntry(call), 'tabs вызывает устаревший cyborg.sessions.list поставщика sessions');
   assert.equal(describeEntry({ ...call, repeats: 41 }), 'tabs вызывает устаревший cyborg.sessions.list поставщика sessions - ещё 41 раз за 5 с');

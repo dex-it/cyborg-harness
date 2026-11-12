@@ -86,7 +86,7 @@ describe('разбор импортов: формы', () => {
     assert.deepEqual(only("export { type A } from 'x';"), [false]);
   });
 
-  it('ST-7002/4: вычисляемый путь и неразобранный оператор - отдельные записи', () => {
+  it('вычисляемый путь и неразобранный оператор - отдельные записи', () => {
     assert.deepEqual(specs('await import(name);'), [COMPUTED]);
     assert.deepEqual(specs("require('a' + b);"), [COMPUTED]);
     assert.deepEqual(specs('await import(`./${name}.js`);'), [COMPUTED]);

@@ -66,7 +66,7 @@ describe('шаблон плагина у стороннего автора', { t
     run(process.execPath, [tsc, '-p', 'tsconfig.repo.json'], project);
   });
 
-  it('ST-7001/1: собственный тест шаблона проходит: плагин активен, команда, вид, config, контракт, checkPlugin', () => {
+  it('собственный тест шаблона проходит: плагин активен, команда, вид, config, контракт, checkPlugin', () => {
     const out = run(process.execPath, ['--test', '--test-reporter=tap', 'test/greeter.test.ts'], project);
     assert.match(out, /# pass 6/);
     assert.match(out, /# fail 0/);

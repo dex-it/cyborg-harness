@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { violationDetail, violationNote } from '../src/shell/csp-note.ts';
 
 // K-05: под строгой CSP вставленный <style> не применяется молча; оболочка называет причину и способ исправить в консоли фрейма вида.
-test('ST-3005/5: отказ CSP вида: стили называют ui.inlineStyles, остальное - директиву и адрес', () => {
+test('отказ CSP вида: стили называют ui.inlineStyles, остальное - директиву и адрес', () => {
   for (const directive of ['style-src', 'style-src-elem', 'style-src-attr']) {
     const note = violationNote('echo', { violatedDirective: directive, blockedURI: 'inline' });
     assert.match(note, /^Вид echo: CSP отклонила инлайн-стиль \(/, directive);

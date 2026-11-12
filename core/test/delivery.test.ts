@@ -55,7 +55,7 @@ describe('поставка: запись и чтение', () => {
     assert.deepEqual(second, first);
   });
 
-  it('ST-6001/3: файлы в корне поставки (не в каталоге плагина) в список не входят', async () => {
+  it('файлы в корне поставки (не в каталоге плагина) в список не входят', async () => {
     const root = catalog();
     put(root, 'README.txt', 'не плагин');
     assert.deepEqual(Object.keys((await writeDelivery(root)).plugins), ['alpha', 'beta']);

@@ -72,7 +72,7 @@ test('ST-2001/7: события окна и ОС: доходят до плаги
   await k.unload();
 });
 
-test('onIdle: один раз на простой, снова - после активности; отписка останавливает опрос ОС', async () => {
+test('ST-2001/7: onIdle: один раз на простой, снова - после активности; отписка останавливает опрос ОС', async () => {
   let idle = 0;
   let asked = 0;
   const fired: number[] = [];
@@ -147,7 +147,7 @@ test('ST-2001/7: beforeQuit: ждёт асинхронных слушателе�
   await k.unload();
 });
 
-test('ST-1006/1, ST-1006/2, ST-1006/3: activation lazy: ждёт; будит команда, сочетание, wake и потребитель контракта; встречные consumes не виснут', async () => {
+test('ST-1001/8, ST-1002/5, ST-1006/1, ST-1006/2, ST-1006/3, ST-1006/4: activation lazy: ждёт; будит команда, сочетание, wake и потребитель контракта; встречные consumes не виснут', async () => {
   const activated: string[] = [];
   const mod = (id: string, body?: (ctx: PluginContext) => void): PluginModule => ({
     activate(ctx) {
@@ -206,7 +206,38 @@ test('ST-1006/1, ST-1006/2, ST-1006/3: activation lazy: ждёт; будит к�
   await k.unload();
 });
 
-test('ST-1006/2: activation lazy: enable ждущего поднимает его один раз, wake после enable не активирует повторно', async () => {
+test('ST-1006/2: потребитель через optional будит ленивого поставщика и получает его контракт при своей активации', async () => {
+  const activated: string[] = [];
+  let seen: unknown;
+  const k = await start(
+    {
+      store: {
+        activate(ctx) {
+          activated.push('store');
+          ctx.contracts.provide('test.tab', '1.0', { kind: 'store' });
+        },
+      },
+      reader: {
+        activate(ctx) {
+          activated.push('reader');
+          seen = ctx.contracts.get('test.tab', 1);
+        },
+      },
+    },
+    {
+      manifests: [
+        manifest('store', { activation: 'lazy', provides: { 'test.tab': ['1.0'] } }),
+        manifest('reader', { optional: { 'test.tab': '^1' } }),
+      ],
+    },
+  );
+  assert.deepEqual(activated, ['store', 'reader']);
+  assert.deepEqual(seen, { kind: 'store' });
+  assert.deepEqual([...k.active].sort(), ['reader', 'store']);
+  await k.unload();
+});
+
+test('activation lazy: enable ждущего поднимает его один раз, wake после enable не активирует повторно', async () => {
   let activated = 0;
   const k = await start(
     {
@@ -261,7 +292,7 @@ test('предел слушателей onIdle: сверх предела ядр
   await k.unload();
 });
 
-test('ST-2004/4: клик по уведомлению, пока хост перезапускается, доходит до команды вернувшегося плагина; падение хоста уведомление не закрывает', async () => {
+test('клик по уведомлению, пока хост перезапускается, доходит до команды вернувшегося плагина; падение хоста уведомление не закрывает', async () => {
   const clicks: NoticeEvents[] = [];
   const ran: unknown[] = [];
   let closed = 0;

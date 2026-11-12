@@ -76,7 +76,7 @@ const first = (s: ReturnType<typeof slow>): AbortSignal => {
   return signal;
 };
 
-test('ST-2001/8: отмена: обработчик получает сигнал, вызывающий - отказ Cancelled, поздний ответ отбрасывается', async () => {
+test('отмена: обработчик получает сигнал, вызывающий - отказ Cancelled, поздний ответ отбрасывается', async () => {
   const [a, b] = pair();
   const s = slow();
   b.handle('work', s.handler);

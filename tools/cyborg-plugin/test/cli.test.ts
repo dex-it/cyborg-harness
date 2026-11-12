@@ -46,7 +46,7 @@ describe('cyborg-plugin check', () => {
     assert.match(r.err.at(-1) ?? '', /Нарушений: 1/);
   });
 
-  it('ошибки манифеста: код 1, каждая строкой manifest.json:<строка>: причина (ST-7002/3)', async () => {
+  it('ST-7002/3: ошибки манифеста: код 1, каждая строкой manifest.json:<строка>: причина', async () => {
     const dir = plugin('export default {};\n');
     const manifest = { version: '1.0.0', engines: { cyborg: '^1' }, bogus: true, ui: { views: { main: './ui/none.js' } } };
     fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));

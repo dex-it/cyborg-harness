@@ -93,7 +93,7 @@ test('transport: пул у каждого плагина свой, а у одн�
   closePools('b');
 });
 
-test('transport: пул без проверки адреса не обслуживает запрос с проверкой к тому же host:port', async () => {
+test('ST-3002/5: transport: пул без проверки адреса не обслуживает запрос с проверкой к тому же host:port', async () => {
   using s = await listen((_request, response) => void response.end('ok'));
   const url = new URL(`http://named.example:${String(s.port)}/x`);
   const toLoopback = ((_h: string, options: { all?: boolean }, cb: (e: null, r: unknown, f?: number) => void) => {

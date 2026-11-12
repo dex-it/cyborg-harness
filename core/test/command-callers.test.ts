@@ -163,7 +163,7 @@ test('ST-3003/3: команда с callers по умолчанию открыт�
   await assert.rejects(s.run('nosy', 'sessions.nope'), { code: 'CommandNotFound' });
 });
 
-test('ST-3003/3: отказ по callers раньше, чем ядро будит спящего исполнителя и сверяет аргументы', async () => {
+test('отказ по callers раньше, чем ядро будит спящего исполнителя и сверяет аргументы', async () => {
   await using s = await setup();
   await assert.rejects(s.run('nosy', 'lazy.go'), { code: 'PermissionDenied' });
   assert.equal(s.k.journal.some((e) => e.pluginId === 'lazy' && e.kind === 'activated'), false, 'спящий не разбужен отказанным');
@@ -176,7 +176,7 @@ test('ST-3003/3: отказ по callers раньше, чем ядро буди�
   assert.equal(await user, 'ok:slow.go');
 });
 
-test('runOwn: чужая команда спящего плагина - отказ раньше пробуждения', async () => {
+test('ST-3003/3: runOwn: чужая команда спящего плагина - отказ раньше пробуждения', async () => {
   await using s = await setup();
   await assert.rejects(s.k.runOwn('nosy', 'lazy.go'), { code: 'PermissionDenied' });
   assert.equal(s.k.journal.some((e) => e.pluginId === 'lazy' && e.kind === 'activated'), false, 'вид чужого плагина не будит спящего');
@@ -253,7 +253,7 @@ test('ST-2002/2: команда в двух манифестах: сторонн
   }
 });
 
-test('ST-2002/2: команда в двух манифестах: встроенный остаётся владельцем и без reservedPrefixes - поставку задаёт bundled', async () => {
+test('команда в двух манифестах: встроенный остаётся владельцем и без reservedPrefixes - поставку задаёт bundled', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'cyborg-callers-'));
   const k = await load({
     apiVersion: PLUGIN_API_VERSION,

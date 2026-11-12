@@ -229,7 +229,27 @@ test('ST-2004/2: слой окна: диалог ask отвечает выбра
   }
 });
 
-test('слой окна: замок прячет остальное окно и показывает экран владельца, снятие замка убирает экран', () => {
+test('ST-3005/3: слой окна: разметка из данных плагина (<img onerror>) в заголовке, тексте, кнопке и окне выведена текстом, а не разметкой', () => {
+  const { document, view, restore } = setup();
+  const markup = '<img src=x onerror=alert(1)>';
+  const nodes = (root: FakeElement): FakeElement[] => root.children.flatMap((c) => (typeof c === 'string' ? [] : [c, ...nodes(c)]));
+  const asHtml = (root: FakeElement) => nodes(root).filter((n) => ['innerHTML', 'outerHTML'].some((p) => Object.hasOwn(n, p)));
+  try {
+    view.sync(snapshot({ dialog: { id: 9, pluginId: 'chat', view: 'main', spec: { kind: 'ask', title: markup, message: markup, buttons: [{ id: 'x', label: markup }] } } }), [], []);
+    const ask = only(document, 'layer-ask');
+    assert.deepEqual(nodes(ask).filter((n) => n.textContent === markup).map((n) => n.tagName), ['H3', 'P', 'BUTTON']);
+    assert.deepEqual(asHtml(ask), [], 'текст плагина ушёл в innerHTML или outerHTML');
+    view.sync(snapshot({ modal: modal({ title: markup }) }), [], layout);
+    const shown = only(document, 'layer-modal');
+    assert.ok(nodes(shown).some((n) => n.tagName === 'H3' && n.textContent === markup));
+    assert.deepEqual(asHtml(shown), []);
+    assert.deepEqual(document.body.all('img'), []);
+  } finally {
+    restore();
+  }
+});
+
+test('ST-2004/3: слой окна: замок прячет остальное окно и показывает экран владельца, снятие замка убирает экран', () => {
   const { document, main, lockLayer, view, restore } = setup();
   try {
     const plugins = [{ id: 'pin', overlay: 'cyborg-plugin://pin/ui/lock.html' }] as unknown as PluginRow[];

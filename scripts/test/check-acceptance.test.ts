@@ -3,23 +3,21 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
-import { collectAcceptance, main, readExceptions, renderMatrix, scanSource } from '../check-acceptance.ts';
-import { acceptanceFiles } from '../test-acceptance.ts';
+import { collectAcceptance, main, parseExceptions, scanTests } from '../check-acceptance.ts';
 
-// #230: связь «критерий -> тест». Деревья-образцы собираются во временном каталоге; вызовы тестов в исходниках-образцах строятся через `call`,
-// чтобы сам этот файл не содержал литералов вида «it('ST-...')», которые скрипт принял бы за разметку.
 const roots: string[] = [];
 after(() => {
   for (const root of roots) fs.rmSync(root, { recursive: true, force: true });
 });
 
-const call = (fn: string, name: string, options = ''): string => `${fn}(${JSON.stringify(name)}${options}, () => {});\n`;
-
 const SRS = '# SRS\n\n### FR-CH-1001 Манифест\n\n- **Требование:** x\n';
-const SCENARIO = '---\nid: UC-PLUGIN-HOST-1001\nfeature: 01-plugin-host\n---\n\n# Сбой\n\n## Основной ход\n\n1. Плагин падает.\n\n## Расширения\n\n- **1а. Завис.** Сторож.\n';
-const CRITERIA = ['1. [FR-CH-1001] [UC-PLUGIN-HOST-1001#1]', '2. [FR-CH-1001] [UC-PLUGIN-HOST-1001#1а]', '3. [целевое поведение] [FR-CH-1001]'].map((c) => `${c}\n   - Дано a\n   - Когда b\n   - Тогда c\n`).join('');
-const STORY = `---\nlevel: story\nid: ST-1001\nfeature: 01-plugin-host\n---\n\n# ST-1001 Сбой остаётся у плагина\n\n## Критерии приёмки\n\n${CRITERIA}`;
-const TABLE = (...rows: string[]): string => `# Исключения\n\n| Критерий | Категория | Причина |\n|---|---|---|\n${rows.join('\n')}\n`;
+const SCENARIO = '---\nid: UC-PLUGIN-HOST-1001\nfeature: 01-plugin-host\n---\n\n# Сбой плагина\n\n## Основной ход\n\n1. Плагин падает.\n';
+const CRITERION = (n: number, extra = ''): string => `${String(n)}. ${extra}[FR-CH-1001] [UC-PLUGIN-HOST-1001#1]\n   - Дано плагин\n   - Когда падает\n   - Тогда окно живо\n`;
+const STORY = `---\nlevel: story\nid: ST-1001\nfeature: 01-plugin-host\n---\n\n# ST-1001 Сбой\n\n## Критерии приёмки\n\n${CRITERION(1)}${CRITERION(2)}${CRITERION(3, '[целевое поведение] ')}`;
+const ACCEPTANCE = 'docs/05-verification/acceptance.md';
+const TEST = 'core/test/loader.test.ts';
+const EXCEPTIONS = (rows: string, parts = ''): string =>
+  `# Приёмка\n\n## Исключения\n\n| Критерий | Причина | Где проверяется |\n|---|---|---|\n${rows}\n## Части вне тестов\n\n| Критерий | Причина | Где проверяется |\n|---|---|---|\n${parts}\n## Дальше\n\n| ST-1001/9 | не исключение | - |\n`;
 
 function tree(files: Record<string, string>): string {
   const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'cyborg-acceptance-'));
@@ -30,7 +28,8 @@ function tree(files: Record<string, string>): string {
     'docs/03-requirements/01-plugin-host/stories/ST-1001-failure.md': STORY,
     'docs/.req_counter/01.ST': '1001\n',
     'docs/.req_counter/01.UC': '1001\n',
-    'docs/05-verification/acceptance.md': TABLE(),
+    [TEST]: "test('ST-1001/1: ловит сбой', () => {});\n",
+    [ACCEPTANCE]: EXCEPTIONS('| ST-1001/2 | окно | `npm run smoke` |\n'),
   };
   for (const [name, text] of Object.entries({ ...base, ...files })) {
     fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true });
@@ -39,156 +38,146 @@ function tree(files: Record<string, string>): string {
   return root;
 }
 
-describe('scanSource: имена тестов с ключом', () => {
-  it('находит ключи в test, it и describe, с кавычками трёх видов и переносом строки после скобки', () => {
-    const text = [call('describe', 'ST-1001/1: группа'), call('it', 'ST-1001/2 и ST-1001/3: два ключа'), "test(\n  `ST-1002/4: шаблон`, () => {});\n", "test('без ключа', () => {});\n"].join('');
-    const refs = scanSource('x.test.ts', text);
+describe('scanTests: ключи в именах тестов', () => {
+  it('берёт ключи из первого аргумента test, it и describe, несколько ключей через запятую', () => {
+    const text = "describe('ST-1001/1: блок', () => {\n  it(\"ST-1001/2, ST-1002/3: тест\", () => {});\n  test(`ST-1003/4 шаблон`, () => {});\n});\n";
     assert.deepEqual(
-      refs.map((r) => [r.kind, r.line, r.keys.join(' ')]),
-      [
-        ['describe', 1, 'ST-1001/1'],
-        ['test', 2, 'ST-1001/2 ST-1001/3'],
-        ['test', 3, 'ST-1002/4'],
-        ['test', 5, ''],
-      ],
+      scanTests(text, 'a.test.ts').map((k) => k.key),
+      ['ST-1001/1', 'ST-1001/2', 'ST-1002/3', 'ST-1003/4'],
     );
   });
 
-  it('skip, todo и параметры skip: true отключают тест; условный skip не отключает; закомментированный вызов не считается', () => {
-    const text = [call('it.skip', 'ST-1001/1: a'), call('test.todo', 'ST-1001/2: b'), call('it', 'ST-1001/3: c', ', { skip: true }'), call('it', 'ST-1001/4: d', ", { skip: process.platform === 'win32' }"), '// ' + call('it', 'ST-1001/5: e')].join('');
+  it('ключ вне имени теста не считается', () => {
+    const text = "// ST-1001/1\nconst x = 'ST-1001/2';\ntest('без ключа', () => { assert.equal(x, 'ST-1001/3'); });\n";
+    assert.deepEqual(scanTests(text, 'a.test.ts'), []);
+  });
+
+  it('закомментированный вызов и метод .test() у выражения (регулярное выражение, KEY.test) тестом не считаются', () => {
+    const text = [
+      "// test('ST-1001/1: закомментирован', () => {});",
+      " * it('ST-1001/2: в блочном комментарии', () => {});",
+      "const ok = /x/.test('ST-1001/3: регулярное выражение');",
+      "KEY.test('ST-1001/4: метод');",
+      "test('ST-1001/5: настоящий', () => {});",
+    ].join('\n');
     assert.deepEqual(
-      scanSource('x.test.ts', text).map((r) => [r.keys.join(), r.disabled]),
-      [
-        ['ST-1001/1', true],
-        ['ST-1001/2', true],
-        ['ST-1001/3', true],
-        ['ST-1001/4', false],
-      ],
+      scanTests(text, 'a.test.ts').map((k) => k.key),
+      ['ST-1001/5'],
     );
   });
 
-  it('ключ в строке-аргументе, а не в имени вызова, не считается', () => {
-    assert.deepEqual(scanSource('x.test.ts', "assert.equal(problems[0], 'ST-1001/2: метка');\n").length, 0);
+  it('skip и todo в параметрах теста помечают его пропущенным; условный skip - нет', () => {
+    const text = [
+      "test('ST-1001/1: a', { skip: true }, () => {});",
+      "it('ST-1001/2: b', { todo: 'позже' }, () => {});",
+      "it('ST-1001/3: c', { skip: process.platform === 'win32' }, () => {});",
+      "test('ST-1001/4: d', { timeout: 5 }, () => {});",
+    ].join('\n');
+    assert.deepEqual(
+      scanTests(text, 'a.test.ts').map((k) => k.skipped),
+      [true, true, false, false],
+    );
+  });
+
+  it('ключ на .skip и .todo помечен пропущенным, на .only - нет', () => {
+    const text = "test.skip('ST-1001/1: a', () => {});\nit.todo('ST-1001/2: b');\ntest.only('ST-1001/3: c', () => {});\n";
+    assert.deepEqual(
+      scanTests(text, 'a.test.ts').map((k) => k.skipped),
+      [true, true, false],
+    );
   });
 });
 
-describe('readExceptions: таблица исключений', () => {
-  it('читает строки, пропускает пояснения, ловит неизвестную категорию, короткую причину и повтор', () => {
-    const { rows, problems } = readExceptions(
-      TABLE('| ST-1001/1 | окно | Окно вне охвата, смотреть smoke |', '| ST-1001/2 | ручная, дефект #?  | Ядро не снимает подписку при выходе |', '| ST-1001/1 | окно | Окно вне охвата, второй раз |', '| ST-1001/3 | прочее | Причина достаточно длинная |', '| ST-1001/4 | окно | мало |'),
-    );
+describe('parseExceptions: таблица исключений', () => {
+  it('читает только раздел «Исключения», несколько ключей в ячейке', () => {
+    const parsed = parseExceptions(EXCEPTIONS('| ST-1001/1, ST-1001/2 | этап 2 | SAD §9 |\n'));
     assert.deepEqual(
-      rows.map((r) => r.key),
-      ['ST-1001/1', 'ST-1001/2', 'ST-1001/1', 'ST-1001/3', 'ST-1001/4'],
+      parsed.items.map((e) => [e.key, e.reason, e.where]),
+      [
+        ['ST-1001/1', 'этап 2', 'SAD §9'],
+        ['ST-1001/2', 'этап 2', 'SAD §9'],
+      ],
     );
-    assert.equal(problems.length, 3);
-    assert.match(problems.join('\n'), /повторяет строку 5/);
-    assert.match(problems.join('\n'), /неизвестная категория «прочее»/);
-    assert.match(problems.join('\n'), /короче 10 знаков/);
+    assert.deepEqual(parsed.problems, []);
   });
 
-  it('строка с ключом не того вида - находка, а не молчаливый пропуск', () => {
-    assert.match(readExceptions(TABLE('| ST-1001 | окно | причина причина |')).problems.join(), /не вида/);
+  it('причина не из списка, пустое «где» и строка без ключа - находки', () => {
+    const parsed = parseExceptions(EXCEPTIONS('| ST-1001/1 | лень | x |\n| ST-1001/2 | окно |  |\n| ST-1001 | окно | x |\n'));
+    assert.equal(parsed.problems.length, 3);
+    assert.match(parsed.problems[0] ?? '', /причина «лень» не из списка/);
+    assert.match(parsed.problems[1] ?? '', /не сказано, где проверяется/);
+    assert.match(parsed.problems[2] ?? '', /без ключа/);
   });
 });
 
-describe('collectAcceptance: исходы критериев', () => {
-  const test1 = { 'core/test/a.test.ts': call('it', 'ST-1001/1: первый') };
-
-  it('тест с ключом или исключение закрывают критерий, целевое поведение не требует ничего', () => {
-    const root = tree({ ...test1, 'docs/05-verification/acceptance.md': TABLE('| ST-1001/2 | окно | Окно вне охвата, смотреть smoke |') });
-    const report = collectAcceptance(root);
+describe('collectAcceptance: находки', () => {
+  it('тест, исключение и целевое поведение закрывают все критерии', () => {
+    const report = collectAcceptance(tree({}));
     assert.deepEqual(report.problems, []);
-    assert.deepEqual(
-      report.rows.map((r) => r.outcome),
-      ['тест', 'исключение', 'целевое поведение'],
-    );
+    assert.deepEqual([...report.tests.keys()], ['ST-1001/1']);
+    assert.deepEqual([...report.exceptions.keys()], ['ST-1001/2']);
   });
 
-  it('критерий без теста и исключения - находка', () => {
-    assert.deepEqual(collectAcceptance(tree({})).problems, [
-      'ST-1001/1: нет теста с ключом в имени и нет исключения в docs/05-verification/acceptance.md',
-      'ST-1001/2: нет теста с ключом в имени и нет исключения в docs/05-verification/acceptance.md',
-    ]);
+  it('критерий без теста и исключения - находка с ключом', () => {
+    const report = collectAcceptance(tree({ [TEST]: "test('без ключа', () => {});\n" }));
+    assert.deepEqual(report.problems, [`ST-1001/1: нет ни теста с ключом в имени, ни исключения в ${ACCEPTANCE}`]);
   });
 
-  it('и тест, и исключение у одного критерия - находка', () => {
-    const root = tree({ ...test1, 'core/test/b.test.ts': call('it', 'ST-1001/2: второй'), 'docs/05-verification/acceptance.md': TABLE('| ST-1001/1 | окно | Окно вне охвата, смотреть smoke |') });
-    assert.match(collectAcceptance(root).problems.join('\n'), /ST-1001\/1: и тест с ключом \(core\/test\/a\.test\.ts\), и исключение/);
+  it('висячий ключ в тесте и в исключении - находки', () => {
+    const report = collectAcceptance(tree({ [TEST]: "test('ST-1001/1, ST-1001/99: x', () => {});\n", [ACCEPTANCE]: EXCEPTIONS('| ST-1001/2 | окно | smoke |\n| ST-2001/1 | окно | smoke |\n') }));
+    assert.deepEqual(report.problems, [`${TEST}: ключ ST-1001/99 - такого критерия нет`, `${ACCEPTANCE}: Исключения: ST-2001/1 - такого критерия нет`]);
   });
 
-  it('ключ несуществующего критерия, отключённый тест, исключение для целевого поведения и для несуществующего критерия - находки', () => {
-    const root = tree({
-      'core/test/a.test.ts': call('it', 'ST-1001/1: первый') + call('it', 'ST-1001/2: второй', ', { skip: true }') + call('it', 'ST-1001/9: нет такого') + call('it', 'ST-1001/3: целевое'),
-      'docs/05-verification/acceptance.md': TABLE('| ST-1001/2 | окно | Окно вне охвата, смотреть smoke |', '| ST-1001/3 | окно | Окно вне охвата, смотреть smoke |', '| ST-1001/8 | окно | Окно вне охвата, смотреть smoke |'),
-    });
-    const text = collectAcceptance(root).problems.join('\n');
-    assert.match(text, /core\/test\/a\.test\.ts:3: ключ ST-1001\/9 указывает на несуществующий критерий/);
-    assert.match(text, /a\.test\.ts:2: тест с ключом ST-1001\/2 отключён/);
-    assert.match(text, /ST-1001\/3: критерий на целевое поведение с тестом/);
-    assert.match(text, /acceptance\.md:6: ST-1001\/3: исключение для критерия на целевое поведение не нужно/);
-    assert.match(text, /acceptance\.md:7: ST-1001\/8: исключение указывает на несуществующий критерий/);
+  it('тест и исключение на одном критерии - находка', () => {
+    const report = collectAcceptance(tree({ [TEST]: "test('ST-1001/1, ST-1001/2: x', () => {});\n" }));
+    assert.deepEqual(report.problems, ['ST-1001/2: есть и тест, и исключение - оставьте одно']);
   });
 
-  it('ключ в describe критерий не закрывает: засчитываются только test и it', () => {
-    const root = tree({ 'core/test/a.test.ts': call('describe', 'ST-1001/1: группа') + call('it', 'ST-1001/2: второй') });
-    assert.deepEqual(collectAcceptance(root).problems, ['ST-1001/1: нет теста с ключом в имени и нет исключения в docs/05-verification/acceptance.md']);
+  it('проверка на критерии целевого поведения - находка', () => {
+    const report = collectAcceptance(tree({ [TEST]: "test('ST-1001/1, ST-1001/3: x', () => {});\n" }));
+    assert.match(report.problems.join('\n'), /ST-1001\/3: критерий помечен \[целевое поведение\]/);
   });
 
-  it('node_modules, dist и docs обход не заходит', () => {
-    const root = tree({ ...test1, 'node_modules/x/a.test.ts': call('it', 'ST-9999/1: чужой'), 'core/dist/a.test.ts': call('it', 'ST-9999/2: сборка'), 'docs/a.test.ts': call('it', 'ST-9999/3: документ'), 'docs/05-verification/acceptance.md': TABLE('| ST-1001/2 | окно | Окно вне охвата, смотреть smoke |') });
-    assert.deepEqual(collectAcceptance(root).problems, []);
+  it('часть вне тестов требует теста с ключом и попадает в матрицу рядом с ним', () => {
+    const ok = tree({ [ACCEPTANCE]: EXCEPTIONS('| ST-1001/2 | окно | smoke |\n', '| ST-1001/1 | замер | `npm run spike:hosts` |\n') });
+    assert.deepEqual(collectAcceptance(ok).problems, []);
+    assert.equal(main(['--write'], ok).code, 0);
+    assert.match(fs.readFileSync(path.join(ok, 'docs/05-verification/acceptance-coverage.md'), 'utf8'), /\| ST-1001\/1 \| `core\/test\/loader\.test\.ts`; часть - замер: `npm run spike:hosts` \|/);
+    const bad = collectAcceptance(tree({ [ACCEPTANCE]: EXCEPTIONS('| ST-1001/2 | окно | smoke |\n', '| ST-1001/2 | окно | smoke |\n') }));
+    assert.deepEqual(bad.problems, ['ST-1001/2: часть вне тестов записана, а теста с ключом нет - запишите критерий в «Исключения»']);
+  });
+
+  it('ключ на пропущенном тесте не закрывает критерий', () => {
+    const report = collectAcceptance(tree({ [TEST]: "test.skip('ST-1001/1: x', () => {});\n" }));
+    assert.deepEqual(report.problems, [`${TEST}: ключ ST-1001/1 стоит на пропущенном тесте (.skip или .todo)`, `ST-1001/1: нет ни теста с ключом в имени, ни исключения в ${ACCEPTANCE}`]);
+  });
+
+  it('тесты в node_modules, dist и fixtures не читаются', () => {
+    const report = collectAcceptance(tree({ 'core/test/fixtures/x.test.ts': "test('ST-1001/99: x', () => {});\n", 'tools/cyborg-plugin/node_modules/y.test.ts': "test('ST-1001/99: y', () => {});\n" }));
+    assert.deepEqual(report.problems, []);
   });
 });
 
-describe('main: таблица покрытия и код выхода', () => {
-  const closed = { 'core/test/a.test.ts': call('it', 'ST-1001/1: первый') + call('it', 'ST-1001/1: ещё раз'), 'docs/05-verification/acceptance.md': TABLE('| ST-1001/2 | ручная, дефект #?  | Ядро не снимает подписку при выходе |') };
-
-  it('без таблицы - код 1 с подсказкой; --write пишет её, затем проверка зелёная и называет исходы', () => {
-    const root = tree(closed);
+describe('main: матрица приёмки', () => {
+  it('--write собирает матрицу, проверка без флага сверяет её и падает на расхождении', () => {
+    const root = tree({});
+    const matrix = path.join(root, 'docs/05-verification/acceptance-coverage.md');
     assert.equal(main([], root).code, 1);
-    assert.match(main([], root).err, /acceptance-coverage\.md расходится/);
     assert.equal(main(['--write'], root).code, 0);
-    const result = main([], root);
-    assert.equal(result.code, 0);
-    assert.match(result.out, /критериев 3: тест 1, исключение 1, целевое поведение 1; дефектов без номера задачи: 1/);
-    const matrix = fs.readFileSync(path.join(root, 'docs/05-verification/acceptance-coverage.md'), 'utf8');
-    assert.match(matrix, /^---\nlevel: coverage/);
-    assert.match(matrix, /Итог: историй 1, критериев 3: тест 1 \(тестов с ключом 2\), исключение 1, целевое поведение 1\./);
-    assert.match(matrix, /\| ST-1001\/1 \| тест \| core\/test\/a\.test\.ts \(2\) \|/);
-    assert.match(matrix, /\| ST-1001\/2 \| исключение \| ручная, дефект #\? \|/);
-    assert.match(matrix, /Исключения по категориям: ручная, дефект 1\./);
-  });
-
-  it('новая правка теста делает таблицу устаревшей; дата в шапке в сверке не участвует', () => {
-    const root = tree(closed);
-    main(['--write'], root);
-    const file = path.join(root, 'docs/05-verification/acceptance-coverage.md');
-    fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('date: 2026-11-12', 'date: 2030-01-01'));
+    const text = fs.readFileSync(matrix, 'utf8');
+    assert.match(text, /^---\nlevel: verification\n/);
+    assert.match(text, /\| ST-1001\/1 \| `core\/test\/loader\.test\.ts` \|/);
+    assert.match(text, /\| ST-1001\/2 \| окно: `npm run smoke` \|/);
+    assert.match(text, /\| ST-1001\/3 \| целевое поведение \|/);
     assert.equal(main([], root).code, 0);
-    fs.writeFileSync(path.join(root, 'core/test/c.test.ts'), call('it', 'ST-1001/1: третий'));
-    assert.equal(main([], root).code, 1);
+    fs.writeFileSync(matrix, text.replace('ST-1001/3 | целевое', 'ST-1001/3 | руками'));
+    assert.match(main([], root).err, /расходится с собранной матрицей/);
   });
 
-  it('находки печатаются списком, таблица при этом не проверяется', () => {
-    const result = main([], tree({}));
+  it('при находках матрица не пишется', () => {
+    const root = tree({ [TEST]: "test('x', () => {});\n" });
+    const result = main(['--write'], root);
     assert.equal(result.code, 1);
-    assert.match(result.err, /^находок: 2\n/);
-  });
-
-  it('renderMatrix без исходов «нет» не пишет «без исхода»', () => {
-    assert.doesNotMatch(renderMatrix(collectAcceptance(tree(closed))), /без исхода/);
-  });
-});
-
-describe('acceptanceFiles: файлы для test:acceptance', () => {
-  it('только файлы с включёнными тестами с ключом, без повторов; describe, skip и тесты без ключа файл не называют', () => {
-    const root = tree({
-      'core/test/a.test.ts': call('it', 'ST-1001/1: первый') + call('it', 'ST-1001/1: второй'),
-      'core/test/b.test.ts': call('describe', 'ST-1001/2: группа'),
-      'core/test/c.test.ts': call('it', 'ST-1001/2: отключён', ', { skip: true }'),
-      'core/test/d.test.ts': call('it', 'без ключа'),
-    });
-    assert.deepEqual(acceptanceFiles(root), ['core/test/a.test.ts']);
+    assert.equal(fs.existsSync(path.join(root, 'docs/05-verification/acceptance-coverage.md')), false);
   });
 });

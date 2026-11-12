@@ -240,7 +240,7 @@ function exportsOf(entry: PublicEntry): Exported {
 const sorted = (names: readonly string[]) => [...names].sort();
 
 describe('публичный API ядра: точки входа', () => {
-  it('ST-6001/2: точки входа package.json совпадают с перечнем, а цели - с исходниками входов', () => {
+  it('точки входа package.json совпадают с перечнем, а цели - с исходниками входов', () => {
     const declared = Object.keys(manifest.exports).filter((k) => k !== './package.json');
     assert.deepEqual(sorted(declared), sorted(Object.keys(ENTRIES)));
     for (const [name, entry] of Object.entries(ENTRIES)) {
@@ -257,7 +257,7 @@ describe('публичный API ядра: точки входа', () => {
     });
   }
 
-  it('ST-6001/2: входы написаны явными именованными экспортами: `export *` во входе запрещён', () => {
+  it('входы написаны явными именованными экспортами: `export *` во входе запрещён', () => {
     for (const [name, entry] of Object.entries(ENTRIES)) {
       const file = path.join(core, entry.source);
       const source = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
@@ -443,11 +443,34 @@ describe('публичный API ядра: потребители в репоз�
     });
   }
 
-  it('ST-6001/1: playground и адаптер Electron берут ядро только через точки входа пакета и только их именами', () => {
+  it('ST-6001/1, ST-6001/2: playground и адаптер Electron берут ядро только через точки входа пакета и только их именами', () => {
     const all = ['playground', 'electron'].flatMap((dir) => files(path.join(root, dir)));
     assert.ok(all.length > 70, `файлов playground и electron: ${all.length}`);
     const bad = all.flatMap((f) => (path.relative(root, f) in INTERNAL ? [] : boundaryViolations(f, fs.readFileSync(f, 'utf8'), path.relative(root, f))));
     assert.deepEqual(bad, []);
+  });
+
+  it('ST-6001/1: копий файлов ядра и адаптера в приложении, шаблоне автора и адаптере нет', () => {
+    const text = (f: string) => fs.readFileSync(f, 'utf8').trim();
+    const originals = new Map<string, string>();
+    for (const dir of ['core/src', 'core/elements', 'electron/src']) for (const f of files(path.join(root, dir))) originals.set(text(f), path.relative(root, f));
+    assert.ok(originals.size > 100, `исходников ядра и адаптера: ${String(originals.size)}`);
+    const copies = ['playground', 'templates', 'electron/src'].flatMap((dir) =>
+      files(path.join(root, dir)).flatMap((f) => {
+        const rel = path.relative(root, f);
+        const original = originals.get(text(f));
+        return original !== undefined && original !== rel ? [`${rel} = ${original}`] : [];
+      }),
+    );
+    assert.deepEqual(copies, []);
+  });
+
+  it('ST-6001/2: обход exports не проходит: глубокий путь в пакет ядра Node не разрешает, каждая точка входа разрешается', () => {
+    const exports = (JSON.parse(fs.readFileSync(path.join(core, 'package.json'), 'utf8')) as { exports: Record<string, unknown> }).exports;
+    for (const entry of Object.keys(exports)) assert.ok(import.meta.resolve(`@cyborg-harness/core${entry.slice(1)}`), entry);
+    for (const deep of ['dist/src/loader.js', 'dist/src/kernel-context.js', 'src/loader.ts', 'dist/elements/elements.js']) {
+      assert.throws(() => import.meta.resolve(`@cyborg-harness/core/${deep}`), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' }, deep);
+    }
   });
 
   it('исключения из границы живы: файл на месте и по-прежнему лезет вглубь ядра', () => {

@@ -166,7 +166,7 @@ async function kernelWithPty(plugins: Record<string, (ctx: PluginContext) => voi
   return { k, backend, handles, [Symbol.asyncDispose]: async () => { await k.unload(); await rm(root, { recursive: true, force: true }); } };
 }
 
-test('ST-1008/1: stress-pty: вывод идёт без остановки, хост падает и возвращается - attach отдаёт хвост без дыр и повторов, поток продолжается', async () => {
+test('stress-pty: вывод идёт без остановки, хост падает и возвращается - attach отдаёт хвост без дыр и повторов, поток продолжается', async () => {
   let ctx!: PluginContext;
   await using s = await kernelWithPty({ term: (c) => void (ctx = c) });
   const h0 = await ctx.os.pty!.spawn({ program: 'sh', args: [], cols: 80, rows: 24, persist: true });
@@ -245,7 +245,7 @@ test('PL-01: окно перезагружено под потоком - нов�
   await t.releaseAll();
 });
 
-test('ST-1008/1: PL-01: хост плагина упал и окно перезагружено при живом pty - attach и новый вид получают хвост без дыр и повторов, поток идёт дальше', async () => {
+test('PL-01: хост плагина упал и окно перезагружено при живом pty - attach и новый вид получают хвост без дыр и повторов, поток идёт дальше', async () => {
   let ctx!: PluginContext;
   await using s = await kernelWithPty({ term: (c) => void (ctx = c) });
   const h0 = await ctx.os.pty!.spawn({ program: 'sh', args: [], cols: 80, rows: 24, persist: true });
@@ -325,8 +325,21 @@ test('ST-1008/2: сирота: pty с persist без attach завершаетс
   assert.equal(table.list('back').length, 1);
   assert.equal(backend.procs[3]!.killed, undefined, 'оставленный человеком ждёт без срока');
   assert.deepEqual(table.list('gone'), [], 'запись завершившегося сироты убрана сроком');
+
+  const byDefault = new PtyTable(inlinePtyHost(backend), () => undefined, { expired: (e) => void expired.push(e) });
+  const orphan = await byDefault.spawn('late', { ...spawnOpts, program: 'late' });
+  byDefault.detach('late');
+  await settle();
+  t.mock.timers.tick(59_999);
+  await settle();
+  assert.equal(backend.procs[5]!.killed, undefined, 'срок по умолчанию короче 60 с');
+  t.mock.timers.tick(1);
+  await settle();
+  assert.equal(backend.procs[5]!.killed, 'SIGHUP', 'срок по умолчанию длиннее 60 с');
+  assert.deepEqual(expired.at(-1), { pluginId: 'late', id: orphan.id, program: 'late', graceMs: 60_000 });
   t.mock.timers.reset();
   await table.releaseAll();
+  await byDefault.releaseAll();
 });
 
 test('ST-1008/3: оставленный: release и detach его не трогают; claim вернувшегося плагина даёт срок на attach; endKept - только оставленным', async (t) => {

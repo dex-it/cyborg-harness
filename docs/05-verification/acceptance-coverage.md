@@ -1,457 +1,263 @@
 ---
-level: coverage
+level: verification
 status: review
 date: 2026-11-12
 origin: derived
 ---
 
-# Покрытие критериев приёмки проверками
-
-Таблица собрана из критериев историй, имён тестов и `acceptance.md` командой `npm run check:acceptance -- --write`; руками не правится. `npm run check:acceptance` падает, если у критерия нет ни теста с ключом `ST-NNNN/k` в имени, ни исключения в [acceptance.md](acceptance.md), если есть и то и другое, если ключ указывает на несуществующий критерий или эта таблица расходится с собранной. Исход критерия: «тест» - в имени хотя бы одного включённого теста ключ критерия (запуск - `npm run test:acceptance`); «исключение» - категория из [acceptance.md](acceptance.md); «целевое поведение» - критерий на то, чего ещё нет, проверки не требует. В ячейке «Проверка» путь файла и число тестов с ключом.
-
-Итог: историй 39, критериев 248: тест 212 (тестов с ключом 535), исключение 14, целевое поведение 22.
-
-Исключения по категориям: документы 3, замеры 2, инструменты автора 1, окно 3, ручная 3, ручная, дефект 2.
-
-## ST-1001 Манифест и обнаружение: плагин с ошибками не запускается, остальные работают
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-1001/1 | тест | core/test/loader.test.ts (2), core/test/semver-manifest.test.ts (1) |
-| ST-1001/2 | тест | core/test/window.test.ts (1) |
-| ST-1001/3 | тест | core/test/manifest-schema.test.ts (1), core/test/plugin-template.test.ts (1) |
-| ST-1001/4 | тест | electron/test/plugins.test.ts (2) |
-| ST-1001/5 | тест | core/test/graph.test.ts (1), electron/test/plugins.test.ts (2) |
-| ST-1001/6 | тест | electron/test/plugins.test.ts (2) |
-| ST-1001/7 | тест | core/test/loader.test.ts (3), electron/test/plugins.test.ts (1), playground/test/plugins-model.test.ts (1) |
-| ST-1001/8 | тест | core/test/status.test.ts (1) |
-| ST-1001/9 | тест | core/test/loader.test.ts (1), core/test/manifest-schema.test.ts (1) |
-| ST-1001/10 | тест | core/test/loader.test.ts (1) |
-| ST-1001/11 | тест | electron/test/plugins.test.ts (1) |
-
-## ST-1002 Граф контрактов разрешается до запуска кода
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-1002/1 | тест | core/test/loader.test.ts (1) |
-| ST-1002/2 | тест | core/test/graph.test.ts (4) |
-| ST-1002/3 | тест | core/test/graph.test.ts (1) |
-| ST-1002/4 | тест | core/test/graph.test.ts (3) |
-| ST-1002/5 | тест | core/test/graph.test.ts (1) |
-| ST-1002/6 | тест | core/test/graph.test.ts (3) |
-| ST-1002/7 | тест | core/test/graph.test.ts (1), core/test/loader.test.ts (1) |
-
-## ST-1003 Сбой плагина остаётся у плагина: хосты и сторож
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-1003/1 | тест | core/test/external-plugins.test.ts (1), core/test/loader.test.ts (2) |
-| ST-1003/2 | тест | core/test/loader.test.ts (1), electron/test/plugins.test.ts (1) |
-| ST-1003/3 | тест | core/test/hosts.test.ts (1), core/test/stress-lifecycle.test.ts (1), core/test/watchdog-stall.test.ts (1) |
-| ST-1003/4 | тест | core/test/hosts.test.ts (1), core/test/stress-lifecycle.test.ts (1) |
-| ST-1003/5 | тест | core/test/hosts.test.ts (3) |
-| ST-1003/6 | тест | core/test/hosts.test.ts (3) |
-| ST-1003/7 | тест | core/test/loader.test.ts (1), core/test/stress-hosts.test.ts (1) |
-| ST-1003/8 | тест | core/test/ui-shell.test.ts (1) |
-
-## ST-1004 Человек видит причину сбоя и включает плагин снова
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-1004/1 | тест | core/test/loader.test.ts (2) |
-| ST-1004/2 | тест | core/test/loader.test.ts (1) |
-| ST-1004/3 | тест | core/test/loader.test.ts (1), core/test/stress-lifecycle.test.ts (1) |
-| ST-1004/4 | тест | core/test/loader.test.ts (1) |
-
-## ST-1005 Выгрузка и откат регистраций без перезапуска окна
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-1005/1 | тест | core/test/loader.test.ts (1), core/test/os-lifetime.test.ts (2), core/test/os.test.ts (1), core/test/serve.test.ts (1), core/test/stress-lifecycle.test.ts (1), core/test/window.test.ts (1) |
-| ST-1005/2 | тест | core/test/subscriptions.test.ts (3) |
-| ST-1005/3 | тест | core/test/lifecycle.test.ts (1), core/test/stress-lifecycle.test.ts (1) |
-| ST-1005/4 | тест | core/test/lifecycle.test.ts (1) |
-| ST-1005/5 | тест | core/test/lifecycle.test.ts (1), core/test/stress-lifecycle.test.ts (1) |
-| ST-1005/6 | тест | electron/test/plugins.test.ts (1) |
-
-## ST-1006 Ленивая активация и бюджет накладных расходов
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-1006/1 | тест | core/test/events.test.ts (1) |
-| ST-1006/2 | тест | core/test/events.test.ts (2) |
-| ST-1006/3 | тест | core/test/events.test.ts (1) |
-| ST-1006/4 | тест | core/test/loader.test.ts (1), core/test/window.test.ts (1) |
-| ST-1006/5 | исключение | замеры |
-| ST-1006/6 | целевое поведение |  |
-
-## ST-1007 Воркспейс как главная сессия: замок, «Недавние», битый файл
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-1007/1 | тест | core/test/instance.test.ts (3), core/test/stress-workspace.test.ts (1), core/test/workspace.test.ts (1) |
-| ST-1007/2 | тест | core/test/instance.test.ts (1), electron/test/instances.test.ts (1) |
-| ST-1007/3 | тест | core/test/config.test.ts (1), core/test/workspace.test.ts (2) |
-| ST-1007/4 | тест | core/test/stress-workspace.test.ts (1), core/test/workspace.test.ts (1) |
-| ST-1007/5 | тест | core/test/workspace.test.ts (2) |
-| ST-1007/6 | тест | core/test/stress-workspace.test.ts (1), core/test/workspace.test.ts (1) |
-| ST-1007/7 | исключение | окно |
-| ST-1007/8 | тест | core/test/loader.test.ts (1), core/test/workspace.test.ts (1) |
-| ST-1007/9 | тест | core/test/os.test.ts (1) |
-
-## ST-1008 Терминальные процессы переживают сбои хостов
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-1008/1 | тест | core/test/pty.test.ts (1), core/test/stress-pty.test.ts (2) |
-| ST-1008/2 | тест | core/test/pty.test.ts (1), core/test/stress-pty.test.ts (1) |
-| ST-1008/3 | тест | core/test/pty.test.ts (2), core/test/stress-pty.test.ts (1) |
-| ST-1008/4 | тест | core/test/pty.test.ts (1) |
-| ST-1008/5 | тест | core/test/pty-host.test.ts (2) |
-| ST-1008/6 | тест | core/test/pty.test.ts (1), core/test/stress-pty.test.ts (2) |
-
-## ST-1009 Ядро остаётся компактным: функция добавляется плагином
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-1009/1 | тест | core/test/purity.test.ts (2) |
-| ST-1009/2 | исключение | ручная |
-
-## ST-2001 Плагины связываются контрактами по объявлению, без общей шины
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-2001/1 | тест | core/test/loader.test.ts (1), core/test/registry.test.ts (1) |
-| ST-2001/2 | тест | core/test/registry.test.ts (1), core/test/trust.test.ts (1) |
-| ST-2001/3 | тест | core/test/registry.test.ts (2) |
-| ST-2001/4 | тест | core/test/trust.test.ts (1) |
-| ST-2001/5 | тест | core/test/loader.test.ts (1), core/test/rpc.test.ts (1) |
-| ST-2001/6 | тест | core/test/subscriptions.test.ts (4), core/test/trust.test.ts (1) |
-| ST-2001/7 | тест | core/test/events.test.ts (2) |
-| ST-2001/8 | тест | core/test/loader.test.ts (1), core/test/rpc.test.ts (1) |
-| ST-2001/9 | тест | core/test/channel.test.ts (1), core/test/window.test.ts (1) |
-| ST-2001/10 | тест | core/test/documents.test.ts (1), playground/test/session-notifications.test.ts (1) |
-
-## ST-2002 Команды, сочетания клавиш и пункты меню объявляются плагином
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-2002/1 | тест | core/test/loader.test.ts (1), core/test/trust.test.ts (2) |
-| ST-2002/2 | тест | core/test/command-callers.test.ts (2), core/test/graph.test.ts (1) |
-| ST-2002/3 | тест | core/test/lifecycle.test.ts (1), electron/test/key-route.test.ts (1) |
-| ST-2002/4 | тест | core/test/lifecycle.test.ts (2), core/test/workspace.test.ts (1) |
-| ST-2002/5 | тест | core/test/keys-registry.test.ts (6) |
-| ST-2002/6 | тест | core/test/loader.test.ts (3) |
-
-## ST-2003 Виды и документы плагина: области, порядок, заглушка при сбое
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-2003/1 | тест | core/test/loader.test.ts (3) |
-| ST-2003/2 | тест | electron/test/view-files.test.ts (3) |
-| ST-2003/3 | тест | electron/test/view-frames.test.ts (3) |
-| ST-2003/4 | исключение | окно |
-| ST-2003/5 | тест | core/test/loader.test.ts (1), playground/test/pilot-shell.test.ts (1), playground/test/plugins-model.test.ts (1) |
-| ST-2003/6 | тест | core/test/documents.test.ts (1) |
-| ST-2003/7 | целевое поведение |  |
-| ST-2003/8 | тест | core/test/semver-manifest.test.ts (1) |
-
-## ST-2004 Слой окна: диалоги, замок, уведомления
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-2004/1 | тест | core/test/window.test.ts (2) |
-| ST-2004/2 | тест | core/test/window.test.ts (2), electron/test/window-layer.test.ts (1) |
-| ST-2004/3 | тест | core/test/window.test.ts (4) |
-| ST-2004/4 | тест | core/test/events.test.ts (1), core/test/os.test.ts (1), core/test/window.test.ts (1) |
-| ST-2004/5 | тест | core/test/loader.test.ts (1), core/test/semver-manifest.test.ts (1) |
-
-## ST-2005 Всё, что рисует ядро, доступно с клавиатуры и дикторам
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-2005/1 | исключение | окно |
-| ST-2005/2 | тест | core/test/window.test.ts (2) |
-| ST-2005/3 | целевое поведение |  |
-| ST-2005/4 | целевое поведение |  |
-
-## ST-2006 Второй агент подключается плагином без правки ядра
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-2006/1 | тест | playground/test/agents.test.ts (1), testing/test/agent-suite.test.ts (1) |
-| ST-2006/2 | тест | core/test/pty.test.ts (1), testing/test/agent-suite.test.ts (1) |
-| ST-2006/3 | тест | playground/test/agents.test.ts (1) |
-| ST-2006/4 | тест | playground/test/agents.test.ts (1) |
-| ST-2006/5 | тест | playground/test/agents.test.ts (1) |
-| ST-2006/6 | тест | core/test/pty.test.ts (1), playground/test/agents.test.ts (1), playground/test/session-notifications.test.ts (1) |
-| ST-2006/7 | тест | playground/test/agents.test.ts (1) |
-| ST-2006/8 | тест | testing/test/agent-suite.test.ts (1) |
-| ST-2006/9 | тест | playground/test/agents.test.ts (1) |
-| ST-2006/10 | тест | playground/test/agents.test.ts (1) |
-| ST-2006/11 | тест | playground/test/agents.test.ts (1) |
-| ST-2006/12 | тест | playground/test/agents.test.ts (2) |
-| ST-2006/13 | тест | playground/test/agents.test.ts (3) |
-| ST-2006/14 | тест | playground/test/agents.test.ts (1) |
-
-## ST-2007 Ядро не называет плагины по именам
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-2007/1 | тест | core/test/purity.test.ts (1) |
-| ST-2007/2 | тест | core/test/plugin-imports.test.ts (2) |
-
-## ST-3001 Права плагина проверяет шлюз ctx.os, у каждого отказа есть запись
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-3001/1 | исключение | ручная, дефект #? |
-| ST-3001/2 | тест | core/test/os.test.ts (3), core/test/security-gateway.test.ts (1) |
-| ST-3001/3 | тест | core/test/os.test.ts (3) |
-| ST-3001/4 | тест | core/test/os.test.ts (2) |
-| ST-3001/5 | тест | core/test/os.test.ts (2) |
-| ST-3001/6 | тест | core/test/os.test.ts (1) |
-| ST-3001/7 | тест | core/test/os.test.ts (2) |
-| ST-3001/8 | тест | core/test/os.test.ts (2), core/test/plugin-check.test.ts (1) |
-| ST-3001/9 | тест | core/test/plugin-check.test.ts (1), core/test/trust.test.ts (1), core/test/workspace-trust.test.ts (1) |
-| ST-3001/10 | целевое поведение |  |
-
-## ST-3002 Программы, сеть, открытие в системе и локальный сервер под правами
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-3002/1 | тест | core/test/os.test.ts (2) |
-| ST-3002/2 | тест | core/test/os-lifetime.test.ts (1), core/test/os.test.ts (6), core/test/security-gateway.test.ts (1), playground/test/pilot-git.test.ts (1) |
-| ST-3002/3 | тест | core/test/os.test.ts (2), core/test/workspace-trust.test.ts (4) |
-| ST-3002/4 | тест | core/test/net-fetch.test.ts (2), core/test/os.test.ts (1) |
-| ST-3002/5 | тест | core/test/net-fetch.test.ts (6) |
-| ST-3002/6 | тест | core/test/serve.test.ts (4) |
-| ST-3002/7 | тест | core/test/os-lifetime.test.ts (4), core/test/os.test.ts (4) |
-
-## ST-3003 Права не передаются через чужие контракты и команды
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-3003/1 | тест | core/test/via-contract.test.ts (2) |
-| ST-3003/2 | целевое поведение |  |
-| ST-3003/3 | тест | core/test/command-callers.test.ts (3) |
-| ST-3003/4 | тест | core/test/command-callers.test.ts (1) |
-| ST-3003/5 | тест | core/test/graph.test.ts (2), core/test/loader.test.ts (1) |
-
-## ST-3004 Секреты не утекают, удаление плагина стирает его данные
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-3004/1 | тест | core/test/os.test.ts (1) |
-| ST-3004/2 | тест | core/test/os.test.ts (1) |
-| ST-3004/3 | тест | core/test/diagnostics.test.ts (2), core/test/plugin-log.test.ts (1), core/test/secrets-journal.test.ts (1), playground/test/pilot-trackers-http.test.ts (1) |
-| ST-3004/4 | тест | core/test/uninstall.test.ts (2) |
-| ST-3004/5 | тест | core/test/plugin-log.test.ts (3) |
-
-## ST-3005 Вид изолирован: группа рендера, закрытая CSP, окно остаётся на своих адресах
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-3005/1 | тест | core/test/loader.test.ts (3), core/test/os.test.ts (1), core/test/workspace-trust.test.ts (1), electron/test/plugins.test.ts (1) |
-| ST-3005/2 | тест | electron/test/view-frames.test.ts (2) |
-| ST-3005/3 | тест | core/test/no-inner-html.test.ts (1) |
-| ST-3005/4 | тест | electron/test/view-files.test.ts (4) |
-| ST-3005/5 | тест | electron/test/csp-note.test.ts (1), electron/test/view-files.test.ts (1) |
-| ST-3005/6 | тест | electron/test/navigation.test.ts (3) |
-| ST-3005/7 | целевое поведение |  |
-
-## ST-3006 Агент не получает больше, чем человек разрешил
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-3006/1 | тест | playground/test/agents.test.ts (1) |
-| ST-3006/2 | тест | playground/test/agents.test.ts (2) |
-| ST-3006/3 | тест | playground/test/agents.test.ts (1) |
-| ST-3006/4 | тест | playground/test/agents.test.ts (2) |
-| ST-3006/5 | целевое поведение |  |
-
-## ST-3007 Установка стороннего плагина с согласием человека (этап 2)
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-3007/1 | целевое поведение |  |
-| ST-3007/2 | целевое поведение |  |
-| ST-3007/3 | целевое поведение |  |
-| ST-3007/4 | целевое поведение |  |
-| ST-3007/5 | целевое поведение |  |
-| ST-3007/6 | целевое поведение |  |
-| ST-3007/7 | тест | core/test/os.test.ts (1), core/test/plugin-check.test.ts (1) |
-| ST-3007/8 | целевое поведение |  |
-
-## ST-3008 Безопасный режим, значения не из репозитория и учёт угроз
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-3008/1 | тест | core/test/loader.test.ts (1), core/test/window.test.ts (1) |
-| ST-3008/2 | тест | core/test/workspace-trust.test.ts (4), core/test/workspace.test.ts (1) |
-| ST-3008/3 | целевое поведение |  |
-
-## ST-4001 Каждая операция на границе плагинов даёт одну запись трассы
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-4001/1 | тест | core/test/trace.test.ts (1) |
-| ST-4001/2 | тест | core/test/trace.test.ts (1) |
-| ST-4001/3 | тест | core/test/trace.test.ts (2) |
-| ST-4001/4 | тест | core/test/trace.test.ts (1) |
-| ST-4001/5 | тест | core/test/trace.test.ts (2), electron/test/trace-args.test.ts (1) |
-| ST-4001/6 | тест | core/test/trace.test.ts (3) |
-| ST-4001/7 | тест | core/test/trace.test.ts (1) |
-| ST-4001/8 | тест | core/test/trace.test.ts (1) |
-| ST-4001/9 | тест | core/test/trace.test.ts (1) |
-| ST-4001/10 | исключение | замеры |
-| ST-4001/11 | тест | core/test/diagnostics.test.ts (2), core/test/secrets-journal.test.ts (1), core/test/trace-args.test.ts (1), core/test/trace.test.ts (4) |
-
-## ST-4002 Журнал плагина: строки ctx.log, вывод хоста и пределы
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-4002/1 | тест | core/test/plugin-log.test.ts (1) |
-| ST-4002/2 | тест | core/test/host-output.test.ts (3) |
-| ST-4002/3 | тест | core/test/plugin-log.test.ts (4) |
-| ST-4002/4 | тест | core/test/plugin-log.test.ts (3) |
-| ST-4002/5 | тест | core/test/diagnostics-ring.test.ts (2), core/test/diagnostics.test.ts (1) |
-
-## ST-4003 Журнал и трасса переживают закрытие: файл, ротация, причина прошлого сбоя
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-4003/1 | тест | core/test/diagnostics.test.ts (1), electron/test/diagnostics.test.ts (1) |
-| ST-4003/2 | тест | core/test/diagnostics.test.ts (3) |
-| ST-4003/3 | тест | core/test/diagnostics.test.ts (2), electron/test/diagnostics.test.ts (1) |
-| ST-4003/4 | тест | core/test/diagnostics.test.ts (2), electron/test/diagnostics.test.ts (1) |
-| ST-4003/5 | тест | core/test/diagnostics.test.ts (1), electron/test/diagnostics.test.ts (1) |
-| ST-4003/6 | тест | core/test/trace.test.ts (1) |
-
-## ST-4004 Диагностика выгружается одним файлом и остаётся на машине
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-4004/1 | тест | core/test/diagnostics.test.ts (1), electron/test/diagnostics.test.ts (1) |
-| ST-4004/2 | тест | core/test/diagnostics.test.ts (1) |
-| ST-4004/3 | тест | core/test/diagnostics.test.ts (2) |
-| ST-4004/4 | тест | core/test/diagnostics.test.ts (2) |
-| ST-4004/5 | тест | core/test/diagnostics.test.ts (1) |
-
-## ST-4005 Окно «Плагины Cyborg» объясняет состояние и ресурсы
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-4005/1 | тест | core/test/status.test.ts (1), electron/test/plugins.test.ts (1), playground/test/plugins-model.test.ts (2) |
-| ST-4005/2 | тест | playground/test/plugins-model.test.ts (2) |
-| ST-4005/3 | целевое поведение |  |
-| ST-4005/4 | тест | core/test/plugin-log.test.ts (2), core/test/status.test.ts (1) |
-
-## ST-5001 Несовместимый плагин не загружается, остальные работают
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-5001/1 | тест | core/test/api-version.test.ts (1), core/test/semver-manifest.test.ts (1) |
-| ST-5001/2 | тест | core/test/graph.test.ts (1), core/test/loader.test.ts (1), core/test/semver-manifest.test.ts (1) |
-| ST-5001/3 | тест | core/test/semver-manifest.test.ts (2) |
-| ST-5001/4 | тест | core/test/graph.test.ts (1), core/test/registry.test.ts (1) |
-| ST-5001/5 | тест | core/test/api-version.test.ts (2) |
-| ST-5001/6 | тест | core/test/graph.test.ts (1), core/test/registry.test.ts (1) |
-
-## ST-5002 Публичный API стабилен в пределах мажорной версии
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-5002/1 | тест | core/test/api-snapshot.test.ts (3) |
-| ST-5002/2 | тест | core/test/graph.test.ts (1), core/test/registry.test.ts (2) |
-| ST-5002/3 | тест | core/test/api-snapshot.test.ts (7) |
-| ST-5002/4 | целевое поведение |  |
-| ST-5002/5 | тест | contracts/test/package.test.ts (3), core/test/api-snapshot.test.ts (2) |
-| ST-5002/6 | тест | core/test/external-plugins.test.ts (1), core/test/loader.test.ts (1) |
-| ST-5002/7 | исключение | ручная |
-| ST-5002/8 | тест | core/test/loader.test.ts (1), core/test/semver-manifest.test.ts (2) |
-
-## ST-5003 Вызовы устаревших членов видны автору
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-5003/1 | тест | core/test/via-contract.test.ts (1) |
-| ST-5003/2 | тест | core/test/semver-manifest.test.ts (1), core/test/via-contract.test.ts (1) |
-| ST-5003/3 | тест | core/test/journal.test.ts (4) |
-| ST-5003/4 | тест | core/test/diagnostics.test.ts (1), core/test/status.test.ts (1) |
-| ST-5003/5 | тест | core/test/api-snapshot.test.ts (1) |
-| ST-5003/6 | тест | testing/test/kit.test.ts (1) |
-
-## ST-5004 Разделы config и state переживают обновление
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-5004/1 | тест | core/test/config.test.ts (1), core/test/loader.test.ts (1) |
-| ST-5004/2 | тест | core/test/config.test.ts (1), core/test/loader.test.ts (1) |
-| ST-5004/3 | тест | core/test/config.test.ts (1), core/test/json-schema.test.ts (1), core/test/loader.test.ts (1), core/test/workspace.test.ts (1) |
-| ST-5004/4 | тест | core/test/config.test.ts (1), core/test/stress-sections.test.ts (1) |
-| ST-5004/5 | тест | core/test/workspace.test.ts (1), playground/src/main/legacy-workspace.test.ts (4) |
-| ST-5004/6 | тест | core/test/uninstall.test.ts (2) |
-| ST-5004/7 | тест | core/test/config.test.ts (1), core/test/stress-sections.test.ts (2), core/test/stress-workspace.test.ts (4) |
-| ST-5004/8 | тест | core/test/workspace.test.ts (1) |
-
-## ST-6001 Приложение подключает ядро пакетами и задаёт поставку списком
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-6001/1 | тест | core/test/consumer.test.ts (3), core/test/public-api.test.ts (1), electron/test/consumer.test.ts (1), electron/test/example.test.ts (2) |
-| ST-6001/2 | тест | core/test/public-api.test.ts (2), electron/test/public-api.test.ts (2) |
-| ST-6001/3 | тест | core/test/delivery.test.ts (1), electron/test/plugins.test.ts (3) |
-| ST-6001/4 | тест | electron/test/plugins.test.ts (3) |
-| ST-6001/5 | тест | electron/test/plugins.test.ts (1) |
-| ST-6001/6 | целевое поведение |  |
-| ST-6001/7 | тест | core/test/loader.test.ts (2) |
-| ST-6001/8 | тест | core/test/api-version.test.ts (1), core/test/consumer.test.ts (1), electron/test/consumer.test.ts (1), testing/test/package.test.ts (1) |
-
-## ST-6002 Выпуск пакетов проверен сборкой примера, ОС ведут себя одинаково
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-6002/1 | тест | contracts/test/api.test.ts (2), core/test/semver-manifest.test.ts (1), scripts/test/release.test.ts (2) |
-| ST-6002/2 | тест | core/test/api-snapshot.test.ts (2) |
-| ST-6002/3 | целевое поведение |  |
-| ST-6002/4 | тест | scripts/test/workflows.test.ts (2) |
-
-## ST-7001 Автор начинает с шаблона и собирает плагин с проверкой состава
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-7001/1 | тест | core/test/plugin-template.test.ts (1), testing/test/template.test.ts (1), tools/cyborg-plugin/test/template.test.ts (1) |
-| ST-7001/2 | тест | tools/cyborg-plugin/test/build.test.ts (2), tools/cyborg-plugin/test/stand.test.ts (1) |
-| ST-7001/3 | тест | tools/cyborg-plugin/test/build.test.ts (5) |
-| ST-7001/4 | исключение | ручная, дефект #? |
-
-## ST-7002 Пакет объявлений и checkPlugin: типы, импорты, права словами
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-7002/1 | тест | contracts/test/package.test.ts (1), core/test/consumer.test.ts (1) |
-| ST-7002/2 | тест | core/test/plugin-check.test.ts (3) |
-| ST-7002/3 | тест | core/test/plugin-check.test.ts (1), tools/cyborg-plugin/test/cli.test.ts (1) |
-| ST-7002/4 | тест | core/test/plugin-check.test.ts (2), core/test/plugin-scan.test.ts (1) |
-| ST-7002/5 | целевое поведение |  |
-| ST-7002/6 | тест | core/test/plugin-imports.test.ts (2) |
-
-## ST-7003 Автор проверяет плагин на тест-ките без окна
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-7003/1 | тест | testing/test/kit.test.ts (4) |
-| ST-7003/2 | тест | testing/test/agent-suite.test.ts (2), testing/test/consumer.test.ts (1) |
-| ST-7003/3 | тест | testing/test/agent-suite.test.ts (4) |
-| ST-7003/4 | исключение | инструменты автора |
-| ST-7003/5 | целевое поведение |  |
-
-## ST-7004 Автор проходит путь по руководству, не читая код ядра
-
-| Критерий | Исход | Проверка |
-|---|---|---|
-| ST-7004/1 | исключение | документы |
-| ST-7004/2 | исключение | документы |
-| ST-7004/3 | исключение | документы |
-| ST-7004/4 | исключение | ручная |
+# Матрица приёмки
+
+Собрана из историй, имён тестов и исключений [acceptance.md](acceptance.md) командой `npm run check:acceptance -- --write`; руками не правится.
+
+Итог: критериев 248; тестом 202, исключением 20, целевое поведение 26.
+
+| Критерий | Чем проверяется |
+|---|---|
+| ST-1001/1 | `core/test/loader.test.ts`, `core/test/semver-manifest.test.ts` |
+| ST-1001/2 | `core/test/loader.test.ts`, `core/test/window.test.ts` |
+| ST-1001/3 | `core/test/manifest-schema.test.ts`, `core/test/semver-manifest.test.ts` |
+| ST-1001/4 | `electron/test/plugins.test.ts` |
+| ST-1001/5 | `core/test/graph.test.ts`, `electron/test/plugins.test.ts` |
+| ST-1001/6 | `electron/test/plugins.test.ts` |
+| ST-1001/7 | `core/test/loader.test.ts`, `electron/test/plugins.test.ts`, `playground/test/plugins-model.test.ts` |
+| ST-1001/8 | `core/test/events.test.ts`, `core/test/status.test.ts` |
+| ST-1001/9 | `core/test/loader.test.ts`, `core/test/manifest-schema.test.ts` |
+| ST-1001/10 | `core/test/loader.test.ts`, `core/test/status.test.ts` |
+| ST-1001/11 | `electron/test/plugins.test.ts` |
+| ST-1002/1 | `core/test/graph.test.ts`, `core/test/loader.test.ts` |
+| ST-1002/2 | `core/test/graph.test.ts` |
+| ST-1002/3 | `core/test/graph.test.ts`, `core/test/status.test.ts` |
+| ST-1002/4 | `core/test/graph.test.ts` |
+| ST-1002/5 | `core/test/events.test.ts`, `core/test/graph.test.ts` |
+| ST-1002/6 | `core/test/graph.test.ts`, `core/test/loader.test.ts` |
+| ST-1002/7 | `core/test/graph.test.ts`, `core/test/loader.test.ts` |
+| ST-1003/1 | `core/test/loader.test.ts` |
+| ST-1003/2 | `core/test/hosts.test.ts`, `core/test/loader.test.ts`, `electron/test/plugins.test.ts`; часть - окно: хост в `utilityProcess`: `playground/scripts/smoke.mjs` |
+| ST-1003/3 | `core/test/hosts.test.ts`, `core/test/pty.test.ts`; часть - замер: срок обнаружения зависания при значениях по умолчанию: `npm run spike:hosts`, [spike-hosts.md](spike-hosts.md) |
+| ST-1003/4 | `core/test/hosts.test.ts`, `core/test/stress-lifecycle.test.ts` |
+| ST-1003/5 | `core/test/hosts.test.ts` |
+| ST-1003/6 | `core/test/loader.test.ts` |
+| ST-1003/7 | `core/test/loader.test.ts` |
+| ST-1003/8 | `core/test/ui-shell.test.ts`; часть - окно: окно и виды после сбоя хоста: `playground/scripts/smoke.mjs` |
+| ST-1004/1 | `core/test/loader.test.ts` |
+| ST-1004/2 | `core/test/loader.test.ts`, `electron/test/plugins.test.ts` |
+| ST-1004/3 | `core/test/loader.test.ts`, `core/test/stress-lifecycle.test.ts` |
+| ST-1004/4 | `core/test/loader.test.ts`, `electron/test/plugins.test.ts` |
+| ST-1005/1 | `core/test/lifecycle.test.ts` |
+| ST-1005/2 | `core/test/subscriptions.test.ts` |
+| ST-1005/3 | `core/test/lifecycle.test.ts` |
+| ST-1005/4 | `core/test/lifecycle.test.ts` |
+| ST-1005/5 | `core/test/lifecycle.test.ts`, `core/test/stress-lifecycle.test.ts` |
+| ST-1005/6 | `electron/test/plugins.test.ts` |
+| ST-1006/1 | `core/test/events.test.ts` |
+| ST-1006/2 | `core/test/events.test.ts`, `electron/test/plugins.test.ts` |
+| ST-1006/3 | `core/test/events.test.ts` |
+| ST-1006/4 | `core/test/events.test.ts`, `core/test/window.test.ts` |
+| ST-1006/5 | замер: `npm run spike:gateway`, [spike-gateway.md](spike-gateway.md); бюджеты - `npm run check:budgets` (`playground/budgets.json`) |
+| ST-1006/6 | целевое поведение |
+| ST-1007/1 | `core/test/instance.test.ts`, `core/test/workspace.test.ts`; часть - окно: фокус окна: `playground/scripts/smoke.mjs` |
+| ST-1007/2 | `core/test/instance.test.ts`, `electron/test/instances.test.ts`; часть - окно: сообщение и код выхода приложения: `playground/src/main/main.ts`, `playground/scripts/smoke.mjs` |
+| ST-1007/3 | `core/test/workspace.test.ts` |
+| ST-1007/4 | `core/test/workspace.test.ts` |
+| ST-1007/5 | `core/test/workspace.test.ts` |
+| ST-1007/6 | `core/test/workspace.test.ts` |
+| ST-1007/7 | ручная: вопрос о живых pty при закрытии и смене воркспейса (`electron/src/restarts.ts`): smoke глушит диалог, [macos-check.md](macos-check.md) |
+| ST-1007/8 | `core/test/loader.test.ts`, `core/test/workspace.test.ts` |
+| ST-1007/9 | `core/test/os.test.ts` |
+| ST-1008/1 | `core/test/pty.test.ts` |
+| ST-1008/2 | `core/test/pty.test.ts`, `core/test/stress-pty.test.ts` |
+| ST-1008/3 | `core/test/pty.test.ts`, `core/test/stress-pty.test.ts` |
+| ST-1008/4 | `core/test/pty.test.ts` |
+| ST-1008/5 | `core/test/pty-host.test.ts` |
+| ST-1008/6 | `core/test/pty.test.ts`, `core/test/stress-pty.test.ts` |
+| ST-1009/1 | `core/test/purity.test.ts` |
+| ST-1009/2 | документ: осмотр по SAD, раздел 2; перенос формата - `core/test/workspace.test.ts` |
+| ST-2001/1 | `core/test/loader.test.ts`, `core/test/plugin-imports.test.ts` |
+| ST-2001/2 | `core/test/registry.test.ts`, `core/test/trust.test.ts` |
+| ST-2001/3 | `core/test/registry.test.ts` |
+| ST-2001/4 | `core/test/trust.test.ts` |
+| ST-2001/5 | `core/test/loader.test.ts`, `core/test/rpc.test.ts` |
+| ST-2001/6 | `core/test/subscriptions.test.ts`, `core/test/trust.test.ts` |
+| ST-2001/7 | `core/test/events.test.ts` |
+| ST-2001/8 | `core/test/loader.test.ts` |
+| ST-2001/9 | `core/test/channel.test.ts`, `core/test/window.test.ts` |
+| ST-2001/10 | `core/test/window.test.ts`, `electron/test/view-files.test.ts` |
+| ST-2002/1 | `core/test/loader.test.ts`, `core/test/trust.test.ts` |
+| ST-2002/2 | `core/test/command-callers.test.ts`, `core/test/graph.test.ts` |
+| ST-2002/3 | `electron/test/key-route.test.ts`, `electron/test/plugins.test.ts`; часть - окно: `<iframe>` вида: `playground/scripts/smoke.mjs` |
+| ST-2002/4 | `core/test/lifecycle.test.ts`, `core/test/workspace.test.ts` |
+| ST-2002/5 | `core/test/keys-registry.test.ts` |
+| ST-2002/6 | `core/test/loader.test.ts`, `electron/test/app-menu.test.ts` |
+| ST-2003/1 | `core/test/loader.test.ts`, `core/test/semver-manifest.test.ts` |
+| ST-2003/2 | `core/test/ui-shell.test.ts`, `electron/test/view-files.test.ts`; часть - окно: `playground/scripts/smoke.mjs` |
+| ST-2003/3 | `electron/test/view-frames.test.ts` |
+| ST-2003/4 | окно: `playground/scripts/smoke.mjs`, шаг перезапуска хоста: вид под плашкой без ввода |
+| ST-2003/5 | `electron/test/plugins.test.ts`, `playground/test/plugins-model.test.ts`, `playground/test/window-plan.test.ts`; часть - окно: `playground/scripts/smoke.mjs` |
+| ST-2003/6 | `core/test/documents.test.ts` |
+| ST-2003/7 | целевое поведение |
+| ST-2003/8 | `core/test/loader.test.ts`, `core/test/semver-manifest.test.ts` |
+| ST-2004/1 | `core/test/window.test.ts` |
+| ST-2004/2 | `core/test/window.test.ts`, `electron/test/window-layer.test.ts` |
+| ST-2004/3 | `core/test/keys-registry.test.ts`, `core/test/window.test.ts`, `electron/test/window-layer.test.ts` |
+| ST-2004/4 | `core/test/os.test.ts`, `core/test/window.test.ts` |
+| ST-2004/5 | `core/test/loader.test.ts`, `electron/test/plugins.test.ts` |
+| ST-2005/1 | окно: `playground/scripts/smoke.mjs`, шаг «элементы ядра» |
+| ST-2005/2 | `core/test/window.test.ts`; часть - окно: `playground/scripts/smoke.mjs` |
+| ST-2005/3 | целевое поведение |
+| ST-2005/4 | целевое поведение |
+| ST-2006/1 | `core/test/pty.test.ts`, `core/test/purity.test.ts`, `playground/test/agents.test.ts` |
+| ST-2006/2 | `core/test/pty.test.ts` |
+| ST-2006/3 | `playground/test/agents.test.ts` |
+| ST-2006/4 | `playground/test/agents.test.ts` |
+| ST-2006/5 | `playground/test/agents.test.ts` |
+| ST-2006/6 | `playground/test/agents.test.ts` |
+| ST-2006/7 | `playground/test/agents.test.ts` |
+| ST-2006/8 | `playground/test/agents.test.ts` |
+| ST-2006/9 | `playground/test/agents.test.ts` |
+| ST-2006/10 | `playground/test/agents.test.ts` |
+| ST-2006/11 | `playground/test/agents.test.ts` |
+| ST-2006/12 | `playground/test/agents.test.ts` |
+| ST-2006/13 | `playground/test/agents.test.ts` |
+| ST-2006/14 | `playground/test/agents.test.ts` |
+| ST-2007/1 | `core/test/purity.test.ts` |
+| ST-2007/2 | документ: гейты CI `.github/workflows/ci.yml`: `npm test` с `core/test/plugin-imports.test.ts`, `typecheck`, `lint`, `smoke` |
+| ST-3001/1 | ручная: дефект #?: прямой запрос хоста от плагина без прав к `pty.share`, `pty.attach`, `pty.write`, `pty.resize`, `pty.kill` даёт `NotFound`, к `pty.list` - пустой список, к `serve.close` - `ok`, а не `PermissionDenied` с записью `denied` (проверки права нет, операция идёт по таблице самого плагина, чужого он не касается); остальные члены `ctx.os` отказывают как надо - `core/test/trust.test.ts` |
+| ST-3001/2 | `core/test/os.test.ts`, `core/test/security-gateway.test.ts` |
+| ST-3001/3 | `core/test/os.test.ts` |
+| ST-3001/4 | `core/test/os.test.ts` |
+| ST-3001/5 | `core/test/os.test.ts` |
+| ST-3001/6 | `core/test/os.test.ts`, `core/test/stress-workspace.test.ts`, `core/test/window.test.ts` |
+| ST-3001/7 | `core/test/loader.test.ts`, `core/test/os.test.ts` |
+| ST-3001/8 | `core/test/os.test.ts`, `core/test/pty.test.ts`, `electron/test/plugins.test.ts` |
+| ST-3001/9 | `core/test/plugin-imports.test.ts`, `core/test/trust.test.ts`, `core/test/workspace-trust.test.ts` |
+| ST-3001/10 | целевое поведение |
+| ST-3002/1 | `core/test/os.test.ts` |
+| ST-3002/2 | `core/test/os-lifetime.test.ts`, `core/test/os.test.ts`, `core/test/security-gateway.test.ts` |
+| ST-3002/3 | `core/test/os.test.ts`, `core/test/workspace-trust.test.ts` |
+| ST-3002/4 | `core/test/net-fetch.test.ts`, `core/test/os.test.ts` |
+| ST-3002/5 | `core/test/net-fetch.test.ts`, `core/test/net-transport.test.ts` |
+| ST-3002/6 | `core/test/serve.test.ts` |
+| ST-3002/7 | `core/test/os-lifetime.test.ts`, `core/test/os.test.ts`, `core/test/serve.test.ts` |
+| ST-3003/1 | `core/test/via-contract.test.ts` |
+| ST-3003/2 | целевое поведение |
+| ST-3003/3 | `core/test/command-callers.test.ts`, `playground/test/agents.test.ts` |
+| ST-3003/4 | `core/test/command-callers.test.ts` |
+| ST-3003/5 | `core/test/graph.test.ts`, `core/test/loader.test.ts`, `electron/test/plugins.test.ts` |
+| ST-3004/1 | `core/test/os.test.ts`, `electron/test/secrets-file.test.ts` |
+| ST-3004/2 | `core/test/os.test.ts`, `core/test/secrets-journal.test.ts`, `core/test/security-gateway.test.ts` |
+| ST-3004/3 | `core/test/diagnostics.test.ts`, `core/test/secrets-journal.test.ts` |
+| ST-3004/4 | `core/test/os.test.ts`, `core/test/uninstall.test.ts`, `electron/test/secrets-file.test.ts` |
+| ST-3004/5 | `core/test/plugin-log.test.ts` |
+| ST-3005/1 | `core/test/loader.test.ts`, `core/test/workspace.test.ts`, `electron/test/plugins.test.ts` |
+| ST-3005/2 | `electron/test/view-frames.test.ts`; часть - окно: вызов `fromWindow` на каждом канале окна: `electron/src/channels.ts`, `playground/scripts/smoke.mjs` |
+| ST-3005/3 | `core/test/plugin-imports.test.ts`, `electron/test/window-layer.test.ts` |
+| ST-3005/4 | `electron/test/view-files.test.ts` |
+| ST-3005/5 | `core/test/semver-manifest.test.ts`, `electron/test/plugins.test.ts`, `electron/test/view-files.test.ts` |
+| ST-3005/6 | `electron/test/navigation.test.ts` |
+| ST-3005/7 | целевое поведение |
+| ST-3006/1 | `playground/test/agents.test.ts` |
+| ST-3006/2 | `playground/test/agents.test.ts` |
+| ST-3006/3 | `playground/test/agents.test.ts` |
+| ST-3006/4 | `playground/test/agents.test.ts` |
+| ST-3006/5 | целевое поведение |
+| ST-3007/1 | целевое поведение |
+| ST-3007/2 | целевое поведение |
+| ST-3007/3 | целевое поведение |
+| ST-3007/4 | целевое поведение |
+| ST-3007/5 | целевое поведение |
+| ST-3007/6 | целевое поведение |
+| ST-3007/7 | `core/test/os.test.ts`, `core/test/plugin-check.test.ts`, `core/test/pty.test.ts` |
+| ST-3007/8 | целевое поведение |
+| ST-3008/1 | `core/test/loader.test.ts`, `core/test/uninstall.test.ts`, `core/test/window.test.ts` |
+| ST-3008/2 | `core/test/loader.test.ts`, `core/test/workspace-trust.test.ts`, `core/test/workspace.test.ts` |
+| ST-3008/3 | целевое поведение |
+| ST-4001/1 | `core/test/trace.test.ts` |
+| ST-4001/2 | `core/test/trace.test.ts` |
+| ST-4001/3 | `core/test/trace.test.ts` |
+| ST-4001/4 | `core/test/trace.test.ts` |
+| ST-4001/5 | `core/test/trace.test.ts` |
+| ST-4001/6 | `core/test/diagnostics.test.ts`, `core/test/trace.test.ts` |
+| ST-4001/7 | `core/test/trace.test.ts` |
+| ST-4001/8 | `core/test/trace.test.ts` |
+| ST-4001/9 | `core/test/trace.test.ts` |
+| ST-4001/10 | замер: `npm run spike:gateway` и `-- --trace=off`, [spike-gateway.md](spike-gateway.md) |
+| ST-4001/11 | `core/test/diagnostics.test.ts`, `core/test/trace.test.ts` |
+| ST-4002/1 | целевое поведение |
+| ST-4002/2 | `core/test/host-output.test.ts`, `core/test/trust.test.ts` |
+| ST-4002/3 | `core/test/diagnostics.test.ts`, `core/test/plugin-log.test.ts` |
+| ST-4002/4 | `core/test/diagnostics.test.ts`, `core/test/plugin-log.test.ts` |
+| ST-4002/5 | `core/test/diagnostics-ring.test.ts`, `core/test/diagnostics.test.ts` |
+| ST-4003/1 | `core/test/diagnostics.test.ts`, `electron/test/diagnostics.test.ts` |
+| ST-4003/2 | `core/test/diagnostics.test.ts` |
+| ST-4003/3 | `core/test/diagnostics.test.ts`, `electron/test/diagnostics.test.ts` |
+| ST-4003/4 | `core/test/diagnostics.test.ts`, `electron/test/diagnostics.test.ts`, `playground/test/plugins-model.test.ts` |
+| ST-4003/5 | `core/test/diagnostics.test.ts`, `electron/test/diagnostics.test.ts` |
+| ST-4003/6 | `core/test/trace.test.ts` |
+| ST-4004/1 | `core/test/diagnostics.test.ts`, `electron/test/diagnostics.test.ts` |
+| ST-4004/2 | `core/test/diagnostics.test.ts` |
+| ST-4004/3 | `core/test/diagnostics.test.ts`, `electron/test/diagnostics.test.ts` |
+| ST-4004/4 | `core/test/diagnostics.test.ts` |
+| ST-4004/5 | `core/test/diagnostics.test.ts` |
+| ST-4005/1 | `core/test/status.test.ts`, `electron/test/plugins.test.ts`, `playground/test/plugins-model.test.ts` |
+| ST-4005/2 | `electron/test/plugins.test.ts` |
+| ST-4005/3 | целевое поведение |
+| ST-4005/4 | `electron/test/plugins.test.ts` |
+| ST-5001/1 | `core/test/graph.test.ts`, `core/test/semver-manifest.test.ts` |
+| ST-5001/2 | `core/test/graph.test.ts`, `core/test/loader.test.ts` |
+| ST-5001/3 | `core/test/graph.test.ts`, `core/test/semver-manifest.test.ts` |
+| ST-5001/4 | `core/test/graph.test.ts` |
+| ST-5001/5 | `core/test/api-version.test.ts` |
+| ST-5001/6 | `core/test/graph.test.ts`, `core/test/registry.test.ts` |
+| ST-5002/1 | `core/test/api-snapshot.test.ts`; часть - ручная: карта `Contracts` и контракты `cyborg.*` в роде изменения: ревью по ADR-CH-0002, п. 4 (FR-CH-5003, «Ещё нет») |
+| ST-5002/2 | `core/test/registry.test.ts` |
+| ST-5002/3 | `core/test/api-snapshot.test.ts`; часть - ручная: новое обязательное поле JSON манифеста и карта `Contracts`: ревью по `contracts/README.md` («Что снимок не видит») и ADR-CH-0002, п. 4 |
+| ST-5002/4 | целевое поведение |
+| ST-5002/5 | `contracts/test/package.test.ts` |
+| ST-5002/6 | `core/test/loader.test.ts` |
+| ST-5002/7 | документ: `contracts/CHANGELOG.md`; формат - `scripts/test/release.test.ts` |
+| ST-5002/8 | `core/test/graph.test.ts` |
+| ST-5003/1 | `core/test/via-contract.test.ts` |
+| ST-5003/2 | `core/test/via-contract.test.ts` |
+| ST-5003/3 | `core/test/journal.test.ts`, `core/test/status.test.ts` |
+| ST-5003/4 | `core/test/status.test.ts` |
+| ST-5003/5 | ручная: ревью по ADR-CH-0002, п. 4: срок жизни члена с `@deprecated` сверкой рода изменения не держится (FR-CH-5003, «Ещё нет»); пометку `@deprecated` держит снимок `core/test/api-snapshot/1.0.0.txt` |
+| ST-5003/6 | `testing/test/kit.test.ts` |
+| ST-5004/1 | `core/test/loader.test.ts` |
+| ST-5004/2 | `core/test/config.test.ts`, `core/test/loader.test.ts` |
+| ST-5004/3 | `core/test/config.test.ts`, `core/test/json-schema.test.ts`, `core/test/loader.test.ts`, `core/test/trust.test.ts` |
+| ST-5004/4 | `core/test/loader.test.ts` |
+| ST-5004/5 | `playground/src/main/legacy-workspace.test.ts` |
+| ST-5004/6 | `core/test/uninstall.test.ts` |
+| ST-5004/7 | `core/test/config.test.ts`, `core/test/loader.test.ts`, `core/test/workspace.test.ts` |
+| ST-5004/8 | `core/test/loader.test.ts`, `core/test/workspace.test.ts` |
+| ST-6001/1 | `core/test/package.test.ts`, `core/test/public-api.test.ts`, `electron/test/boundary.test.ts`, `electron/test/example.test.ts` |
+| ST-6001/2 | `core/test/public-api.test.ts`; часть - ручная: расширение экспорта только новой версией пакета: сверки перечня `exports` с версией нет (FR-CH-6004, «Ещё нет», T-06) |
+| ST-6001/3 | `electron/test/plugins.test.ts` |
+| ST-6001/4 | `electron/test/plugins.test.ts` |
+| ST-6001/5 | `electron/test/plugins.test.ts` |
+| ST-6001/6 | целевое поведение |
+| ST-6001/7 | `core/test/graph.test.ts`, `core/test/loader.test.ts`, `electron/test/plugins.test.ts` |
+| ST-6001/8 | `core/test/api-version.test.ts`, `electron/test/consumer.test.ts`, `scripts/test/release.test.ts` |
+| ST-6002/1 | `core/test/api-snapshot.test.ts`, `core/test/graph.test.ts`, `scripts/test/release.test.ts`; часть - ручная: ломающее изменение только мажорной версией: сверки рода изменения с версией пакета нет (FR-CH-6004, «Ещё нет», T-06) |
+| ST-6002/2 | `core/test/api-snapshot.test.ts`, `core/test/api-version.test.ts`, `core/test/semver-manifest.test.ts` |
+| ST-6002/3 | целевое поведение |
+| ST-6002/4 | окно: `npm run smoke` в CI на macOS и Linux, [macos-check.md](macos-check.md) |
+| ST-7001/1 | инструменты: `core/test/plugin-template.test.ts`, `tools/cyborg-plugin/test/template.test.ts` |
+| ST-7001/2 | инструменты: `tools/cyborg-plugin/test/build.test.ts` |
+| ST-7001/3 | инструменты: `tools/cyborg-plugin/test/build.test.ts` |
+| ST-7001/4 | целевое поведение |
+| ST-7002/1 | `contracts/test/package.test.ts`, `core/test/plugin-check.test.ts` |
+| ST-7002/2 | `core/test/plugin-check.test.ts` |
+| ST-7002/3 | `core/test/plugin-check.test.ts`, `tools/cyborg-plugin/test/cli.test.ts` |
+| ST-7002/4 | `core/test/plugin-check.test.ts` |
+| ST-7002/5 | целевое поведение |
+| ST-7002/6 | `core/test/plugin-imports.test.ts` |
+| ST-7003/1 | инструменты: `testing/test/kit.test.ts` |
+| ST-7003/2 | инструменты: `testing/test/agent-suite.test.ts` |
+| ST-7003/3 | инструменты: `testing/test/agent-suite.test.ts` |
+| ST-7003/4 | документ: [руководство «Тесты плагина»](../guide/authors/testing.md) |
+| ST-7003/5 | целевое поведение |
+| ST-7004/1 | документ: [author-kit-run.md](author-kit-run.md), `scripts/test/api-reference.test.ts` |
+| ST-7004/2 | целевое поведение |
+| ST-7004/3 | целевое поведение |
+| ST-7004/4 | ручная: [author-kit-run.md](author-kit-run.md) |

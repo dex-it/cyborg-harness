@@ -56,7 +56,7 @@ test('ST-1007/3: state по ключу воркспейса: тот же фай�
   assert.notEqual(workspaceKey(path.join(box.root, 'other.json')), workspaceKey(box.file));
 });
 
-test('ST-5004/5: ST-1007/5: перенос старого формата хуком приложения: копия .v1.bak, config с полем cyborg, разделы state, повтор не идёт', async () => {
+test('ST-1007/5: перенос старого формата хуком приложения: копия .v1.bak, config с полем cyborg, разделы state, повтор не идёт', async () => {
   await using box = await sandbox();
   const old = { items: ['a', 'b'], current: 'b', plugins: { enabled: ['list'] } };
   await writeFile(box.file, JSON.stringify(old));
@@ -194,7 +194,7 @@ test('хук вернул undefined или его нет: файл не трон
   await assert.rejects(readFile(`${box.file}.v1.bak`), { code: 'ENOENT' });
 });
 
-test('ST-2002/4: ST-1007/3: plugins: воркспейс перекрывает enabled пользователя, группы хостов сливаются; нет файла - пустой новый', async () => {
+test('ST-1007/3, ST-2002/4: plugins: воркспейс перекрывает enabled пользователя, группы хостов сливаются; нет файла - пустой новый', async () => {
   await using box = await sandbox();
   const fresh = await open(box);
   assert.deepEqual(fresh.plugins, { enabled: [], hosts: {}, uiGroups: {}, keybindings: [] });
@@ -209,8 +209,30 @@ test('ST-2002/4: ST-1007/3: plugins: воркспейс перекрывает e
   ws.close();
 });
 
+test('ST-2002/4: plugins.keybindings: одно сочетание у пользователя и в воркспейсе - побеждает воркспейс', async () => {
+  await using box = await sandbox();
+  await writeFile(box.file, JSON.stringify({ cyborg: 2, plugins: { keybindings: [{ key: 'F2', command: 'b.go' }] } }));
+  await mkdir(path.dirname(box.userFile), { recursive: true });
+  await writeFile(box.userFile, JSON.stringify({ plugins: { keybindings: [{ key: 'F2', command: 'a.go' }] } }));
+  const ws = await open(box);
+  const pad = (id: string): PluginModule => ({ activate: (ctx) => ctx.commands.register(`${id}.go`, () => id) });
+  const pads: Record<string, PluginModule> = { a: pad('a'), b: pad('b') };
+  const k = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    spawnHost: inlineHosts(async (entry) => pads[entry] ?? Promise.reject(new Error(entry))),
+    enabled: ['a', 'b'],
+    manifests: ['a', 'b'].map((id) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, commands: [`${id}.go`] })),
+    keybindings: ws.plugins.keybindings,
+    platform: 'linux',
+  });
+  assert.equal(k.keybinding('F2')?.command, 'b.go');
+  assert.equal(k.keybinding('F2')?.user, true);
+  await k.unload();
+  ws.close();
+});
+
 // K-04: plugins.uiGroups - группа рендера -> плагины; группа рендера делит мост плагинов, поэтому читается только из слоя пользователя (ADR-CH-0015, п. 5).
-test('ST-3008/2: plugins.uiGroups: действуют группы пользователя, поле файла воркспейса не действует и называется в problems', async () => {
+test('ST-3005/1, ST-3008/2: plugins.uiGroups: действуют группы пользователя, поле файла воркспейса не действует и называется в problems', async () => {
   await using box = await sandbox();
   await writeFile(box.file, JSON.stringify({ cyborg: 2, plugins: { uiGroups: { panels: ['b', 'c'], solo: ['d'] } } }));
   await mkdir(path.dirname(box.userFile), { recursive: true });
@@ -250,7 +272,7 @@ test('plugins.uiGroups: ошибки называют поле и файл по�
   bad.close();
 });
 
-test('ST-5004/3, ST-5004/8: ST-1007/8: правка файла извне доходит до ctx.config.onChange; не прошедшая проверку - запись в журнале, значение прежнее; своя запись не будит', async (t) => {
+test('ST-1007/8, ST-5004/7, ST-5004/8: правка файла извне доходит до ctx.config.onChange; не прошедшая проверку - запись в журнале, значение прежнее; своя запись не будит', async (t) => {
   await using box = await sandbox();
   await writeFile(box.file, JSON.stringify({ cyborg: 2, plugins: { enabled: ['lock'] }, settings: { lock: { $version: 1, minutes: 5 } } }));
   const ws = await open(box);
@@ -332,7 +354,7 @@ test('слежение: правка между открытием ворксп�
   await waitFor('onChange с 7', () => seen.includes(7));
 });
 
-test('битый файл пользователя не роняет открытие: причина в problems, файл не перезаписан', async () => {
+test('ST-5004/7: битый файл пользователя не роняет открытие: причина в problems, файл не перезаписан', async () => {
   await using box = await sandbox();
   await mkdir(path.dirname(box.userFile), { recursive: true });
   await writeFile(box.userFile, '{ "plugins": ');
@@ -387,4 +409,10 @@ test('ST-1007/6: «Недавние»: последний открытый пе�
   assert.deepEqual(recent.list(), []);
   recent.add(files[1]!);
   assert.deepEqual(recent.list(), [files[1]]);
+
+  const many = Array.from({ length: 12 }, (_, i) => path.join(box.root, `w${String(i)}.cyborg.json`));
+  for (const f of many) await writeFile(f, '{}');
+  const byDefault = new RecentWorkspaces(path.join(box.root, 'recent-default.json'));
+  for (const f of many) byDefault.add(f);
+  assert.deepEqual(byDefault.list(), many.slice(2).reverse(), 'лимит по умолчанию - 10 последних');
 });

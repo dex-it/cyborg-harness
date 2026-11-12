@@ -43,7 +43,7 @@ describe('пример из README адаптера', { timeout: 120_000 }, () =
     assert.deepEqual([...blocks().keys()].sort(), ['main.ts', 'preload.ts', 'renderer.ts']);
   });
 
-  it('ST-6001/1: компилятор принимает пример: имена и типы пакета на месте', () => {
+  it('компилятор принимает пример: имена и типы пакета на месте', () => {
     runCommand(process.execPath, [tsc, '-p', work], { cwd: work });
   });
 

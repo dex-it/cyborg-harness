@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { inlineHosts } from '@cyborg-harness/core';
 import type { PluginModule, TraceRecord } from '@cyborg-harness/core';
+import type { PluginContext } from '@cyborg-harness/contracts';
 import { MENU_OWNER, WINDOW_OWNER } from '@cyborg-harness/core';
 import { DELIVERY_FILE, writeDelivery } from '@cyborg-harness/core/delivery';
 import { ENTRY_FILES as CHECKED_ENTRY_FILES } from '@cyborg-harness/core/plugin-check';
@@ -30,7 +31,7 @@ function plugin(dir: string, id: string, manifest: Record<string, unknown>, code
   if (code) fs.writeFileSync(path.join(dir, id, file), code);
 }
 
-test('ST-6001/3: поиск: встроенные раньше пользовательских, повтор id - второму не достаётся точка входа, битый JSON - в problems', () => {
+test('ST-1001/4, ST-1001/5, ST-6001/3: поиск: встроенные раньше пользовательских, повтор id - второму не достаётся точка входа, битый JSON - в problems', () => {
   const builtin = tmp();
   const user = tmp();
   plugin(builtin, 'files', {}, 'export default {}');
@@ -109,7 +110,7 @@ test('каталог пользователя при поставке в builtin
   assert.ok(failed?.kind === 'failed' && failed.error.includes(path.join(userData, 'plugins', 'empty', 'index.mjs')), 'в журнале путь файла, которого нет');
 });
 
-test('ST-1001/5: поиск: повтор id внутри одного каталога называет оба каталога плагина, действует первый по имени', () => {
+test('поиск: повтор id внутри одного каталога называет оба каталога плагина, действует первый по имени', () => {
   const user = tmp();
   for (const home of ['b', 'a']) {
     fs.mkdirSync(path.join(user, home));
@@ -120,7 +121,7 @@ test('ST-1001/5: поиск: повтор id внутри одного ката�
   assert.deepEqual(found.problems, [`повтор id z в ${path.join(user, 'b')}: действует ${path.join(user, 'a')}`]);
 });
 
-test('ST-6001/4: ST-1001/5: старт с флагом: встроенный плагин активен при одноимённом пользовательском, второй пропущен с записью в problems', async (t) => {
+test('старт с флагом: встроенный плагин активен при одноимённом пользовательском, второй пропущен с записью в problems', async (t) => {
   const userData = tmp();
   const builtinDir = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['pin-lock', 'echo'] } }));
@@ -149,7 +150,7 @@ test('окно: повтор id пользовательского плагин�
   assert.deepEqual(snapshot.plugins.map((r) => [r.id, r.origin, r.state]), [['pin-lock', 'bundled', 'active']]);
 });
 
-test('ST-6001/4: ST-1003/2: старт: плагин из каталога пользователя - сторонний и не попадает в общую группу хоста', async () => {
+test('ST-1003/2, ST-2004/5: старт: плагин из каталога пользователя - сторонний и не попадает в общую группу хоста', async () => {
   const userData = tmp();
   const builtinDir = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['files', 'notes'], hosts: { ui: ['files', 'notes'] } } }));
@@ -158,6 +159,22 @@ test('ST-6001/4: ST-1003/2: старт: плагин из каталога по�
   const kernel = await startPlugins({ userData, builtinDir, userPlugins: true, spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {} });
   assert.deepEqual([kernel.hostOf('files'), kernel.hostOf('notes')], ['ui', 'notes']);
   assert.ok(kernel.journal.some((e) => e.kind === 'host-isolated' && e.pluginId === 'notes'));
+  await kernel.unload();
+});
+
+test('ST-2004/5: признак «из поставки» задаёт каталог установки: манифест, объявивший себя поставкой, отвергнут, сторонний остаётся в своём хосте', async () => {
+  const userData = tmp();
+  const builtinDir = tmp();
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['files', 'notes', 'boast'], hosts: { ui: ['files', 'notes', 'boast'] } } }));
+  plugin(builtinDir, 'files', {}, 'export default {}');
+  plugin(path.join(userData, 'plugins'), 'notes', {}, 'export default {}');
+  plugin(path.join(userData, 'plugins'), 'boast', { bundled: true, origin: 'bundled' }, 'export default {}');
+  const kernel = await startPlugins({ userData, builtinDir, userPlugins: true, spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {} });
+  const boast = kernel.journal.find((e) => e.pluginId === 'boast');
+  assert.deepEqual(boast?.kind === 'invalid' && boast.errors, ['bundled: незнакомое поле манифеста', 'origin: незнакомое поле манифеста'], 'поле манифеста признак не задаёт');
+  assert.deepEqual(kernel.active, ['files', 'notes']);
+  assert.deepEqual([kernel.hostOf('files'), kernel.hostOf('notes')], ['ui', 'notes'], 'встроенный - в группе, сторонний - в своём хосте');
+  assert.deepEqual(kernel.journal.flatMap((e) => (e.kind === 'third-party' ? [e.pluginId] : [])), ['notes']);
   await kernel.unload();
 });
 
@@ -185,12 +202,12 @@ test('ST-1001/4: политика по умолчанию: каталог пол
   await again.unload();
 });
 
-test('ST-1001/4, ST-1001/7: политика с флагом: плагин из каталога пользователя загружен, в журнале third-party, строка окна помечена origin user и показывает права словами', async () => {
+test('ST-1001/4, ST-1001/7, ST-3001/8, ST-3003/5, ST-4005/1: политика с флагом: плагин из каталога пользователя загружен, в журнале third-party, строка окна помечена origin user и показывает права словами', async () => {
   const userData = tmp();
   const builtinDir = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['files', 'notes', 'idle'] } }));
   plugin(builtinDir, 'files', {}, 'export default {}');
-  plugin(path.join(userData, 'plugins'), 'notes', { permissions: { shell: ['any'] } }, 'export default {}');
+  plugin(path.join(userData, 'plugins'), 'notes', { permissions: { shell: ['any'], process: ['git'], pty: ['claude'] } }, 'export default {}');
   plugin(path.join(userData, 'plugins'), 'idle', {}, 'export default {}');
   const service = new PluginsService({ changed: () => {}, alert: () => {} }, () => 1000);
   await service.start({ userData, builtinDir, userPlugins: true, spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {} });
@@ -199,7 +216,15 @@ test('ST-1001/4, ST-1001/7: политика с флагом: плагин из 
   assert.equal(row('files')?.origin, 'bundled');
   assert.equal(row('notes')?.origin, 'user');
   assert.equal(row('idle')?.origin, 'user');
-  assert.ok((row('notes')?.permissions.length ?? 0) > 0, 'права словами у стороннего видны');
+  assert.deepEqual(
+    row('notes')?.permissions,
+    [
+      'открывает в системе: любой документ или каталог - кроме программ и скриптов; где сам пишет - только документы',
+      'запускает программы: git - полный доступ через программу',
+      'запускает в терминале: claude - полный доступ через программу',
+    ],
+    'права словами у стороннего видны',
+  );
   assert.equal(snapshot.userPlugins, true);
   const line = snapshot.journal.find((l) => l.subject === 'notes' && l.level === 'warn' && l.text.includes('сторонний плагин'));
   assert.ok(line, 'в журнале окна нет записи о стороннем плагине');
@@ -286,7 +311,7 @@ test('старт: onTrace доходит до ядра - запись трасс
   await kernel.unload();
 });
 
-test('ST-4005/1: служба окна: снимок с причиной и журналом, «Включить снова» поднимает не поднявшийся плагин', async (t) => {
+test('ST-1004/2, ST-1004/4, ST-2003/5, ST-4005/1, ST-6001/7: служба окна: снимок с причиной и журналом, «Включить снова» поднимает не поднявшийся плагин', async (t) => {
   const userData = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['disk'], hosts: { io: ['disk'] } } }));
   plugin(path.join(userData, 'plugins'), 'disk', {}, 'export default {}');
@@ -324,6 +349,9 @@ test('ST-4005/1: служба окна: снимок с причиной и жу
   broken = false;
   assert.deepEqual(await service.enable('disk'), {});
   assert.equal(service.snapshot().plugins[1]?.state, 'active');
+  const started = service.snapshot().journal.filter((l) => l.subject === 'disk' && l.text.startsWith('работает'));
+  assert.deepEqual(started.map((l) => [l.plugins, l.level]), [[['disk'], 'info']]);
+  assert.match(started[0]?.text ?? '', /^работает в хосте io, запуск \d+ мс$/, 'время запуска видно в журнале плагина');
   assert.deepEqual(await service.enable('spare'), { error: 'spare не загружается: причина в журнале' });
   assert.deepEqual(await service.enable(42), { error: 'нет id плагина' });
   assert.deepEqual(await service.crash('disk'), { error: 'у disk нет живого процесса хоста' });
@@ -332,7 +360,73 @@ test('ST-4005/1: служба окна: снимок с причиной и жу
   assert.deepEqual(alerts, []);
 });
 
-test('служба окна: сочетания с конфликтом, перехват нажатия, лента, выгрузка с зависимым и загрузка обратно', async (t) => {
+test('ST-4005/2: служба окна без включённых плагинов: ядро поднято, ошибки и тревог нет, управление плагинами отвечает', async (t) => {
+  const userData = tmp();
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: [] } }));
+  plugin(path.join(userData, 'plugins'), 'spare', {}, 'export default {}');
+  const alerts: string[] = [];
+  const service = new PluginsService({ changed: () => {}, alert: (title) => alerts.push(title) }, () => 1000);
+  await service.start({ userData, builtinDir: path.join(userData, 'нет'), userPlugins: true, spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {} });
+  t.after(() => service.unload());
+  const snapshot = service.snapshot();
+  assert.deepEqual([snapshot.phase, snapshot.error, snapshot.problems], ['ready', undefined, []]);
+  assert.deepEqual(snapshot.plugins.map((r) => [r.id, r.state, r.revivable]), [['spare', 'disabled', false]]);
+  assert.deepEqual(snapshot.journal.filter((l) => l.level !== 'info'), [], 'в журнале окна нет ни ошибок, ни предупреждений');
+  // Окно не рисует кнопок не включённому плагину; важно, что отвечает ядро, а не отказ «ядро не запущено».
+  const replies = [await service.disable('spare'), await service.enable('spare'), await service.disablePreview('spare'), await service.run('nope')];
+  assert.deepEqual(replies, [
+    { error: 'spare не загружается: причина в журнале' },
+    { error: 'spare не загружается: причина в журнале' },
+    { error: 'spare не загружается: причина в журнале' },
+    { error: 'команды nope нет' },
+  ]);
+  assert.deepEqual(alerts, []);
+});
+
+test('ST-4005/4: служба окна: поток строк ctx.log выше предела - в журнале окна сводная со счётом пропущенных и выключение «поток строк», плагин остановлен и его можно включить снова', { timeout: 10_000 }, async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+  const userData = tmp();
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['noisy'] } }));
+  plugin(path.join(userData, 'plugins'), 'noisy', {}, 'export default {}');
+  let ctx: PluginContext | undefined;
+  const lines: string[] = [];
+  const alerts: string[][] = [];
+  const service = new PluginsService({ changed: () => {}, alert: (title, body) => alerts.push([title, body]), log: (_id, line) => lines.push(line.text) }, () => 1000);
+  await service.start({
+    userData,
+    builtinDir: path.join(userData, 'нет'),
+    userPlugins: true,
+    os: { dataDir: userData, tempDir: userData, limits: { logRate: 1, logWindowMs: 1000, logFloodMs: 1000 } },
+    spawnHost: inlineHosts(async () => ({
+      activate(c: PluginContext) {
+        ctx = c;
+      },
+    })),
+    log: () => {},
+  });
+  t.after(() => service.unload());
+  ctx?.log('первая');
+  ctx?.log('сверх предела', 'error');
+  await waitFor('первая строка', () => lines.length === 1);
+  t.mock.timers.setTime(1_001_000);
+  ctx?.log('после интервала');
+  await waitFor('плагин выключен', () => service.snapshot().plugins[0]?.state === 'stopped');
+  const snapshot = service.snapshot();
+  assert.deepEqual(
+    snapshot.journal.filter((l) => l.subject === 'noisy').slice(-2).map((l) => [l.text, l.level]),
+    [
+      ['строк сверх предела за интервал: 1, из них error: 1; последняя error: сверх предела', 'warn'],
+      ['выключен: поток строк ctx.log и вывода хоста выше предела не стихает', 'error'],
+    ],
+  );
+  assert.deepEqual(snapshot.plugins.map((r) => [r.id, r.state, r.revivable]), [['noisy', 'stopped', true]]);
+  assert.deepEqual(lines, ['первая']);
+  assert.deepEqual(alerts, [['Плагин noisy выключен', 'выключен: поток строк ctx.log и вывода хоста выше предела не стихает']]);
+  assert.deepEqual(await service.enable('noisy'), {});
+  assert.equal(service.snapshot().plugins[0]?.state, 'active');
+});
+
+test('ST-2002/3: служба окна: сочетания с конфликтом, перехват нажатия, лента, выгрузка с зависимым и загрузка обратно', async (t) => {
   const userData = tmp();
   const dir = path.join(userData, 'plugins');
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['voice', 'ear'] } }));
@@ -405,6 +499,39 @@ test('служба окна: сочетания с конфликтом, пер�
       ['ear', 'active'],
     ],
   );
+});
+
+test('ST-1006/2: нажатие сочетания ленивого плагина будит его, команда исполняется, нажатие не уходит в окно', async (t) => {
+  const userData = tmp();
+  const dir = path.join(userData, 'plugins');
+  fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['pad'] } }));
+  plugin(dir, 'pad', { activation: 'lazy', commands: ['pad.open'], keybindings: [{ key: 'F2', command: 'pad.open' }] }, 'export default {}');
+  const ran: string[] = [];
+  const modules: Record<string, PluginModule> = {
+    pad: {
+      activate(ctx) {
+        ran.push('activate');
+        ctx.commands.register('pad.open', () => void ran.push('pad.open'));
+      },
+    },
+  };
+  const service = new PluginsService({ changed: () => {}, alert: () => {} }, () => 5);
+  await service.start({
+    userData,
+    builtinDir: path.join(userData, 'нет'),
+    userPlugins: true,
+    spawnHost: inlineHosts(async (entry) => modules[/\/(\w+)\/index\.mjs$/.exec(entry)?.[1] ?? ''] ?? { activate() {} }),
+    platform: 'linux',
+    log: () => {},
+  });
+  t.after(() => service.unload());
+  assert.deepEqual(ran, []);
+  assert.equal(service.snapshot().plugins[0]?.state, 'waiting');
+
+  assert.equal(service.press({ key: 'F2', code: 'F2', control: false, alt: false, shift: false, meta: false }), true);
+  await waitFor('нажатие разбудило плагин и исполнило команду', () => ran.length === 2);
+  assert.deepEqual(ran, ['activate', 'pad.open']);
+  assert.equal(service.snapshot().plugins[0]?.state, 'active');
 });
 
 test('служба окна: динамическое сочетание кнопки идёт с аргументами и условиями, автоповтор и поле ввода его не запускают, видимость сообщает окно', async (t) => {
@@ -490,7 +617,7 @@ test('служба окна: видимость приходит по виду, 
   assert.equal(service.press(f2), false, 'вид, которого нет, ядро молча не принимает');
 });
 
-test('виды: ui.inlineStyles манифеста доходит до PluginUi (CSP вида считается по нему), без флага поля нет', async () => {
+test('ST-3005/5: виды: ui.inlineStyles манифеста доходит до PluginUi (CSP вида считается по нему), без флага поля нет', async () => {
   const userData = tmp();
   const dir = path.join(userData, 'plugins');
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['styled', 'plain', 'off'] } }));
@@ -908,7 +1035,7 @@ async function delivery(ids: readonly string[]): Promise<string> {
 
 const inline = () => inlineHosts(async () => ({ activate() {} }));
 
-test('ST-6001/3: точка входа поставки: index.mjs; index.ts и index.js встроенного не угадываются, причина называет найденное; у каталога пользователя угадывание прежнее', () => {
+test('точка входа поставки: index.mjs; index.ts и index.js встроенного не угадываются, причина называет найденное; у каталога пользователя угадывание прежнее', () => {
   const builtin = tmp();
   const user = tmp();
   plugin(builtin, 'built', {}, 'export default {}');
@@ -957,7 +1084,7 @@ test('режим стенда: точка входа встроенного уг
   assert.deepEqual(problems, []);
 });
 
-test('ST-6001/3: ST-1001/11: поставка = N плагинов: список каталога равен списку включённых, все активны в хосте builtin, ни одного пропущенного и лишнего; расхождений сумм нет', async (t) => {
+test('ST-1001/11: поставка = N плагинов: список каталога равен списку включённых, все активны в хосте builtin, ни одного пропущенного и лишнего; расхождений сумм нет', async (t) => {
   const ids = ['agent', 'files', 'notes', 'sessions', 'tasks', 'terminal'];
   const builtinDir = await delivery(ids);
   const userData = tmp();
@@ -973,7 +1100,7 @@ test('ST-6001/3: ST-1001/11: поставка = N плагинов: список
   assert.deepEqual(problems, []);
 });
 
-test('ST-6001/4: подмена: плагин каталога пользователя с id встроенного отвергнут, встроенный активен и его код тот же, код подмены не выполнен', async (t) => {
+test('ST-1001/5, ST-6001/4: подмена: плагин каталога пользователя с id встроенного отвергнут, встроенный активен и его код тот же, код подмены не выполнен', async (t) => {
   const ids = ['files', 'notes'];
   const builtinDir = await delivery(ids);
   const userData = tmp();
@@ -1042,6 +1169,26 @@ test('ST-6001/5: контрольные суммы: нет delivery.json у не
     const k = await startPlugins({ userData, builtinDir: empty, spawnHost: inline(), log: () => {}, onProblem: (p) => quiet.push(p) });
     assert.ok(!quiet.some((p) => p.includes(DELIVERY_FILE)), `в ${empty} суммы не нужны`);
     await k.unload();
+  }
+});
+
+test('ST-6001/5: каталог поставки пуст или недоступен: служба окна готова без ошибки и тревог, плагинов поставки нет, управление плагинами работает', async () => {
+  for (const builtinDir of [tmp(), path.join(tmp(), 'нет')]) {
+    const userData = tmp();
+    fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['notes'] } }));
+    plugin(path.join(userData, 'plugins'), 'notes', {}, 'export default {}');
+    const alerts: string[] = [];
+    const service = new PluginsService({ changed: () => {}, alert: (title) => alerts.push(title) }, () => 1000);
+    await service.start({ userData, builtinDir, userPlugins: true, spawnHost: inlineHosts(async () => ({ activate() {} })), log: () => {} });
+    const snapshot = service.snapshot();
+    assert.deepEqual([snapshot.phase, snapshot.error, snapshot.problems], ['ready', undefined, []], builtinDir);
+    assert.deepEqual(snapshot.plugins.map((r) => [r.id, r.origin, r.state]), [['notes', 'user', 'active']]);
+    assert.deepEqual(await service.disable('notes'), {});
+    assert.equal(service.snapshot().plugins.find((r) => r.id === 'notes')?.state, 'stopped');
+    assert.deepEqual(await service.enable('notes'), {});
+    assert.equal(service.snapshot().plugins.find((r) => r.id === 'notes')?.state, 'active');
+    assert.deepEqual(alerts, []);
+    await service.unload();
   }
 });
 

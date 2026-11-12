@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import { allowsMajor, satisfies, isValidRange } from '../src/semver.ts';
 import { checkArgs, parseManifest, type CommandSpec } from '../src/manifest.ts';
 
-test('ST-5001/1, ST-5001/3, ST-5002/8: диапазоны: каретка, тильда, префикс и звезда', () => {
+test('ST-5001/1, ST-5001/3, ST-6002/2: диапазоны: каретка, тильда, префикс и звезда', () => {
   assert.ok(satisfies('1.4.0', '^1'));
+  assert.ok(satisfies('1.4.0', '^1.3'));
+  assert.ok(!satisfies('1.3.0', '^1.5'));
   assert.ok(satisfies('1.9.9', '^1.4'));
   assert.ok(!satisfies('1.3.9', '^1.4'));
   assert.ok(!satisfies('2.0.0', '^1'));
@@ -20,7 +22,7 @@ test('ST-5001/1, ST-5001/3, ST-5002/8: диапазоны: каретка, ти�
   assert.ok(!satisfies('1.x', '^1'));
 });
 
-test('ST-5001/3, ST-5002/8: allowsMajor: есть ли в диапазоне версия этой мажорной', () => {
+test('allowsMajor: есть ли в диапазоне версия этой мажорной', () => {
   assert.ok(allowsMajor('^1.4', 1));
   assert.ok(!allowsMajor('^1.4', 2));
   assert.ok(!allowsMajor('^1.4', 0));
@@ -33,13 +35,13 @@ test('ST-5001/3, ST-5002/8: allowsMajor: есть ли в диапазоне в�
 
 const base = { id: 'pin-lock', version: '1.0.0', engines: { cyborg: '^1' } };
 
-test('ST-2004/5: манифест: незнакомое поле верхнего уровня - отказ с именем поля, $schema разрешён', () => {
+test('манифест: незнакомое поле верхнего уровня - отказ с именем поля, $schema разрешён', () => {
   const typo = parseManifest({ ...base, keybinding: [], lok: { onStart: true } });
   assert.deepEqual(typo, { ok: false, id: 'pin-lock', errors: ['keybinding: незнакомое поле манифеста', 'lok: незнакомое поле манифеста'] });
   assert.ok(parseManifest({ $schema: './manifest.schema.json', ...base }).ok);
 });
 
-test('ST-6002/1: ST-5001/2: манифест под другой API: при ошибках разбора одна причина - версия API', () => {
+test('ST-5001/3: манифест под другой API: при ошибках разбора одна причина - версия API', () => {
   const newer = { ...base, engines: { cyborg: '^1.3' }, layout: { kind: 'side' } };
   assert.deepEqual(parseManifest(newer, '1.2.0'), { ok: false, id: 'pin-lock', errors: ['engines.cyborg: нужен API Cyborg ^1.3, есть 1.2.0'] });
   assert.deepEqual(parseManifest(newer, '1.3.0'), { ok: false, id: 'pin-lock', errors: ['layout: незнакомое поле манифеста'] });
@@ -47,7 +49,7 @@ test('ST-6002/1: ST-5001/2: манифест под другой API: при о�
   assert.ok(parseManifest({ ...base, engines: { cyborg: '^2' } }, '1.2.0').ok, 'без ошибок разбора версию судит граф');
 });
 
-test('манифест: минимальный приводится к полной форме', () => {
+test('ST-1001/3: манифест: минимальный приводится к полной форме', () => {
   const r = parseManifest({ ...base, provides: { 'cyborg.lock': '1.0' } });
   assert.ok(r.ok);
   assert.deepEqual(r.manifest.provides, { 'cyborg.lock': ['1.0'] });
@@ -138,7 +140,7 @@ const docErrors = (documents: unknown) => {
 };
 const AREAS = 'sidebar, main, toolbar, popup или modal';
 
-test('вид: объект с module, area, order и title; строка остаётся краткой записью и не получает размещения', () => {
+test('ST-2003/1: вид: объект с module, area, order и title; строка остаётся краткой записью и не получает размещения', () => {
   const r = parseManifest({
     ...base,
     ui: { views: { sessions: { module: './ui/s.js', area: 'main', order: 100, title: 'Сессии' }, tree: './ui/tree.js', bar: { module: './bar.js' } } },
@@ -192,7 +194,7 @@ test('ui.group: имя группы в манифесте разбирается
 });
 
 // K-05: ui.inlineStyles - только true включает инлайн-стили вида; без поля, как и с false, поля в разборе нет.
-test('ui.inlineStyles: только булев true включает инлайн-стили вида, прочее - отказ с именем поля', () => {
+test('ST-3005/5: ui.inlineStyles: только булев true включает инлайн-стили вида, прочее - отказ с именем поля', () => {
   const ok = parseManifest({ ...base, ui: { views: { main: './ui.js' }, inlineStyles: true } });
   assert.ok(ok.ok);
   assert.equal(ok.manifest.ui?.inlineStyles, true);
@@ -227,7 +229,7 @@ test('вид: area modal - окно по просьбе главной част�
   assert.deepEqual(docErrors({ note: { area: 'modal' } }), ['documents.note.area: модальным бывает вид, а не документ: вкладки у модального окна нет']);
 });
 
-test('ST-5003/2: манифест: deprecated у provides - члены с пометкой @deprecated, ошибки называют поле', () => {
+test('манифест: deprecated у provides - члены с пометкой @deprecated, ошибки называют поле', () => {
   const ok = parseManifest({ ...base, provides: { 'test.old': { version: ['1.4', '2.0'], deprecated: ['list', 'get_one'], guard: { list: { 'fs.read': 0 } } }, 'test.new': '1.0' } });
   assert.ok(ok.ok);
   assert.deepEqual(ok.manifest.deprecated, { 'test.old': ['list', 'get_one'] });

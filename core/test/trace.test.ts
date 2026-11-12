@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -125,7 +126,7 @@ const pairManifests = [
 ];
 const pairOptions = { hosts: { f: ['files'], a: ['app'] }, os: { dataDir: '/nonexistent/d', tempDir: '/nonexistent/t', env: ENV } } as const;
 
-test('ST-4001/1, ST-4001/2: трасса: вызов ctx.os, член контракта, команда и вызов моста дают по одной записи с границами, адресатом и итогом (FR-CH-4001, NFR-CH-1004)', async () => {
+test('ST-4001/1, ST-4001/2, ST-4001/4: трасса: вызов ctx.os, член контракта, команда и вызов моста дают по одной записи с границами, адресатом и итогом (FR-CH-4001, NFR-CH-1004)', async () => {
   const r = await rig(pair, pairManifests, pairOptions);
   const app = r.ctx.app!;
   r.take();
@@ -177,39 +178,14 @@ test('ST-4001/1, ST-4001/2: трасса: вызов ctx.os, член контр
   );
 });
 
-test('ST-4003/6: хост упал посреди цепочки - операция кончается обычной записью с code HostGone, отдельной записи нет, виновник в host-down журнала', async () => {
-  const handles = new Map<string, HostHandle>();
-  const ctxs: Record<string, PluginContext> = {};
-  const table: Record<string, PluginModule> = {
-    files: {
-      activate(ctx) {
-        ctx.contracts.provide('trace.files', '1.0', { read: () => new Promise<string>(() => {}) });
-      },
-    },
-    app: { activate: () => undefined },
-  };
-  const spawn: SpawnHost = (hostId) => {
-    const handle = inlineHosts(async (entry) => ({
-      activate(c: PluginContext) {
-        ctxs[entry] = c;
-        return table[entry]!.activate(c);
-      },
-    }))(hostId);
-    handles.set(hostId, handle);
-    return handle;
-  };
-  const r = await rig(table, pairManifests, { ...pairOptions, spawn });
+test('ST-4001/1: трасса: вызов ctx.os.net.fetch - одна запись, последняя граница - сеть (Г5), право net (FR-CH-4001)', async () => {
+  const fakeFetch = (async () => new Response('ответ')) as unknown as typeof fetch;
+  const r = await rig({ web: { activate() {} } }, [manifest('web', { permissions: { net: ['api.example.com'] } })], { os: { dataDir: '/nonexistent/d', tempDir: '/nonexistent/t', fetch: fakeFetch } });
   r.take();
-  const settled = assert.rejects(ctxs.app!.contracts.get('trace.files', 1)!.read!('/x'), { code: 'HostGone' });
-  await sleep(30);
-  handles.get('f')!.kill();
-  await settled;
-  await r.k.idle();
-  const reads = r.ops().filter((o) => o.target === 'contract:trace.files@1#read');
-  assert.equal(reads.length, 1, 'операция дала не одну запись');
-  assert.deepEqual([reads[0]!.outcome, reads[0]!.code], ['error', 'HostGone']);
-  assert.ok(r.records.every((rec) => rec.kind !== 'operation' || rec.target !== 'host-gone'), 'отдельной записи о потере хоста нет');
-  assert.ok(r.k.journal.some((e) => e.kind === 'host-down'), 'виновник назван в журнале');
+  assert.equal((await r.ctx.web!.os.net!.fetch('https://api.example.com/v1')).body, 'ответ');
+  const [op, ...rest] = r.take();
+  assert.equal(rest.length, 0, 'вызов net.fetch - одна запись');
+  assert.deepEqual([op!.caller, op!.target, op!.boundaries, op!.right, op!.outcome], ['plugin:web', 'os:net.fetch', ['host', 'net'], 'net', 'ok']);
 });
 
 test('ST-4001/4: итог: исключение поставщика, команда без владельца и вызов ctx.os без права - запись с кодом и причиной на английском; вызов без права не выполняется (FR-CH-4003)', async () => {
@@ -233,11 +209,20 @@ test('ST-4001/4: итог: исключение поставщика, коман
   const [none] = r.take();
   assert.deepEqual([none!.target, none!.code, none!.boundaries], ['command:nobody.home', 'CommandNotFound', ['host', 'contract']]);
 
+  const stolen = box.path('stolen.txt');
+  await assert.rejects(app.os.fs.writeText(stolen, 'чужое'), { code: 'PermissionDenied' });
+  const [write] = r.take();
+  assert.deepEqual([write!.target, write!.right, write!.outcome, write!.code], ['os:fs.writeText', 'fs.write', 'error', 'PermissionDenied']);
+  assert.equal(existsSync(stolen), false, 'вызов без права не выполнялся: файла нет');
+
   const text = JSON.stringify(r.records);
   assert.ok(!text.includes('отказ поставщика') && !text.includes(secretFile), 'текст исключения и путь в запись не идут: причина - по коду');
+
+  const broken = await rig({ bad: { activate: () => Promise.reject(new Error('нет ключа')) } }, [manifest('bad')], { os: { dataDir: box.path('data2'), tempDir: box.path('temp2') } });
+  assert.ok(broken.k.journal.some((e) => e.kind === 'failed' && e.pluginId === 'bad'), 'отказ активации - запись failed в журнале');
 });
 
-test('ST-4001/3: цепочка: клик вида -> команда -> член контракта другого плагина -> ctx.os несут номер первой записи; сочетание строит цепочку так же (FR-CH-4002)', async () => {
+test('ST-4001/1, ST-4001/2, ST-4001/3: цепочка: клик вида -> команда -> член контракта другого плагина -> ctx.os несут номер первой записи; сочетание строит цепочку так же (FR-CH-4002)', async () => {
   const r = await rig(pair, pairManifests, pairOptions);
   r.take();
 
@@ -296,6 +281,59 @@ test('ST-4001/3: цепочка: событие контракта начина�
   assert.deepEqual([os!.target, os!.caller, os!.chain], ['os:env.get', 'plugin:user', event!.id]);
 });
 
+test('ST-4001/3: цепочка: таймер плагина начинает цепочку - команда, член контракта и ctx.os из него несут номер первой записи (FR-CH-4002)', async () => {
+  const table: Record<string, PluginModule> = {
+    ...pair,
+    app: {
+      activate(ctx) {
+        ctx.commands.register('app.go', () => ctx.contracts.get('trace.files', 1)!.env!());
+        setTimeout(() => void ctx.commands.run('app.go'), 20);
+      },
+    },
+  };
+  const r = await rig(table, pairManifests, pairOptions);
+  const targets = ['command:app.go', 'contract:trace.files@1#env', 'os:env.get'];
+  await waitFor('таймер сработал, все три операции записаны', () => r.ops().filter((x) => targets.includes(x.target)).length === 3);
+  const fromTimer = r.ops().filter((x) => targets.includes(x.target));
+  const first = fromTimer.find((x) => x.target === 'command:app.go')!;
+  assert.deepEqual([first.caller, first.chain], ['plugin:app', first.id], 'операция из таймера не входит в другую: номер цепочки равен её id');
+  assert.ok(first.id < Math.min(...fromTimer.filter((x) => x !== first).map((x) => x.id)));
+  assert.deepEqual([...new Set(fromTimer.map((x) => x.chain))], [first.id], 'порождённые операции несут номер первой');
+});
+
+test('ST-4003/6, ST-4001/4: хост поставщика упал посреди вызова: у вызова одна запись с HostGone, отдельной записи нет, виновник - в host-down журнала (FR-CH-4003)', async () => {
+  const handles = new Map<string, HostHandle>();
+  const ctx: Record<string, PluginContext> = {};
+  const inline = inlineHosts(async (entry) => ({
+    activate(c: PluginContext) {
+      ctx[entry] = c;
+      if (entry === 'files') c.contracts.provide('trace.files', '1.0', { read: () => new Promise<string>(() => undefined) });
+    },
+  }));
+  const spawn: SpawnHost = (hostId) => {
+    const handle = inline(hostId);
+    handles.set(hostId, handle);
+    return handle;
+  };
+  const r = await rig({}, [manifest('files', { provides: { 'trace.files': '1.0' } }), manifest('app', { requires: { 'trace.files': '^1' } })], { spawn, hosts: { f: ['files'], a: ['app'] } });
+  r.take();
+
+  const call = ctx.app!.contracts.get('trace.files', 1)!.read!('x');
+  const settled = assert.rejects(call, { code: 'HostGone' });
+  await sleep(20);
+  handles.get('f')!.kill();
+  await settled;
+  await waitFor('хост поставщика перезапущен', () => r.k.journal.some((e) => e.kind === 'host-restart' && e.hostId === 'f') && r.k.active.includes('files'));
+
+  const records = r.ops().filter((x) => x.target === 'contract:trace.files@1#read');
+  assert.equal(records.length, 1, 'операция кончается одной записью, отдельной записи о падении нет');
+  assert.deepEqual([records[0]!.caller, records[0]!.callee, records[0]!.outcome, records[0]!.code], ['plugin:app', 'plugin:files', 'error', 'HostGone']);
+  assert.deepEqual(r.ops().filter((x) => x.code === 'HostGone'), records, 'HostGone несёт только оборванный вызов');
+  const down = r.k.journal.find((e) => e.kind === 'host-down' && e.hostId === 'f');
+  assert.ok(down?.kind === 'host-down', 'запись host-down в журнале');
+  assert.deepEqual([down.reason, down.culprits], ['crash', ['files']], 'виновник назван в host-down');
+});
+
 test('ST-4001/5, ST-4001/11: содержимое: маркер в аргументе и в результате, значение секрета и путь в записи не попадают, размеры - да (FR-CH-4004, NFR-CH-4002)', async () => {
   await using box = await sandbox();
   const marker = `МАРКЕР-${randomUUID()}`;
@@ -328,7 +366,7 @@ test('ST-4001/5, ST-4001/11: содержимое: маркер в аргуме�
   for (const leak of [marker, secret, box.root, 'work']) assert.ok(!text.includes(leak), `в трассе есть ${leak.slice(0, 12)}…`);
 });
 
-test('ST-4001/11: содержимое: значение секрета, полученное через secrets.resolve, и ссылка на внешний источник в трассу не попадают, запись операции есть (NFR-CH-4002, #168)', async () => {
+test('содержимое: значение секрета, полученное через secrets.resolve, и ссылка на внешний источник в трассу не попадают, запись операции есть (NFR-CH-4002, #168)', async () => {
   const secret = `s3cr3t-${randomUUID()}`;
   const ref = `vault://x/${randomUUID()}`;
   const secrets = memorySecrets();
@@ -479,7 +517,7 @@ test('ST-4001/9: трасса недоступна плагину: в ctx нет
   assert.ok(!keys.some((n) => /trace/i.test(n)), 'ядро для встраивающего приложения трассу не отдаёт: её читает окно ядра через onTrace');
 });
 
-test('сообщение хоста неверной формы и подмена имени плагина - запись на границе Г1 с кодом (FR-CH-4001)', async () => {
+test('ST-4001/7: сообщение хоста неверной формы и подмена имени плагина - запись на границе Г1 с кодом (FR-CH-4001)', async () => {
   const toKernel = new Map<string, (m: unknown) => void>();
   const base = inlineHosts(async () => ({ activate() {} }));
   const spawn: SpawnHost = (hostId) => {
@@ -563,7 +601,7 @@ test('мост вида (K-13): канал, модальное окно, его 
 
 // K-33 (#224): аргументы операций в записи по флагу запуска `traceArgs` (`--trace-args`).
 
-test('ST-4001/5: без флага запись не несёт поля args, хотя аргументы есть (K-33)', async () => {
+test('без флага запись не несёт поля args, хотя аргументы есть (K-33)', async () => {
   const r = await rig(pair, pairManifests, pairOptions);
   const app = r.ctx.app!;
   r.take();
@@ -648,7 +686,7 @@ test('предел: длинные аргументы обрезаны по LIMI
   assert.ok(cut!.args!.length < 60 && cut!.args!.includes('обрезано'), cut!.args!);
 });
 
-test('ST-4001/11: секрет: значение, полученное плагином через шлюз, вычёркнуто из аргументов; чужой секрет и не прошедшее шлюз значение - нет (K-33, K-29)', async () => {
+test('секрет: значение, полученное плагином через шлюз, вычёркнуто из аргументов; чужой секрет и не прошедшее шлюз значение - нет (K-33, K-29)', async () => {
   const secret = `s3cr3t-${randomUUID()}`;
   const stranger = `chuzhoj-${randomUUID()}`;
   const r = await rig(pair, pairManifests, { ...pairOptions, traceArgs: true, os: { ...pairOptions.os, secrets: memorySecrets() } });
@@ -691,7 +729,7 @@ test('журнал: с флагом при запуске есть запись 
   assert.deepEqual(noSink.records, []);
 });
 
-test('ST-4001/11: секрет: значение в os:secrets.set пишется меткой при любой длине (1-3 знака, 4 знака, длинное), ключ остаётся; get и resolve аргументов не теряют (K-33)', async () => {
+test('секрет: значение в os:secrets.set пишется меткой при любой длине (1-3 знака, 4 знака, длинное), ключ остаётся; get и resolve аргументов не теряют (K-33)', async () => {
   const r = await rig(pair, pairManifests, { ...pairOptions, traceArgs: true, os: { ...pairOptions.os, secrets: memorySecrets() } });
   const app = r.ctx.app!;
   r.take();

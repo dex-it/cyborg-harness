@@ -18,7 +18,7 @@ const files = m('files', { provides: { 'cyborg.files': ['1.4', '2.0'] } });
 const oldUser = m('old', { requires: { 'cyborg.files': '^1' } });
 const newUser = m('new', { optional: { 'cyborg.files': '^2' } });
 
-test('ST-5001/6, ST-5002/2: ST-2001/1: потребитель получает свою мажорную версию от того же поставщика', () => {
+test('ST-5001/6: потребитель получает свою мажорную версию от того же поставщика', () => {
   const r = registry([files, oldUser, newUser]);
   r.provide('files', 'cyborg.files', '1.4', { v: 1 });
   r.provide('files', 'cyborg.files', '2.0', { v: 2 });
@@ -26,7 +26,7 @@ test('ST-5001/6, ST-5002/2: ST-2001/1: потребитель получает �
   assert.deepEqual(r.get('new', 'cyborg.files', 2), { v: 2 });
 });
 
-test('ST-5001/4, ST-5002/2: мажорная версия в get и all должна лежать в диапазоне манифеста', () => {
+test('ST-5002/2: мажорная версия в get и all должна лежать в диапазоне манифеста', () => {
   const any = m('any', { optional: { 'cyborg.files': '*' } });
   const r = registry([files, oldUser, any]);
   r.provide('files', 'cyborg.files', '1.4', { v: 1 });
@@ -38,6 +38,18 @@ test('ST-5001/4, ST-5002/2: мажорная версия в get и all долж
   const untyped = r as unknown as { get(consumer: string, contract: string, major?: unknown): unknown };
   assert.throws(() => untyped.get('old', 'cyborg.files'), { code: 'NotDeclared' });
   assert.throws(() => untyped.get('old', 'cyborg.files', '1'), { code: 'NotDeclared' });
+});
+
+test('ST-5002/2: all: поставщик двух мажорных версий - каждому потребителю consumes своя, мажорная вне диапазона - NotDeclared', () => {
+  const v1 = m('v1', { consumes: { 'cyborg.files': '^1' } });
+  const v2 = m('v2', { consumes: { 'cyborg.files': '^2' } });
+  const r = registry([files, v1, v2]);
+  r.provide('files', 'cyborg.files', '1.4', { v: 1 });
+  r.provide('files', 'cyborg.files', '2.0', { v: 2 });
+  assert.deepEqual(r.all('v1', 'cyborg.files', 1).map((p) => [p.pluginId, p.version, p.impl]), [['files', '1.4', { v: 1 }]]);
+  assert.deepEqual(r.all('v2', 'cyborg.files', 2).map((p) => [p.pluginId, p.version, p.impl]), [['files', '2.0', { v: 2 }]]);
+  assert.throws(() => r.all('v1', 'cyborg.files', 2), { code: 'NotDeclared', message: 'v1: cyborg.files объявлен как ^1, мажорной версии 2 в нём нет' });
+  assert.throws(() => r.all('v2', 'cyborg.files', 1), { code: 'NotDeclared' });
 });
 
 test('ST-2001/2: необъявленное не отдаётся и не берётся', () => {

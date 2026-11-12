@@ -150,7 +150,7 @@ test('ST-5003/3: журнал: вызовы устаревшего члена з
   assert.match(describeEntry(last), /ещё 99 раз/);
 });
 
-test('ST-5003/3: журнал: окно склейки закрывается - следующий вызов пишется заново', async () => {
+test('журнал: окно склейки закрывается - следующий вызов пишется заново', async () => {
   const out: JournalEntry[] = [];
   const c = new DeprecatedCollapse((e) => out.push(e), 10);
   c.record(old('a'));
@@ -162,7 +162,7 @@ test('ST-5003/3: журнал: окно склейки закрывается - 
   c.flush();
 });
 
-test('ST-5003/3: журнал: записей deprecated-call не больше предела, старейшая самого шумного уходит; отказы и записи жизненного цикла остаются', () => {
+test('журнал: записей deprecated-call не больше предела, старейшая самого шумного уходит; отказы и записи жизненного цикла остаются', () => {
   const list: JournalEntry[] = [{ pluginId: 'p', kind: 'activated', hostId: 'h', ms: 1 }, denied('x'), old('quiet')];
   for (let i = 0; i < 50; i++) appendBounded(list, old('loud', `m${String(i)}`), (e) => e, 10);
   const calls = list.filter((e) => e.kind === 'deprecated-call');
@@ -173,7 +173,7 @@ test('ST-5003/3: журнал: записей deprecated-call не больше 
   assert.equal(list.filter((e) => e.kind === 'activated').length, 1);
 });
 
-test('ST-5003/3: журнал: поток вызовов устаревшего члена не вытесняет отказы, а предел по умолчанию - 1000', () => {
+test('журнал: поток вызовов устаревшего члена не вытесняет отказы, а предел по умолчанию - 1000', () => {
   const list: JournalEntry[] = [];
   for (let i = 0; i < 5; i++) appendBounded(list, denied(String(i)), (e) => e);
   for (let i = 0; i < 3000; i++) appendBounded(list, old('loud', `m${String(i)}`), (e) => e);

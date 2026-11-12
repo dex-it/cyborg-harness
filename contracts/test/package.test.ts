@@ -46,7 +46,7 @@ function specifiers(file: string, text: string): string[] {
 }
 
 describe('package.json пакета контрактов', () => {
-  it('ST-5002/5: готов к публикации: не private, exports и types на собранные декларации', () => {
+  it('готов к публикации: не private, exports и types на собранные декларации', () => {
     assert.equal(pkg.name, '@cyborg-harness/contracts');
     assert.notEqual(pkg.private, true, 'private: true запрещает npm publish');
     assert.match(pkg.version, /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/);
@@ -61,6 +61,34 @@ describe('package.json пакета контрактов', () => {
     assert.equal(pkg.publishConfig?.registry, 'https://registry.npmjs.org/');
     assert.equal(pkg.publishConfig.access, 'restricted', 'public выставляет релиз P-10 по решению владельца, не эта задача');
     assert.equal(pkg.scripts?.prepack, 'node scripts/build.ts', 'tarball всегда собирается свежим');
+  });
+});
+
+/** Ключи интерфейсов `Contracts` файла: карта самого пакета или дополнение через `declare module`. */
+function contractKeys(file: string): string[] {
+  const source = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const found: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isInterfaceDeclaration(node) && node.name.text === 'Contracts') {
+      for (const member of node.members) if (member.name && ts.isStringLiteral(member.name)) found.push(member.name.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+describe('ST-5002/5: демо-контракты вне пакета и снимка', () => {
+  it('карта Contracts пакета - только cyborg.*; demo.* нет ни в исходниках пакета, ни в снимке деклараций, ни в эталоне API; демо дополняют карту в core/examples', () => {
+    const own = contractKeys(path.join(contracts, 'index.ts'));
+    assert.ok(own.length >= 6, `в карте только ${String(own.length)} ключей`);
+    assert.deepEqual(own.filter((k) => !k.startsWith('cyborg.')), []);
+    const etalons = fs.readdirSync(path.join(repo, 'core', 'test', 'api-snapshot')).map((name) => `core/test/api-snapshot/${name}`);
+    assert.ok(etalons.length > 0);
+    const files = [...SOURCES.map((s) => `contracts/${s}.ts`), 'contracts/api-snapshot.txt', ...etalons];
+    assert.deepEqual(files.filter((rel) => fs.readFileSync(path.join(repo, rel), 'utf8').includes('demo.')), []);
+    const demo = contractKeys(path.join(repo, 'core', 'examples', 'contracts.ts'));
+    assert.ok(demo.length > 0 && demo.every((k) => k.startsWith('demo.')), demo.join());
   });
 });
 
@@ -87,7 +115,7 @@ describe('сборка деклараций', () => {
     );
   });
 
-  it('ST-5002/5: в dist только .d.ts, импортов с расширением .ts нет, каждый относительный путь ведёт к файлу', () => {
+  it('в dist только .d.ts, импортов с расширением .ts нет, каждый относительный путь ведёт к файлу', () => {
     const out = tmp('build');
     buildDeclarations(out);
     const files = fs.readdirSync(out, { recursive: true, encoding: 'utf8' }).sort();
@@ -121,7 +149,7 @@ describe('npm pack и пустой потребитель', () => {
     fs.rmSync(work, { recursive: true, force: true });
   });
 
-  it('ST-5002/5: в tarball: package.json, README, CHANGELOG, схема манифеста и декларации; исходных .ts нет', () => {
+  it('в tarball: package.json, README, CHANGELOG, схема манифеста и декларации; исходных .ts нет', () => {
     const names = report[0]!.files.map((f) => f.path).sort();
     assert.deepEqual(names, ['CHANGELOG.md', 'README.md', 'dist/agent.d.ts', 'dist/elements.d.ts', 'dist/git.d.ts', 'dist/index.d.ts', 'dist/os.d.ts', 'dist/plugin.d.ts', 'dist/sessions.d.ts', 'dist/tree.d.ts', 'dist/view.d.ts', 'manifest.schema.json', 'package.json']);
     assert.deepEqual(names.filter((n) => n.endsWith('.ts') && !n.endsWith('.d.ts')), []);

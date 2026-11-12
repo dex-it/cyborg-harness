@@ -6,12 +6,13 @@ import { test } from 'node:test';
 import type { PluginContext } from '@cyborg-harness/contracts';
 import { memorySecrets } from '../../testing/src/memory.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
-import { Diagnostics, type DiagnosticsFs, type DiagnosticsOptions } from '../src/diagnostics.ts';
+import { DIAGNOSTICS_DEFAULTS, Diagnostics, type DiagnosticsFs, type DiagnosticsOptions } from '../src/diagnostics.ts';
 import { decodeRecord } from '../src/diagnostics-record.ts';
+import { LIMITS } from '../src/limits.ts';
 import { load, type JournalEntry, type Kernel, type LoadOptions } from '../src/loader.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { pluginStatuses } from '../src/status.ts';
-import { inlineHosts } from '../src/transports.ts';
+import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { trackKernels } from './kernels.ts';
 import { waitFor } from './wait-for.ts';
 
@@ -85,7 +86,7 @@ test('ST-4003/2: запись: ошибка и жизненный цикл ух�
   d.close();
 });
 
-test('запись: срочные записи чаще urgentGapMs не превращают каждую ошибку в запись на диск', async () => {
+test('ST-4003/2: запись: срочные записи чаще urgentGapMs не превращают каждую ошибку в запись на диск', async () => {
   const fsys = new MemoryFs();
   const d = diag(fsys, { urgentGapMs: 60_000 });
   const first = fsys.appends;
@@ -96,7 +97,7 @@ test('запись: срочные записи чаще urgentGapMs не пре
   assert.equal(fsys.records('diagnostics.log').filter((r) => r.src === 'log').length, 100);
 });
 
-test('ST-4003/1: ротация: файлов не больше предела, каждый не больше предельного размера, оба читаются, самые новые записи на месте (FR-CH-4012)', () => {
+test('ST-4003/1, ST-4004/4: ротация: файлов не больше предела, каждый не больше предельного размера, оба читаются, самые новые записи на месте (FR-CH-4012)', () => {
   const fsys = new MemoryFs();
   const start = clock;
   const d = diag(fsys, { fileBytes: 2000, files: 3 });
@@ -112,6 +113,29 @@ test('ST-4003/1: ротация: файлов не больше предела, 
   const info = d.stored();
   assert.deepEqual([info.files, info.bytes], [3, names(fsys).reduce((n, name) => n + fsys.size(name), 0)]);
   assert.ok(info.since !== undefined && info.since > start + 50, 'время самой ранней записи сдвинулось вперёд вместе с ротацией, но не пропало');
+});
+
+test('ST-4001/6, ST-4002/3, ST-4002/4, ST-4002/5, ST-4003/1, ST-4003/2: умолчания из критериев - интервал счётчика потока 1 с, строка 8 КиБ, 100 строк за 1 с, поток 10 с, кольцо 5000 и 1250 на плагин, 5 файлов по 2 МиБ, срочная запись 20 мс, пакет 1 с', () => {
+  const { traceStreamMs, logLineBytes, logRate, logWindowMs, logFloodMs } = LIMITS;
+  assert.deepEqual({ traceStreamMs, logLineBytes, logRate, logWindowMs, logFloodMs }, { traceStreamMs: 1000, logLineBytes: 8192, logRate: 100, logWindowMs: 1000, logFloodMs: 10_000 });
+  const { capacity, perPlugin, fileBytes, files, urgentGapMs, flushMs } = DIAGNOSTICS_DEFAULTS;
+  assert.deepEqual({ capacity, perPlugin, fileBytes, files, urgentGapMs, flushMs }, { capacity: 5000, perPlugin: 1250, fileBytes: 2 * 1024 * 1024, files: 5, urgentGapMs: 20, flushMs: 1000 });
+});
+
+test('ST-4003/1: срока хранения нет - записи годичной давности переживают новый запуск, есть в выгрузке и в причине прошлого сбоя', () => {
+  const fsys = new MemoryFs();
+  const yearAgo = Date.now() - 365 * 24 * 3600 * 1000;
+  let at = yearAgo;
+  const old = new Diagnostics({ fs: fsys, now: () => ++at, flushMs: 60_000, urgentGapMs: 0 });
+  old.sinks.onLog('p', 'строка годичной давности', 'info');
+  old.sinks.onJournal(failed('p', 'сбой годичной давности'));
+  old.close();
+  const d = diag(fsys);
+  const text = d.export({});
+  assert.ok(text.includes('строка info p: строка годичной давности'));
+  assert.ok(text.includes('не поднялся в хосте h: сбой годичной давности'));
+  assert.ok(text.includes(`самая ранняя: ${new Date(yearAgo + 1).toISOString()}`));
+  assert.equal(d.previousFailures().get('p')?.text, 'не поднялся в хосте h: сбой годичной давности');
 });
 
 test('ротация: один файл - при заполнении он начинается заново; запись длиннее предела заменяется меткой и предел размера держится', () => {
@@ -151,6 +175,7 @@ test('ST-4003/3: отказ диска: запись не бросает, кол
   const own = d.recent().filter((r) => r.src === 'log' && r.pluginId === 'диагностика');
   assert.equal(own.length, 1, 'одна запись об отказе, а не по записи на попытку');
   assert.equal(own[0]?.src === 'log' && own[0].text.includes('ENOSPC'), true);
+  assert.equal(own[0]?.src === 'log' && own[0].level, 'error', 'запись об отказе - уровня error');
   assert.ok(!JSON.stringify(own).includes('секретное-имя'), 'путь из сообщения файловой системы в запись не идёт');
   assert.equal(problems.length, 1);
   assert.equal(d.stored().problem, 'ENOSPC');
@@ -208,7 +233,7 @@ test('ST-4003/3: отказ диска не отказывает операци�
   d.close();
 });
 
-test('ST-4003/4, ST-4003/5: прошлый запуск: причина сбоя читается из файла на том же каталоге, состояние плагина в новом запуске выводится только из его журнала (FR-CH-4013, 4014)', async () => {
+test('ST-4003/5: прошлый запуск: причина сбоя читается из файла на том же каталоге, состояние плагина в новом запуске выводится только из его журнала (FR-CH-4013, 4014)', async () => {
   const fsys = new MemoryFs();
   const first = diag(fsys);
   first.sinks.onJournal({ pluginId: 'flaky', kind: 'activated', hostId: 'h', ms: 3 });
@@ -235,7 +260,7 @@ test('ST-4003/4, ST-4003/5: прошлый запуск: причина сбоя
   assert.equal(second.previousFailures().get('flaky')?.pluginId, 'flaky', 'причина прошлого сбоя при этом остаётся видимой');
 });
 
-test('ST-4003/4: прошлый запуск: прошлым считается последний запуск, чистый запуск после сбоя причину не оставляет', () => {
+test('ST-4003/4, ST-4004/4: прошлый запуск: прошлым считается последний запуск, чистый запуск после сбоя причину не оставляет', () => {
   const fsys = new MemoryFs();
   const a = diag(fsys);
   a.sinks.onJournal(failed('p'));
@@ -297,7 +322,34 @@ test('ST-4003/2: NFR-CH-1005: записи с ошибкой и жизненно
   assert.deepEqual(kept, ['обычная строка до сбоя'], 'сброс ошибки унёс и накопленное перед ней; хвост после неё потерян - это вопрос 2');
 });
 
-test('ST-4004/4: ротация: поток шумного плагина на несколько размеров файла не стирает запись failed соседа, previousFailures() её отдаёт (#180, У-49)', () => {
+test('ST-4003/2: NFR-CH-1005: сбой активации и падение хоста настоящего ядра - в файле без закрытия, следующий запуск на том же каталоге их видит', async () => {
+  const fsys = new MemoryFs();
+  const d = diag(fsys);
+  const handles = new Map<string, HostHandle>();
+  const inline = inlineHosts(async (entry) => ({
+    activate() {
+      if (entry === 'broken') throw new Error('нет ключа');
+    },
+  }));
+  const k = await boot(d, {}, [manifest('broken'), manifest('crashy')], {
+    hosts: { b: ['broken'], c: ['crashy'] },
+    spawnHost: (hostId) => {
+      const handle = inline(hostId);
+      handles.set(hostId, handle);
+      return handle;
+    },
+  });
+  handles.get('c')!.kill();
+  await waitFor('host-down в журнале ядра', () => k.journal.some((e) => e.kind === 'host-down' && e.hostId === 'c'));
+  const next = diag(fsys);
+  assert.match(next.previousFailures().get('broken')?.text ?? '', /^не поднялся в хосте b: нет ключа$/);
+  assert.match(next.previousFailures().get('crashy')?.text ?? '', /^хост c упал/);
+  const text = next.export({});
+  assert.ok(text.includes('не поднялся в хосте b: нет ключа'));
+  assert.match(text, /хост c упал/);
+});
+
+test('ротация: поток шумного плагина на несколько размеров файла не стирает запись failed соседа, previousFailures() её отдаёт (#180, У-49)', () => {
   const fsys = new MemoryFs();
   const first = diag(fsys, { fileBytes: 4000, files: 3, keepBytes: 3000 });
   first.sinks.onJournal(failed('neighbour', 'причина вчерашнего сбоя'));
@@ -368,7 +420,12 @@ async function scenario(options: { diagnostics?: Partial<DiagnosticsOptions>; tr
   const table: Record<string, PluginModule> = {
     base: {
       activate(c) {
-        c.contracts.provide('dx.base', '1.0', { work: () => Promise.reject(new Error(`отказ поставщика ${marker}`)) });
+        c.contracts.provide('dx.base', '1.0', {
+          work: async () => {
+            await c.os.env!.get('DX_ENV');
+            throw new Error(`отказ поставщика ${marker}`);
+          },
+        });
         c.commands.register('base.go', () => 'ok');
       },
     },
@@ -388,16 +445,16 @@ async function scenario(options: { diagnostics?: Partial<DiagnosticsOptions>; tr
     d,
     table,
     [
-      manifest('base', { version: '2.3.4', provides: { 'dx.base': '1.0' }, commands: ['base.go'] }),
+      manifest('base', { version: '2.3.4', provides: { 'dx.base': '1.0' }, commands: ['base.go'], permissions: { env: ['DX_ENV'] } }),
       manifest('top', { version: '0.9.1', requires: { 'dx.base': '^1' }, commands: ['top.run'], permissions: { 'secrets.ref': ['vault://x/*'] } }),
       manifest('broken', { version: '1.4.0' }),
     ],
-    { os: { dataDir: '/nonexistent/d', tempDir: '/nonexistent/t', secrets }, hosts: { a: ['base'], b: ['top'] }, ...(options.traceArgs === true && { traceArgs: true }) },
+    { os: { dataDir: '/nonexistent/d', tempDir: '/nonexistent/t', secrets, env: { DX_ENV: 'x' } }, hosts: { a: ['base'], b: ['top'] }, ...(options.traceArgs === true && { traceArgs: true }) },
   );
   return { fsys, d, k, marker, secret, ctx: ctx!, secrets };
 }
 
-test('ST-4004/1, ST-4004/2, ST-4004/4: выгрузка: один текстовый файл с записью об ошибке и её цепочкой, версиями ядра и плагинов, состоянием и графом, самой ранней записью (FR-CH-4015)', async () => {
+test('ST-4004/1, ST-4004/2: выгрузка: один текстовый файл с записью об ошибке и её цепочкой, версиями ядра и плагинов, состоянием и графом, самой ранней записью (FR-CH-4015)', async () => {
   const { d, k } = await scenario();
   await assert.rejects(k.run('top.run'), { code: 'Remote' });
   const text = d.export({ app: 'Тест 1.2.3', core: '0.1.0', kernel: k });
@@ -417,6 +474,8 @@ test('ST-4004/1, ST-4004/2, ST-4004/4: выгрузка: один текстов
   const inChain = lines.filter((l) => l.includes(`цепочка ${chain}:`));
   assert.ok(inChain.length >= 2, `в цепочке ${chain} операций: ${String(inChain.length)}`);
   assert.ok(inChain.some((l) => l.includes('user -> command:top.run')), 'цепочку видно от первой операции');
+  assert.match(inChain.find((l) => l.includes('-> os:env.get')) ?? '', /: plugin:base -> os:env\.get, границы host os, право env, \d+(\.\d+)? мс, .*, успех$/, 'вызов ctx.os в цепочке - с правом и длительностью');
+  assert.match(inChain.find((l) => l.includes('-> contract:dx.base@1#work')) ?? '', /: plugin:top -> contract:dx\.base@1#work \[plugin:base\], .*, \d+(\.\d+)? мс, .*, отказ Remote/, 'член контракта с отказом - с длительностью и кодом');
   assert.match(text, /Записей: \d+; самая ранняя: \d{4}-\d\d-\d\dT/);
   assert.ok(text.includes('не поднялся в хосте'), 'запись журнала о сбое активации');
   // Записи идут в порядке времени.
@@ -425,7 +484,31 @@ test('ST-4004/1, ST-4004/2, ST-4004/4: выгрузка: один текстов
   await k.unload();
 });
 
-test('ST-4001/11: ST-3004/3: выгрузка: маркера аргумента, значения секрета и текста исключения поставщика нет ни в файле хранилища, ни в выгрузке (FR-CH-4004, NFR-CH-4002)', async () => {
+test('ST-4004/4: выгрузка после ротации, унёсшей начало цепочки: остаток цепочки, самая ранняя - время первой оставшейся записи, записи всех файлов', () => {
+  const fsys = new MemoryFs();
+  const d = diag(fsys, { fileBytes: 2000, files: 2 });
+  const op = (id: number, target: string, outcome: 'ok' | 'error') =>
+    d.sinks.onTrace({ kind: 'operation', id, chain: 77, at: ++clock, caller: id === 77 ? 'user' : 'plugin:top', target, boundaries: ['contract'], durationMs: 1, argsBytes: 0, resultBytes: 0, outcome, ...(outcome === 'error' && { code: 'Remote' }) });
+  op(77, 'command:top.run', 'ok');
+  for (let i = 0; i < 100; i++) d.sinks.onLog('p', `шум ${String(i)} ${'x'.repeat(40)}`, 'info');
+  op(78, 'contract:dx.base@1#work', 'ok');
+  op(79, 'contract:dx.base@1#fail', 'error');
+  d.flush();
+  assert.deepEqual(names(fsys), ['diagnostics.1.log', 'diagnostics.log']);
+  const text = d.export({});
+  const lines = text.split('\n');
+  assert.deepEqual(lines.filter((l) => l.includes('цепочка 77:')).map((l) => /операция #(\d+)/.exec(l)?.[1]), ['78', '79'], 'начало цепочки ушло, остаток в выгрузке');
+  const stored = names(fsys).flatMap((name) => fsys.records(name));
+  const earliest = new Date(Math.min(...stored.map((r) => r.at))).toISOString();
+  assert.ok(text.includes(`самая ранняя: ${earliest};`), `самая ранняя: ${earliest}`);
+  assert.ok(lines.find((l) => /^\d{4}-\d\d-\d\dT/.test(l))?.startsWith(earliest), 'первая запись выгрузки - самая ранняя из оставшихся');
+  for (const name of names(fsys)) {
+    const logs = fsys.records(name).flatMap((r) => (r.src === 'log' ? [r.text] : []));
+    assert.ok(logs.length > 0 && logs.every((t) => text.includes(`строка info p: ${t}`)), `в выгрузке все строки ${name}`);
+  }
+});
+
+test('ST-3004/3, ST-4001/11: выгрузка: маркера аргумента, значения секрета и текста исключения поставщика нет ни в файле хранилища, ни в выгрузке (FR-CH-4004, NFR-CH-4002)', async () => {
   const { fsys, d, k, marker, secret, ctx, secrets } = await scenario();
   await ctx.os.secrets.set('token', secret);
   assert.equal(await ctx.os.secrets.get('token'), secret);
@@ -454,7 +537,7 @@ test('выгрузка без флага --trace-args: заголовок гов
   await k.unload();
 });
 
-test('ST-3004/3, ST-4001/11: выгрузка с флагом --trace-args: предупреждение в заголовке, аргументы в строках операций, значение секрета вычеркнуто, файл хранилища тоже с аргументами (K-33)', async () => {
+test('выгрузка с флагом --trace-args: предупреждение в заголовке, аргументы в строках операций, значение секрета вычеркнуто, файл хранилища тоже с аргументами (K-33)', async () => {
   const { fsys, d, k, marker, secret, ctx } = await scenario({ traceArgs: true });
   await ctx.os.secrets.set('token', secret);
   await ctx.os.secrets.get('token');
@@ -570,7 +653,7 @@ test('кольцо: шумный поставщик событий контра�
   await k.unload();
 });
 
-test('ST-5003/4: ST-4004/5: выгрузка: записи всех видов читаются строкой, граф с отказом, пустое ядро и неназванные версии, запись больше строки файла - метка, дата вне диапазона не ломает текст', () => {
+test('ST-4004/2, ST-4004/4, ST-4004/5: выгрузка: записи всех видов читаются строкой, граф с отказом, пустое ядро и неназванные версии, запись больше строки файла - метка, дата вне диапазона не ломает текст', () => {
   const fsys = new MemoryFs();
   const d = diag(fsys);
   d.sinks.onTrace({ kind: 'stream', stream: 'fs-watch', pluginId: 'p', hostId: 'h', at: 5, intervalMs: 1000, messages: 4, bytes: 80 });

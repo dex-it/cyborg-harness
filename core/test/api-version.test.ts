@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { allowsMajor, isValidRange, parseVersion, satisfies } from '../src/semver.ts';
@@ -30,13 +30,33 @@ function peerAccepts(range: string, version: string): boolean {
   return cmp(numbers(version), numbers(m[1])) >= 0 && cmp(numbers(version), numbers(m[2])) < 0;
 }
 
-test('ST-5001/5: мажор PLUGIN_API_VERSION равен мажору @cyborg-harness/contracts', () => {
+/** Исходники ядра, адаптера, приложения, тест-кита и проверки плагина без тестов. */
+function sources(rel: string): string[] {
+  const dir = path.join(repo, rel);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).flatMap((name) => {
+    const child = `${rel}/${name}`;
+    if (name === 'node_modules' || name === 'dist') return [];
+    if (statSync(path.join(repo, child)).isDirectory()) return sources(child);
+    return /\.(ts|mts|js|mjs)$/.test(name) && !name.endsWith('.test.ts') ? [child] : [];
+  });
+}
+
+test('ST-5001/5: литерал версии API плагинов - только PLUGIN_API_VERSION в core/src/api-version.ts, в ядре, приложении и проверке плагина второго нет', () => {
+  const files = ['core/src', 'electron/src', 'playground/src', 'playground/scripts', 'testing/src', 'tools/cyborg-plugin/src'].flatMap(sources);
+  assert.ok(files.includes('core/src/api-version.ts') && files.length > 100, `нашлось только ${String(files.length)} файлов`);
+  const literal = /(apiVersion|API_VERSION)\s*[:=]\s*['"`]\d/g;
+  const found = files.flatMap((rel) => [...readFileSync(path.join(repo, rel), 'utf8').matchAll(literal)].map((m) => `${rel}: ${m[0]}`));
+  assert.deepEqual(found.map((f) => f.split(':')[0]), ['core/src/api-version.ts'], found.join('\n'));
+});
+
+test('мажор PLUGIN_API_VERSION равен мажору @cyborg-harness/contracts', () => {
   const major = (v: string) => v.split('.')[0];
   assert.equal(major(PLUGIN_API_VERSION), major(packageVersion()));
 });
 
 describe('согласованность версий (K-21)', () => {
-  test('ST-5001/5: PLUGIN_API_VERSION - чистая x.y.z: разбор диапазонов ядра суффикс не читает, а engines.cyborg плагинов судят по ней', () => {
+  test('PLUGIN_API_VERSION - чистая x.y.z: разбор диапазонов ядра суффикс не читает, а engines.cyborg плагинов судят по ней', () => {
     assert.ok(parseVersion(PLUGIN_API_VERSION), `«${PLUGIN_API_VERSION}» не читается разбором ядра`);
     assert.match(PLUGIN_API_VERSION, /^\d+\.\d+\.\d+$/);
   });
@@ -49,7 +69,7 @@ describe('согласованность версий (K-21)', () => {
     assert.match(packageVersion(), /^\d+\.\d+\.\d+(-dev|-rc\.\d+)?$/);
   });
 
-  test('ST-5001/1: engines.cyborg каждого встроенного плагина, шаблона и проверочного потребителя: допустимый диапазон, принимает API ядра и не выходит за его мажор', () => {
+  test('ST-6002/2: engines.cyborg каждого встроенного плагина, шаблона и проверочного потребителя: допустимый диапазон, принимает API ядра и не выходит за его мажор', () => {
     const manifests = builtInManifests();
     assert.ok(manifests.length >= 20, `нашлось только ${String(manifests.length)} манифестов`);
     const major = numbers(PLUGIN_API_VERSION)[0];
@@ -63,13 +83,28 @@ describe('согласованность версий (K-21)', () => {
     }
   });
 
-  test('ST-6001/8: peer-зависимость на контракты у ядра, адаптера, тест-кита и шаблона принимает версию пакета контрактов', () => {
+  test('peer-зависимость на контракты у ядра, адаптера, тест-кита и шаблона принимает версию пакета контрактов', () => {
     for (const rel of ['core/package.json', 'electron/package.json', 'testing/package.json', 'templates/plugin/package.json']) {
       const peers = (json(rel).peerDependencies ?? json(rel).devDependencies) as Record<string, string> | undefined;
       const range = peers?.['@cyborg-harness/contracts'];
       assert.ok(range, `${rel}: нет зависимости от @cyborg-harness/contracts`);
       assert.ok(peerAccepts(range, packageVersion()), `${rel}: «${range}» не принимает ${packageVersion()}`);
     }
+  });
+
+  test('ST-6001/8: peer-зависимости адаптера: текущие ядро и контракты в диапазоне, ядро и контракты другой несовместимой версии - вне его; версии трёх пакетов независимы', () => {
+    const peers = json('electron/package.json').peerDependencies as Record<string, string>;
+    const coreRange = peers['@cyborg-harness/core'] ?? '';
+    const contractsRange = peers['@cyborg-harness/contracts'] ?? '';
+    const coreVersion = String(json('core/package.json').version);
+    assert.ok(satisfies(coreVersion, coreRange), `«${coreRange}» не принимает ядро ${coreVersion}`);
+    assert.ok(peerAccepts(contractsRange, packageVersion()), `«${contractsRange}» не принимает контракты ${packageVersion()}`);
+    const [major, minor] = numbers(coreVersion);
+    const breaking = major === 0 ? `0.${String(minor + 1)}.0` : `${String(major + 1)}.0.0`;
+    assert.ok(!satisfies(breaking, coreRange), `«${coreRange}» принимает несовместимое ядро ${breaking}`);
+    assert.ok(!peerAccepts(contractsRange, `${String(numbers(packageVersion())[0] + 1)}.0.0`), `«${contractsRange}» принимает контракты следующей мажорной`);
+    assert.ok(!peerAccepts(contractsRange, '0.9.0'));
+    assert.notEqual(String(json('electron/package.json').version), packageVersion(), 'адаптер и контракты выходят своими версиями');
   });
 
   test('эталон снимка есть для версии API, его заголовок называет ту же версию', () => {

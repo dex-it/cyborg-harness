@@ -92,7 +92,7 @@ describe('схема и parseManifest на манифестах примеров
   });
 
   for (const { name, manifest } of manifests()) {
-    it(`ST-1001/3: ${name}: итог схемы и parseManifest одинаков`, () => {
+    it(`${name}: итог схемы и parseManifest одинаков`, () => {
       const expected = name === 'core/examples/plugins/broken-manifest' ? false : true;
       assert.equal(byCore(manifest), expected, 'итог parseManifest');
       assert.deepEqual(validateDraft(schema, manifest).length === 0, expected, `итог схемы: ${validateDraft(schema, manifest).join('; ')}`);
@@ -271,10 +271,31 @@ const withPatch = (patch: Patch): Json => {
 };
 
 describe('таблица правок одного манифеста: где схема и разбор согласны, а где нет', () => {
-  it('исходный манифест принимают и схема, и ядро', () => {
+  it('ST-1001/3: исходный манифест принимают и схема, и ядро', () => {
     assert.deepEqual(validateDraft(schema, BASE), []);
     const parsed = parseManifest(BASE);
     assert.equal(parsed.ok, true, parsed.ok ? '' : parsed.errors.join('; '));
+  });
+
+  it('ST-1001/3: необязательные разделы манифеста доходят до итога разбора', () => {
+    const parsed = parseManifest(BASE);
+    assert.ok(parsed.ok, parsed.ok ? '' : parsed.errors.join('; '));
+    const m = parsed.manifest;
+    assert.deepEqual(Object.keys(BASE).filter((key) => key !== '$schema' && !Object.hasOwn(m, key)), []);
+    assert.deepEqual(m.provides, { 'acme.demo-api': ['1.0', '2.1'], 'acme.other': ['1.0'] });
+    assert.deepEqual(Object.keys(m.commands), ['acme.demo.open', 'acme.demo.read', 'acme.demo.run']);
+    assert.deepEqual(m.config, { version: 2, schema: './config.schema.json' });
+    assert.deepEqual(m.state, { version: 1 });
+    assert.deepEqual(Object.keys(m.ui?.views ?? {}), ['main', 'side']);
+    assert.deepEqual(Object.keys(m.documents ?? {}), ['note']);
+    assert.equal(m.host, 'own');
+    assert.equal(m.activation, 'lazy');
+    assert.equal(m.contributes?.menus[0]?.id, 'open');
+    assert.deepEqual(m.permissions.serve, true);
+
+    const locked = parseManifest({ id: 'pin', version: '1.0.0', engines: { cyborg: '^1' }, permissions: { 'ui.lock': true }, ui: { overlay: './lock.js' }, lock: { onStart: true } });
+    assert.ok(locked.ok, locked.ok ? '' : locked.errors.join('; '));
+    assert.deepEqual(locked.manifest.lock, { onStart: true });
   });
 
   for (const [name, patch] of Object.entries(BOTH_REJECT)) {

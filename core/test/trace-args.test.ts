@@ -75,7 +75,7 @@ test('форма: цикл, глубина и число узлов ограни
   assert.ok(wide.length < 20_000, `длина ${String(wide.length)}`);
 });
 
-test('ST-4001/11: значение секрета: аргумент os:secrets.set с номером 1 пишется меткой без порога длины, прочие цели и номера не затронуты (K-33)', () => {
+test('значение секрета: аргумент os:secrets.set с номером 1 пишется меткой без порога длины, прочие цели и номера не затронуты (K-33)', () => {
   assert.equal(describeArgs(['key', 'a'], 4096, [], 0, 'os:secrets.set'), `["key","${SECRET_MARK}"]`);
   assert.equal(describeArgs(['key', { v: 1 }], 4096, [], 0, 'os:secrets.set'), `["key","${SECRET_MARK}"]`);
   assert.equal(describeArgs(['key'], 4096, [], 0, 'os:secrets.set'), '["key"]', 'значения нет - нечего скрывать');

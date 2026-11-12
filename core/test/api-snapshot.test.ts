@@ -44,13 +44,13 @@ function problemsOf(source: ReadFile, line: keyof typeof LINES): string[] {
   return checkSurface({ apiVersion, packageVersion: LINES[line], surface: extractSurface(source), etalons });
 }
 
-describe('эталон и исходники', () => {
-  it('ST-5002/3: эталон текущей версии API совпадает с исходниками', () => {
+describe('ST-5002/1: эталон и исходники', () => {
+  it('эталон текущей версии API совпадает с исходниками', () => {
     for (const line of ['dev', 'rc', 'final'] as const) assert.deepEqual(problemsOf(read, line), [], line);
     assert.deepEqual(checkSurface({ apiVersion, packageVersion: packageVersion(), surface: extractSurface(read), etalons }), [], 'версия пакета из репозитория');
   });
 
-  it('ST-5002/3: эталон покрывает интерфейсы, поля манифеста и теги из задачи', () => {
+  it('эталон покрывает интерфейсы, поля манифеста и теги из задачи', () => {
     const { surface } = parseSurface(fs.readFileSync(path.join(import.meta.dirname, 'api-snapshot', `${apiVersion}.txt`), 'utf8'));
     for (const name of ['PluginContext', 'PluginModule', 'PluginDocuments', 'PluginWindow', 'PluginSystem', 'UiContext', 'UiModule', 'PluginOs', 'PluginPermissions', 'PluginManifest']) {
       assert.ok(surface.has(`interface ${name}`), `нет интерфейса ${name}`);
@@ -64,7 +64,7 @@ describe('эталон и исходники', () => {
   });
 
   // K-21, пункт 2 задачи: что замораживается 1.0. Перечень записан здесь, а не выведен из эталона, иначе пропавшая из снимка группа не заметна.
-  it('ST-5002/3: эталон покрывает весь перечень замораживаемого API', () => {
+  it('эталон покрывает весь перечень замораживаемого API', () => {
     const { surface } = parseSurface(fs.readFileSync(path.join(import.meta.dirname, 'api-snapshot', `${apiVersion}.txt`), 'utf8'));
     const keys = [...surface.keys()];
     const count = (prefix: string): number => keys.filter((k) => k.startsWith(prefix)).length;
@@ -98,7 +98,7 @@ describe('эталон и исходники', () => {
     assert.ok(defined.length >= 7);
   });
 
-  it('ST-5002/5: каждое имя в KERNEL_SIDE - интерфейс из снимка (опечатка или удалённый тип не остаются в списке)', () => {
+  it('каждое имя в KERNEL_SIDE - интерфейс из снимка (опечатка или удалённый тип не остаются в списке)', () => {
     const surface = extractSurface(read);
     for (const name of KERNEL_SIDE) assert.ok(surface.has(`interface ${name}`), `KERNEL_SIDE: ${name} нет в снимке`);
   });
@@ -126,7 +126,7 @@ describe('порча исходников: линия разработки, ка
   ];
 
   for (const c of cases) {
-    it(`ST-6002/2: ST-5002/1, ST-5002/3: ${c.name}: после заморозки - ломающее, у кандидата - новый кандидат, на линии разработки - просьба обновить эталон`, () => {
+    it(`ST-5002/3, ST-6002/1: ${c.name}: после заморозки - ломающее, у кандидата - новый кандидат, на линии разработки - просьба обновить эталон`, () => {
       const frozen = problemsOf(c.source, 'final');
       assert.equal(frozen.length, 1, frozen.join('\n'));
       assert.match(frozen[0]!, /ломающее изменение публичного API плагина в пределах мажорной версии 1/);
@@ -161,7 +161,7 @@ describe('порча исходников: линия разработки, ка
   ];
 
   for (const c of additive) {
-    it(`ST-5002/3: ${c.name}: после заморозки - просьба поднять минор и создать эталон, у кандидата - новый кандидат, а не отказ`, () => {
+    it(`${c.name}: после заморозки - просьба поднять минор и создать эталон, у кандидата - новый кандидат, а не отказ`, () => {
       const frozen = problemsOf(c.source, 'final');
       assert.equal(frozen.length, 1, frozen.join('\n'));
       assert.match(frozen[0]!, /публичный API плагина дополнен, а версия API и эталон - нет/);
@@ -211,7 +211,7 @@ describe('цепочка эталонов и версии', () => {
     assert.deepEqual(check('1.1.0', grown, { '1.0.0': v1, '1.1.0': grown }), []);
   });
 
-  it('ST-6002/2: ST-5003/5: ST-5002/5: минорная версия: эталон 1.1.0 с удалённым членом ломает 1.0.0 - ошибка, даже если исходники совпали с ним', () => {
+  it('ST-6002/2: минорная версия: эталон 1.1.0 с удалённым членом ломает 1.0.0 - ошибка, даже если исходники совпали с ним', () => {
     const problems = check('1.1.0', broken, { '1.0.0': v1, '1.1.0': broken });
     assert.equal(problems.length, 1);
     assert.match(problems[0]!, /эталон 1\.1\.0\.txt ломает 1\.0\.0\.txt при той же мажорной версии 1/);
@@ -256,12 +256,12 @@ describe('род изменения', () => {
   const surface = (text: string): Surface => declarationsOf(text, 'x.ts');
   const kinds = (a: string, b: string) => compareSurfaces(surface(a), surface(b)).map((c) => `${c.kind}:${c.breaking ? 'breaking' : 'ok'}:${c.key}`);
 
-  it('ST-5002/1, ST-5002/3: удаление и переименование члена - ломающие', () => {
+  it('удаление и переименование члена - ломающие', () => {
     assert.deepEqual(kinds('export interface A { a: string }', 'export interface A { }'), ['removed:breaking:member A.a']);
     assert.deepEqual(kinds('export interface A { a: string }', 'export interface A { b: string }'), ['removed:breaking:member A.a', 'added:breaking:member A.b']);
   });
 
-  it('ST-5002/1, ST-5002/3: смена типа члена и типа аргумента - ломающие, имя параметра - нет', () => {
+  it('смена типа члена и типа аргумента - ломающие, имя параметра - нет', () => {
     assert.deepEqual(kinds('export interface A { f(x: string): void }', 'export interface A { f(x: number): void }'), ['changed:breaking:member A.f']);
     assert.deepEqual(kinds('export interface A { f(x: string): void }', 'export interface A { f(y: string): void }'), []);
     assert.deepEqual(kinds('export interface A { f(x: string): void }', 'export interface A { f(x: string, y?: number): void }'), ['changed:breaking:member A.f']);

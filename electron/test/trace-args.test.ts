@@ -32,7 +32,7 @@ test('флаг запуска назван --trace-args', () => {
   assert.equal(TRACE_ARGS_FLAG, '--trace-args');
 });
 
-test('ST-4001/5: без StartOptions.traceArgs записи не несут аргументов, даже если файлы пользователя и воркспейса просят их любыми ключами (критерий приёмки K-33)', async () => {
+test('без StartOptions.traceArgs записи не несут аргументов, даже если файлы пользователя и воркспейса просят их любыми ключами (критерий приёмки K-33)', async () => {
   const keys = { traceArgs: true, 'trace-args': true, '--trace-args': true, diagnostics: { traceArgs: true }, trace: { args: true }, plugins: { traceArgs: true, 'trace-args': true } };
   const { userData } = setup(keys);
   const records: TraceRecord[] = [];

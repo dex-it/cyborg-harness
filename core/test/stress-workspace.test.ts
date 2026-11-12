@@ -28,7 +28,7 @@ const openIn = async (s: { file: string; userFile: string; stateDir: string }) =
   return r.workspace;
 };
 
-test('ST-1007/1: stress-workspace: замок воркспейса при одновременном старте нескольких экземпляров берёт ровно один', async () => {
+test('stress-workspace: замок воркспейса при одновременном старте нескольких экземпляров берёт ровно один', async () => {
   // SAD 3.1: один экземпляр - один воркспейс. Участники - потоки с чужими живыми pid, чтобы замок соседа не считался умершим.
   const holders = Array.from({ length: 3 }, () => spawn('sleep', ['30'], { stdio: 'ignore' }));
   await using s = await scratch();
@@ -52,7 +52,7 @@ test('ST-1007/1: stress-workspace: замок воркспейса при одн
   }
 });
 
-test('ST-5004/7: stress-workspace: одновременная запись разных разделов state не теряет ни один', async () => {
+test('stress-workspace: одновременная запись разных разделов state не теряет ни один', async () => {
   await using s = await scratch();
   const ws = await openIn(s);
   try {
@@ -66,7 +66,7 @@ test('ST-5004/7: stress-workspace: одновременная запись ра�
   }
 });
 
-test('ST-5004/7: stress-workspace: одновременная запись разных разделов config одного слоя не теряет ни один', async () => {
+test('stress-workspace: одновременная запись разных разделов config одного слоя не теряет ни один', async () => {
   await using s = await scratch();
   const ws = await openIn(s);
   try {
@@ -78,7 +78,7 @@ test('ST-5004/7: stress-workspace: одновременная запись ра�
   }
 });
 
-test('ST-5004/7: ST-1007/4: stress-workspace: битый файл state попадает в problems и запись в него отменяется, а не затирает его', async () => {
+test('ST-3001/6: stress-workspace: битый файл state попадает в problems и запись в него отменяется, а не затирает его', async () => {
   await using s = await scratch();
   fs.mkdirSync(s.stateDir, { recursive: true });
   const ws0 = await openIn(s);
@@ -116,7 +116,7 @@ test('stress-workspace: новый воркспейс за симлинком - 
   }
 });
 
-test('ST-5004/7: stress-workspace: правка файла воркспейса извне не стирается записью другого раздела до того, как слежение её подхватило', async () => {
+test('stress-workspace: правка файла воркспейса извне не стирается записью другого раздела до того, как слежение её подхватило', async () => {
   await using s = await scratch();
   const ws = await openIn(s);
   const seen: (readonly string[])[] = [];
@@ -154,7 +154,7 @@ test('stress-workspace: 150 циклов open/watch/close не оставляю�
   ws.close();
 });
 
-test('ST-1007/6: stress-workspace: «Недавние» - 1000 операций, не больше 10 записей, без повторов, битый файл не мешает', async () => {
+test('stress-workspace: «Недавние» - 1000 операций, не больше 10 записей, без повторов, битый файл не мешает', async () => {
   await using s = await scratch();
   const list = path.join(s.dir, 'recent.json');
   const recent = new RecentWorkspaces(list);
