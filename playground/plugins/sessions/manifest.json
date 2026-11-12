@@ -47,6 +47,14 @@
           "CYBORG_EVENTS",
           "CYBORG_SETTINGS",
           "CYBORG_MCP_TOKEN"
+        ],
+        "deny": [
+          "--dangerously-skip-permissions",
+          "--permission-mode",
+          "--allowedTools",
+          "--allowed-tools",
+          "--disallowedTools",
+          "--tools"
         ]
       }
     ]

@@ -192,3 +192,37 @@ test('git: .git - не каталог (worktree, подмодуль) - status р
   assert.deepEqual(status.changes.map((c) => c.path), ['link.txt']);
   assert.equal(p.watches.opened.length, 0, 'у .git-файла слежения нет');
 });
+
+// K-34: хвост argv после закреплённого префикса. Проба получает правила process манифеста git и зовёт ctx.os.process напрямую.
+const ROGUE_GIT = `
+export default {
+  activate(ctx) {
+    ctx.commands.register('rogue.run', async (args) => {
+      try {
+        const r = await ctx.os.process.run('git', args, {});
+        return { ok: true, code: r.code };
+      } catch (e) {
+        return { ok: false, code: e.code };
+      }
+    });
+    return undefined;
+  },
+};
+`;
+
+test('git: deny правил process отклоняет -c, --output и --exec-path в хвосте argv, в том числе в форме флаг=значение; чтение без них проходит', async () => {
+  await using box = await sandbox('cyborg-k34-');
+  const repo = await makeRepo(box, FILES);
+  const manifest = JSON.parse(readFileSync(path.join(import.meta.dirname, '..', 'plugins', 'git', 'manifest.json'), 'utf8')) as { permissions: { process: { args: string[]; deny?: string[] }[] } };
+  for (const r of manifest.permissions.process) assert.ok(['-c', '--output', '--exec-path', '--config-env'].every((f) => r.deny?.includes(f)), r.args.join(' '));
+  await using p = await startPilot({ box, repo, ids: [], probes: [{ id: 'rogue', source: ROGUE_GIT, commands: { 'rogue.run': { args: ['strings'] } }, permissions: { process: manifest.permissions.process } }] });
+  const run = (...tail: string[]) => p.k.run('rogue.run', ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'ls-files', '--stage', '-z', ...tail]) as Promise<{ ok: boolean; code?: string | number }>;
+  const marker = box.path('out.txt');
+  for (const tail of [['-c', 'core.sshCommand=touch x'], ['--output', marker], [`--output=${marker}`], ['--exec-path=/tmp/evil']]) {
+    assert.deepEqual(await run(...tail), { ok: false, code: 'PermissionDenied' }, tail.join(' '));
+  }
+  assert.equal(existsSync(marker), false, 'git не запускался');
+  const flags = p.k.journal.flatMap((e) => (e.kind === 'denied' && e.pluginId === 'rogue' ? [e.detail] : []));
+  assert.deepEqual(flags, ['запрещён флаг -c в правиле process: git', 'запрещён флаг --output в правиле process: git', 'запрещён флаг --exec-path в правиле process: git']);
+  assert.deepEqual(await run(), { ok: true, code: 0 });
+});

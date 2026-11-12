@@ -159,6 +159,14 @@ test('agent-claude-code: режим разрешений человека не �
   }
 });
 
+test('K-34: deny в манифестах стенда - claude без --dangerously-skip-permissions и без смены режима разрешений в process agent-claude-code и pty sessions', () => {
+  const rules = (id: string, right: 'process' | 'pty') => (manifestOf(id) as { permissions: Record<string, { program?: string; deny?: string[] }[]> }).permissions[right]!;
+  assert.deepEqual(rules('agent-claude-code', 'process').map((r) => r.deny), [['--dangerously-skip-permissions']]);
+  const claude = rules('sessions', 'pty').filter((r) => typeof r === 'object' && r.program === '$SHELL');
+  assert.equal(claude.length, 1);
+  for (const flag of ['--dangerously-skip-permissions', '--permission-mode', '--allowedTools', '--allowed-tools', '--disallowedTools', '--tools']) assert.ok(claude[0]?.deny?.includes(flag), flag);
+});
+
 test('agent-claude-code: хуки в события контракта; прошлое и недописанная строка не читаются', async () => {
   await using s = await setup();
   const agent = s.agent('agent-claude-code');
