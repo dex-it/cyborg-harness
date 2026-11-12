@@ -149,6 +149,8 @@ function journalLine(e: JournalEntry): string {
       return `${yellow('⚠')} ${id} пункт меню ${e.item}: ${e.field} не прочитан: ${e.error}`;
     case 'key-ignored':
       return `${yellow('⌨')} plugins.keybindings: ${e.key} -> ${String(e.command)} не применено: ${e.reason}`;
+    case 'trace-args':
+      return `${yellow('⚠')} трасса несёт аргументы операций (до ${String(e.limit)} Б на запись)`;
     case 'host-isolated':
       return `${yellow('◌')} ${id} сторонний: группа ${e.group} не действует, свой хост ${e.hostId}`;
     case 'group-isolated':

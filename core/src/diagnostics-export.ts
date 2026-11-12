@@ -6,8 +6,9 @@ import { describeEntry, entryLevel, pluginStatuses, type PluginState } from './s
 
 /*
  * Выгрузка диагностики (K-30, FR-CH-4015, 4016): один текстовый файл, читаемый без инструментов. Что в него входит: версии ядра и плагинов, их состояние на момент выгрузки,
- * граф контрактов и записи всех хранимых файлов по времени; запись трассы несёт номер цепочки. Всё, что в записях есть, пришло из источников, которые содержимого аргументов
- * и значений секретов не отдают (FR-CH-4004, NFR-CH-4002); этот модуль ничего не читает из сети и никуда не пишет: файл на диск кладёт приложение, отправки нет.
+ * граф контрактов и записи всех хранимых файлов по времени; запись трассы несёт номер цепочки. Значений секретов в записях нет (NFR-CH-4002), содержимого аргументов нет,
+ * пока приложение не запущено с `--trace-args` (FR-CH-4004, K-33): тогда записи несут аргументы, и заголовок выгрузки об этом предупреждает. Предупреждение выводится из самих записей,
+ * а не из флага этого запуска: аргументы прошлого запуска остаются в файлах, пока их не вытеснит ротация. Этот модуль ничего не читает из сети и никуда не пишет: файл на диск кладёт приложение, отправки нет.
  */
 
 export interface ExportContext {
@@ -54,7 +55,7 @@ function describeRecord({ record }: StoredRecord): string {
       return `запуск приложения${record.app === undefined ? '' : ` ${record.app}`}`;
     case 'journal': {
       const e = record.entry;
-      const subject = e.pluginId ?? (e.kind === 'key-ignored' ? 'сочетания' : `хост ${e.hostId}`);
+      const subject = e.pluginId ?? (e.kind === 'key-ignored' ? 'сочетания' : e.kind === 'trace-args' ? 'трасса' : `хост ${e.hostId}`);
       return `журнал ${entryLevel(e)} ${subject}: ${oneLine(describeEntry(e))}`;
     }
     case 'log':
@@ -68,7 +69,8 @@ function describeRecord({ record }: StoredRecord): string {
       const result = t.outcome === 'ok' ? 'успех' : `отказ ${t.code ?? '?'}${t.reason === undefined ? '' : ` (${t.reason})`}`;
       return (
         `трасса операция #${String(t.id)} цепочка ${String(t.chain)}: ${t.caller} -> ${t.target}${t.callee === undefined ? '' : ` [${t.callee}]`}, границы ${t.boundaries.join(' ')}` +
-        `${t.right === undefined ? '' : `, право ${t.right}`}, ${String(t.durationMs)} мс, аргументы ${String(t.argsBytes)} Б, результат ${String(t.resultBytes)} Б, ${result}`
+        `${t.right === undefined ? '' : `, право ${t.right}`}, ${String(t.durationMs)} мс, аргументы ${String(t.argsBytes)} Б, результат ${String(t.resultBytes)} Б, ${result}` +
+        (t.args === undefined ? '' : `, аргументы: ${oneLine(t.args)}`)
       );
     }
   }
@@ -101,6 +103,7 @@ export function formatExport(input: ExportInput): string {
   const runs = [...new Set(records.map((r) => r.run).concat(input.run))].sort((a, b) => a - b);
   const tag = (run: number) => `з${String(runs.indexOf(run) + 1)}`;
   const earliest = sorted[0]?.record.at;
+  const withArgs = records.some(({ record }) => (record.src === 'trace' && record.record.kind === 'operation' && record.record.args !== undefined) || (record.src === 'journal' && record.entry.kind === 'trace-args'));
   const kib = (n: number) => `${String(Math.round(n / 1024))} КиБ`;
   const out: string[] = [
     'Диагностика Cyborg Harness',
@@ -112,7 +115,11 @@ export function formatExport(input: ExportInput): string {
     `Запуски: ${runs.map((run) => `${tag(run)} с ${iso(run)}${run === input.run ? ' (этот)' : ''}`).join('; ')}`,
     ...(input.unsaved > 0 ? [`Не записано в файл: ${String(input.unsaved)} (запись на диск не удаётся${input.problem === undefined ? '' : `: ${input.problem}`}); они в выгрузке ниже.`] : []),
     ...(input.unreadable > 0 ? [`Не разобрано строк или файлов: ${String(input.unreadable)}.`] : []),
-    'В записях нет содержимого аргументов и результатов операций (только размеры) и значений секретов из хранилища ядра. Файл остаётся на этой машине: ядро его никуда не отправляет.',
+    ...(withArgs
+      ? [
+          'ВНИМАНИЕ: в записях есть аргументы операций (запуск с --trace-args): пути, имена и данные человека, обрезанные до предела; значения секретов, прошедшие через шлюз ядра, вычеркнуты, а токен, собранный плагином самим, остаётся. Результатов операций в записях нет. Просмотрите файл, прежде чем прикладывать его к issue или отправлять. Файл остаётся на этой машине: ядро его никуда не отправляет.',
+        ]
+      : ['В записях нет содержимого аргументов и результатов операций (только размеры) и значений секретов из хранилища ядра. Файл остаётся на этой машине: ядро его никуда не отправляет.']),
     '',
   ];
   if (context.kernel) out.push('Плагины (состояние на момент выгрузки):', ...plugins(context.kernel), '');

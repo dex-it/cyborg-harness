@@ -107,6 +107,8 @@ export interface PluginsSnapshot {
   readonly safeMode: boolean;
   /** Запуск с `--user-plugins`: каталог плагинов пользователя читается, его плагины сторонние. */
   readonly userPlugins: boolean;
+  /** Запуск с `--trace-args`: записи трассы несут аргументы операций, в файле диагностики и выгрузке будут пути и данные человека (K-33). */
+  readonly traceArgs: boolean;
   readonly error?: string;
   /** Что не дошло до ядра: битый cyborg.json, непрочитанный манифест. */
   readonly problems: readonly string[];

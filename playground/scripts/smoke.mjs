@@ -1374,6 +1374,7 @@ async function main() {
   await bareWindow();
   await safeWindow();
   await userPluginsWindow();
+  await traceArgsWindow();
   await diagnosticsWindow();
   await ptyExitWindow();
 }
@@ -1570,11 +1571,54 @@ async function userPluginsWindow() {
     assert.equal(await ev("document.querySelector('#plugins-list [data-origin=\"user\"]') === null && document.getElementById('user-plugins').hidden"), true, 'без флага в окне есть сторонние или плашка каталога');
     assert.ok(err.includes('--user-plugins'), 'в лог не попала подсказка про флаг');
     assert.ok(!/"kind":"third-party"/.test(err), 'без флага загружен сторонний плагин');
+    assert.equal(await ev("document.getElementById('trace-args').hidden && !document.getElementById('plugins-journal').textContent.includes('--trace-args')"), true, 'без --trace-args в окне плашка или строка журнала о нём');
+    assert.ok(!/"kind":"trace-args"/.test(err), 'без --trace-args в журнале запись trace-args');
     log('каталог пользователя без флага: плагин notes не загружен, в окне нет сторонних, подсказка про --user-plugins в логе');
   } finally {
     plain.kill('SIGTERM');
     await Promise.race([new Promise((r) => plain.once('exit', r)), sleep(8000)]);
     if (plain.exitCode === null) plain.kill('SIGKILL');
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** K-33: запуск с `--trace-args` виден в окне (плашка, строка журнала) и в журнале приложения; файл настроек с таким ключом его не включает. */
+async function traceArgsWindow() {
+  const dir = mkdtempSync(join(tmpdir(), 'cyborg-playground-traceargs-'));
+  writeFileSync(join(dir, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['echo'] }, traceArgs: true }));
+  const run = async (flags) => {
+    const app = spawn(join(repo, 'node_modules', '.bin', 'electron'), ['--inspect=0', repo, `--user-data-dir=${dir}`, '--remote-debugging-port=0', ...flags, ...electronArgs], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let err = '';
+    app.stderr.on('data', (d) => (err += d));
+    const stop = async () => {
+      app.kill('SIGTERM');
+      await Promise.race([new Promise((r) => app.once('exit', r)), sleep(8000)]);
+      if (app.exitCode === null) app.kill('SIGKILL');
+    };
+    const port = await waitFor('порт DevTools окна с --trace-args', () => /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//.exec(err)?.[1]);
+    const page = await waitFor('окно с --trace-args', async () => (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page'));
+    const ev = await connect(page.webSocketDebuggerUrl);
+    await waitFor('echo из поставки работает', () => ev("document.querySelector('#plugins-list [data-plugin=\"echo\"]')?.dataset.state === 'active'"));
+    return { ev, err: () => err, stop };
+  };
+  try {
+    const off = await run([]);
+    try {
+      assert.equal(await off.ev("document.getElementById('trace-args').hidden"), true, 'файл с ключом traceArgs включил плашку без флага командной строки');
+      assert.ok(!/"kind":"trace-args"/.test(off.err()), 'файл с ключом traceArgs включил запись без флага командной строки');
+    } finally {
+      await off.stop();
+    }
+    const on = await run(['--trace-args']);
+    try {
+      assert.equal(await on.ev("!document.getElementById('trace-args').hidden && /--trace-args/.test(document.getElementById('trace-args').textContent)"), true, 'нет плашки --trace-args');
+      assert.equal(await on.ev("document.getElementById('plugins-journal').textContent.includes('--trace-args')"), true, 'нет строки журнала окна о --trace-args');
+      assert.ok(/\[plugins\] \{"kind":"trace-args","limit":4096\}/.test(on.err()), 'нет записи trace-args в журнале приложения');
+      log('--trace-args: плашка и строка журнала окна, запись trace-args в журнале приложения; без флага (при ключе в файле) их нет');
+    } finally {
+      await on.stop();
+    }
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }

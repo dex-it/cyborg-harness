@@ -24,6 +24,7 @@ import {
   restarts,
   serveViews,
   showWindow,
+  TRACE_ARGS_FLAG,
   USER_PLUGINS_FLAG,
   utilityHosts,
   utilityPtyHost,
@@ -102,6 +103,8 @@ const spiking = spikeOut !== undefined || hostsSpikeOut !== undefined || gateway
 const safeMode = process.argv.includes('--safe-mode');
 /** `--user-plugins` (SAD 6.1): читать каталог плагинов пользователя; без флага грузятся только плагины из поставки. Флаг только в командной строке: файл воркспейса может лежать в репозитории. Смена воркспейса и безопасного режима его сохраняет (перезапуск берёт argv). */
 const userPlugins = process.argv.includes(USER_PLUGINS_FLAG);
+/** `--trace-args` (K-33): записи трассы несут аргументы операций, чтобы отладка не шла вслепую. Только командная строка, как `--user-plugins`: из файла воркспейса запись данных не включить. Перезапуск и новое окно берут argv и флаг сохраняют. */
+const traceArgs = process.argv.includes(TRACE_ARGS_FLAG);
 /** `--delivery` (P-07): встроенные плагины берутся из `delivery` рядом с приложением - поставки, собранной `cyborg-plugin delivery` (index.mjs и delivery.json); без флага это стенд с исходниками в `plugins` (index.ts). */
 const deliveryMode = process.argv.includes('--delivery');
 
@@ -263,6 +266,7 @@ const start = () => {
     migrate: migrateLegacyWorkspace,
     safeMode,
     userPlugins,
+    traceArgs,
     // Настоящие акселераторы меню окна: плагин не займёт их динамически, манифест на них проиграет с записью в журнале (PL-03).
     menuKeys: baseAccelerators(menuBase),
     neighbors: workspaceNeighbors(userData, workspaceFile),
