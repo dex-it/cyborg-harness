@@ -1,0 +1,17 @@
+{
+  "id": "trackers-http",
+  "version": "1.0.0",
+  "engines": {
+    "cyborg": "^1"
+  },
+  "config": { "version": 1 },
+  "commands": {
+    "trackers-http.list": { "args": ["string", "string", "string"], "callers": "plugins" },
+    "trackers-http.hubs": {},
+    "trackers-http.set-token": { "args": ["string", "string"] },
+    "trackers-http.clear-token": { "args": ["string"] }
+  },
+  "permissions": {
+    "net": ["config:hubs"]
+  }
+}

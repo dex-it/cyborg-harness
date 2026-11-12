@@ -80,6 +80,37 @@ export function isLocalAddress(address: string): boolean {
   return bytes.length === 4 ? localV4(bytes) : localV6(bytes);
 }
 
+/** Адреса метаданных облака вне link-local: Azure (wire server), Alibaba, Oracle (прежний), AWS IPv6 (`fd00:ec2::254`). Link-local `169.254.0.0/16` (AWS, GCP, Oracle, DigitalOcean, ECS) закрыт целиком. */
+const METADATA_V4 = ['168.63.129.16', '100.100.100.200', '192.0.0.192'];
+const METADATA_V6 = [0xfd, 0x00, 0x0e, 0xc2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02, 0x54];
+
+function forbiddenV4(bytes: readonly number[]): boolean {
+  const [a = 0, b = 0] = bytes;
+  return (a === 169 && b === 254) || METADATA_V4.includes(bytes.join('.'));
+}
+
+function forbiddenV6(bytes: readonly number[]): boolean {
+  const zeros = (from: number, to: number) => bytes.slice(from, to).every((x) => x === 0);
+  const [b0 = 0, b1 = 0] = bytes;
+  // IPv4 внутри IPv6 ведёт себя как он сам: тот же набор форм, что у `isLocalAddress` (::/96, ::ffff:0:0/96, NAT64 64:ff9b::/96, 6to4).
+  if (zeros(0, 12)) return forbiddenV4(bytes.slice(12));
+  if (zeros(0, 10) && bytes[10] === 255 && bytes[11] === 255) return forbiddenV4(bytes.slice(12));
+  if (b0 === 0 && b1 === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b && zeros(4, 12)) return forbiddenV4(bytes.slice(12));
+  if (b0 === 0x20 && b1 === 0x02) return forbiddenV4(bytes.slice(2, 6));
+  return (b0 === 0xfe && (b1 & 0xc0) === 0x80) || bytes.every((x, i) => x === METADATA_V6[i]);
+}
+
+/**
+ * Link-local (`169.254.0.0/16`, `fe80::/10`, в том числе IPv4 внутри IPv6) и адреса метаданных облака: закрыты любому хосту, и названному человеком тоже.
+ * Названный хост открывает частные сети и loopback, но не эти адреса: по ним сервис облака отдаёт ключи экземпляра, и корпоративному GitLab они не нужны.
+ * Не разобралось как адрес - тоже «да»: отказать безопаснее.
+ */
+export function isForbiddenAddress(address: string): boolean {
+  const bytes = net.isIPv4(address) ? v4Bytes(address) : v6Bytes(address);
+  if (bytes === undefined) return true;
+  return bytes.length === 4 ? forbiddenV4(bytes) : forbiddenV6(bytes);
+}
+
 /**
  * Резолв для соединения: `refuse` видит каждый адрес ответа и возвращает ошибку отказа.
  * Проверка стоит в самом соединении, а не перед ним: второй запрос DNS между проверкой и соединением дал бы другой адрес.

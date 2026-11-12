@@ -4,7 +4,7 @@ description: "Все члены ctx главной части, ctx вида и c
 ---
 
 :::note[Страница сгенерирована]
-Версия API: 1.0.0-rc.2. Дата: 2026-11-12 (запись версии в `contracts/CHANGELOG.md`). Источник - TSDoc файлов `contracts/plugin.ts`, `contracts/view.ts`, `contracts/os.ts`; правьте описания там, а страницу пересоберите командой `npm run docs:api`. CI падает, если страница устарела. Правила стабильности членов - раздел «Что стабильно, а что нет» в [README пакета контрактов](https://github.com/dex-it/cyborg-harness/blob/master/contracts/README.md).
+Версия API: 1.0.0-rc.3. Дата: 2026-11-12 (запись версии в `contracts/CHANGELOG.md`). Источник - TSDoc файлов `contracts/plugin.ts`, `contracts/view.ts`, `contracts/os.ts`; правьте описания там, а страницу пересоберите командой `npm run docs:api`. CI падает, если страница устарела. Правила стабильности членов - раздел «Что стабильно, а что нет» в [README пакета контрактов](https://github.com/dex-it/cyborg-harness/blob/master/contracts/README.md).
 :::
 
 Справочник отвечает на вопрос «что делает этот член и что он принимает». Как ими пользоваться, написано в [главной части](/authors/main-api/), [виде](/authors/view-api/) и [рецептах](/authors/recipes/); права `ctx.os` - в [справочнике прав](/reference/permissions/).
@@ -398,7 +398,7 @@ type DialogSpec = | AskDialog | { readonly kind: 'menu'; readonly items: readonl
 - `process?: {...}` - Программы нет в системе (или нет `cwd`) - `NotFound`; ненулевой код выхода ошибкой не считается и приходит в `ProcessResult.code`. Одновременных программ у плагина не больше 16, сверх - `Invalid`: очереди у ядра нет, пул ведёт плагин.
 - `process.run(program: string, args: readonly string[], options?: ProcessOptions): Promise<ProcessResult>` - Запускает программу без оболочки, ждёт завершения и возвращает вывод и код выхода. Программа и первые аргументы должны подходить под правило `process` манифеста.
 - `net?: {...}` - Сеть; есть при праве `net`.
-- `net.fetch(url: string, request?: HttpRequest): Promise<HttpResponse>` - HTTP-запрос к хосту из права `net` (`config:<поле>` - хост из своего раздела `config`). Метод по умолчанию `GET`; срок и предел тела - в `HttpRequest`.
+- `net.fetch(url: string, request?: HttpRequest): Promise<HttpResponse>` - HTTP-запрос к хосту из права `net` (`config:<поле>` - хост или список хостов из своего раздела `config`). Метод по умолчанию `GET`; срок и предел тела - в `HttpRequest`.
 - `env?: {...}` - Переменные окружения; есть при праве `env`.
 - `env.get(name: string): Promise<string | undefined>` - Значение переменной окружения, названной в праве `env`; переменной нет - `undefined`.
 - `notify?: OsNotify` - Системные уведомления; есть при праве `notify`. Тип: [OsNotify](#osnotify).
@@ -426,7 +426,7 @@ type DialogSpec = | AskDialog | { readonly kind: 'menu'; readonly items: readonl
 - `process?: readonly ProgramRule[]` - Программы, которые плагин запускает через `ctx.os.process`: имя или правило `{ program, args, env?, deny? }` с закреплёнными первыми аргументами и запретом флагов в хвосте argv (`deny`). Даёт программе все права пользователя ОС.
 - `pty?: readonly ProgramRule[]` - Программы в псевдотерминале; правило той же формы, что у `process`, в том числе `deny`.
 - `launch?: readonly ProgramRule[]` - Запуски, которые поставщик описывает потребителю (`cyborg.agent`); члена в `ctx.os` не даёт, pty потребителя с `describedBy` сверяется и с ними.
-- `net?: readonly string[]` - Хосты HTTP; `config:<поле>` - хост из своего раздела config.
+- `net?: readonly string[]` - Хосты HTTP; `config:<поле>` - хост или список хостов из своего раздела config (значение поля - строка или список строк: адрес `https://gitlab.corp:8443` либо `хост:порт`), заданный человеком в слое пользователя. Такой хост ядро считает названным человеком: loopback и частный адрес из DNS ему разрешены, записи с фиксированным именем в манифесте - нет. Link-local (`169.254.0.0/16`, `fe80::/10`) и адреса метаданных облака закрыты любому хосту, и названному тоже.
 - `env?: readonly string[]` - Имена переменных окружения, которые плагин читает через `ctx.os.env`.
 - `notify?: boolean` - Системные уведомления (`ctx.os.notify`).
 - `clipboard?: readonly ('read' | 'write')[]` - Буфер обмена: `read`, `write` или оба.
