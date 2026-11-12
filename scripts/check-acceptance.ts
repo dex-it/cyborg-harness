@@ -14,9 +14,11 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'fixtures']);
 const SELF = 'scripts/test/check-acceptance.test.ts';
 export const REASONS = ['окно', 'инструменты', 'документ', 'замер', 'этап 2', 'ручная'] as const;
 
-const KEY = /ST-\d{4}\/\d+/g;
-// `.skip` и `.todo` ловятся отдельно: пропущенный тест не проверяет критерий.
-const CALL = /\b(?:test|it|describe)(\.(?:skip|todo|only))?\(\s*(['"`])((?:\\.|(?!\2)[^\\])*)\2/g;
+const KEY = /ST-\d{4,}\/\d+/g;
+// `.skip` и `.todo` ловятся отдельно: пропущенный тест не проверяет критерий. Перед именем вызова не бывает `.`, буквы и `$`: `regexp.test('ST-1001/1')` - не тест.
+const CALL = /(?<![\w.$])(?:test|it|describe)(\.(?:skip|todo|only))?\(\s*(['"`])((?:\\.|(?!\2)[^\\])*)\2/g;
+// Параметры теста: `{ skip: true }`, `{ todo: 'позже' }`; условие (`skip: process.platform === 'win32'`) тест не пропускает безусловно.
+const DISABLED = /^\s*,\s*\{[^}]*\b(?:skip|todo)\s*:\s*(?:true\b|['"`])/;
 
 export interface TestKey {
   readonly key: string;
@@ -61,8 +63,11 @@ export function testFiles(root: string): string[] {
 
 export function scanTests(text: string, file: string): TestKey[] {
   const keys: TestKey[] = [];
-  for (const m of text.replaceAll('\r\n', '\n').matchAll(CALL)) {
-    const skipped = m[1] === '.skip' || m[1] === '.todo';
+  const source = text.replaceAll('\r\n', '\n');
+  for (const m of source.matchAll(CALL)) {
+    const lineStart = source.lastIndexOf('\n', m.index) + 1;
+    if (/^\s*(\/\/|\/\*|\*)/.test(source.slice(lineStart, m.index + 1))) continue;
+    const skipped = m[1] === '.skip' || m[1] === '.todo' || DISABLED.test(source.slice(m.index + m[0].length, m.index + m[0].length + 200));
     for (const k of (m[3] ?? '').matchAll(KEY)) keys.push({ key: k[0], file, skipped });
   }
   return keys;

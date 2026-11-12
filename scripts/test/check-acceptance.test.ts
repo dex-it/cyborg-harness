@@ -52,6 +52,33 @@ describe('scanTests: ключи в именах тестов', () => {
     assert.deepEqual(scanTests(text, 'a.test.ts'), []);
   });
 
+  it('закомментированный вызов и метод .test() у выражения (регулярное выражение, KEY.test) тестом не считаются', () => {
+    const text = [
+      "// test('ST-1001/1: закомментирован', () => {});",
+      " * it('ST-1001/2: в блочном комментарии', () => {});",
+      "const ok = /x/.test('ST-1001/3: регулярное выражение');",
+      "KEY.test('ST-1001/4: метод');",
+      "test('ST-1001/5: настоящий', () => {});",
+    ].join('\n');
+    assert.deepEqual(
+      scanTests(text, 'a.test.ts').map((k) => k.key),
+      ['ST-1001/5'],
+    );
+  });
+
+  it('skip и todo в параметрах теста помечают его пропущенным; условный skip - нет', () => {
+    const text = [
+      "test('ST-1001/1: a', { skip: true }, () => {});",
+      "it('ST-1001/2: b', { todo: 'позже' }, () => {});",
+      "it('ST-1001/3: c', { skip: process.platform === 'win32' }, () => {});",
+      "test('ST-1001/4: d', { timeout: 5 }, () => {});",
+    ].join('\n');
+    assert.deepEqual(
+      scanTests(text, 'a.test.ts').map((k) => k.skipped),
+      [true, true, false, false],
+    );
+  });
+
   it('ключ на .skip и .todo помечен пропущенным, на .only - нет', () => {
     const text = "test.skip('ST-1001/1: a', () => {});\nit.todo('ST-1001/2: b');\ntest.only('ST-1001/3: c', () => {});\n";
     assert.deepEqual(
