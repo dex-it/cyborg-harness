@@ -18,7 +18,7 @@ const fake = (taken: readonly string[], modal = false) => {
   };
 };
 
-test('нажатие: забранное ядром не доходит до страницы, чужое доходит; автоповтор передаётся ядру', () => {
+test('ST-2002/3: нажатие: забранное ядром не доходит до страницы, чужое доходит; автоповтор передаётся ядру', () => {
   const { plugins, seen } = fake(['N']);
   assert.equal(routeInput(plugins, input({})), true);
   assert.equal(routeInput(plugins, input({ key: 'Z', code: 'KeyZ' })), false);

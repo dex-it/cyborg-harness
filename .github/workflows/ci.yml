@@ -149,7 +149,7 @@ jobs:
           done
           exit 1
 
-  # Ссылки и якоря в docs/ и README (P-10): путь с точным регистром и заголовок-цель; покрытие норм и веток сценариев критериями историй (#186). Без установки зависимостей и без сети.
+  # Ссылки и якоря в docs/ и README (P-10): путь с точным регистром и заголовок-цель; покрытие норм и веток сценариев критериями историй (#186) и критериев тестами (#230). Без установки зависимостей и без сети.
   docs-links:
     name: ссылки в docs
     runs-on: ubuntu-24.04
@@ -162,6 +162,8 @@ jobs:
       - run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-docs-links.ts docs README.md
       # Покрытие критериями приёмки (#186): каждая норма дала критерий, каждая ветка сценария покрыта или названа открытой, таблица docs/03-requirements/coverage.md собрана.
       - run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-docs-trace.ts
+      # Критерий приёмки -> тест (#230): у каждого критерия историй тест с ключом ST-NNNN/k в имени или исключение в docs/05-verification/acceptance.md, сводка acceptance-coverage.md собрана.
+      - run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-acceptance.ts
 
   # Уязвимости в продакшен-зависимостях (P-10). Дерево берётся из lock-файла, установка не нужна.
   # Пакеты, которые получает потребитель (контракты, ядро, адаптер, тест-кит, cyborg-plugin), и стенд playground (monaco-editor, xterm, node-pty в корне)

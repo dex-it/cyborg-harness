@@ -59,7 +59,7 @@ async function until(what: string, ok: () => boolean, ms = 3000): Promise<void> 
   }
 }
 
-test('ctx.log: без уровня - info, с уровнем - он; в записи id плагина', async () => {
+test('ST-4002/1: ctx.log: без уровня - info, с уровнем - он; в записи id плагина', async () => {
   const { k, ctx, lines } = await rig(['a', 'b']);
   try {
     ctx.a?.log('x');
@@ -108,7 +108,7 @@ test('ctx.log хоста: слушатель fs.watch, который броси
 const summaries = (journal: readonly JournalEntry[], pluginId?: string) =>
   journal.filter((e): e is Extract<JournalEntry, { kind: 'log-summary' }> => e.kind === 'log-summary' && (pluginId === undefined || e.pluginId === pluginId));
 
-test('длина: строка длиннее предела обрезается по границе символа и помечается, короткая идёт как есть', async () => {
+test('ST-4002/3: длина: строка длиннее предела обрезается по границе символа и помечается, короткая идёт как есть', async () => {
   const { k, ctx, lines } = await rig(['a'], { limits: { logLineBytes: 64 } });
   try {
     ctx.a?.log('коротко');
@@ -129,7 +129,7 @@ test('длина: строка длиннее предела обрезаетс�
   }
 });
 
-test('длина: предел по умолчанию - 8 КиБ', async () => {
+test('ST-4002/3: длина: предел по умолчанию - 8 КиБ', async () => {
   const { k, ctx, lines } = await rig(['a']);
   try {
     ctx.a?.log('x'.repeat(8192));
@@ -142,7 +142,7 @@ test('длина: предел по умолчанию - 8 КиБ', async () => 
   }
 });
 
-test('частота: строк сверх предела за интервал в журнал по одной не идёт, в конце интервала - одна сводная с последней error; сосед и состояние целы', async () => {
+test('ST-4002/3, ST-4005/4: частота: строк сверх предела за интервал в журнал по одной не идёт, в конце интервала - одна сводная с последней error; сосед и состояние целы', async () => {
   const { k, ctx, lines, journal } = await rig(['a', 'b'], { limits: { logRate: 5, logWindowMs: 100 } });
   try {
     for (let i = 0; i < 12; i++) ctx.a?.log(`info ${String(i)}`);
@@ -162,7 +162,7 @@ test('частота: строк сверх предела за интервал
   }
 });
 
-test('частота: сводная запись не меняет состояние плагина; после интервала строки идут снова', async () => {
+test('ST-4002/3: частота: сводная запись не меняет состояние плагина; после интервала строки идут снова', async () => {
   const { k, ctx, lines, journal } = await rig(['a'], { limits: { logRate: 2, logWindowMs: 60 } });
   try {
     for (let i = 0; i < 6; i++) ctx.a?.log(`s${String(i)}`);
@@ -215,7 +215,7 @@ function pour(write: (i: number) => void, perTick: number, every: number): () =>
   return () => clearInterval(timer);
 }
 
-test('поток: плагин выше предела частоты дольше срока выключается (switched-off, log-flood), строки после этого не идут, сосед пишет как прежде', async () => {
+test('ST-4002/4, ST-4005/4: поток: плагин выше предела частоты дольше срока выключается (switched-off, log-flood), строки после этого не идут, сосед пишет как прежде', async () => {
   const { k, ctx, lines, journal } = await rig(['a', 'b'], { limits: { logRate: 2, logWindowMs: 100, logFloodMs: 400 } });
   const stopA = pour((i) => ctx.a?.log(`поток ${String(i)}`), 10, 5);
   const stopB = pour((i) => ctx.b?.log(`сосед ${String(i)}`), 1, 60);
@@ -240,7 +240,7 @@ test('поток: плагин выше предела частоты дольш
   }
 });
 
-test('поток: всплески выше предела с паузами дольше интервала плагин не выключают', async () => {
+test('ST-4002/4: поток: всплески выше предела с паузами дольше интервала плагин не выключают', async () => {
   const { k, ctx, journal } = await rig(['a'], { limits: { logRate: 2, logWindowMs: 40, logFloodMs: 160 } });
   try {
     for (let round = 0; round < 6; round++) {
@@ -281,7 +281,7 @@ async function burst(t: { mock: { timers: { setTime(ms: number): void } } }, ctx
   await sleep(25);
 }
 
-test('поток: всплески через паузу короче окна, но с частотой в среднем ниже предела, потоком не считаются (FR-CH-4018: «подряд» - без паузы)', async (t) => {
+test('ST-4002/4: поток: всплески через паузу короче окна, но с частотой в среднем ниже предела, потоком не считаются (FR-CH-4018: «подряд» - без паузы)', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
   // Предел 2 строки за 1 с, всплеск в 3 строки раз в 1990 мс: в среднем 1,5 строки/с. За 14 с набегает больше срока в 5 с, если паузу меньше окна считать продолжением.
   const { k, ctx, journal } = await rig(['a'], { limits: { logRate: 2, logWindowMs: 1000, logFloodMs: 5000 } });
@@ -342,7 +342,7 @@ function withSecrets(): { store: Map<string, string>; os: NonNullable<LoadOption
   return { store: secrets.map, os: { dataDir: tmpdir(), tempDir: tmpdir(), secrets } };
 }
 
-test('секреты: значение из хранилища (set, get, resolve) вычёркивается из строки ctx.log; чужому плагину оно не принадлежит', async () => {
+test('ST-3004/3, ST-3004/5: секреты: значение из хранилища (set, get, resolve) вычёркивается из строки ctx.log; чужому плагину оно не принадлежит', async () => {
   const { os } = withSecrets();
   const { k, ctx, lines } = await rig(['a', 'b'], { os });
   try {
@@ -374,7 +374,7 @@ test('секреты: значение из хранилища (set, get, resolv
   }
 });
 
-test('секреты: прочитанное через get и resolve вычёркивается, в том числе из сводной записи', async () => {
+test('ST-3004/5: секреты: прочитанное через get и resolve вычёркивается, в том числе из сводной записи', async () => {
   const { store, os } = withSecrets();
   const secret = `s3cr3t-${randomUUID()}`;
   store.set('a/via-get', secret);
@@ -416,7 +416,7 @@ test('секреты: значение, разрезанное границей 
   }
 });
 
-test('секреты: значение короче 4 символов не вычёркивается - замена испортила бы строку, а скрыть такое значение нельзя', async () => {
+test('ST-3004/5: секреты: значение короче 4 символов не вычёркивается - замена испортила бы строку, а скрыть такое значение нельзя', async () => {
   const { os } = withSecrets();
   const { k, ctx, lines } = await rig(['a'], { os });
   try {

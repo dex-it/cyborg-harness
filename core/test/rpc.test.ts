@@ -36,7 +36,7 @@ test('запрос, ответ, ошибка с кодом и уведомлен
   assert.deepEqual(notes, [{ n: 1 }]);
 });
 
-test('функция не проходит границу ни в аргументах, ни в результате', async () => {
+test('ST-2001/5: функция не проходит границу ни в аргументах, ни в результате', async () => {
   const [a, b] = pair();
   b.handle('leak', () => ({ cb: () => 0 }));
   await assert.rejects(a.request('echo', { cb: () => 0 }), { code: 'NotCloneable' });
@@ -76,7 +76,7 @@ const first = (s: ReturnType<typeof slow>): AbortSignal => {
   return signal;
 };
 
-test('отмена: обработчик получает сигнал, вызывающий - отказ Cancelled, поздний ответ отбрасывается', async () => {
+test('ST-2001/8: отмена: обработчик получает сигнал, вызывающий - отказ Cancelled, поздний ответ отбрасывается', async () => {
   const [a, b] = pair();
   const s = slow();
   b.handle('work', s.handler);

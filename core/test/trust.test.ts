@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
+import { fakePty } from '../../testing/src/fake-pty.ts';
 import { memorySecrets } from '../../testing/src/memory.ts';
 import { SectionStore, type LayerStore } from '../src/config.ts';
 import { CoreError } from '../src/errors.ts';
@@ -76,7 +77,7 @@ const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, ve
 const settle = () => new Promise((r) => setImmediate(r));
 const code = (r: Reply) => (r.ok ? 'ok' : r.e?.code);
 
-test('register: чужой хост не перехватывает команду и не регистрирует необъявленную', async () => {
+test('ST-2002/1: register: чужой хост не перехватывает команду и не регистрирует необъявленную', async () => {
   const forger = forging({
     victim: { activate: (ctx) => ctx.commands.register('victim.save', () => 'сохранил victim') },
     mallory: { activate: () => undefined },
@@ -106,7 +107,7 @@ test('register: чужой хост не перехватывает команд
   await kernel.unload();
 });
 
-test('run: ядро сверяет аргументы со схемой манифеста до обработчика, откуда бы ни пришла команда', async () => {
+test('ST-2002/1: run: ядро сверяет аргументы со схемой манифеста до обработчика, откуда бы ни пришла команда', async () => {
   const seen: unknown[][] = [];
   const forger = forging({
     victim: {
@@ -166,7 +167,7 @@ test('run: вызывающего называет канал - чужой пл�
   await kernel.unload();
 });
 
-test('invoke: метод контракта зовёт только связанный графом потребитель из своего хоста', async () => {
+test('ST-2001/4: invoke: метод контракта зовёт только связанный графом потребитель из своего хоста', async () => {
   let readerCtx: PluginContext | undefined;
   const forger = forging({
     files: {
@@ -216,7 +217,7 @@ test('invoke: метод контракта зовёт только связан
   await kernel.unload();
 });
 
-test('provide и section.write: хост не отдаёт необъявленное и не пишет чужие разделы', async () => {
+test('ST-2001/2: provide и section.write: хост не отдаёт необъявленное и не пишет чужие разделы', async () => {
   const forger = forging({
     victim: { activate: () => undefined, config: { defaults: { theme: 'light' } } },
     mallory: { activate: () => undefined },
@@ -257,7 +258,7 @@ test('provide и section.write: хост не отдаёт необъявлен�
   await kernel.unload();
 });
 
-test('сторонний плагин не делит хост: группа пользователя не даёт ему писать раздел соседа', async () => {
+test('ST-3001/9: сторонний плагин не делит хост: группа пользователя не даёт ему писать раздел соседа', async () => {
   const start = async (bundled: string[]) => {
     const forger = forging({
       victim: { activate: () => undefined, config: { defaults: { theme: 'light' } } },
@@ -292,7 +293,7 @@ test('сторонний плагин не делит хост: группа п�
   await shared.kernel.unload();
 });
 
-test('emit и release: чужой хост не стреляет в чужую подписку и не снимает её', async () => {
+test('ST-2001/6: emit и release: чужой хост не стреляет в чужую подписку и не снимает её', async () => {
   const seen: number[] = [];
   let emit: ((n: number) => void) | undefined;
   let reader: PluginContext | undefined;
@@ -600,5 +601,57 @@ test('os: notify.show и notify.close плагина без права notify о
     ['mallory:notify.show', 'mallory:notify.close'],
     'каждый отказ - запись в журнале плагина',
   );
+  await kernel.unload();
+});
+
+// Члены, которым нужно право; каждый зовётся в обход ctx.os (прямой запрос хоста) плагином с пустыми permissions. Свои каталоги, свои секреты и dialog права не просят.
+// Не вошли семь членов, которые права не проверяют и отвечают без PermissionDenied: pty.share, pty.list, pty.attach, pty.write, pty.resize, pty.kill (NotFound или пустой список,
+// чужого pty у плагина нет) и serve.close (ok на чужой или неоткрытый сервер). Это расхождение с критерием ST-3001/1 записано в docs/05-verification/acceptance.md как дефект.
+const NEEDS_RIGHT: readonly (readonly [string, ...unknown[]])[] = [
+  ['fs.readText', '/etc/hosts'],
+  ['fs.readSlice', '/etc/hosts', 0, 16],
+  ['fs.list', '/etc'],
+  ['fs.stat', '/etc/hosts'],
+  ['fs.realpath', '/etc/hosts'],
+  ['fs.watch', '/etc', 'w1', { recursive: false }],
+  ['fs.writeText', '/etc/cyborg-hacked', 'x'],
+  ['fs.mkdir', '/etc/cyborg-hacked'],
+  ['fs.remove', '/etc/hosts'],
+  ['process.run', 'git', ['status'], {}],
+  ['pty.spawn', { program: '/bin/sh', args: [], cols: 80, rows: 24 }],
+  ['net.fetch', 'https://example.com/'],
+  ['serve.http', {}],
+  ['env.get', 'HOME'],
+  ['clipboard.readText'],
+  ['clipboard.writeText', 'x'],
+  ['shell.openPath', '/etc/hosts'],
+  ['shell.openExternal', 'https://example.com/'],
+  ['security.setRoots', ['/etc']],
+  ['notify.show', 'фишинг', 'нажми'],
+  ['notify.close', 'n1'],
+];
+
+test('прямой запрос хоста: плагин с пустыми permissions зовёт члены ctx.os с правом - PermissionDenied и запись denied на каждый, исполнения нет', async () => {
+  const forger = forging({ mallory: { activate: () => undefined } });
+  const kernel = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['mallory'],
+    manifests: [manifest('mallory')],
+    spawnHost: forger.spawn,
+    hosts: { m: ['mallory'] },
+    os: { dataDir: tmpdir(), tempDir: tmpdir(), pty: fakePty() },
+  });
+  const outcomes: string[] = [];
+  for (const [method, ...args] of NEEDS_RIGHT) {
+    const reply = await forger.request('m', 'os', { pluginId: 'mallory', method, args });
+    outcomes.push(`${method}:${code(reply) ?? 'нет кода'}`);
+  }
+  assert.deepEqual(
+    outcomes,
+    NEEDS_RIGHT.map(([method]) => `${method}:PermissionDenied`),
+    'член вернул успех или иной код: проверка права обойдена прямым запросом',
+  );
+  const denied = kernel.journal.flatMap((e) => (e.kind === 'denied' ? [e.method] : []));
+  assert.deepEqual(denied, NEEDS_RIGHT.map(([method]) => method), 'на каждый отказ запись denied в журнале плагина');
   await kernel.unload();
 });

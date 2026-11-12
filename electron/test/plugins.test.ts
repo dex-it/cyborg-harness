@@ -30,7 +30,7 @@ function plugin(dir: string, id: string, manifest: Record<string, unknown>, code
   if (code) fs.writeFileSync(path.join(dir, id, file), code);
 }
 
-test('поиск: встроенные раньше пользовательских, повтор id - второму не достаётся точка входа, битый JSON - в problems', () => {
+test('ST-6001/3: поиск: встроенные раньше пользовательских, повтор id - второму не достаётся точка входа, битый JSON - в problems', () => {
   const builtin = tmp();
   const user = tmp();
   plugin(builtin, 'files', {}, 'export default {}');
@@ -109,7 +109,7 @@ test('каталог пользователя при поставке в builtin
   assert.ok(failed?.kind === 'failed' && failed.error.includes(path.join(userData, 'plugins', 'empty', 'index.mjs')), 'в журнале путь файла, которого нет');
 });
 
-test('поиск: повтор id внутри одного каталога называет оба каталога плагина, действует первый по имени', () => {
+test('ST-1001/5: поиск: повтор id внутри одного каталога называет оба каталога плагина, действует первый по имени', () => {
   const user = tmp();
   for (const home of ['b', 'a']) {
     fs.mkdirSync(path.join(user, home));
@@ -120,7 +120,7 @@ test('поиск: повтор id внутри одного каталога н�
   assert.deepEqual(found.problems, [`повтор id z в ${path.join(user, 'b')}: действует ${path.join(user, 'a')}`]);
 });
 
-test('старт с флагом: встроенный плагин активен при одноимённом пользовательском, второй пропущен с записью в problems', async (t) => {
+test('ST-6001/4: ST-1001/5: старт с флагом: встроенный плагин активен при одноимённом пользовательском, второй пропущен с записью в problems', async (t) => {
   const userData = tmp();
   const builtinDir = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['pin-lock', 'echo'] } }));
@@ -149,7 +149,7 @@ test('окно: повтор id пользовательского плагин�
   assert.deepEqual(snapshot.plugins.map((r) => [r.id, r.origin, r.state]), [['pin-lock', 'bundled', 'active']]);
 });
 
-test('старт: плагин из каталога пользователя - сторонний и не попадает в общую группу хоста', async () => {
+test('ST-6001/4: ST-1003/2: старт: плагин из каталога пользователя - сторонний и не попадает в общую группу хоста', async () => {
   const userData = tmp();
   const builtinDir = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['files', 'notes'], hosts: { ui: ['files', 'notes'] } } }));
@@ -161,7 +161,7 @@ test('старт: плагин из каталога пользователя - 
   await kernel.unload();
 });
 
-test('политика по умолчанию: каталог пользователя не читается, плагин оттуда не загружен, в журнале причина - его нет среди найденных; в лог идёт подсказка про флаг', async () => {
+test('ST-1001/4: политика по умолчанию: каталог пользователя не читается, плагин оттуда не загружен, в журнале причина - его нет среди найденных; в лог идёт подсказка про флаг', async () => {
   const userData = tmp();
   const builtinDir = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['files', 'notes'] } }));
@@ -185,7 +185,7 @@ test('политика по умолчанию: каталог пользова�
   await again.unload();
 });
 
-test('политика с флагом: плагин из каталога пользователя загружен, в журнале third-party, строка окна помечена origin user и показывает права словами', async () => {
+test('ST-1001/4, ST-1001/7: политика с флагом: плагин из каталога пользователя загружен, в журнале third-party, строка окна помечена origin user и показывает права словами', async () => {
   const userData = tmp();
   const builtinDir = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['files', 'notes', 'idle'] } }));
@@ -286,7 +286,7 @@ test('старт: onTrace доходит до ядра - запись трасс
   await kernel.unload();
 });
 
-test('служба окна: снимок с причиной и журналом, «Включить снова» поднимает не поднявшийся плагин', async (t) => {
+test('ST-4005/1: служба окна: снимок с причиной и журналом, «Включить снова» поднимает не поднявшийся плагин', async (t) => {
   const userData = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['disk'], hosts: { io: ['disk'] } } }));
   plugin(path.join(userData, 'plugins'), 'disk', {}, 'export default {}');
@@ -608,7 +608,7 @@ test('виды: адрес у плагина с ui в манифесте и у �
   await service.unload();
 });
 
-test('группы рендера: виды плагинов поставки в одной группе делят origin, адрес несёт плагина; сторонний один, с предупреждением в строке плагина', async () => {
+test('ST-3005/1: группы рендера: виды плагинов поставки в одной группе делят origin, адрес несёт плагина; сторонний один, с предупреждением в строке плагина', async () => {
   const userData = tmp();
   const builtinDir = tmp();
   // guest назван в группе duo в config, mine просит duo манифестом: сторонние остаются каждый в своей группе.
@@ -679,7 +679,7 @@ test('схема раздела: файл из каталога плагина �
   await kernel.unload();
 });
 
-test('plugins.enabled из файла воркспейса без перезапуска: убранный выключается, вернувшийся включается, новый ждёт перезапуска', async (t) => {
+test('ST-1005/6: plugins.enabled из файла воркспейса без перезапуска: убранный выключается, вернувшийся включается, новый ждёт перезапуска', async (t) => {
   const userData = tmp();
   const ws = path.join(userData, 'w.cyborg.json');
   const write = (enabled: string[]) => fs.writeFileSync(ws, JSON.stringify({ cyborg: 2, plugins: { enabled }, settings: {} }));
@@ -908,7 +908,7 @@ async function delivery(ids: readonly string[]): Promise<string> {
 
 const inline = () => inlineHosts(async () => ({ activate() {} }));
 
-test('точка входа поставки: index.mjs; index.ts и index.js встроенного не угадываются, причина называет найденное; у каталога пользователя угадывание прежнее', () => {
+test('ST-6001/3: точка входа поставки: index.mjs; index.ts и index.js встроенного не угадываются, причина называет найденное; у каталога пользователя угадывание прежнее', () => {
   const builtin = tmp();
   const user = tmp();
   plugin(builtin, 'built', {}, 'export default {}');
@@ -929,7 +929,7 @@ test('точка входа поставки: index.mjs; index.ts и index.js в
   assert.ok(loose.problems.some((p) => p.includes(path.join(builtin, 'bare')) && p.includes('нет точки входа (ищутся')));
 });
 
-test('старт: встроенный плагин без index.mjs не активируется, в журнале ядра запись failed с понятной причиной, остальные активны', async (t) => {
+test('ST-1001/6: старт: встроенный плагин без index.mjs не активируется, в журнале ядра запись failed с понятной причиной, остальные активны', async (t) => {
   const userData = tmp();
   const builtinDir = await delivery(['good']);
   plugin(builtinDir, 'source', {}, 'export default {}', 'index.ts');
@@ -957,7 +957,7 @@ test('режим стенда: точка входа встроенного уг
   assert.deepEqual(problems, []);
 });
 
-test('поставка = N плагинов: список каталога равен списку включённых, все активны в хосте builtin, ни одного пропущенного и лишнего; расхождений сумм нет', async (t) => {
+test('ST-6001/3: ST-1001/11: поставка = N плагинов: список каталога равен списку включённых, все активны в хосте builtin, ни одного пропущенного и лишнего; расхождений сумм нет', async (t) => {
   const ids = ['agent', 'files', 'notes', 'sessions', 'tasks', 'terminal'];
   const builtinDir = await delivery(ids);
   const userData = tmp();
@@ -973,7 +973,7 @@ test('поставка = N плагинов: список каталога ра�
   assert.deepEqual(problems, []);
 });
 
-test('подмена: плагин каталога пользователя с id встроенного отвергнут, встроенный активен и его код тот же, код подмены не выполнен', async (t) => {
+test('ST-6001/4: подмена: плагин каталога пользователя с id встроенного отвергнут, встроенный активен и его код тот же, код подмены не выполнен', async (t) => {
   const ids = ['files', 'notes'];
   const builtinDir = await delivery(ids);
   const userData = tmp();
@@ -1000,7 +1000,7 @@ test('подмена: плагин каталога пользователя с 
   assert.ok(service.snapshot().problems.some((p) => p.includes('повтор id files')));
 });
 
-test('контрольные суммы: изменённый, пропавший и лишний файл поставки попадают в лог и problems, старт не отказан, плагин активен', async (t) => {
+test('ST-1001/6: контрольные суммы: изменённый, пропавший и лишний файл поставки попадают в лог и problems, старт не отказан, плагин активен', async (t) => {
   const builtinDir = await delivery(['files', 'notes']);
   fs.writeFileSync(path.join(builtinDir, 'files', 'index.mjs'), 'export default { изменён: true }');
   fs.rmSync(path.join(builtinDir, 'notes', 'manifest.json'));
@@ -1019,7 +1019,7 @@ test('контрольные суммы: изменённый, пропавши�
   assert.ok(lines.some((l) => l.startsWith('[plugins] контрольная сумма поставки: files/index.mjs')), 'и в лог главного процесса');
 });
 
-test('контрольные суммы: нет delivery.json у непустой поставки или он битый - жалоба, старт идёт; пустой и отсутствующий каталог поставки молчат', async () => {
+test('ST-6001/5: контрольные суммы: нет delivery.json у непустой поставки или он битый - жалоба, старт идёт; пустой и отсутствующий каталог поставки молчат', async () => {
   const builtinDir = tmp();
   plugin(builtinDir, 'files', {}, 'export default {}');
   const userData = tmp();

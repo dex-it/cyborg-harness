@@ -83,7 +83,7 @@ async function setup() {
   return { k, root, work, file, files, denied, contexts, [Symbol.asyncDispose]: dispose };
 }
 
-test('via-contract: вызывающий без права на путь не читает его руками поставщика, и отказ - в журнале с причиной', async () => {
+test('ST-3003/1: via-contract: вызывающий без права на путь не читает его руками поставщика, и отказ - в журнале с причиной', async () => {
   await using s = await setup();
   assert.equal(await s.files('trusted').read(s.file), 'можно');
   await assert.rejects(s.files('nosy').read(s.file), { code: 'PermissionDenied' });
@@ -96,7 +96,7 @@ test('via-contract: вызывающий без права на путь не ч
   assert.equal(await s.files('nosy').size(s.file), Buffer.byteLength('можно'));
 });
 
-test('via-contract: право вызывающего не расширяет поставщика, аргумент не строкой - отказ, а не пропуск', async () => {
+test('ST-3003/1: via-contract: право вызывающего не расширяет поставщика, аргумент не строкой - отказ, а не пропуск', async () => {
   await using s = await setup();
   const own = path.join(s.contexts.get('nosy')!.os.paths.data, 'note.txt');
   await s.contexts.get('nosy')!.os.fs.writeText(own, 'своё');
@@ -203,7 +203,7 @@ async function deprecatedSetup() {
   return { k, file, files, calls, [Symbol.asyncDispose]: dispose };
 }
 
-test('@deprecated: вызов помеченного члена из главной части пишет запись, повторы за окно считаются, непомеченный - ничего', async () => {
+test('ST-5003/1, ST-5003/2: @deprecated: вызов помеченного члена из главной части пишет запись, повторы за окно считаются, непомеченный - ничего', async () => {
   await using s = await deprecatedSetup();
   assert.deepEqual(s.calls(), [], 'запуск и подписки записей не дают');
   for (let i = 0; i < 4; i++) await s.files('main').size(s.file);

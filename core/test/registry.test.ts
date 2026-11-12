@@ -18,7 +18,7 @@ const files = m('files', { provides: { 'cyborg.files': ['1.4', '2.0'] } });
 const oldUser = m('old', { requires: { 'cyborg.files': '^1' } });
 const newUser = m('new', { optional: { 'cyborg.files': '^2' } });
 
-test('потребитель получает свою мажорную версию от того же поставщика', () => {
+test('ST-5001/6, ST-5002/2: ST-2001/1: потребитель получает свою мажорную версию от того же поставщика', () => {
   const r = registry([files, oldUser, newUser]);
   r.provide('files', 'cyborg.files', '1.4', { v: 1 });
   r.provide('files', 'cyborg.files', '2.0', { v: 2 });
@@ -26,7 +26,7 @@ test('потребитель получает свою мажорную верс
   assert.deepEqual(r.get('new', 'cyborg.files', 2), { v: 2 });
 });
 
-test('мажорная версия в get и all должна лежать в диапазоне манифеста', () => {
+test('ST-5001/4, ST-5002/2: мажорная версия в get и all должна лежать в диапазоне манифеста', () => {
   const any = m('any', { optional: { 'cyborg.files': '*' } });
   const r = registry([files, oldUser, any]);
   r.provide('files', 'cyborg.files', '1.4', { v: 1 });
@@ -40,20 +40,20 @@ test('мажорная версия в get и all должна лежать в �
   assert.throws(() => untyped.get('old', 'cyborg.files', '1'), { code: 'NotDeclared' });
 });
 
-test('необъявленное не отдаётся и не берётся', () => {
+test('ST-2001/2: необъявленное не отдаётся и не берётся', () => {
   const r = registry([files, oldUser]);
   assert.throws(() => r.provide('files', 'cyborg.files', '1.5', {}), { code: 'NotDeclared' });
   assert.throws(() => r.provide('old', 'cyborg.files', '1.4', {}), { code: 'NotDeclared' });
   assert.throws(() => r.get('files', 'cyborg.files', 1), { code: 'NotDeclared' });
 });
 
-test('requires без отданного контракта - Unavailable, optional - undefined', () => {
+test('ST-2001/3: requires без отданного контракта - Unavailable, optional - undefined', () => {
   const r = registry([files, oldUser, newUser]);
   assert.throws(() => r.get('old', 'cyborg.files', 1), { code: 'Unavailable' });
   assert.equal(r.get('new', 'cyborg.files', 2), undefined);
 });
 
-test('consumes: все поставщики, onChange на приход и уход, снятие по dispose', () => {
+test('ST-2001/3: consumes: все поставщики, onChange на приход и уход, снятие по dispose', () => {
   const ms = [
     m('editor', { provides: { 'cyborg.tab': '1.0' } }),
     m('viewer', { provides: { 'cyborg.tab': '1.1' } }),

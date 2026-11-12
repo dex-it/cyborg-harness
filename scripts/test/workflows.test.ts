@@ -40,7 +40,7 @@ describe('действия закреплены по SHA', () => {
 });
 
 describe('ci.yml: задания P-10', () => {
-  it('check не потерял лимит 15 минут и матрицу macOS и Linux, права токена - только чтение', () => {
+  it('ST-6002/4: check не потерял лимит 15 минут и матрицу macOS и Linux, права токена - только чтение', () => {
     assert.match(job(ci, 'check'), /timeout-minutes: 15/);
     assert.match(ci, /os: \[macos-latest, ubuntu-24\.04\]/);
     assert.match(ci, /^permissions:\n {2}contents: read\n/m);
@@ -57,7 +57,7 @@ describe('ci.yml: задания P-10', () => {
     assert.doesNotMatch(ci, /run: npm ci\s*$/m, 'голый `npm ci` вернул бы нативную сборку на каждый запуск');
   });
 
-  it('бюджеты: оба ОС, замеры шлюза и хостов с --json, сверка с файлом порогов, один повтор', () => {
+  it('ST-6002/4: бюджеты: оба ОС, замеры шлюза и хостов с --json, сверка с файлом порогов, один повтор', () => {
     const budgets = job(ci, 'budgets');
     assert.match(budgets, /os: \[macos-latest, ubuntu-24\.04\]/);
     assert.match(budgets, /spike-gateway\.mjs --json/);
@@ -71,6 +71,7 @@ describe('ci.yml: задания P-10', () => {
   it('ссылки в docs и npm audit - задания без continue-on-error на блокирующих шагах', () => {
     assert.match(job(ci, 'docs-links'), /scripts\/check-docs-links\.ts docs README\.md/);
     assert.match(job(ci, 'docs-links'), /scripts\/check-docs-trace\.ts\n/);
+    assert.match(job(ci, 'docs-links'), /scripts\/check-acceptance\.ts\n/);
     const audit = job(ci, 'audit');
     assert.match(audit, /npm audit --omit=dev --audit-level=high --workspace "\$workspace" \|\| failed=1/);
     for (const workspace of ['contracts', 'core', 'electron', 'testing', 'tools/cyborg-plugin']) assert.match(audit, new RegExp(`for workspace in [^\\n]*${workspace.replace('/', '\\/')}`));

@@ -5,7 +5,7 @@ import { describeEntry, entryLevel, entryPlugins, isLifecycleEntry, pluginStatus
 
 const view = (journal: JournalEntry[]) => pluginStatuses(journal).map((s) => `${s.id}:${s.state}:${s.cause?.kind}:${s.revivable ? 'R' : '-'}`);
 
-test('состояние по журналу: работает, перезапуск хоста, выключен сторожем, брошенный хост, не включён', () => {
+test('ST-1001/8: состояние по журналу: работает, перезапуск хоста, выключен сторожем, брошенный хост, не включён', () => {
   const journal: JournalEntry[] = [
     { pluginId: 'old', kind: 'disabled' },
     { pluginId: 'bad', kind: 'rejected', reasons: [{ kind: 'missing', contract: 'x', range: '^1' }] },
@@ -26,7 +26,7 @@ test('состояние по журналу: работает, перезапу
   assert.equal(view(journal)[2], 'a:restarting:revived:-');
 });
 
-test('запись журнала словами и уровень', () => {
+test('ST-4005/1, ST-4005/4: запись журнала словами и уровень', () => {
   const down: JournalEntry = { kind: 'host-down', hostId: 'ui', reason: 'crash', culprits: ['echo'], plugins: ['echo'], affects: ['probe'] };
   assert.equal(describeEntry(down), 'хост ui упал, виновник: echo; сняты: echo; задеты: probe');
   assert.equal(entryLevel(down), 'warn');
@@ -48,7 +48,7 @@ test('запись журнала словами и уровень', () => {
   );
 });
 
-test('вызов устаревшего члена: словами с вызывающим, поставщиком и повторами, уровень warn, состояние плагинов не меняет, виден обоим', () => {
+test('ST-5003/4: вызов устаревшего члена: словами с вызывающим, поставщиком и повторами, уровень warn, состояние плагинов не меняет, виден обоим', () => {
   const call: JournalEntry = { pluginId: 'tabs', kind: 'deprecated-call', provider: 'sessions', contract: 'cyborg.sessions', member: 'list' };
   assert.equal(describeEntry(call), 'tabs вызывает устаревший cyborg.sessions.list поставщика sessions');
   assert.equal(describeEntry({ ...call, repeats: 41 }), 'tabs вызывает устаревший cyborg.sessions.list поставщика sessions - ещё 41 раз за 5 с');

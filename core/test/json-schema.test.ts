@@ -39,7 +39,7 @@ test('схема раздела: типы, поля, границы и путь 
   assert.deepEqual(check({ type: 'string', maxLength: 2 }, '😀😀'), [], 'длина в символах');
 });
 
-test('схема раздела: ключ вне подмножества и неверный ключ - ошибка схемы, а не пропуск', () => {
+test('ST-5004/3: схема раздела: ключ вне подмножества и неверный ключ - ошибка схемы, а не пропуск', () => {
   const bad = compileSchema({ type: 'object', properties: { a: { $ref: '#/x' }, b: { type: 'date' } }, oneOf: [], pattern: '(' });
   if (bad.ok) throw new Error('схема с $ref и oneOf принята');
   assert.deepEqual(bad.errors, [

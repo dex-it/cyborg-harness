@@ -12,7 +12,7 @@ import { load, type Kernel, type LoadOptions } from '../src/loader.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { waitFor } from './wait-for.ts';
 import type { ExitRecord, OperationRecord, StreamRecord, TraceRecord } from '../src/trace-record.ts';
-import { inlineHosts, type SpawnHost } from '../src/transports.ts';
+import { inlineHosts, type HostHandle, type SpawnHost } from '../src/transports.ts';
 import { trackKernels } from './kernels.ts';
 
 // K-28 (FR-CH-4001…4008, NFR-CH-1004, NFR-CH-4002): трасса операций на границах Г1 - Г5.
@@ -125,7 +125,7 @@ const pairManifests = [
 ];
 const pairOptions = { hosts: { f: ['files'], a: ['app'] }, os: { dataDir: '/nonexistent/d', tempDir: '/nonexistent/t', env: ENV } } as const;
 
-test('трасса: вызов ctx.os, член контракта, команда и вызов моста дают по одной записи с границами, адресатом и итогом (FR-CH-4001, NFR-CH-1004)', async () => {
+test('ST-4001/1, ST-4001/2: трасса: вызов ctx.os, член контракта, команда и вызов моста дают по одной записи с границами, адресатом и итогом (FR-CH-4001, NFR-CH-1004)', async () => {
   const r = await rig(pair, pairManifests, pairOptions);
   const app = r.ctx.app!;
   r.take();
@@ -177,7 +177,42 @@ test('трасса: вызов ctx.os, член контракта, команд
   );
 });
 
-test('итог: исключение поставщика, команда без владельца и вызов ctx.os без права - запись с кодом и причиной на английском; вызов без права не выполняется (FR-CH-4003)', async () => {
+test('ST-4003/6: хост упал посреди цепочки - операция кончается обычной записью с code HostGone, отдельной записи нет, виновник в host-down журнала', async () => {
+  const handles = new Map<string, HostHandle>();
+  const ctxs: Record<string, PluginContext> = {};
+  const table: Record<string, PluginModule> = {
+    files: {
+      activate(ctx) {
+        ctx.contracts.provide('trace.files', '1.0', { read: () => new Promise<string>(() => {}) });
+      },
+    },
+    app: { activate: () => undefined },
+  };
+  const spawn: SpawnHost = (hostId) => {
+    const handle = inlineHosts(async (entry) => ({
+      activate(c: PluginContext) {
+        ctxs[entry] = c;
+        return table[entry]!.activate(c);
+      },
+    }))(hostId);
+    handles.set(hostId, handle);
+    return handle;
+  };
+  const r = await rig(table, pairManifests, { ...pairOptions, spawn });
+  r.take();
+  const settled = assert.rejects(ctxs.app!.contracts.get('trace.files', 1)!.read!('/x'), { code: 'HostGone' });
+  await sleep(30);
+  handles.get('f')!.kill();
+  await settled;
+  await r.k.idle();
+  const reads = r.ops().filter((o) => o.target === 'contract:trace.files@1#read');
+  assert.equal(reads.length, 1, 'операция дала не одну запись');
+  assert.deepEqual([reads[0]!.outcome, reads[0]!.code], ['error', 'HostGone']);
+  assert.ok(r.records.every((rec) => rec.kind !== 'operation' || rec.target !== 'host-gone'), 'отдельной записи о потере хоста нет');
+  assert.ok(r.k.journal.some((e) => e.kind === 'host-down'), 'виновник назван в журнале');
+});
+
+test('ST-4001/4: итог: исключение поставщика, команда без владельца и вызов ctx.os без права - запись с кодом и причиной на английском; вызов без права не выполняется (FR-CH-4003)', async () => {
   await using box = await sandbox();
   const secretFile = box.path('secret.txt');
   await writeFile(secretFile, 'содержимое');
@@ -202,7 +237,7 @@ test('итог: исключение поставщика, команда без
   assert.ok(!text.includes('отказ поставщика') && !text.includes(secretFile), 'текст исключения и путь в запись не идут: причина - по коду');
 });
 
-test('цепочка: клик вида -> команда -> член контракта другого плагина -> ctx.os несут номер первой записи; сочетание строит цепочку так же (FR-CH-4002)', async () => {
+test('ST-4001/3: цепочка: клик вида -> команда -> член контракта другого плагина -> ctx.os несут номер первой записи; сочетание строит цепочку так же (FR-CH-4002)', async () => {
   const r = await rig(pair, pairManifests, pairOptions);
   r.take();
 
@@ -223,7 +258,7 @@ test('цепочка: клик вида -> команда -> член контр
   assert.notEqual(start.chain, first.chain, 'вторая цепочка - другая');
 });
 
-test('цепочка: событие контракта начинает цепочку, колбэк потребителя с вызовом ctx.os идёт в ней (FR-CH-4001, 4002)', async () => {
+test('ST-4001/3: цепочка: событие контракта начинает цепочку, колбэк потребителя с вызовом ctx.os идёт в ней (FR-CH-4001, 4002)', async () => {
   let fire: (n: number) => void = () => undefined;
   const table: Record<string, PluginModule> = {
     ticker: {
@@ -261,7 +296,7 @@ test('цепочка: событие контракта начинает цеп�
   assert.deepEqual([os!.target, os!.caller, os!.chain], ['os:env.get', 'plugin:user', event!.id]);
 });
 
-test('содержимое: маркер в аргументе и в результате, значение секрета и путь в записи не попадают, размеры - да (FR-CH-4004, NFR-CH-4002)', async () => {
+test('ST-4001/5, ST-4001/11: содержимое: маркер в аргументе и в результате, значение секрета и путь в записи не попадают, размеры - да (FR-CH-4004, NFR-CH-4002)', async () => {
   await using box = await sandbox();
   const marker = `МАРКЕР-${randomUUID()}`;
   const secret = `s3cr3t-${randomUUID()}`;
@@ -293,7 +328,7 @@ test('содержимое: маркер в аргументе и в резул�
   for (const leak of [marker, secret, box.root, 'work']) assert.ok(!text.includes(leak), `в трассе есть ${leak.slice(0, 12)}…`);
 });
 
-test('содержимое: значение секрета, полученное через secrets.resolve, и ссылка на внешний источник в трассу не попадают, запись операции есть (NFR-CH-4002, #168)', async () => {
+test('ST-4001/11: содержимое: значение секрета, полученное через secrets.resolve, и ссылка на внешний источник в трассу не попадают, запись операции есть (NFR-CH-4002, #168)', async () => {
   const secret = `s3cr3t-${randomUUID()}`;
   const ref = `vault://x/${randomUUID()}`;
   const secrets = memorySecrets();
@@ -323,7 +358,7 @@ test('содержимое: значение секрета, полученно�
   for (const leak of [secret, ref, 'elsewhere']) assert.ok(!text.includes(leak), `в трассе есть ${leak.slice(0, 12)}…`);
 });
 
-test('поток: 5000 сообщений pty за интервал дают одну запись-счётчик с числом сообщений и байт, а не запись на сообщение (FR-CH-4005)', async () => {
+test('ST-4001/6: поток: 5000 сообщений pty за интервал дают одну запись-счётчик с числом сообщений и байт, а не запись на сообщение (FR-CH-4005)', async () => {
   const pty = fakePty();
   const r = await rig(
     { term: { activate() {} } },
@@ -348,7 +383,7 @@ test('поток: 5000 сообщений pty за интервал дают о�
   assert.ok(r.ops().length < 10, 'операций на сообщение нет');
 });
 
-test('поток: счётчик закрывается по истечении интервала, следующий интервал считается заново (FR-CH-4005)', async () => {
+test('ST-4001/6: поток: счётчик закрывается по истечении интервала, следующий интервал считается заново (FR-CH-4005)', async () => {
   const pty = fakePty();
   const r = await rig(
     { term: { activate() {} } },
@@ -368,7 +403,7 @@ test('поток: счётчик закрывается по истечении 
   assert.deepEqual(r.records.filter(isStream).map((s) => [s.messages, s.bytes]), [[20, 40], [5, 15]]);
 });
 
-test('поток: события fs.watch пишутся счётчиком за интервал, а не записью на событие (FR-CH-4005)', async () => {
+test('ST-4001/6: поток: события fs.watch пишутся счётчиком за интервал, а не записью на событие (FR-CH-4005)', async () => {
   await using box = await sandbox();
   const dir = box.path('watched');
   await mkdir(dir);
@@ -388,7 +423,7 @@ test('поток: события fs.watch пишутся счётчиком за
   assert.ok(!r.ops().some((x) => x.target.includes('change')), 'записи на событие нет');
 });
 
-test('вызывающий в общем хосте: запись несёт id хоста и имя плагина по отметке канала (FR-CH-4006)', async () => {
+test('ST-4001/7: вызывающий в общем хосте: запись несёт id хоста и имя плагина по отметке канала (FR-CH-4006)', async () => {
   const r = await rig(
     { x: { activate() {} }, y: { activate() {} } },
     [manifest('x', { permissions: { env: ['TRACE_ENV'] } }), manifest('y', { permissions: { env: ['TRACE_ENV'] } })],
@@ -400,7 +435,7 @@ test('вызывающий в общем хосте: запись несёт id 
   assert.deepEqual(r.take().map((x) => [x.caller, x.hostId]), [['plugin:x', 'shared'], ['plugin:y', 'shared']]);
 });
 
-test('запуск программы: process.run даёт запись с правом и запись выхода с кодом без вывода программы; pty.spawn - запись запуска и запись выхода (FR-CH-4007)', async () => {
+test('ST-4001/8: запуск программы: process.run даёт запись с правом и запись выхода с кодом без вывода программы; pty.spawn - запись запуска и запись выхода (FR-CH-4007)', async () => {
   const pty = fakePty();
   const marker = `ВЫВОД-${randomUUID()}`;
   const r = await rig(
@@ -428,7 +463,7 @@ test('запуск программы: process.run даёт запись с пр
   assert.ok(!JSON.stringify(r.records).includes(marker), 'вывод программы в записях не появляется');
 });
 
-test('трасса недоступна плагину: в ctx нет члена с трассой, а сообщения ядра хостам не несут ни записей, ни их полей (FR-CH-4008)', async () => {
+test('ST-4001/9: трасса недоступна плагину: в ctx нет члена с трассой, а сообщения ядра хостам не несут ни записей, ни их полей (FR-CH-4008)', async () => {
   const r = await rig(pair, pairManifests, pairOptions);
   await r.ctx.app!.os.env!.get('TRACE_ENV');
   await r.ctx.app!.contracts.get('trace.files', 1)!.read!('x');
@@ -528,7 +563,7 @@ test('мост вида (K-13): канал, модальное окно, его 
 
 // K-33 (#224): аргументы операций в записи по флагу запуска `traceArgs` (`--trace-args`).
 
-test('без флага запись не несёт поля args, хотя аргументы есть (K-33)', async () => {
+test('ST-4001/5: без флага запись не несёт поля args, хотя аргументы есть (K-33)', async () => {
   const r = await rig(pair, pairManifests, pairOptions);
   const app = r.ctx.app!;
   r.take();
@@ -613,7 +648,7 @@ test('предел: длинные аргументы обрезаны по LIMI
   assert.ok(cut!.args!.length < 60 && cut!.args!.includes('обрезано'), cut!.args!);
 });
 
-test('секрет: значение, полученное плагином через шлюз, вычёркнуто из аргументов; чужой секрет и не прошедшее шлюз значение - нет (K-33, K-29)', async () => {
+test('ST-4001/11: секрет: значение, полученное плагином через шлюз, вычёркнуто из аргументов; чужой секрет и не прошедшее шлюз значение - нет (K-33, K-29)', async () => {
   const secret = `s3cr3t-${randomUUID()}`;
   const stranger = `chuzhoj-${randomUUID()}`;
   const r = await rig(pair, pairManifests, { ...pairOptions, traceArgs: true, os: { ...pairOptions.os, secrets: memorySecrets() } });
@@ -656,7 +691,7 @@ test('журнал: с флагом при запуске есть запись 
   assert.deepEqual(noSink.records, []);
 });
 
-test('секрет: значение в os:secrets.set пишется меткой при любой длине (1-3 знака, 4 знака, длинное), ключ остаётся; get и resolve аргументов не теряют (K-33)', async () => {
+test('ST-4001/11: секрет: значение в os:secrets.set пишется меткой при любой длине (1-3 знака, 4 знака, длинное), ключ остаётся; get и resolve аргументов не теряют (K-33)', async () => {
   const r = await rig(pair, pairManifests, { ...pairOptions, traceArgs: true, os: { ...pairOptions.os, secrets: memorySecrets() } });
   const app = r.ctx.app!;
   r.take();

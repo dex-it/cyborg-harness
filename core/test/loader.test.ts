@@ -31,7 +31,7 @@ function kernel(table: Record<string, PluginModule>, options: Omit<LoadOptions, 
 
 const kinds = (k: { journal: readonly { pluginId?: string | undefined; kind: string }[] }) => k.journal.map((e) => `${e.pluginId ?? '-'}:${e.kind}`);
 
-test('активация по графу, вызов чужого контракта через ядро, снятие в обратном порядке', async () => {
+test('ST-2001/1: ST-1002/7, ST-1006/4: активация по графу, вызов чужого контракта через ядро, снятие в обратном порядке', async () => {
   const events: string[] = [];
   const k = await kernel(
     {
@@ -62,7 +62,7 @@ test('активация по графу, вызов чужого контрак
   assert.deepEqual(events, ['files:up', 'sessions:/w:data:a', 'sessions:down', 'files:down']);
 });
 
-test('журнал: невалидный, выключенный, не найденный, отказ графа, сбой и пропуск зависимого', async () => {
+test('ST-6001/7: ST-1001/1, ST-1001/7, ST-1002/1, ST-1003/1, ST-1004/1: журнал: невалидный, выключенный, не найденный, отказ графа, сбой и пропуск зависимого', async () => {
   const k = await kernel(
     { files: { activate() { throw new Error('диск недоступен'); } }, sessions: { activate() {} } },
     {
@@ -81,7 +81,7 @@ test('журнал: невалидный, выключенный, не найд�
   await k.unload();
 });
 
-test('сбой активации снимает уже отданное плагином', async () => {
+test('ST-5002/6: ST-1003/1, ST-1004/1, ST-1005/1: сбой активации снимает уже отданное плагином', async () => {
   const k = await kernel(
     {
       files: {
@@ -102,7 +102,7 @@ test('сбой активации снимает уже отданное пла�
   await k.unload();
 });
 
-test('команды: запуск из ядра и из другого плагина, необъявленная команда отклоняется', async () => {
+test('ST-2002/1: команды: запуск из ядра и из другого плагина, необъявленная команда отклоняется', async () => {
   const k = await kernel(
     {
       lock: { activate: (ctx) => void ctx.commands.register('lock.now', (reason) => `locked:${String(reason)}`) },
@@ -121,7 +121,7 @@ test('команды: запуск из ядра и из другого плаг
   await k.unload();
 });
 
-test('функция в результате контракта - NotCloneable у вызывающего', async () => {
+test('ST-2001/5: функция в результате контракта - NotCloneable у вызывающего', async () => {
   let error: unknown;
   const k = await kernel(
     {
@@ -147,12 +147,12 @@ test('функция в результате контракта - NotCloneable �
   await k.unload();
 });
 
-test('битый манифест невключённого плагина - disabled, а не invalid', async () => {
+test('ST-1001/1, ST-1001/7: битый манифест невключённого плагина - disabled, а не invalid', async () => {
   const k = await kernel({}, { enabled: [], manifests: [{ id: 'old', version: 'latest' }] });
   assert.deepEqual(k.journal, [{ pluginId: 'old', kind: 'disabled' }]);
 });
 
-test('манифест с полем новой версии API - в журнале причина версия, а не поле', async () => {
+test('ST-6001/7: ST-5001/2, ST-5002/8: манифест с полем новой версии API - в журнале причина версия, а не поле', async () => {
   const k = await kernel({}, { enabled: ['next', 'typo'], manifests: [manifest('next', { engines: { cyborg: '^1.3' }, layout: {} }), manifest('typo', { keybinding: [] })] });
   assert.deepEqual(k.journal, [
     { pluginId: 'next', kind: 'invalid', errors: [`engines.cyborg: нужен API Cyborg ^1.3, есть ${PLUGIN_API_VERSION}`] },
@@ -182,7 +182,7 @@ test('хуки: граф до кода, журнал по ходу, лог с id
   assert.deepEqual(seen, ['graph:a', 'log:a:привет', 'journal:activated', 'journal:deactivated']);
 });
 
-test('безопасный режим не запускает хосты', async () => {
+test('ST-3008/1: безопасный режим не запускает хосты', async () => {
   let spawned = false;
   const k = await load({
     apiVersion: PLUGIN_API_VERSION,
@@ -198,7 +198,7 @@ test('безопасный режим не запускает хосты', async
   assert.deepEqual(k.journal, [{ pluginId: 'a', kind: 'safe-mode' }]);
 });
 
-test('откат версии плагина: раздел config новее манифеста - плагин не активируется, данные целы', async () => {
+test('ST-5004/2: откат версии плагина: раздел config новее манифеста - плагин не активируется, данные целы', async () => {
   const { docs, store } = memory({ user: { 'pin-lock': { $version: 3, minutes: 5 } } });
   const k = await kernel(
     { 'pin-lock': { config: { migrate: (_, d) => d }, activate() {} } },
@@ -210,7 +210,7 @@ test('откат версии плагина: раздел config новее м�
   await k.unload();
 });
 
-test('миграция config идёт в хосте, ядро записывает итог; set плагина доходит до слоя', async () => {
+test('ST-5004/1: миграция config идёт в хосте, ядро записывает итог; set плагина доходит до слоя', async () => {
   const { docs, store } = memory({ user: { 'pin-lock': { idle: 5 } } });
   let seen: unknown;
   const k = await kernel(
@@ -236,7 +236,7 @@ test('миграция config идёт в хосте, ядро записыва�
   await k.unload();
 });
 
-test('хост упал без виновника: журнал называет задетых через consumes, хост поднимается, после лимита брошен', async () => {
+test('ST-1003/7: хост упал без виновника: журнал называет задетых через consumes, хост поднимается, после лимита брошен', async () => {
   const handles = new Map<string, HostHandle>();
   const spawn = inlineHosts(async (entry) => ({
     activate(ctx) {
@@ -265,7 +265,7 @@ test('хост упал без виновника: журнал называет
   await k.unload();
 });
 
-test('«Включить снова»: не поднявшийся плагин и потребитель следом, затем выключенный сторожем', async () => {
+test('ST-1004/2, ST-1004/3, ST-1004/4: «Включить снова»: не поднявшийся плагин и потребитель следом, затем выключенный сторожем', async () => {
   const handles = new Map<string, HostHandle>();
   let broken = true;
   const spawn = inlineHosts(async (entry) =>
@@ -312,7 +312,7 @@ test('«Включить снова»: не поднявшийся плагин 
   await k.unload();
 });
 
-test('пространство поставки: отказ стороннему поставщику идёт в журнал, без bundled проверки нет', async () => {
+test('ST-3003/5: ST-2004/5: пространство поставки: отказ стороннему поставщику идёт в журнал, без bundled проверки нет', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const table = { claude: noop, rogue: noop, sessions: noop };
   const options = {
@@ -333,7 +333,7 @@ test('пространство поставки: отказ стороннему
 });
 
 // K-04: группы рендера - origin и процесс рендера на группу; граница доверия видов - группа, поэтому сторонний не делит её ни с кем.
-test('группы рендера: ui.group - рекомендация, plugins.uiGroups её перекрывает, без группы - id плагина, без ui группы нет', async () => {
+test('ST-3005/1: группы рендера: ui.group - рекомендация, plugins.uiGroups её перекрывает, без группы - id плагина, без ui группы нет', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
   const ids = ['a', 'b', 'c', 'd', 'e', 'logic'];
@@ -365,7 +365,7 @@ test('группы рендера: ui.group - рекомендация, plugins.
   await plain.unload();
 });
 
-test('группы рендера: сторонний всегда один в своей группе, запись group-isolated только если ему было с кем делить', async () => {
+test('ST-3005/1: группы рендера: сторонний всегда один в своей группе, запись group-isolated только если ему было с кем делить', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
   const ids = ['files', 'tree', 'x', 'y', 'z', 'w'];
@@ -407,7 +407,7 @@ test('группы рендера: сторонний всегда один в �
   await open.unload();
 });
 
-test('группы рендера: origin стороннего в своём пространстве имён - группа поставки с тем же именем его хранилище не делит, ни в одной загрузке, ни в следующей', async () => {
+test('ST-3005/1: группы рендера: origin стороннего в своём пространстве имён - группа поставки с тем же именем его хранилище не делит, ни в одной загрузке, ни в следующей', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
   // Загрузка 1: alice и bob (поставка) в группе tp2, имя пришло от человека или манифеста; загрузка 2: человек включил сторонний плагин с id tp2.
@@ -430,7 +430,7 @@ test('группы рендера: origin стороннего в своём п�
   for (const k of [first, second, alone]) await k.unload();
 });
 
-test('хосты: из поставки - по группам, сторонний всегда один в своём хосте', async () => {
+test('ST-1003/2: хосты: из поставки - по группам, сторонний всегда один в своём хосте', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const ids = ['a', 'b', 'x', 'y', 'z', 'w'];
   const k = await kernel(Object.fromEntries(ids.map((id) => [id, noop])), {
@@ -462,7 +462,7 @@ test('хосты: из поставки - по группам, сторонни�
   await unknown.unload();
 });
 
-test('журнал: загруженный сторонний плагин получает запись third-party, плагин поставки, выключенный и загрузка без bundled - нет', async () => {
+test('ST-1001/7: журнал: загруженный сторонний плагин получает запись third-party, плагин поставки, выключенный и загрузка без bundled - нет', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const ids = ['a', 'x', 'y'];
   const k = await kernel(Object.fromEntries(ids.map((id) => [id, noop])), {
@@ -482,7 +482,7 @@ test('журнал: загруженный сторонний плагин по�
   await unknown.unload();
 });
 
-test('хосты: host own у плагина поставки - свой хост без группы; в группе с соседом - хост группы и предупреждение host-own-grouped', async () => {
+test('ST-1001/9, ST-1001/10: хосты: host own у плагина поставки - свой хост без группы; в группе с соседом - хост группы и предупреждение host-own-grouped', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const ids = ['solo', 'grouped', 'mate', 'alone', 'guest', 'rogue'];
   const own = { host: 'own' };
@@ -510,7 +510,7 @@ test('хосты: host own у плагина поставки - свой хос�
   await k.unload();
 });
 
-test('схема раздела из манифеста: значение не по схеме - отказ плагину, правка извне не по схеме - значение прежнее', async () => {
+test('ST-5004/3: ST-1007/8: схема раздела из манифеста: значение не по схеме - отказ плагину, правка извне не по схеме - значение прежнее', async () => {
   const { docs, store } = memory({ user: { timer: { $version: 1, minutes: 'пять' } } });
   const schema = { type: 'object', properties: { minutes: { type: 'integer', minimum: 1 } }, additionalProperties: false };
   const files: Record<string, unknown> = { './config.schema.json': schema, './broken.json': { type: 'date' } };
@@ -562,7 +562,7 @@ test('схема раздела из манифеста: значение не �
 // Пауза - только для проверки «ничего не произошло»; то, что должно произойти, ждётся по условию (`waitFor`), а не срокам в 60 мс.
 const pause = (ms = 60) => new Promise((r) => setTimeout(r, ms));
 
-test('отмена вызова контракта: поставщик получает сигнал, вызывающий - Cancelled, вызовы без сигнала целы', async () => {
+test('ST-2001/8: отмена вызова контракта: поставщик получает сигнал, вызывающий - Cancelled, вызовы без сигнала целы', async () => {
   const { kernel, api, log } = await startCancel();
   const abort = new AbortController();
   const call = api.slow('a', abort.signal);
@@ -630,7 +630,7 @@ const quiet: PluginModule = { activate() {} };
 const view = (module: string, area?: string, order?: number, title?: string) => ({ module, ...(area && { area }), ...(order !== undefined && { order }), ...(title && { title }) });
 const layoutOf = (k: { layout: readonly { pluginId: string; kind: string; name: string }[] }) => k.layout.map((e) => `${e.pluginId}/${e.name}`);
 
-test('раскладка: по order, при равенстве по id плагина, затем по имени; не зависит от порядка манифестов', async () => {
+test('ST-2003/1: раскладка: по order, при равенстве по id плагина, затем по имени; не зависит от порядка манифестов', async () => {
   const set = [
     manifest('zeta', { ui: { views: { main: view('./z.js', 'main', 100) } } }),
     manifest('alpha', { ui: { views: { b: view('./b.js', 'sidebar', 200), a: view('./a.js', 'sidebar', 200) } } }),
@@ -648,7 +648,7 @@ test('раскладка: по order, при равенстве по id плаг
   await backward.unload();
 });
 
-test('раскладка: вид без размещения - боковая колонка и order 1000, документ - основная область и после вида того же плагина; заголовок доходит до снимка', async () => {
+test('ST-2003/1: раскладка: вид без размещения - боковая колонка и order 1000, документ - основная область и после вида того же плагина; заголовок доходит до снимка', async () => {
   const k = await kernel(
     { a: quiet, b: quiet },
     {
@@ -664,7 +664,7 @@ test('раскладка: вид без размещения - боковая к
   await k.unload();
 });
 
-test('раскладка: невключённые, выключенные и плагины вне графа помечены, а не пропадают', async () => {
+test('ST-2003/1, ST-2003/5: раскладка: невключённые, выключенные и плагины вне графа помечены, а не пропадают', async () => {
   const ui = { views: { main: view('./m.js', 'main', 100) } };
   const k = await kernel(
     { on: quiet, user: quiet, orphan: quiet },
@@ -770,7 +770,7 @@ test('меню: снимок упорядочен по меню, order, id пл�
   await second.unload();
 });
 
-test('меню: выключение плагина делает его пункты недоступными, а не убирает; включение возвращает', async () => {
+test('ST-2002/6: меню: выключение плагина делает его пункты недоступными, а не убирает; включение возвращает', async () => {
   const flags = { open: true, project: true };
   const k = await kernel({ owner: stateOwner(flags), menu: menuPlugin }, { enabled: ['owner', 'menu'], manifests: [ownerManifest, menuManifest()] });
   assert.deepEqual(brief(k), ['menu/open:on+']);
@@ -807,7 +807,7 @@ test('меню: ленивый плагин виден и доступен до 
   await k.unload();
 });
 
-test('меню: нажатие недоступного или неизвестного пункта - отказ, чужую команду пункт не запускает', async () => {
+test('ST-2002/6: меню: нажатие недоступного или неизвестного пункта - отказ, чужую команду пункт не запускает', async () => {
   opened.length = 0;
   const flags = { open: false, project: false };
   const k = await kernel({ owner: stateOwner(flags), menu: menuPlugin }, { enabled: ['owner', 'menu'], manifests: [ownerManifest, menuManifest()] });
@@ -850,7 +850,7 @@ test('меню: источник - член собственного контр�
   await k.unload();
 });
 
-test('меню: сочетание пункта занято в едином реестре клавиш - манифест проигрывает, динамическое отказано, оба видны в журнале', async () => {
+test('ST-2002/6: меню: сочетание пункта занято в едином реестре клавиш - манифест проигрывает, динамическое отказано, оба видны в журнале', async () => {
   const flags = { open: false, project: true };
   const item = { ...open, accelerator: 'CmdOrCtrl+Shift+O' };
   const rival = manifest('rival', { commands: ['rival.run'], keybindings: [{ key: 'CmdOrCtrl+Shift+O', command: 'rival.run' }] });

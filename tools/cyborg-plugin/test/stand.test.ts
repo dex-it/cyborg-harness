@@ -26,7 +26,7 @@ describe('стенд на инструменте: состав результа�
   });
 
   for (const name of homes) {
-    it(`${name}: исходники как есть, кроме ui/*.ts; на каждый ui/*.ts - ui/*.js и карта`, async () => {
+    it(`ST-7001/2: ${name}: исходники как есть, кроме ui/*.ts; на каждый ui/*.ts - ui/*.js и карта`, async () => {
       const src = path.join(plugins, name);
       const out = fresh(name);
       const report = await buildPlugin(src, { out, main: 'source', check: false });

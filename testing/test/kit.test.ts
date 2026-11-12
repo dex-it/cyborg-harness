@@ -23,7 +23,7 @@ function probe(id: string, extra: Record<string, unknown> = {}): { plugin: Inlin
 }
 
 describe('startKernel', () => {
-  it('плагин из каталога: манифест и точка входа найдены, команда отвечает, активация в журнале', async () => {
+  it('ST-7003/1: плагин из каталога: манифест и точка входа найдены, команда отвечает, активация в журнале', async () => {
     await using k = await startKernel({ plugins: [ECHO] });
     assert.deepEqual(k.active, ['echo']);
     assert.equal((await k.waitForJournal({ kind: 'activated', pluginId: 'echo' })).hostId.length > 0, true);
@@ -89,7 +89,7 @@ describe('startKernel', () => {
     assert.equal((await k.waitForJournal({ kind: 'disabled', pluginId: 'other' })).kind, 'disabled');
   });
 
-  it('среда по умолчанию: песочница после realpath, поддельный pty, секреты в памяти; запуск идёт в fakePty', async () => {
+  it('ST-7003/1: среда по умолчанию: песочница после realpath, поддельный pty, секреты в памяти; запуск идёт в fakePty', async () => {
     const p = probe('term', { permissions: { pty: ['/bin/sh'] } });
     await using k = await startKernel({ plugins: [p.plugin] });
     assert.equal(k.sandbox.root, await realpath(k.sandbox.root));
@@ -133,7 +133,7 @@ describe('startKernel', () => {
     assert.ok(seen.includes('activated'));
   });
 
-  it('waitForJournal: предикат, запись, появившаяся позже, и отказ по сроку с перечнем записей', async () => {
+  it('ST-7003/1: waitForJournal: предикат, запись, появившаяся позже, и отказ по сроку с перечнем записей', async () => {
     const late = probe('later', { activation: 'lazy', commands: { 'later.go': {} } });
     late.plugin.module.activate = (ctx) => void ctx.commands.register('later.go', () => 'ok');
     await using k = await startKernel({ plugins: [late.plugin] });
@@ -144,7 +144,27 @@ describe('startKernel', () => {
     await assert.rejects(k.waitForJournal({ kind: 'denied' }, { timeout: 60 }), /нет нужной записи за 60 мс; есть: .*later:activated/);
   });
 
-  it('unload через Symbol.asyncDispose: плагины сняты, песочница удалена, повторный вызов безвреден', async () => {
+  it('ST-5003/6: тест на тест-ките ждёт запись deprecated-call и видит вызывающего, контракт и член, как окно «Плагины Cyborg»', async () => {
+    const consumer = probe('caller', { requires: { 'test.old': '^1' } });
+    const provider: InlinePlugin = {
+      manifest: manifest('prov', { provides: { 'test.old': { version: '1.0', deprecated: ['list'] } } }),
+      module: {
+        activate: (ctx) => {
+          (ctx.contracts as unknown as { provide(name: string, version: string, impl: object): void }).provide('test.old', '1.0', { list: async () => ['a'], fresh: async () => ['a'] });
+        },
+      },
+    };
+    await using k = await startKernel({ plugins: [provider, consumer.plugin] });
+    const old = (consumer.ctx().contracts as unknown as { get(name: string, major: number): { list(): Promise<string[]>; fresh(): Promise<string[]> } | undefined }).get('test.old', 1);
+    assert.ok(old);
+    assert.deepEqual(await old.fresh(), ['a']);
+    assert.deepEqual(await old.list(), ['a'], 'вызов устаревшего члена выполняется как раньше');
+    const entry = await k.waitForJournal({ kind: 'deprecated-call', pluginId: 'caller' });
+    assert.deepEqual([entry.provider, entry.contract, entry.member], ['prov', 'test.old', 'list']);
+    assert.equal(k.journal.filter((e) => e.kind === 'deprecated-call').length, 1, 'непомеченный член записи не даёт');
+  });
+
+  it('ST-7003/1: unload через Symbol.asyncDispose: плагины сняты, песочница удалена, повторный вызов безвреден', async () => {
     const down: string[] = [];
     const k = await startKernel({ plugins: [{ manifest: manifest('x'), module: { activate: () => ({ dispose: () => void down.push('x') }) } }] });
     const root = k.sandbox.root;

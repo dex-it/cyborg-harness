@@ -31,7 +31,7 @@ describe('импорты плагинов', () => {
     const root = path.join(repo, relRoot);
     const declarations = path.join(repo, relDeclarations);
 
-    it(`${relRoot}: только ${CONTRACTS}, свои модули и типы пакета объявлений`, () => {
+    it(`ST-7002/6: ST-2007/2: ${relRoot}: только ${CONTRACTS}, свои модули и типы пакета объявлений`, () => {
       const homes = fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => path.join(root, d.name));
       assert.ok(homes.length > 0, `в ${relRoot} нет плагинов`);
       const found = homes.flatMap((home) => sources(home).flatMap((file) => importProblems(file, fs.readFileSync(file, 'utf8'), { home, declarations: [declarations], packages: [] }).map((p) => `${path.relative(repo, file)}:${p.line} ${p.message}`)));
@@ -43,7 +43,7 @@ describe('импорты плагинов', () => {
     });
   }
 
-  it('проверка ловит то, что запрещает', () => {
+  it('ST-7002/6: ST-2007/2: проверка ловит то, что запрещает', () => {
     const home = path.join(repo, 'playground/plugins/x');
     const declarations = path.join(repo, 'playground/plugins/contracts.ts');
     const rules = { home, declarations: [declarations], packages: [] };

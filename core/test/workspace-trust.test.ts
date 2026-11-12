@@ -51,7 +51,7 @@ async function web(layers: { user?: Record<string, unknown>; workspace?: Record<
   return { k, store, docs, calls, plugin, denials };
 }
 
-test('config:<поле> из слоя воркспейса не пускает net.fetch, из слоя пользователя - пускает', async () => {
+test('ST-3001/9, ST-3008/2: config:<поле> из слоя воркспейса не пускает net.fetch, из слоя пользователя - пускает', async () => {
   await using box = await sandbox();
 
   const fromWorkspace = await web({ workspace: { baseUrl: EVIL } }, box.root);
@@ -73,7 +73,7 @@ test('config:<поле> из слоя воркспейса не пускает n
 });
 
 // PL-10 (#226): хабов трекера у человека бывает несколько (свои GitLab и Jira), и одной строкой они не выражаются.
-test('config:<поле> со списком: из слоя пользователя пускает каждый названный хост, из слоя воркспейса - ни одного, чужой хост вне списка - отказ', async () => {
+test('ST-3002/3: config:<поле> со списком: из слоя пользователя пускает каждый названный хост, из слоя воркспейса - ни одного, чужой хост вне списка - отказ', async () => {
   await using box = await sandbox();
   const HUBS = ['https://gitlab.corp.local', 'https://jira.corp.local:8443', 'git.corp.local:9000'];
 
@@ -92,7 +92,7 @@ test('config:<поле> со списком: из слоя пользовате�
   await fromUser.k.unload();
 });
 
-test('config:<поле> со списком: воркспейс перекрывает список для плагина, но не для права net; правка списка человеком извне расширяет, правка воркспейса - нет', async () => {
+test('ST-3002/3: config:<поле> со списком: воркспейс перекрывает список для плагина, но не для права net; правка списка человеком извне расширяет, правка воркспейса - нет', async () => {
   await using box = await sandbox();
   const w = await web({ user: { hubs: [JIRA] }, workspace: { hubs: [JIRA, EVIL] } }, box.root, 'hubs');
   assert.deepEqual(w.plugin().config?.get().hubs, [JIRA, EVIL], 'плагин видит слитое значение');
@@ -107,7 +107,7 @@ test('config:<поле> со списком: воркспейс перекрыв
   await w.k.unload();
 });
 
-test('config:<поле>: воркспейс перекрывает значение для плагина, но не для права net', async () => {
+test('ST-3008/2: config:<поле>: воркспейс перекрывает значение для плагина, но не для права net', async () => {
   await using box = await sandbox();
   const both = await web({ user: { baseUrl: JIRA }, workspace: { baseUrl: EVIL } }, box.root);
   assert.equal(both.plugin().config?.get().baseUrl, EVIL, 'плагин видит слитое значение, как раньше');
@@ -117,7 +117,7 @@ test('config:<поле>: воркспейс перекрывает значен�
   await both.k.unload();
 });
 
-test('config:<поле>: правка файла воркспейса извне хоста не расширяет, правка файла пользователя - расширяет', async () => {
+test('ST-3002/3, ST-3008/2: config:<поле>: правка файла воркспейса извне хоста не расширяет, правка файла пользователя - расширяет', async () => {
   await using box = await sandbox();
   const w = await web({ user: { baseUrl: JIRA } }, box.root);
   w.docs.set('workspace', { web: { $version: 1, baseUrl: EVIL } });
@@ -175,7 +175,7 @@ test('plugins.hosts из файла воркспейса: сторонний п�
   }
 });
 
-test('plugins.uiGroups из файла воркспейса: присланный файл не сажает плагины поставки в одну группу рендера, группа пользователя действует', async () => {
+test('ST-3005/1, ST-3008/2: plugins.uiGroups из файла воркспейса: присланный файл не сажает плагины поставки в одну группу рендера, группа пользователя действует', async () => {
   await using box = await sandbox();
   const wsFile = path.join(box.root, 'ws', 'workspace.cyborg.json');
   const userFile = path.join(box.root, 'user', 'cyborg.json');
@@ -206,7 +206,7 @@ test('plugins.uiGroups из файла воркспейса: присланны�
   }
 });
 
-test('файлы на диске: baseUrl в settings воркспейса хоста не даёт, в settings пользователя даёт', async () => {
+test('ST-3002/3: файлы на диске: baseUrl в settings воркспейса хоста не даёт, в settings пользователя даёт', async () => {
   await using box = await sandbox();
   const wsFile = path.join(box.root, 'ws', 'workspace.cyborg.json');
   const userFile = path.join(box.root, 'user', 'cyborg.json');

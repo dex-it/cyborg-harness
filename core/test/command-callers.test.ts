@@ -141,7 +141,7 @@ async function setup() {
   return { k, work, ran, run, denied, release, [Symbol.asyncDispose]: dispose };
 }
 
-test('команда с callers по умолчанию: плагин без прав из главной части получает PermissionDenied и запись denied, обработчик не вызван', async () => {
+test('ST-3003/3: команда с callers по умолчанию: плагин без прав из главной части получает PermissionDenied и запись denied, обработчик не вызван', async () => {
   await using s = await setup();
   await assert.rejects(s.run('nosy', 'sessions.new', 'claude'), { code: 'PermissionDenied' });
   await assert.rejects(s.run('trusted', 'sessions.pin', 'x'), { code: 'PermissionDenied' }, 'явное user - то же');
@@ -154,7 +154,7 @@ test('команда с callers по умолчанию: плагин без п�
   assert.equal(entry && describeEntry(entry), 'отказ команды: sessions.new - sessions не открыл её другим плагинам (callers: "user")');
 });
 
-test('команда с callers по умолчанию открыта пользователю (палитра, клавиши, меню) и своему плагину', async () => {
+test('ST-3003/3: команда с callers по умолчанию открыта пользователю (палитра, клавиши, меню) и своему плагину', async () => {
   await using s = await setup();
   assert.equal(await s.k.run('sessions.new', 'claude'), 'ok:sessions.new');
   assert.equal(await s.run('sessions', 'sessions.new', 'shell'), 'ok:sessions.new', 'главная часть звонит своей команде');
@@ -163,7 +163,7 @@ test('команда с callers по умолчанию открыта поль�
   await assert.rejects(s.run('nosy', 'sessions.nope'), { code: 'CommandNotFound' });
 });
 
-test('отказ по callers раньше, чем ядро будит спящего исполнителя и сверяет аргументы', async () => {
+test('ST-3003/3: отказ по callers раньше, чем ядро будит спящего исполнителя и сверяет аргументы', async () => {
   await using s = await setup();
   await assert.rejects(s.run('nosy', 'lazy.go'), { code: 'PermissionDenied' });
   assert.equal(s.k.journal.some((e) => e.pluginId === 'lazy' && e.kind === 'activated'), false, 'спящий не разбужен отказанным');
@@ -191,7 +191,7 @@ test('callers: "plugins" - чужая главная часть вызывает
   assert.deepEqual(s.denied(), []);
 });
 
-test('guard команды: путь вне права вызывающего отклоняется, в границах права проходит, пользователя guard не касается', async () => {
+test('ST-3003/4: guard команды: путь вне права вызывающего отклоняется, в границах права проходит, пользователя guard не касается', async () => {
   await using s = await setup();
   const inside = path.join(s.work, 'a.md');
   await writeFile(inside, 'x');
@@ -210,7 +210,7 @@ test('guard команды: путь вне права вызывающего о
 });
 
 // Ревью K-22: `a` и `a.b` оба проходят проверку пространства имён для `a.b.run`.
-test('команда в двух манифестах: сторонний отвергнут, встроенный остаётся владельцем; runOwn не пускает к чужой команде', async () => {
+test('ST-2002/2: команда в двух манифестах: сторонний отвергнут, встроенный остаётся владельцем; runOwn не пускает к чужой команде', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'cyborg-callers-'));
   const contexts = new Map<string, PluginContext>();
   const ran: string[] = [];
@@ -253,7 +253,7 @@ test('команда в двух манифестах: сторонний отв
   }
 });
 
-test('команда в двух манифестах: встроенный остаётся владельцем и без reservedPrefixes - поставку задаёт bundled', async () => {
+test('ST-2002/2: команда в двух манифестах: встроенный остаётся владельцем и без reservedPrefixes - поставку задаёт bundled', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'cyborg-callers-'));
   const k = await load({
     apiVersion: PLUGIN_API_VERSION,

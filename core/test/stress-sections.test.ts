@@ -26,7 +26,7 @@ test('stress-sections: setViewState и documents.open одновременно -
   await k.unload();
 });
 
-test('stress-sections: config.set в два слоя одновременно - значение раздела в плагине сливает оба слоя', async () => {
+test('ST-5004/7: stress-sections: config.set в два слоя одновременно - значение раздела в плагине сливает оба слоя', async () => {
   const { docs, store } = memory();
   let ctx!: PluginContext;
   const k = await load({
@@ -44,7 +44,7 @@ test('stress-sections: config.set в два слоя одновременно - 
   await k.unload();
 });
 
-test('stress-sections: migrate бросает не Error - причина читаема, а не undefined', () => {
+test('ST-5004/4: stress-sections: migrate бросает не Error - причина читаема, а не undefined', () => {
   const r = resolveSection(
     {
       version: 2,
@@ -60,7 +60,7 @@ test('stress-sections: migrate бросает не Error - причина чит
   assert.match(String((r.result as { error: unknown }).error), /старый формат битый/);
 });
 
-test('stress-sections: 400 последовательных записей в 8 разделов - на диске последнее значение каждого', async () => {
+test('ST-5004/7: stress-sections: 400 последовательных записей в 8 разделов - на диске последнее значение каждого', async () => {
   const { docs, store } = memory();
   const s = await SectionStore.open(store, ['workspace']);
   for (let round = 0; round < 50; round++) {

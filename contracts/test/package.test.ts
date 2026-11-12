@@ -46,7 +46,7 @@ function specifiers(file: string, text: string): string[] {
 }
 
 describe('package.json пакета контрактов', () => {
-  it('готов к публикации: не private, exports и types на собранные декларации', () => {
+  it('ST-5002/5: готов к публикации: не private, exports и types на собранные декларации', () => {
     assert.equal(pkg.name, '@cyborg-harness/contracts');
     assert.notEqual(pkg.private, true, 'private: true запрещает npm publish');
     assert.match(pkg.version, /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/);
@@ -87,7 +87,7 @@ describe('сборка деклараций', () => {
     );
   });
 
-  it('в dist только .d.ts, импортов с расширением .ts нет, каждый относительный путь ведёт к файлу', () => {
+  it('ST-5002/5: в dist только .d.ts, импортов с расширением .ts нет, каждый относительный путь ведёт к файлу', () => {
     const out = tmp('build');
     buildDeclarations(out);
     const files = fs.readdirSync(out, { recursive: true, encoding: 'utf8' }).sort();
@@ -121,7 +121,7 @@ describe('npm pack и пустой потребитель', () => {
     fs.rmSync(work, { recursive: true, force: true });
   });
 
-  it('в tarball: package.json, README, CHANGELOG, схема манифеста и декларации; исходных .ts нет', () => {
+  it('ST-5002/5: в tarball: package.json, README, CHANGELOG, схема манифеста и декларации; исходных .ts нет', () => {
     const names = report[0]!.files.map((f) => f.path).sort();
     assert.deepEqual(names, ['CHANGELOG.md', 'README.md', 'dist/agent.d.ts', 'dist/elements.d.ts', 'dist/git.d.ts', 'dist/index.d.ts', 'dist/os.d.ts', 'dist/plugin.d.ts', 'dist/sessions.d.ts', 'dist/tree.d.ts', 'dist/view.d.ts', 'manifest.schema.json', 'package.json']);
     assert.deepEqual(names.filter((n) => n.endsWith('.ts') && !n.endsWith('.d.ts')), []);
@@ -167,7 +167,7 @@ export const view: UiModule<{ innerHTML: string }> = {
 `;
 
   for (const [name, module, resolution] of [['NodeNext', 'NodeNext', 'NodeNext'], ['Bundler', 'ESNext', 'Bundler']] as const) {
-    it(`пустой проект (${name}) ставит tarball и собирает плагин на PluginModule и declare module`, () => {
+    it(`ST-7002/1: пустой проект (${name}) ставит tarball и собирает плагин на PluginModule и declare module`, () => {
       const project = path.join(work, `consumer-${name}`);
       fs.mkdirSync(project);
       fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'consumer', private: true, type: 'module' }));

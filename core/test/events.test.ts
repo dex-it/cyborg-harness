@@ -37,7 +37,7 @@ function start(table: Record<string, PluginModule>, options: Omit<LoadOptions, '
   }).then((k) => Object.assign(k, { logs }));
 }
 
-test('события окна и ОС: доходят до плагинов всех хостов, упавший слушатель не мешает соседу, снятый плагин их не получает', async () => {
+test('ST-2001/7: события окна и ОС: доходят до плагинов всех хостов, упавший слушатель не мешает соседу, снятый плагин их не получает', async () => {
   const seen: string[] = [];
   const listen = (id: string, fail = false): PluginModule => ({
     activate(ctx) {
@@ -117,7 +117,7 @@ test('onIdle: один раз на простой, снова - после ак�
   await k.unload();
 });
 
-test('beforeQuit: ждёт асинхронных слушателей всех хостов, зависший обрезается бюджетом', async () => {
+test('ST-2001/7: beforeQuit: ждёт асинхронных слушателей всех хостов, зависший обрезается бюджетом', async () => {
   const done: string[] = [];
   const k = await start(
     {
@@ -147,7 +147,7 @@ test('beforeQuit: ждёт асинхронных слушателей всех 
   await k.unload();
 });
 
-test('activation lazy: ждёт; будит команда, сочетание, wake и потребитель контракта; встречные consumes не виснут', async () => {
+test('ST-1006/1, ST-1006/2, ST-1006/3: activation lazy: ждёт; будит команда, сочетание, wake и потребитель контракта; встречные consumes не виснут', async () => {
   const activated: string[] = [];
   const mod = (id: string, body?: (ctx: PluginContext) => void): PluginModule => ({
     activate(ctx) {
@@ -206,7 +206,7 @@ test('activation lazy: ждёт; будит команда, сочетание, 
   await k.unload();
 });
 
-test('activation lazy: enable ждущего поднимает его один раз, wake после enable не активирует повторно', async () => {
+test('ST-1006/2: activation lazy: enable ждущего поднимает его один раз, wake после enable не активирует повторно', async () => {
   let activated = 0;
   const k = await start(
     {
@@ -261,7 +261,7 @@ test('предел слушателей onIdle: сверх предела ядр
   await k.unload();
 });
 
-test('клик по уведомлению, пока хост перезапускается, доходит до команды вернувшегося плагина; падение хоста уведомление не закрывает', async () => {
+test('ST-2004/4: клик по уведомлению, пока хост перезапускается, доходит до команды вернувшегося плагина; падение хоста уведомление не закрывает', async () => {
   const clicks: NoticeEvents[] = [];
   const ran: unknown[] = [];
   let closed = 0;

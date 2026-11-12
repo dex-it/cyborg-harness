@@ -80,7 +80,7 @@ test('канал: вид, которого нет в манифесте, - Inval
   await k.unload();
 });
 
-test('канал: сообщение сверх лимита - Invalid, не данные - NotCloneable, канал работает дальше', async () => {
+test('ST-2001/9: канал: сообщение сверх лимита - Invalid, не данные - NotCloneable, канал работает дальше', async () => {
   const s = stand();
   const k = await s.start();
   const big = 'я'.repeat(40 * 1024);

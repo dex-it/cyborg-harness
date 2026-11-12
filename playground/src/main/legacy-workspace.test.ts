@@ -8,7 +8,7 @@ import { migrateLegacyWorkspace } from './legacy-workspace.ts';
 
 const json = async (file: string): Promise<unknown> => JSON.parse(await readFile(file, 'utf8'));
 
-test('перенос {projects, lastProjectId}: проекты и трекеры в settings, активный проект в state, копия старого файла', async () => {
+test('ST-5004/5: перенос {projects, lastProjectId}: проекты и трекеры в settings, активный проект в state, копия старого файла', async () => {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-legacy-')));
   const file = path.join(root, 'team.cyborg.json');
   const options = { file, userFile: path.join(root, 'user', 'cyborg.json'), stateDir: path.join(root, 'state'), migrate: migrateLegacyWorkspace };
@@ -79,7 +79,7 @@ async function tree(root: string): Promise<Record<string, string>> {
   return out;
 }
 
-test('файл e4beb72: ни одно значение не потеряно, поля уходят по таблице, копия .v1.bak побайтно равна исходнику', async () => {
+test('ST-5004/5: файл e4beb72: ни одно значение не потеряно, поля уходят по таблице, копия .v1.bak побайтно равна исходнику', async () => {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-pl06-')));
   try {
     const original = await readFile(FIXTURE);
@@ -120,7 +120,7 @@ test('файл e4beb72: ни одно значение не потеряно, п
   }
 });
 
-test('файл e4beb72: повторное открытие не меняет ни одного файла (config, state, копия), перенос не повторяется', async () => {
+test('ST-5004/5: файл e4beb72: повторное открытие не меняет ни одного файла (config, state, копия), перенос не повторяется', async () => {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-pl06-')));
   try {
     const { options, ws } = await openFixture(root);
@@ -140,7 +140,7 @@ test('файл e4beb72: повторное открытие не меняет н
   }
 });
 
-test('перенос: неизвестные поля проекта остаются в его записи, пропущенные записи сохраняются в settings.projects.skipped, а не пропадают', () => {
+test('ST-5004/5: перенос: неизвестные поля проекта остаются в его записи, пропущенные записи сохраняются в settings.projects.skipped, а не пропадают', () => {
   const migrated = migrateLegacyWorkspace({
     projects: [{ id: 'a', name: 'A', repos: ['/r'], color: 'red', extra: { n: 1 } }, 'мусор', { name: 'без id' }, null, { id: 'b', path: '/p' }],
     lastProjectId: 'a',

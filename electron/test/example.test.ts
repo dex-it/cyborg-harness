@@ -43,11 +43,11 @@ describe('пример из README адаптера', { timeout: 120_000 }, () =
     assert.deepEqual([...blocks().keys()].sort(), ['main.ts', 'preload.ts', 'renderer.ts']);
   });
 
-  it('компилятор принимает пример: имена и типы пакета на месте', () => {
+  it('ST-6001/1: компилятор принимает пример: имена и типы пакета на месте', () => {
     runCommand(process.execPath, [tsc, '-p', work], { cwd: work });
   });
 
-  it('esbuild собирает главный процесс, preload, файл хоста и окно; окно без node:*', async () => {
+  it('ST-6001/1: esbuild собирает главный процесс, preload, файл хоста и окно; окно без node:*', async () => {
     const common = { absWorkingDir: work, bundle: true, logLevel: 'silent' as const, write: false as const };
     const main = await build({ ...common, entryPoints: ['main.ts'], platform: 'node', format: 'cjs', external: ['electron', 'node-pty'] });
     assert.match(main.outputFiles[0]?.text ?? '', /utilityProcess/, 'главный процесс собран вместе с адаптером');

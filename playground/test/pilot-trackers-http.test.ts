@@ -169,7 +169,7 @@ test('PL-10, У-35: хаб, названный человеком, но резо
   assert.equal(r.denied().length, Object.keys(addresses).length);
 });
 
-test('PL-10: токен вводит человек; плагин другого автора команду ввода не вызовет, токен не попадает в журнал, строки плагина, трассу и слои config', async () => {
+test('ST-3004/3: PL-10: токен вводит человек; плагин другого автора команду ввода не вызовет, токен не попадает в журнал, строки плагина, трассу и слои config', async () => {
   await using box = await sandbox();
   await using r = await rig({ box, layers: { user: [HUB(CORP)] }, resolve: [CORP], probes: [{ id: 'snoop' }] });
   r.fake.accept.set(hostPort(r, CORP), TOKEN);

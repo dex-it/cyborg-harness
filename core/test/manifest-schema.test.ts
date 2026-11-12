@@ -92,7 +92,7 @@ describe('схема и parseManifest на манифестах примеров
   });
 
   for (const { name, manifest } of manifests()) {
-    it(`${name}: итог схемы и parseManifest одинаков`, () => {
+    it(`ST-1001/3: ${name}: итог схемы и parseManifest одинаков`, () => {
       const expected = name === 'core/examples/plugins/broken-manifest' ? false : true;
       assert.equal(byCore(manifest), expected, 'итог parseManifest');
       assert.deepEqual(validateDraft(schema, manifest).length === 0, expected, `итог схемы: ${validateDraft(schema, manifest).join('; ')}`);
@@ -278,7 +278,7 @@ describe('таблица правок одного манифеста: где с
   });
 
   for (const [name, patch] of Object.entries(BOTH_REJECT)) {
-    it(`обе стороны отказывают: ${name}`, () => {
+    it(`ST-1001/9: обе стороны отказывают: ${name}`, () => {
       const m = withPatch(patch);
       assert.equal(byCore(m), false, 'ядро приняло');
       assert.equal(bySchema(m), false, 'схема приняла');

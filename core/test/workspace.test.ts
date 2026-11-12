@@ -32,7 +32,7 @@ async function open(box: Awaited<ReturnType<typeof sandbox>>, pid?: number): Pro
   return r.workspace;
 }
 
-test('замок: второй открывающий получает pid владельца, замок умершего процесса забирается, close снимает', async () => {
+test('ST-1007/1: замок: второй открывающий получает pid владельца, замок умершего процесса забирается, close снимает', async () => {
   await using box = await sandbox();
   const ws = await open(box);
   const again = await openWorkspace({ file: box.file, userFile: box.userFile, stateDir: box.stateDir, pid: process.pid + 1 });
@@ -47,7 +47,7 @@ test('замок: второй открывающий получает pid вл�
   (await open(box)).close();
 });
 
-test('state по ключу воркспейса: тот же файл через симлинк - то же состояние', async () => {
+test('ST-1007/3: state по ключу воркспейса: тот же файл через симлинк - то же состояние', async () => {
   await using box = await sandbox();
   await writeFile(box.file, '{}');
   const link = path.join(box.root, 'link.json');
@@ -56,7 +56,7 @@ test('state по ключу воркспейса: тот же файл чере�
   assert.notEqual(workspaceKey(path.join(box.root, 'other.json')), workspaceKey(box.file));
 });
 
-test('перенос старого формата хуком приложения: копия .v1.bak, config с полем cyborg, разделы state, повтор не идёт', async () => {
+test('ST-5004/5: ST-1007/5: перенос старого формата хуком приложения: копия .v1.bak, config с полем cyborg, разделы state, повтор не идёт', async () => {
   await using box = await sandbox();
   const old = { items: ['a', 'b'], current: 'b', plugins: { enabled: ['list'] } };
   await writeFile(box.file, JSON.stringify(old));
@@ -85,7 +85,7 @@ test('перенос старого формата хуком приложени
 });
 
 // PL-06: копия `.v1.bak` - защита пользователя от потери данных, поэтому она байты исходника, а не его пересериализация (приложение пишет файл без перевода строки в конце).
-test('перенос: .v1.bak побайтно равна исходному файлу, даже если его формат отличается от записи ядра', async () => {
+test('ST-1007/5: перенос: .v1.bak побайтно равна исходному файлу, даже если его формат отличается от записи ядра', async () => {
   await using box = await sandbox();
   const original = Buffer.from('{"items":[ "a" ,"b"],\r\n  "current":"b",  "n": 1.0, "текст": "\\u0041"}');
   await writeFile(box.file, original);
@@ -194,7 +194,7 @@ test('хук вернул undefined или его нет: файл не трон
   await assert.rejects(readFile(`${box.file}.v1.bak`), { code: 'ENOENT' });
 });
 
-test('plugins: воркспейс перекрывает enabled пользователя, группы хостов сливаются; нет файла - пустой новый', async () => {
+test('ST-2002/4: ST-1007/3: plugins: воркспейс перекрывает enabled пользователя, группы хостов сливаются; нет файла - пустой новый', async () => {
   await using box = await sandbox();
   const fresh = await open(box);
   assert.deepEqual(fresh.plugins, { enabled: [], hosts: {}, uiGroups: {}, keybindings: [] });
@@ -210,7 +210,7 @@ test('plugins: воркспейс перекрывает enabled пользов�
 });
 
 // K-04: plugins.uiGroups - группа рендера -> плагины; группа рендера делит мост плагинов, поэтому читается только из слоя пользователя (ADR-CH-0015, п. 5).
-test('plugins.uiGroups: действуют группы пользователя, поле файла воркспейса не действует и называется в problems', async () => {
+test('ST-3008/2: plugins.uiGroups: действуют группы пользователя, поле файла воркспейса не действует и называется в problems', async () => {
   await using box = await sandbox();
   await writeFile(box.file, JSON.stringify({ cyborg: 2, plugins: { uiGroups: { panels: ['b', 'c'], solo: ['d'] } } }));
   await mkdir(path.dirname(box.userFile), { recursive: true });
@@ -250,7 +250,7 @@ test('plugins.uiGroups: ошибки называют поле и файл по�
   bad.close();
 });
 
-test('правка файла извне доходит до ctx.config.onChange; не прошедшая проверку - запись в журнале, значение прежнее; своя запись не будит', async (t) => {
+test('ST-5004/3, ST-5004/8: ST-1007/8: правка файла извне доходит до ctx.config.onChange; не прошедшая проверку - запись в журнале, значение прежнее; своя запись не будит', async (t) => {
   await using box = await sandbox();
   await writeFile(box.file, JSON.stringify({ cyborg: 2, plugins: { enabled: ['lock'] }, settings: { lock: { $version: 1, minutes: 5 } } }));
   const ws = await open(box);
@@ -345,7 +345,7 @@ test('битый файл пользователя не роняет откры�
   ws.close();
 });
 
-test('битый файл воркспейса: рядом копия .corrupt-<время> с исходником, сам файл не тронут, повторное открытие копий не плодит', async () => {
+test('ST-1007/4: битый файл воркспейса: рядом копия .corrupt-<время> с исходником, сам файл не тронут, повторное открытие копий не плодит', async () => {
   await using box = await sandbox();
   const broken = '{ "cyborg": 2, "plugins": ';
   await writeFile(box.file, broken);
@@ -367,7 +367,7 @@ test('битый файл воркспейса: рядом копия .corrupt-<
   assert.equal((await copies()).length, 2, 'новая порча - новая копия');
 });
 
-test('«Недавние»: последний открытый первым, без повторов по realpath, пропавший файл не показывается, битый список не мешает', async () => {
+test('ST-1007/6: «Недавние»: последний открытый первым, без повторов по realpath, пропавший файл не показывается, битый список не мешает', async () => {
   await using box = await sandbox();
   const list = path.join(box.root, 'recent.json');
   const recent = new RecentWorkspaces(list, 3);

@@ -43,7 +43,7 @@ const settle = async () => {
 const files: PluginModule = { activate: (ctx) => ctx.contracts.provide('test.files', '1.0', { read: (p: string) => p }) };
 const idle: PluginModule = { activate: () => undefined };
 
-test('disable: требующие выгружаются вместе с поставщиком, необязательный остаётся; enable поднимает их в порядке графа', async () => {
+test('ST-1005/3, ST-1005/4: disable: требующие выгружаются вместе с поставщиком, необязательный остаётся; enable поднимает их в порядке графа', async () => {
   let changes = 0;
   const { start, spawned } = kernel(
     {
@@ -88,7 +88,7 @@ test('disable: требующие выгружаются вместе с пос�
   await k.unload();
 });
 
-test('disable: выключенного человеком enable соседа не поднимает', async () => {
+test('ST-1005/5: disable: выключенного человеком enable соседа не поднимает', async () => {
   const { start } = kernel({ files, reader: idle }, {
     enabled: ['files', 'reader'],
     manifests: [manifest('files', { provides: { 'test.files': '1.0' } }), manifest('reader', { requires: { 'test.files': '^1' } })],
@@ -146,7 +146,7 @@ test('сочетания клавиш: запись, платформа, наж�
   assert.equal(keyOfInput({ key: 'Control', control: true, alt: false, shift: false, meta: false }), undefined);
 });
 
-test('манифест: сочетание - на свою команду без обязательных аргументов', () => {
+test('ST-2002/3: манифест: сочетание - на свою команду без обязательных аргументов', () => {
   const problem = (fields: Record<string, unknown>) => {
     const r = parseManifest(manifest('pad', { commands: { 'pad.open': {}, 'pad.say': { args: ['string'] } }, ...fields }));
     return r.ok ? '' : r.errors.join('\n');
@@ -159,7 +159,7 @@ test('манифест: сочетание - на свою команду без
   assert.match(problem({ keybindings: [{ key: 'F2', command: 'pad.open' }, { key: 'f2', command: 'pad.open' }] }), /повторяется/);
 });
 
-test('plugins.keybindings: выбор пользователя перекрывает манифесты, null отдаёт сочетание окну, неверное - в журнал', async () => {
+test('ST-2002/4: plugins.keybindings: выбор пользователя перекрывает манифесты, null отдаёт сочетание окну, неверное - в журнал', async () => {
   const pad = (id: string): PluginModule => ({ activate: (ctx) => ctx.commands.register(`${id}.go`, () => id) });
   const keyed = (id: string, key: string) => manifest(id, { commands: [`${id}.go`, `${id}.alt`], keybindings: [{ key, command: `${id}.go` }] });
   const { start } = kernel(
@@ -193,7 +193,7 @@ test('plugins.keybindings: выбор пользователя перекрыв�
   await k.unload();
 });
 
-test('конфликт сочетаний: встроенный побеждает сторонний, между равными - первый по id; нажатие идёт активному владельцу', async () => {
+test('ST-2002/4: конфликт сочетаний: встроенный побеждает сторонний, между равными - первый по id; нажатие идёт активному владельцу', async () => {
   const pad = (id: string): PluginModule => ({ activate: (ctx) => ctx.commands.register(`${id}.go`, () => id) });
   const keyed = (id: string, key: string) => manifest(id, { commands: [`${id}.go`], keybindings: [{ key, command: `${id}.go` }] });
   const { start } = kernel(

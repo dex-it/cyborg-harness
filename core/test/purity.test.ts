@@ -74,14 +74,14 @@ const sources = () =>
     .map((f) => path.join(src, f));
 
 describe('чистота ядра', () => {
-  it('core/src импортирует только node:*, пакет контрактов и свои модули', () => {
+  it('ST-1009/1: core/src импортирует только node:*, пакет контрактов и свои модули', () => {
     assert.deepEqual(
       sources().flatMap((f) => importViolations(f, fs.readFileSync(f, 'utf8'))),
       [],
     );
   });
 
-  it('в идентификаторах и строках core/src нет предметных слов', () => {
+  it('ST-2007/1: ST-1009/1: в идентификаторах и строках core/src нет предметных слов', () => {
     assert.deepEqual(
       sources().flatMap((f) => domainViolations(f, fs.readFileSync(f, 'utf8'))),
       [],

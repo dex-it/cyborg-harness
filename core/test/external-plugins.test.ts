@@ -118,7 +118,7 @@ describe('плагин вне репозитория', () => {
     });
   }
 
-  it('отказ одних плагинов не трогает остальных: хосты у плагинов свои', () => {
+  it('ST-5002/6: ST-1003/1: отказ одних плагинов не трогает остальных: хосты у плагинов свои', () => {
     const failing = variants.filter((v) => v.fails !== undefined).map((v) => v.name);
     assert.deepEqual(kernel.active.toSorted(), variants.map((v) => v.name).filter((n) => !failing.includes(n)).toSorted());
   });

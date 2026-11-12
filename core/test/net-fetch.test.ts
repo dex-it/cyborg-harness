@@ -99,7 +99,7 @@ async function fixture(permissions: Record<string, unknown>, lookup: Lookup, con
   return { net, k, port, server, hits, hung, denied, [Symbol.asyncDispose]: dispose };
 }
 
-test('net.fetch: хост из права, резолвящийся в локальный или частный адрес, получает отказ до соединения', async () => {
+test('ST-3002/5: net.fetch: хост из права, резолвящийся в локальный или частный адрес, получает отказ до соединения', async () => {
   const bad = [...LOCAL, ...LOCAL_V6].filter((a) => !a.includes('%'));
   const { lookup, calls } = answer(Object.fromEntries(bad.map((a, i) => [`h${String(i)}.example`, [a]])));
   await using f = await fixture({ net: bad.map((_, i) => `h${String(i)}.example:$PORT`) }, lookup);
@@ -112,7 +112,7 @@ test('net.fetch: хост из права, резолвящийся в лока�
   assert.match(f.denied()[0] ?? '', /адрес 127\.0\.0\.1 локальный/);
 });
 
-test('net.fetch: один локальный адрес среди публичных в ответе - отказ', async () => {
+test('ST-3002/5: net.fetch: один локальный адрес среди публичных в ответе - отказ', async () => {
   const { lookup } = answer({ 'mixed.example': ['8.8.8.8', '127.0.0.1'] });
   await using f = await fixture({ net: ['mixed.example:$PORT'] }, lookup);
   await assert.rejects(f.net.fetch(`http://mixed.example:${String(f.port)}/`), { code: 'PermissionDenied' });
@@ -132,7 +132,7 @@ test('net.fetch: право, названное локальным адресо�
   assert.deepEqual(f.denied(), []);
 });
 
-test('net.fetch: частный адрес корпоративного хоста открывает только его название человеком в config; то же имя в праве манифеста и пустое поле - отказ (PL-10, У-35)', async () => {
+test('ST-3002/5: net.fetch: частный адрес корпоративного хоста открывает только его название человеком в config; то же имя в праве манифеста и пустое поле - отказ (PL-10, У-35)', async () => {
   // Сервер теста слушает 127.0.0.1: имена корпоративных хостов ведут на локальный адрес подменой резолва, а пропуск или отказ виден по тому, дошёл ли запрос.
   const { lookup } = answer({ 'gitlab.corp.example': ['127.0.0.1'], 'hub2.corp.example': ['127.0.0.1'] });
   await using named = await fixture({ net: ['config:hubs'] }, lookup, { hubs: ['gitlab.corp.example:$PORT', 'http://hub2.corp.example:$PORT/api'] });
@@ -164,7 +164,7 @@ test('isForbiddenAddress: link-local и метаданные облака, в т
   assert.equal(isForbiddenAddress('не адрес'), true, 'непонятное отвергается');
 });
 
-test('net.fetch: хост, названный человеком в config, не получает link-local и адреса метаданных облака, даже если пускает на loopback и частные сети (PL-10, У-35)', async () => {
+test('ST-3002/5: net.fetch: хост, названный человеком в config, не получает link-local и адреса метаданных облака, даже если пускает на loopback и частные сети (PL-10, У-35)', async () => {
   const bad = [...FORBIDDEN, ...FORBIDDEN_V6].filter((a) => !a.includes('%'));
   const names = Object.fromEntries(bad.map((a, i) => [`meta${String(i)}.corp.example`, [a]]));
   const { lookup, calls } = answer({ ...names, 'ok.corp.example': ['127.0.0.1'], 'mixed.corp.example': ['127.0.0.1', '169.254.169.254'] });
@@ -179,14 +179,14 @@ test('net.fetch: хост, названный человеком в config, не
   assert.match(f.denied()[0] ?? '', /адрес 169\.254\.169\.254 локальный \(link-local или метаданные облака закрыты даже названному хосту\)/);
 });
 
-test('net.fetch: тот же закрытый адрес и у хоста, не названного человеком (имя в манифесте): отказ, как и раньше', async () => {
+test('ST-3002/5: net.fetch: тот же закрытый адрес и у хоста, не названного человеком (имя в манифесте): отказ, как и раньше', async () => {
   const { lookup } = answer({ 'a.example': ['169.254.169.254'], 'b.example': ['168.63.129.16'], 'c.example': ['fe80::1'] });
   await using f = await fixture({ net: ['a.example:$PORT', 'b.example:$PORT', 'c.example:$PORT'] }, lookup);
   for (const name of ['a', 'b', 'c']) await assert.rejects(f.net.fetch(`http://${name}.example:${String(f.port)}/x`, { timeoutMs: 1000 }), { code: 'PermissionDenied' }, name);
   assert.equal(f.hits.length, 0);
 });
 
-test('net.fetch: адрес-литерал link-local или метаданных, названный в праве или в config, закрыт во всех записях числа, DNS не нужен', async () => {
+test('ST-3002/5: net.fetch: адрес-литерал link-local или метаданных, названный в праве или в config, закрыт во всех записях числа, DNS не нужен', async () => {
   const { lookup, calls } = answer({});
   // В праве манифеста и в config (человек): IPv4 и IPv6, URL сводит десятичную, шестнадцатеричную и восьмеричную записи к одному виду.
   await using f = await fixture({ net: ['169.254.169.254', 'config:hubs'] }, lookup, { hubs: ['168.63.129.16', '[fe80::1]', '[::ffff:a9fe:a9fe]', '[fd00:ec2::254]', '127.0.0.1:$PORT'] });
@@ -198,7 +198,7 @@ test('net.fetch: адрес-литерал link-local или метаданны�
   assert.equal(f.hits.length, 1);
 });
 
-test('net.fetch: переадресация на link-local или метаданные не выполняется: ответ 3xx отдан плагину, второго запроса и резолва нет', async () => {
+test('ST-3002/4: net.fetch: переадресация на link-local или метаданные не выполняется: ответ 3xx отдан плагину, второго запроса и резолва нет', async () => {
   const { lookup, calls } = answer({ 'ok.corp.example': ['127.0.0.1'] });
   await using f = await fixture({ net: ['config:hubs'] }, lookup, { hubs: ['ok.corp.example:$PORT', '169.254.169.254'] });
   const response = await f.net.fetch(`http://ok.corp.example:${String(f.port)}/redirect-meta`);
@@ -208,7 +208,7 @@ test('net.fetch: переадресация на link-local или метада�
   await assert.rejects(f.net.fetch('http://169.254.169.254/latest/meta-data/', { timeoutMs: 1000 }), { code: 'PermissionDenied' }, 'и прямой запрос по Location закрыт');
 });
 
-test('net.fetch по node:http: метод, тело и заголовки доходят; переадресация не идёт; 204 без тела; тайм-аут и выгрузка обрывают запрос', async () => {
+test('ST-3002/4: net.fetch по node:http: метод, тело и заголовки доходят; переадресация не идёт; 204 без тела; тайм-аут и выгрузка обрывают запрос', async () => {
   const { lookup } = answer({});
   await using f = await fixture({ net: ['127.0.0.1:$PORT'] }, lookup);
   const at = (p: string) => `http://127.0.0.1:${String(f.port)}${p}`;
