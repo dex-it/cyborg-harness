@@ -62,7 +62,7 @@ describe('потребитель вне репозитория: peer-завис�
       // `--legacy-peer-deps`: electron и node-pty (тяжёлые, нужны сети) не подтягиваются; проверку peer делает `npm ls` ниже.
       const install = run('npm', ['install', '--offline', '--no-audit', '--no-fund', '--ignore-scripts', '--legacy-peer-deps', ...tarballs], project);
       assert.equal(install.code, 0, install.out);
-      const ls = run('npm', ['ls', '--all', '--offline'], project);
+      const ls = run('npm', ['ls', '--all', '--offline', '--loglevel=error'], project);
       const problems = ls.out.split('\n').filter((line) => /^npm error (missing|invalid|peer dep|extraneous)/.test(line));
       assert.deepEqual(
         problems.sort(),

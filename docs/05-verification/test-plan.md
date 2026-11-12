@@ -2,7 +2,7 @@
 level: verification
 feature: cyborg-harness
 status: draft
-date: 2026-11-10
+date: 2026-11-12
 origin: derived
 ---
 

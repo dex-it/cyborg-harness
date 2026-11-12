@@ -31,8 +31,8 @@ const strings = (r: CheckReport) => r.problems.map(formatProblem);
 describe('checkPlugin: плагины репозитория', () => {
   // Образцы, негодные намеренно: тесты загрузчика и графа. Каждый должен давать именно свою причину.
   const EXPECTED: Readonly<Record<string, RegExp>> = {
-    'core/examples/plugins/broken-manifest': /^manifest\.json: version: ожидается версия x\.y\.z/m,
-    'core/examples/plugins/future': /^manifest\.json: engines\.cyborg: нужен API Cyborg \^2, есть 1\.0\.0$/m,
+    'core/examples/plugins/broken-manifest': /^manifest\.json:3: version: ожидается версия x\.y\.z/m,
+    'core/examples/plugins/future': /^manifest\.json:4: engines\.cyborg: нужен API Cyborg \^2, есть 1\.0\.0$/m,
     'core/examples/plugins/cycle-a': /нет точки входа/,
     'core/examples/plugins/cycle-b': /нет точки входа/,
   };
@@ -140,10 +140,10 @@ describe('checkPlugin: манифест и файлы из него', () => {
       state: { version: 1, schema: './schemas/state.json' },
     });
     assert.deepEqual(strings(await checkPlugin(dir)), [
-      'manifest.json: ui.views.main: файла ./ui/ui.js нет',
-      'manifest.json: ui.overlay: файла ./ui/lock.js нет',
-      'manifest.json: config.schema: файла ./config.schema.json нет',
-      'manifest.json: state.schema: файла ./schemas/state.json нет',
+      'manifest.json:1: ui.views.main: файла ./ui/ui.js нет',
+      'manifest.json:1: ui.overlay: файла ./ui/lock.js нет',
+      'manifest.json:1: config.schema: файла ./config.schema.json нет',
+      'manifest.json:1: state.schema: файла ./schemas/state.json нет',
     ]);
   });
 
@@ -157,26 +157,26 @@ describe('checkPlugin: манифест и файлы из него', () => {
     fs.writeFileSync(outside, '{}');
     const dir = plugin(OK, { config: { version: 1, schema: './link.json' } });
     fs.symlinkSync(outside, path.join(dir, 'link.json'));
-    assert.deepEqual(strings(await checkPlugin(dir)), ['manifest.json: config.schema: ./link.json ведёт за пределы каталога плагина']);
+    assert.deepEqual(strings(await checkPlugin(dir)), ['manifest.json:1: config.schema: ./link.json ведёт за пределы каталога плагина']);
   });
 
   it('все ошибки манифеста сразу, а не первая', async () => {
     const dir = plugin(OK, { id: 'Bad Id', version: 'x', commands: 5, bogus: 1, ui: { views: { main: '../out.js' } } });
     const found = strings(await checkPlugin(dir));
     assert.ok(found.length >= 5, found.join('\n'));
-    for (const part of ['id:', 'version:', 'commands:', 'bogus: незнакомое поле', 'ui.views.main:']) assert.ok(found.some((l) => l.startsWith(`manifest.json: ${part}`)), `${part}\n${found.join('\n')}`);
+    for (const part of ['id:', 'version:', 'commands:', 'bogus: незнакомое поле', 'ui.views.main:']) assert.ok(found.some((l) => l.startsWith(`manifest.json:1: ${part}`)), `${part}\n${found.join('\n')}`);
   });
 
   it('engines.cyborg под другой API: одна причина о версии, остальные ошибки не отвлекают', async () => {
     const dir = plugin(OK, { engines: { cyborg: '^2' }, bogus: 1, version: 'x', brandNew: { form: 'of API 2' } });
-    assert.deepEqual(strings(await checkPlugin(dir)), ['manifest.json: engines.cyborg: нужен API Cyborg ^2, есть 1.0.0']);
+    assert.deepEqual(strings(await checkPlugin(dir)), ['manifest.json:1: engines.cyborg: нужен API Cyborg ^2, есть 1.0.0']);
     // То же на parseManifest: так отвечает и загрузчик.
     assert.deepEqual(parseManifest({ id: 'a', version: 'x', engines: { cyborg: '^2' }, bogus: 1 }, PLUGIN_API_VERSION), { ok: false, id: 'a', errors: ['engines.cyborg: нужен API Cyborg ^2, есть 1.0.0'] });
   });
 
   it('верный манифест под другой API отвергается тоже; версию API задаёт вызывающий', async () => {
     const dir = plugin(OK, { engines: { cyborg: '^2' } });
-    assert.deepEqual(strings(await checkPlugin(dir)), ['manifest.json: engines.cyborg: нужен API Cyborg ^2, есть 1.0.0']);
+    assert.deepEqual(strings(await checkPlugin(dir)), ['manifest.json:1: engines.cyborg: нужен API Cyborg ^2, есть 1.0.0']);
     assert.deepEqual(strings(await checkPlugin(dir, { apiVersion: '2.1.0' })), []);
   });
 
@@ -190,7 +190,7 @@ describe('checkPlugin: манифест и файлы из него', () => {
     assert.deepEqual(strings(await checkPlugin(plugin(OK, null))), ['manifest.json: файла нет']);
     const broken = plugin(OK, null);
     fs.writeFileSync(path.join(broken, 'manifest.json'), '{ "id": ');
-    assert.match(strings(await checkPlugin(broken))[0] ?? '', /^manifest\.json: не JSON - /);
+    assert.match(strings(await checkPlugin(broken))[0] ?? '', /^manifest\.json:1: не JSON - /);
     const missing = await checkPlugin(path.join(scratch, 'нет-такого'));
     assert.deepEqual(strings(missing), ['.: каталога нет']);
     assert.equal(missing.ok, false);
@@ -288,7 +288,7 @@ describe('checkPlugin: манифест и файлы из него', () => {
 
   it('при ошибках манифеста импорты всё равно проверены', async () => {
     const dir = plugin({ 'index.ts': "import fs from 'node:fs';\n" }, { bogus: 1 });
-    assert.deepEqual(strings(await checkPlugin(dir)), ['manifest.json: bogus: незнакомое поле манифеста', "index.ts:1: 'node:fs': только @cyborg-harness/contracts и свои модули"]);
+    assert.deepEqual(strings(await checkPlugin(dir)), ['manifest.json:1: bogus: незнакомое поле манифеста', "index.ts:1: 'node:fs': только @cyborg-harness/contracts и свои модули"]);
   });
 });
 
@@ -360,5 +360,132 @@ describe('checkPlugin: ignore (P-06) - каталог результата сб�
     const dir = plugin({ ...OK, 'dist/index.mjs': "import fs from 'node:fs';\n" });
     const report = await checkPlugin(dir, { ignore: ['../dist', '/dist'] });
     assert.equal(report.problems.length, 1, strings(report).join('\n'));
+  });
+});
+
+// ST-7002 критерий 3 (FR-CH-7005): ошибки манифеста идут строками «файл:строка: причина», строка - в исходном JSON.
+describe('ошибки манифеста с номером строки', () => {
+  /** Каталог плагина с манифестом, записанным как есть (с переводами строк, какие в тексте). */
+  const withManifest = (text: string, files: Record<string, string> = OK): string => {
+    const dir = plugin(files, null);
+    fs.writeFileSync(path.join(dir, 'manifest.json'), text);
+    return dir;
+  };
+  const lines = (...rows: string[]) => rows.join('\n');
+
+  it('ST-7002/3: манифест без id и со ссылкой на несуществующий модуль вида - каждая ошибка manifest.json:<строка>: <причина>', async () => {
+    const dir = plugin(OK, null);
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ version: '1.0.0', engines: { cyborg: '^1' }, ui: { views: { main: './ui/none.js' } } }, null, 2));
+    const found = strings(await checkPlugin(dir));
+    assert.ok(found.length > 0);
+    for (const line of found) assert.match(line, /^manifest\.json:\d+: /);
+    // Пропущенный обязательный ключ - строка начала объекта.
+    assert.match(found[0] ?? '', /^manifest\.json:1: id: ожидается имя вида/);
+  });
+
+  const MIXED = lines(
+    '{',
+    '  "id": "acme.hello",',
+    '  "version": "x",',
+    '  "engines": {},',
+    '  "bogus": 1,',
+    '  "commands": [',
+    '    "acme.hello.run",',
+    '    "other.run"',
+    '  ],',
+    '  "keybindings": [',
+    '    { "key": "Ctrl+K", "command": "acme.hello.run" },',
+    '    {',
+    '      "key": "Ctrl+L",',
+    '      "command": "acme.hello.nope"',
+    '    }',
+    '  ],',
+    '  "permissions": {',
+    '    "net": ["a.example"],',
+    '    "teleport": true',
+    '  },',
+    '  "ui": {',
+    '    "views": {',
+    '      "Main": "./ui/main.js",',
+    '      "side": {',
+    '        "module": "../out.js"',
+    '      }',
+    '    }',
+    '  }',
+    '}',
+    '',
+  );
+  const MIXED_EXPECTED = [
+    ['manifest.json:5: bogus: незнакомое поле манифеста'],
+    ['manifest.json:3: version: ожидается версия x.y.z'],
+    ['manifest.json:4: engines.cyborg: ожидается диапазон'],
+    ['manifest.json:8: commands: "other.run" должна лежать'],
+    ['manifest.json:12: keybindings.Ctrl+L: команда "acme.hello.nope" не объявлена'],
+    ['manifest.json:19: permissions.teleport: неизвестное право'],
+    ['manifest.json:23: ui.views.Main: имя вида'],
+    ['manifest.json:25: ui.views.side.module:'],
+  ].flat();
+
+  const expectPrefixes = (found: string[], expected: string[]) => {
+    assert.equal(found.length, expected.length, found.join('\n'));
+    expected.forEach((prefix, i) => assert.ok((found[i] ?? '').startsWith(prefix), `${prefix}\n--\n${found.join('\n')}`));
+  };
+
+  it('ключи верхнего уровня, вложенные ключи, элементы массивов и недостающий вложенный ключ - строка своего места', async () => {
+    expectPrefixes(strings(await checkPlugin(withManifest(MIXED))), MIXED_EXPECTED);
+  });
+
+  it('CRLF и одиночный CR считаются переводом строки один раз', async () => {
+    expectPrefixes(strings(await checkPlugin(withManifest(MIXED.replaceAll('\n', '\r\n')))), MIXED_EXPECTED);
+    expectPrefixes(strings(await checkPlugin(withManifest(MIXED.replaceAll('\n', '\r')))), MIXED_EXPECTED);
+  });
+
+  it('одинаковые ключи: берётся последний, как у JSON.parse', async () => {
+    const dir = withManifest(lines('{', '  "id": "acme.hello",', '  "version": "1.0.0",', '  "engines": { "cyborg": "^1" },', '  "bogus": 1,', '  "host": "own",', '  "bogus": 2', '}'));
+    assert.deepEqual(strings(await checkPlugin(dir)), ['manifest.json:7: bogus: незнакомое поле манифеста']);
+  });
+
+  it('несуществующий файл вида и схемы: строка ключа, у вида-объекта - ключа module; engines.cyborg под другой API - строка этого ключа', async () => {
+    const dir = withManifest(lines(
+      '{',
+      '  "id": "acme.hello",',
+      '  "version": "1.0.0",',
+      '  "engines": { "cyborg": "^1" },',
+      '  "config": {',
+      '    "version": 1,',
+      '    "schema": "./c.json"',
+      '  },',
+      '  "ui": {',
+      '    "views": {',
+      '      "main": "./ui/a.js",',
+      '      "side": {',
+      '        "module": "./ui/b.js"',
+      '      }',
+      '    }',
+      '  }',
+      '}',
+    ));
+    assert.deepEqual(strings(await checkPlugin(dir)), [
+      'manifest.json:11: ui.views.main: файла ./ui/a.js нет',
+      'manifest.json:13: ui.views.side: файла ./ui/b.js нет',
+      'manifest.json:7: config.schema: файла ./c.json нет',
+    ]);
+    const future = withManifest(lines('{', '  "id": "acme.hello",', '  "version": "1.0.0",', '  "engines": {', '    "cyborg": "^2"', '  }', '}'));
+    assert.deepEqual(strings(await checkPlugin(future)), ['manifest.json:5: engines.cyborg: нужен API Cyborg ^2, есть 1.0.0']);
+  });
+
+  it('неразбираемый JSON, пустой файл и не объект: строка места сбоя', async () => {
+    const at = async (text: string) => strings(await checkPlugin(withManifest(text)))[0] ?? '';
+    assert.match(await at(lines('{', '  "id": "a",', '  "version": }', '}')), /^manifest\.json:3: не JSON - /);
+    assert.match(await at('{ "id": '), /^manifest\.json:1: не JSON - /);
+    assert.match(await at(lines('{', '  "id": "a",', '', '')), /^manifest\.json:2: не JSON - /);
+    assert.match(await at(''), /^manifest\.json:1: не JSON - /);
+    assert.match(await at('\n\n  \n'), /^manifest\.json:1: не JSON - /);
+    assert.match(await at(lines('', '', '[1]')), /^manifest\.json:3: манифест не объект$/);
+    assert.match(await at(lines('{', '  "a": 1,', '}')), /^manifest\.json:3: не JSON - /);
+  });
+
+  it('файла нет: строки у ошибки нет, указывать в нём нечего', async () => {
+    assert.deepEqual(strings(await checkPlugin(plugin(OK, null))), ['manifest.json: файла нет']);
   });
 });

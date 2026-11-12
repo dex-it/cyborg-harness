@@ -39,6 +39,8 @@ export interface ResourceLimits {
   readonly logFloodMs: number;
   /** Интервал счётчика частого потока в трассе (вывод pty, события `fs.watch`), мс: за него пишется одна запись с числом сообщений и байт (FR-CH-4005). */
   readonly traceStreamMs: number;
+  /** Байт UTF-8 аргументов в одной записи трассы при запуске с `--trace-args` (K-33); остаток отрезается с пометкой `[обрезано: всего N Б]`. Без флага аргументов в записи нет. */
+  readonly traceArgsBytes: number;
 }
 
 export const LIMITS: ResourceLimits = {
@@ -65,6 +67,8 @@ export const LIMITS: ResourceLimits = {
   logFloodMs: 10_000,
   // Предложение нормы (SRS фичи 04, вопрос 10), владелец его не принял.
   traceStreamMs: 1000,
+  // Предложение задачи K-33 (#224), владелец число не называл: меняется здесь одной строкой.
+  traceArgsBytes: 4 * 1024,
 };
 
 export function limitsOf(...overrides: (Partial<ResourceLimits> | undefined)[]): ResourceLimits {

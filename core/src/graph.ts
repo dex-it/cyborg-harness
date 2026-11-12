@@ -51,8 +51,17 @@ export function resolveGraph(manifests: readonly PluginManifest[], apiVersion: s
   let bindings: Map<string, Map<string, string>>;
 
   for (;;) {
-    bindings = bindAll(alive(), reject);
-    if (alive().length !== bindings.size) continue;
+    // Поставщик контракта - только плагин, остающийся в графе. Проход смотрит на снимок живых и ничего не отвергает сам: отказы
+    // возвращает, а здесь решается, какие из них окончательные. Нехватка поставщика (missing) окончательна всегда: удаление
+    // плагинов её не лечит. Неоднозначность (ambiguous) лечится отказом одного из поставщиков, поэтому, пока есть нехватка,
+    // неоднозначность не фиксируется; а среди неоднозначностей откладывается та, чей спорный поставщик сам в отказе. Итог не зависит
+    // от порядка входа: каждый шаг - функция множества живых.
+    const { bindings: pass, failures } = bindAll(alive());
+    if (failures.size > 0) {
+      for (const [id, reasons] of settle(failures)) for (const reason of reasons) reject(id, reason);
+      continue;
+    }
+    bindings = pass;
     const cycles = findCycles(bindings);
     if (cycles.length === 0) break;
     for (const members of cycles) for (const id of members) reject(id, { kind: 'cycle', members });
@@ -84,27 +93,36 @@ function* trespasses(m: PluginManifest, prefixes: readonly string[]): Generator<
   }
 }
 
-/** Один проход: каждому живому - поставщики; отказавшие в этом проходе выпадают в следующем. */
-function bindAll(plugins: readonly PluginManifest[], reject: (id: string, r: Rejection) => void): Map<string, Map<string, string>> {
+/** Один проход по снимку живых: каждому - поставщики из этого снимка; кто не связался, попадает в `failures` с причинами, ничего не отвергается. */
+function bindAll(plugins: readonly PluginManifest[]): { bindings: Map<string, Map<string, string>>; failures: Map<string, Rejection[]> } {
   const bindings = new Map<string, Map<string, string>>();
+  const failures = new Map<string, Rejection[]>();
   for (const m of plugins) {
     const bound = new Map<string, string>();
-    let ok = true;
+    const reasons: Rejection[] = [];
     for (const [contract, range, required] of dependencies(m)) {
       const providers = plugins.filter((p) => p.id !== m.id && providesMatching(p, contract, range)).map((p) => p.id);
-      if (providers.length > 1) {
-        reject(m.id, { kind: 'ambiguous', contract, providers });
-        ok = false;
-      } else if (providers[0] !== undefined) {
-        bound.set(contract, providers[0]);
-      } else if (required) {
-        reject(m.id, { kind: 'missing', contract, range });
-        ok = false;
-      }
+      if (providers.length > 1) reasons.push({ kind: 'ambiguous', contract, providers });
+      else if (providers[0] !== undefined) bound.set(contract, providers[0]);
+      else if (required) reasons.push({ kind: 'missing', contract, range });
     }
-    if (ok) bindings.set(m.id, bound);
+    if (reasons.length === 0) bindings.set(m.id, bound);
+    else failures.set(m.id, reasons);
   }
-  return bindings;
+  return { bindings, failures };
+}
+
+/**
+ * Какие отказы прохода окончательны. Нехватка поставщика (`missing`) - все такие плагины, с одними этими причинами. Нет нехватки -
+ * неоднозначности, кроме тех, у кого спорный поставщик сам в отказе: после его ухода спор мог исчезнуть. Остались одни такие
+ * (замкнутый спор) - отказ всем, иначе проход не сдвинулся бы.
+ */
+function settle(failures: ReadonlyMap<string, readonly Rejection[]>): [string, readonly Rejection[]][] {
+  const all = [...failures];
+  const lacking = all.filter(([, reasons]) => reasons.some((r) => r.kind === 'missing'));
+  if (lacking.length > 0) return lacking.map(([id, reasons]) => [id, reasons.filter((r) => r.kind === 'missing')]);
+  const final = all.filter(([, reasons]) => !reasons.some((r) => r.kind === 'ambiguous' && r.providers.some((p) => failures.has(p))));
+  return final.length > 0 ? final : all;
 }
 
 function* dependencies(m: PluginManifest): Generator<[string, string, boolean]> {

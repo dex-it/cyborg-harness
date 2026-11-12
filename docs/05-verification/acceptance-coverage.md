@@ -9,7 +9,7 @@ origin: derived
 
 Собрана из историй, имён тестов и исключений [acceptance.md](acceptance.md) командой `npm run check:acceptance -- --write`; руками не правится.
 
-Итог: критериев 248; тестом 200, исключением 22, целевое поведение 26.
+Итог: критериев 248; тестом 202, исключением 20, целевое поведение 26.
 
 | Критерий | Чем проверяется |
 |---|---|
@@ -27,7 +27,7 @@ origin: derived
 | ST-1002/1 | `core/test/graph.test.ts`, `core/test/loader.test.ts` |
 | ST-1002/2 | `core/test/graph.test.ts` |
 | ST-1002/3 | `core/test/graph.test.ts`, `core/test/status.test.ts` |
-| ST-1002/4 | ручная: дефект [#228](https://github.com/dex-it/cyborg-harness/issues/228): цепочка из двух звеньев с отказом на конце роняет `resolveGraph`; каскад на одно звено - `core/test/graph.test.ts` |
+| ST-1002/4 | `core/test/graph.test.ts` |
 | ST-1002/5 | `core/test/events.test.ts`, `core/test/graph.test.ts` |
 | ST-1002/6 | `core/test/graph.test.ts`, `core/test/loader.test.ts` |
 | ST-1002/7 | `core/test/graph.test.ts`, `core/test/loader.test.ts` |
@@ -121,7 +121,7 @@ origin: derived
 | ST-2006/14 | `playground/test/agents.test.ts` |
 | ST-2007/1 | `core/test/purity.test.ts` |
 | ST-2007/2 | документ: гейты CI `.github/workflows/ci.yml`: `npm test` с `core/test/plugin-imports.test.ts`, `typecheck`, `lint`, `smoke` |
-| ST-3001/1 | `core/test/trust.test.ts` |
+| ST-3001/1 | ручная: дефект #?: прямой запрос хоста от плагина без прав к `pty.share`, `pty.attach`, `pty.write`, `pty.resize`, `pty.kill` даёт `NotFound`, к `pty.list` - пустой список, к `serve.close` - `ok`, а не `PermissionDenied` с записью `denied` (проверки права нет, операция идёт по таблице самого плагина, чужого он не касается); остальные члены `ctx.os` отказывают как надо - `core/test/trust.test.ts` |
 | ST-3001/2 | `core/test/os.test.ts`, `core/test/security-gateway.test.ts` |
 | ST-3001/3 | `core/test/os.test.ts` |
 | ST-3001/4 | `core/test/os.test.ts` |
@@ -221,7 +221,7 @@ origin: derived
 | ST-5003/3 | `core/test/journal.test.ts`, `core/test/status.test.ts` |
 | ST-5003/4 | `core/test/status.test.ts` |
 | ST-5003/5 | ручная: ревью по ADR-CH-0002, п. 4: срок жизни члена с `@deprecated` сверкой рода изменения не держится (FR-CH-5003, «Ещё нет»); пометку `@deprecated` держит снимок `core/test/api-snapshot/1.0.0.txt` |
-| ST-5003/6 | инструменты: `testing/test/kit.test.ts` |
+| ST-5003/6 | `testing/test/kit.test.ts` |
 | ST-5004/1 | `core/test/loader.test.ts` |
 | ST-5004/2 | `core/test/config.test.ts`, `core/test/loader.test.ts` |
 | ST-5004/3 | `core/test/config.test.ts`, `core/test/json-schema.test.ts`, `core/test/loader.test.ts`, `core/test/trust.test.ts` |
@@ -248,7 +248,7 @@ origin: derived
 | ST-7001/4 | целевое поведение |
 | ST-7002/1 | `contracts/test/package.test.ts`, `core/test/plugin-check.test.ts` |
 | ST-7002/2 | `core/test/plugin-check.test.ts` |
-| ST-7002/3 | ручная: дефект [#229](https://github.com/dex-it/cyborg-harness/issues/229): ошибки манифеста у `checkPlugin` без номера строки; остальные строки «файл:строка» - `core/test/plugin-check.test.ts` |
+| ST-7002/3 | `core/test/plugin-check.test.ts`, `tools/cyborg-plugin/test/cli.test.ts` |
 | ST-7002/4 | `core/test/plugin-check.test.ts` |
 | ST-7002/5 | целевое поведение |
 | ST-7002/6 | `core/test/plugin-imports.test.ts` |

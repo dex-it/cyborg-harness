@@ -46,6 +46,19 @@ describe('cyborg-plugin check', () => {
     assert.match(r.err.at(-1) ?? '', /Нарушений: 1/);
   });
 
+  it('ST-7002/3: ошибки манифеста: код 1, каждая строкой manifest.json:<строка>: причина', async () => {
+    const dir = plugin('export default {};\n');
+    const manifest = { version: '1.0.0', engines: { cyborg: '^1' }, bogus: true, ui: { views: { main: './ui/none.js' } } };
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+    const r = await cli('check', dir);
+    assert.equal(r.code, 1);
+    assert.match(r.err[0] ?? '', /^manifest\.json:6: bogus: незнакомое поле манифеста$/);
+    assert.match(r.err[1] ?? '', /^manifest\.json:1: id: ожидается имя вида/);
+    assert.match(r.err.at(-1) ?? '', /Нарушений: 2/);
+    fs.writeFileSync(path.join(dir, 'manifest.json'), '{\n  "id": "acme.hello",\n  "version": ,\n}\n');
+    assert.match((await cli('check', dir)).err[0] ?? '', /^manifest\.json:3: не JSON - /);
+  });
+
   it('без каталога проверяется текущий', async () => {
     const dir = plugin('export default {};\n');
     const before = process.cwd();

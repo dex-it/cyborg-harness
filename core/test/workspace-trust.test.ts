@@ -25,7 +25,7 @@ async function sandbox() {
 }
 
 /** Плагин `web` с правом `net: ["config:baseUrl"]` и слоями config в памяти; хосты, до которых дошёл запрос, собираются в `calls`. */
-async function web(layers: { user?: Record<string, unknown>; workspace?: Record<string, unknown> }, root: string) {
+async function web(layers: { user?: Record<string, unknown>; workspace?: Record<string, unknown> }, root: string, field = 'baseUrl') {
   const docs = new Map<string, Record<string, unknown>>();
   for (const [layer, baseUrl] of Object.entries(layers)) docs.set(layer, { web: { $version: 1, ...baseUrl } });
   const store = await SectionStore.open({ load: async (l) => structuredClone(docs.get(l)), save: async (l, d) => void docs.set(l, structuredClone(d)) }, ['user', 'workspace']);
@@ -39,7 +39,7 @@ async function web(layers: { user?: Record<string, unknown>; workspace?: Record<
     apiVersion: PLUGIN_API_VERSION,
     spawnHost: inlineHosts(async () => ({ activate: (c: PluginContext) => void (ctx = c) })),
     enabled: ['web'],
-    manifests: [manifest('web', { permissions: { net: ['config:baseUrl'] }, config: { version: 1 } })],
+    manifests: [manifest('web', { permissions: { net: [`config:${field}`] }, config: { version: 1 } })],
     os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), fetch },
     config: store,
   });
@@ -70,6 +70,41 @@ test('ST-3001/9, ST-3008/2: config:<поле> из слоя воркспейса
   assert.deepEqual(fromUser.calls, ['jira.corp.local']);
   assert.deepEqual(fromUser.denials(), []);
   await fromUser.k.unload();
+});
+
+// PL-10 (#226): хабов трекера у человека бывает несколько (свои GitLab и Jira), и одной строкой они не выражаются.
+test('config:<поле> со списком: из слоя пользователя пускает каждый названный хост, из слоя воркспейса - ни одного, чужой хост вне списка - отказ', async () => {
+  await using box = await sandbox();
+  const HUBS = ['https://gitlab.corp.local', 'https://jira.corp.local:8443', 'git.corp.local:9000'];
+
+  const fromWorkspace = await web({ workspace: { hubs: HUBS } }, box.root, 'hubs');
+  for (const hub of HUBS) await assert.rejects(fromWorkspace.plugin().os.net!.fetch(`${hub.includes('//') ? hub : `https://${hub}`}/x`), { code: 'PermissionDenied' }, hub);
+  assert.deepEqual(fromWorkspace.calls, [], 'ни один запрос на хост из файла воркспейса не ушёл');
+  assert.match(fromWorkspace.denials()[0]?.detail ?? '', /config:hubs задан в файле воркспейса/);
+  await fromWorkspace.k.unload();
+
+  const fromUser = await web({ user: { hubs: [...HUBS, 42, null, { host: 'evil.example' }] } }, box.root, 'hubs');
+  const os = fromUser.plugin().os;
+  for (const url of ['https://gitlab.corp.local/a', 'https://jira.corp.local:8443/b', 'https://git.corp.local:9000/c']) await os.net!.fetch(url);
+  assert.deepEqual(fromUser.calls, ['gitlab.corp.local', 'jira.corp.local:8443', 'git.corp.local:9000']);
+  for (const url of [EVIL, 'https://jira.corp.local/', 'https://gitlab.corp.local:8443/', 'https://42/', 'https://null/']) await assert.rejects(os.net!.fetch(url), { code: 'PermissionDenied' }, url);
+  assert.equal(fromUser.calls.length, 3, 'хост вне списка запроса не получил');
+  await fromUser.k.unload();
+});
+
+test('config:<поле> со списком: воркспейс перекрывает список для плагина, но не для права net; правка списка человеком извне расширяет, правка воркспейса - нет', async () => {
+  await using box = await sandbox();
+  const w = await web({ user: { hubs: [JIRA] }, workspace: { hubs: [JIRA, EVIL] } }, box.root, 'hubs');
+  assert.deepEqual(w.plugin().config?.get().hubs, [JIRA, EVIL], 'плагин видит слитое значение');
+  await assert.rejects(w.plugin().os.net!.fetch(`${EVIL}/`), { code: 'PermissionDenied' });
+  await w.plugin().os.net!.fetch(`${JIRA}/`);
+  w.docs.set('user', { web: { $version: 1, hubs: [JIRA, EVIL] } });
+  await w.store.reload();
+  await w.k.reloadSections('config', ['web']);
+  await w.plugin().os.net!.fetch(`${EVIL}/`);
+  assert.deepEqual(w.calls, ['jira.corp.local', 'evil.example']);
+  await assert.rejects(w.plugin().config!.set('user', { hubs: [JIRA, EVIL, 'https://other.example'] }), { code: 'PermissionDenied' }, 'плагин сам список не расширяет');
+  await w.k.unload();
 });
 
 test('config:<поле>: воркспейс перекрывает значение для плагина, но не для права net', async () => {

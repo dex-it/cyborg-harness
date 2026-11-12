@@ -49,6 +49,9 @@ const DELIVERY_ENTRY = 'index.mjs';
 /** Флаг запуска, включающий каталог плагинов пользователя (политика этапа 1, SAD 6.1). */
 export const USER_PLUGINS_FLAG = '--user-plugins';
 
+/** Флаг запуска, включающий аргументы операций в записях трассы (K-33, решение владельца 2026-11-11). Только командная строка: файлы настроек и воркспейса его не читают. */
+export const TRACE_ARGS_FLAG = '--trace-args';
+
 function countDirs(dir: string): number {
   try {
     return fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).length;
@@ -171,6 +174,12 @@ export interface StartOptions {
    * Включает только человек за машиной, флагом запуска: файл воркспейса может лежать в репозитории и включить это от чужого имени.
    */
   readonly userPlugins?: boolean;
+  /**
+   * Писать аргументы операций в записи трассы (`LoadOptions.traceArgs`, K-33): в файле диагностики и выгрузке окажутся пути и данные человека, выгрузка предупреждает.
+   * Включает только человек за машиной, флагом `--trace-args`: файл воркспейса может лежать в репозитории команды и включил бы запись данных от чужого имени, поэтому из файлов поле не берётся.
+   * Нужен приёмник трассы (`diagnostics` или `onTrace`), без него поле ничего не делает.
+   */
+  readonly traceArgs?: boolean;
   readonly spawnHost: SpawnHost;
   readonly log: (line: string) => void;
   readonly watchdog?: WatchdogOptions;
@@ -217,6 +226,9 @@ export interface StartOptions {
   /** Соседние окна того же `userData` (`workspaceNeighbors`): `Kernel.uninstall` не стирает общие данные из-под плагина, который может работать у соседа (#154). */
   readonly neighbors?: LoadOptions['neighbors'];
 }
+
+/** Аргументы в трассе действуют, если их просили флагом и есть кому записи читать (то же условие у ядра). */
+const tracesArgs = (options: Pick<StartOptions, 'traceArgs' | 'diagnostics' | 'onTrace'>): boolean => options.traceArgs === true && (options.diagnostics !== undefined || options.onTrace !== undefined);
 
 export async function startPlugins(options: StartOptions): Promise<Kernel & { readonly workspace: string }> {
   const report = (p: string) => {
@@ -273,6 +285,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     idleSeconds: options.idleSeconds,
     windowTitle: { workspace: path.basename(file), app: options.appName ?? 'Cyborg' },
     safeMode: options.safeMode,
+    traceArgs: tracesArgs(options),
     neighbors: options.neighbors,
     onWindow: (snapshot) => options.onWindow?.(snapshot),
     onDocuments: () => options.onDocuments?.(),
@@ -376,6 +389,7 @@ export class PluginsService implements ViewGroups {
   private title: string | undefined;
   private safeMode = false;
   private userPlugins = false;
+  private traceArgs = false;
   private diagnostics: Diagnostics | undefined;
   private versions: StartOptions['versions'];
   /** id плагинов не из каталога поставки: происхождение определяет каталог установки, а не манифест. */
@@ -457,6 +471,7 @@ export class PluginsService implements ViewGroups {
     this.pidOf = options.pidOf;
     this.safeMode = options.safeMode === true;
     this.userPlugins = options.userPlugins === true;
+    this.traceArgs = tracesArgs(options);
     this.diagnostics = options.diagnostics;
     this.versions = options.versions;
     try {
@@ -765,7 +780,7 @@ export class PluginsService implements ViewGroups {
     }));
     const journal: PluginJournalLine[] = this.entries.map(({ at, entry }) => ({
       at,
-      subject: entry.pluginId ?? (entry.kind === 'key-ignored' ? 'сочетания' : `хост ${entry.hostId}`),
+      subject: entry.pluginId ?? (entry.kind === 'key-ignored' ? 'сочетания' : entry.kind === 'trace-args' ? 'трасса' : `хост ${entry.hostId}`),
       // Задетые потребители тоже: в журнале плагина видно, что его поставщик пропадал.
       plugins: [...new Set([...entryPlugins(entry), ...('affects' in entry ? entry.affects : [])])],
       text: describeEntry(entry),
@@ -775,6 +790,7 @@ export class PluginsService implements ViewGroups {
       phase: this.phase,
       safeMode: this.safeMode,
       userPlugins: this.userPlugins,
+      traceArgs: this.traceArgs,
       ...(this.error !== undefined && { error: this.error }),
       problems: [...this.problems],
       plugins,

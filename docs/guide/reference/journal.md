@@ -44,6 +44,7 @@ description: "Записи журнала плагинов: когда ядро 
 | `host-restart` | инфо | Хост перезапускается | `hostId`, `plugins` |
 | `host-abandoned` | ошибка | Хост падает без виновника несколько раз подряд и больше не перезапускается; pty-хост поднимет снова следующий `spawn` | `hostId`, `failures`, `plugins` |
 | `key-ignored` | предупреждение | Привязка `plugins.keybindings` не применена | `key`, `command`, `reason` |
+| `trace-args` | предупреждение | Приложение запущено с `--trace-args`: записи трассы несут аргументы операций, в файле диагностики и выгрузке будут пути и данные человека; пишется один раз при запуске | `limit` - предел длины аргументов в записи, байт |
 
 ## Причины отказа графа (rejected)
 
@@ -76,7 +77,7 @@ description: "Записи журнала плагинов: когда ядро 
 
 ## Состояние плагина по журналу
 
-Состояние вычисляется по последней записи жизненного цикла. Записи `key-conflict`, `key-ignored`, `denied`, `deprecated-call`, `unhandled-rejection`, `pty-expired`, `host-isolated`, `group-isolated`, `host-own-grouped`, `third-party` и `log-summary` о работе плагина ничего не говорят и состояние не меняют: они приходят и после снятия плагина, но запись снятия не перекрывают. По той же последней записи жизненного цикла зависимого `enable` поставщика решает, поднимать ли его: поднимается зависимый, снятый вместе с этим поставщиком (`unloaded` с `by` поставщика), или пропущенный (`skipped`).
+Состояние вычисляется по последней записи жизненного цикла. Записи `key-conflict`, `key-ignored`, `trace-args`, `denied`, `deprecated-call`, `unhandled-rejection`, `pty-expired`, `host-isolated`, `group-isolated`, `host-own-grouped`, `third-party` и `log-summary` о работе плагина ничего не говорят и состояние не меняют: они приходят и после снятия плагина, но запись снятия не перекрывают. По той же последней записи жизненного цикла зависимого `enable` поставщика решает, поднимать ли его: поднимается зависимый, снятый вместе с этим поставщиком (`unloaded` с `by` поставщика), или пропущенный (`skipped`).
 
 | Запись | Состояние | «Включить снова» |
 |---|---|---|
@@ -91,7 +92,7 @@ description: "Записи журнала плагинов: когда ядро 
 ## Уровни
 
 - **инфо:** `activated`, `waiting`, `disabled`, `revived`, `host-restart`; `unloaded`, `deactivated` и `uninstalled` без ошибки.
-- **предупреждение:** `denied`, `key-conflict`, `key-ignored`, `safe-mode`, `skipped`, `unhandled-rejection`, `pty-expired`, `host-down`, `host-isolated`, `group-isolated`, `host-own-grouped`, `third-party`, `log-summary`; `unloaded` и `deactivated` с ошибкой.
+- **предупреждение:** `denied`, `key-conflict`, `key-ignored`, `trace-args`, `safe-mode`, `skipped`, `unhandled-rejection`, `pty-expired`, `host-down`, `host-isolated`, `group-isolated`, `host-own-grouped`, `third-party`, `log-summary`; `unloaded` и `deactivated` с ошибкой.
 - **ошибка:** все остальные, а также `config` и `state`, если статус не `ok`, и `uninstalled` с `error`.
 
 ## Дальше

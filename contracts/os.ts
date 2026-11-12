@@ -1,7 +1,7 @@
 import type { Disposable } from './plugin.ts';
 
-/** Программа или программа с первыми аргументами; `env` - имена переменных, которые плагин может ей передать: точное имя или маска `ПРЕФИКС_*` для номерных: хвост после префикса - только десятичные цифры (`GIT_CONFIG_KEY_*` покрывает `GIT_CONFIG_KEY_0`, `GIT_CONFIG_KEY_12`, но не `GIT_CONFIG_KEY_X`; `GIT_*` не покрывает `GIT_SSH_COMMAND`). */
-export type ProgramRule = string | { readonly program: string; readonly args: readonly string[]; readonly env?: readonly string[] };
+/** Программа или программа с первыми аргументами; `env` - имена переменных, которые плагин может ей передать: точное имя или маска `ПРЕФИКС_*` для номерных: хвост после префикса - только десятичные цифры (`GIT_CONFIG_KEY_*` покрывает `GIT_CONFIG_KEY_0`, `GIT_CONFIG_KEY_12`, но не `GIT_CONFIG_KEY_X`; `GIT_*` не покрывает `GIT_SSH_COMMAND`). `deny` - флаги, запрещённые в хвосте argv после закреплённых `args`: запуск отклоняется, если элемент хвоста равен флагу или начинается с `флаг=` (`--output` ловит `--output` и `--output=путь`). Поле только у `process` и `pty`; список ведёт автор плагина, ядро своего не имеет. Склеенные короткие флаги (`-xD`) запрет не ловит: автор называет и их. Запрет смягчает правило, а не отменяет «полный доступ через программу». */
+export type ProgramRule = string | { readonly program: string; readonly args: readonly string[]; readonly env?: readonly string[]; readonly deny?: readonly string[] };
 
 /** Права главной части плагина: что ядро пропустит через `ctx.os` (SAD §3.7). Нет права - нет члена в `ctx.os`. */
 export interface PluginPermissions {
@@ -11,13 +11,13 @@ export interface PluginPermissions {
   readonly 'fs.write'?: readonly string[];
   /** Открыть в системе: области путей, как у `fs.read`, `any` - любой существующий документ или каталог, и схемы URL с двоеточием (`https:`, `mailto:`). */
   readonly shell?: readonly string[];
-  /** Программы, которые плагин запускает через `ctx.os.process`: имя или правило `{ program, args, env? }` с закреплёнными первыми аргументами. Даёт программе все права пользователя ОС. */
+  /** Программы, которые плагин запускает через `ctx.os.process`: имя или правило `{ program, args, env?, deny? }` с закреплёнными первыми аргументами и запретом флагов в хвосте argv (`deny`). Даёт программе все права пользователя ОС. */
   readonly process?: readonly ProgramRule[];
-  /** Программы в псевдотерминале; правило той же формы, что у `process`. */
+  /** Программы в псевдотерминале; правило той же формы, что у `process`, в том числе `deny`. */
   readonly pty?: readonly ProgramRule[];
   /** Запуски, которые поставщик описывает потребителю (`cyborg.agent`); члена в `ctx.os` не даёт, pty потребителя с `describedBy` сверяется и с ними. */
   readonly launch?: readonly ProgramRule[];
-  /** Хосты HTTP; `config:<поле>` - хост из своего раздела config. */
+  /** Хосты HTTP; `config:<поле>` - хост или список хостов из своего раздела config (значение поля - строка или список строк: адрес `https://gitlab.corp:8443` либо `хост:порт`), заданный человеком в слое пользователя. Такой хост ядро считает названным человеком: loopback и частный адрес из DNS ему разрешены, записи с фиксированным именем в манифесте - нет. Link-local (`169.254.0.0/16`, `fe80::/10`) и адреса метаданных облака закрыты любому хосту, и названному тоже. */
   readonly net?: readonly string[];
   /** Имена переменных окружения, которые плагин читает через `ctx.os.env`. */
   readonly env?: readonly string[];
@@ -318,7 +318,7 @@ export interface PluginOs {
   };
   /** Сеть; есть при праве `net`. */
   readonly net?: {
-    /** HTTP-запрос к хосту из права `net` (`config:<поле>` - хост из своего раздела `config`). Метод по умолчанию `GET`; срок и предел тела - в `HttpRequest`. */
+    /** HTTP-запрос к хосту из права `net` (`config:<поле>` - хост или список хостов из своего раздела `config`). Метод по умолчанию `GET`; срок и предел тела - в `HttpRequest`. */
     fetch(url: string, request?: HttpRequest): Promise<HttpResponse>;
   };
   /** Переменные окружения; есть при праве `env`. */

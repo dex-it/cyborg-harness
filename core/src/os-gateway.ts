@@ -13,9 +13,9 @@ import { limitsOf, type ResourceLimits } from './limits.ts';
 import { isValidId } from './manifest-fields.ts';
 import { namedPaths } from './named-paths.ts';
 import type { PluginManifest } from './manifest.ts';
-import { closePools, guardedLookup, isLocalAddress, transport } from './net-transport.ts';
+import { closePools, guardedLookup, isForbiddenAddress, isLocalAddress, transport } from './net-transport.ts';
 import type { NotifyLimits, ShowNotice } from './notices.ts';
-import { ANY_PATH, envNameAllowed, LOGIN_SHELL } from './permissions.ts';
+import { ANY_PATH, deniedFlag, envNameAllowed, LOGIN_SHELL } from './permissions.ts';
 import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type KeptPty, type PtyExpiry, type PtyHostEvents, type TerminalChannel, type TerminalView } from './pty.ts';
 import { inlinePtyHost, type PtyWatchdog, type SpawnPtyHost } from './pty-link.ts';
 import { HttpServes, type AskHost } from './serve.ts';
@@ -384,26 +384,39 @@ export interface ConfigView {
   readonly untrusted: Readonly<Record<string, unknown>>;
 }
 
-/** Хост записи `net`: имя как есть либо значение поля `config:<поле>` из `config`; нет значения - пусто. */
+/** Хост из значения поля config: адрес (`https://gitlab.corp:8443/api`) или хост с портом без схемы (`gitlab.corp:8443`, `new URL` читает его как схему `gitlab.corp:`). */
+function hostOf(value: string): string {
+  try {
+    const host = new URL(value).host.toLowerCase();
+    if (host !== '') return host;
+  } catch {
+    // не адрес: ниже берётся как хост
+  }
+  return value.toLowerCase();
+}
+
+/**
+ * Хосты записи `net`: имя как есть либо значение поля `config:<поле>` из `config`. Значение - строка либо список строк (хабов трекера у человека бывает несколько,
+ * PL-10); не строки из списка пропускаются, нет значения - пусто.
+ */
 function configHost(entry: string, config: Readonly<Record<string, unknown>>): string[] {
   if (!entry.startsWith('config:')) return [entry.toLowerCase()];
   const v = config[entry.slice('config:'.length)];
-  if (typeof v !== 'string') return [];
-  try {
-    return [new URL(v).host.toLowerCase()];
-  } catch {
-    return [v.toLowerCase()];
-  }
+  return (Array.isArray(v) ? v : [v]).filter((x): x is string => typeof x === 'string').map(hostOf);
 }
 
 /** Причина отказа правила `process`, `pty` или `launch`; undefined - запуск подходит. */
 function ruleRefusal(m: PluginManifest, key: 'process' | 'pty' | 'launch', program: string, argv: readonly string[], envNames: readonly string[]): string | undefined {
-  const rule = (m.permissions[key] ?? []).find((r) => {
-    if (typeof r === 'string') return r === program;
-    return r.program === program && r.args.every((a, i) => argv[i] === a);
-  });
-  // Аргументы в журнал не идут: в них бывают токены (`--header 'Authorization: …'`).
-  if (rule === undefined) return (m.permissions[key] ?? []).some((r) => (typeof r === 'string' ? r : r.program) === program) ? `аргументы не по правилу ${key}: ${program}` : `программа не в ${key}: ${program}`;
+  const rules = m.permissions[key] ?? [];
+  // Правило подходит, если закреплённые аргументы совпали, а в хвосте нет флага из его `deny`; из подходящих по префиксу берётся первое без запретного флага.
+  const byPrefix = rules.filter((r) => (typeof r === 'string' ? r === program : r.program === program && r.args.every((a, i) => argv[i] === a)));
+  const rule = byPrefix.find((r) => typeof r === 'string' || deniedFlag(r, argv) === undefined);
+  if (rule === undefined) {
+    // Аргументы в журнал не идут: в них бывают токены (`--header 'Authorization: …'`); от запретного флага в журнал попадает только его имя из `deny`, без значения.
+    const flag = byPrefix.map((r) => (typeof r === 'string' ? undefined : deniedFlag(r, argv))).find((f) => f !== undefined);
+    if (flag !== undefined) return `запрещён флаг ${flag} в правиле ${key}: ${program}`;
+    return rules.some((r) => (typeof r === 'string' ? r : r.program) === program) ? `аргументы не по правилу ${key}: ${program}` : `программа не в ${key}: ${program}`;
+  }
   // Окружение - тоже ввод программы (GIT_CONFIG_*, NODE_OPTIONS, LD_PRELOAD): только имена из правила, маска `ПРЕФИКС_*` - для номерных `GIT_CONFIG_KEY_<n>`.
   const allowedEnv = typeof rule === 'string' ? [] : (rule.env ?? []);
   const foreign = envNames.filter((k) => !allowedEnv.some((a) => envNameAllowed(a, k)));
@@ -1315,6 +1328,15 @@ export class OsGateway {
     // Локальный адрес открыт там, где его назвали: IP-адрес и localhost в праве, хост из настройки человека.
     const bare = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
     const local = right.named || net.isIP(bare) !== 0 || bare === 'localhost' || bare.endsWith('.localhost');
+    // Link-local и метаданные облака закрыты и названному хосту; проверка одна на всех путях: адрес-литерал здесь (DNS ему не нужен), имя - в соединении.
+    const refuse = (address: string): Error | undefined => {
+      if (isForbiddenAddress(address)) return this.#denied(m, method, `адрес ${address} локальный (link-local или метаданные облака закрыты даже названному хосту): ${url.host}`);
+      return !local && isLocalAddress(address) ? this.#denied(m, method, `адрес ${address} локальный: ${url.host}`) : undefined;
+    };
+    if (net.isIP(bare) !== 0) {
+      const refusal = refuse(bare);
+      if (refusal) throw refusal;
+    }
     const request = isRecord(args[1]) ? args[1] : {};
     const headers = isRecord(request.headers) ? Object.fromEntries(Object.entries(request.headers).filter((e): e is [string, string] => typeof e[1] === 'string')) : {};
     const timeout = typeof request.timeoutMs === 'number' && request.timeoutMs > 0 ? request.timeoutMs : FETCH_TIMEOUT_MS;
@@ -1335,7 +1357,7 @@ export class OsGateway {
             local,
             owner: m.id,
             // Проверка на том же резолве, по которому идёт соединение: отдельный `dns.lookup` до запроса мог бы получить другой ответ.
-            lookup: local ? real : guardedLookup(real, (address) => (isLocalAddress(address) ? this.#denied(m, method, `адрес ${address} локальный: ${url.host}`) : undefined)),
+            lookup: guardedLookup(real, refuse),
             ...body,
           });
       return { status: response.status, headers: Object.fromEntries(response.headers), body: await readBody(response, MAX_BODY) };

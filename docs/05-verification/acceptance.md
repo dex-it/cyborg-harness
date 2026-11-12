@@ -40,21 +40,19 @@ describe('ST-2001/1: заявка контракта', () => { ... });
 
 | Критерий | Причина | Где проверяется |
 |---|---|---|
-| ST-1002/4 | ручная | дефект [#228](https://github.com/dex-it/cyborg-harness/issues/228): цепочка из двух звеньев с отказом на конце роняет `resolveGraph`; каскад на одно звено - `core/test/graph.test.ts` |
 | ST-1006/5 | замер | `npm run spike:gateway`, [spike-gateway.md](spike-gateway.md); бюджеты - `npm run check:budgets` (`playground/budgets.json`) |
 | ST-1007/7 | ручная | вопрос о живых pty при закрытии и смене воркспейса (`electron/src/restarts.ts`): smoke глушит диалог, [macos-check.md](macos-check.md) |
 | ST-1009/2 | документ | осмотр по SAD, раздел 2; перенос формата - `core/test/workspace.test.ts` |
 | ST-2003/4 | окно | `playground/scripts/smoke.mjs`, шаг перезапуска хоста: вид под плашкой без ввода |
 | ST-2005/1 | окно | `playground/scripts/smoke.mjs`, шаг «элементы ядра» |
 | ST-2007/2 | документ | гейты CI `.github/workflows/ci.yml`: `npm test` с `core/test/plugin-imports.test.ts`, `typecheck`, `lint`, `smoke` |
+| ST-3001/1 | ручная | дефект #?: прямой запрос хоста от плагина без прав к `pty.share`, `pty.attach`, `pty.write`, `pty.resize`, `pty.kill` даёт `NotFound`, к `pty.list` - пустой список, к `serve.close` - `ok`, а не `PermissionDenied` с записью `denied` (проверки права нет, операция идёт по таблице самого плагина, чужого он не касается); остальные члены `ctx.os` отказывают как надо - `core/test/trust.test.ts` |
 | ST-4001/10 | замер | `npm run spike:gateway` и `-- --trace=off`, [spike-gateway.md](spike-gateway.md) |
 | ST-5002/7 | документ | `contracts/CHANGELOG.md`; формат - `scripts/test/release.test.ts` |
 | ST-5003/5 | ручная | ревью по ADR-CH-0002, п. 4: срок жизни члена с `@deprecated` сверкой рода изменения не держится (FR-CH-5003, «Ещё нет»); пометку `@deprecated` держит снимок `core/test/api-snapshot/1.0.0.txt` |
-| ST-5003/6 | инструменты | `testing/test/kit.test.ts` |
 | ST-6002/4 | окно | `npm run smoke` в CI на macOS и Linux, [macos-check.md](macos-check.md) |
 | ST-7001/1 | инструменты | `core/test/plugin-template.test.ts`, `tools/cyborg-plugin/test/template.test.ts` |
 | ST-7001/2, ST-7001/3 | инструменты | `tools/cyborg-plugin/test/build.test.ts` |
-| ST-7002/3 | ручная | дефект [#229](https://github.com/dex-it/cyborg-harness/issues/229): ошибки манифеста у `checkPlugin` без номера строки; остальные строки «файл:строка» - `core/test/plugin-check.test.ts` |
 | ST-7003/1 | инструменты | `testing/test/kit.test.ts` |
 | ST-7003/2, ST-7003/3 | инструменты | `testing/test/agent-suite.test.ts` |
 | ST-7003/4 | документ | [руководство «Тесты плагина»](../guide/authors/testing.md) |

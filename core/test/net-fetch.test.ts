@@ -9,7 +9,7 @@ import type { AddressInfo } from 'node:net';
 import type { PluginContext } from '@cyborg-harness/contracts';
 import { load as loadKernel, type Kernel, type LoadOptions } from '../src/loader.ts';
 import { trackKernels } from './kernels.ts';
-import { guardedLookup, isLocalAddress, type Lookup } from '../src/net-transport.ts';
+import { guardedLookup, isForbiddenAddress, isLocalAddress, type Lookup } from '../src/net-transport.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { waitFor } from './wait-for.ts';
@@ -67,6 +67,7 @@ async function fixture(permissions: Record<string, unknown>, lookup: Lookup, con
         return;
       }
       if (request.url === '/redirect') response.writeHead(302, { location: 'http://elsewhere.example/' }).end();
+      else if (request.url === '/redirect-meta') response.writeHead(302, { location: 'http://169.254.169.254/latest/meta-data/' }).end();
       else if (request.url === '/empty') response.writeHead(204).end();
       else if (request.url === '/weird') response.writeHead(999).end();
       else if (request.url === '/gzip') response.writeHead(200, { 'content-encoding': 'gzip' }).end(gzipSync('hello'));
@@ -129,6 +130,82 @@ test('net.fetch: право, названное локальным адресо�
   assert.deepEqual([...new Set(f.hits)].sort(), [`127.0.0.1:${String(f.port)}`, `localhost:${String(f.port)}`, `svc.corp.local:${String(f.port)}`].sort());
   assert.ok(calls.includes('localhost'));
   assert.deepEqual(f.denied(), []);
+});
+
+test('net.fetch: частный адрес корпоративного хоста открывает только его название человеком в config; то же имя в праве манифеста и пустое поле - отказ (PL-10, У-35)', async () => {
+  // Сервер теста слушает 127.0.0.1: имена корпоративных хостов ведут на локальный адрес подменой резолва, а пропуск или отказ виден по тому, дошёл ли запрос.
+  const { lookup } = answer({ 'gitlab.corp.example': ['127.0.0.1'], 'hub2.corp.example': ['127.0.0.1'] });
+  await using named = await fixture({ net: ['config:hubs'] }, lookup, { hubs: ['gitlab.corp.example:$PORT', 'http://hub2.corp.example:$PORT/api'] });
+  for (const host of ['gitlab.corp.example', 'hub2.corp.example']) assert.equal((await named.net.fetch(`http://${host}:${String(named.port)}/x`)).status, 200, host);
+  assert.equal(named.hits.length, 2);
+  assert.deepEqual(named.denied(), []);
+
+  // Тот же хост, записанный в манифесте именем: адрес из DNS локальный, автор плагина частную сеть не открывает.
+  await using fixed = await fixture({ net: ['gitlab.corp.example:$PORT'] }, lookup);
+  await assert.rejects(fixed.net.fetch(`http://gitlab.corp.example:${String(fixed.port)}/x`), { code: 'PermissionDenied' });
+  assert.match(fixed.denied()[0] ?? '', /адрес 127\.0\.0\.1 локальный/);
+  assert.equal(fixed.hits.length, 0);
+
+  // Поле config есть, но человек в нём ничего не назвал: частной сети плагин не получил.
+  await using empty = await fixture({ net: ['config:hubs'] }, lookup, { hubs: [] });
+  await assert.rejects(empty.net.fetch(`http://gitlab.corp.example:${String(empty.port)}/x`), { code: 'PermissionDenied' });
+  assert.equal(empty.hits.length, 0);
+});
+
+// Адреса, закрытые всем, в том числе хосту, названному человеком: link-local и известные адреса метаданных облака (PL-10, У-35).
+const FORBIDDEN = ['169.254.169.254', '169.254.170.2', '169.254.0.1', '168.63.129.16', '100.100.100.200', '192.0.0.192'];
+const FORBIDDEN_V6 = ['fe80::1', 'fe80::a9fe:a9fe', 'febf::1', 'fe80::1%en0', 'fd00:ec2::254', '::ffff:169.254.169.254', '::ffff:a9fe:a9fe', '::169.254.169.254', '64:ff9b::a9fe:a9fe', '2002:a9fe:a9fe::', '::ffff:168.63.129.16'];
+/** Названы человеком или всем плагинам открыты как раньше: loopback, частные сети, ULA. */
+const NAMED_OK = ['127.0.0.1', '10.1.2.3', '172.16.0.9', '192.168.1.1', '100.64.0.1', '169.253.0.1', '169.255.0.1', '::1', 'fc00::1', 'fd12:3456::1', '::ffff:127.0.0.1', '::ffff:10.0.0.1', 'fec0::1', '2606:4700:4700::1111'];
+
+test('isForbiddenAddress: link-local и метаданные облака, в том числе внутри IPv6 - да; loopback, частные, ULA и публичные - нет', () => {
+  for (const a of [...FORBIDDEN, ...FORBIDDEN_V6]) assert.equal(isForbiddenAddress(a), true, a);
+  for (const a of NAMED_OK) assert.equal(isForbiddenAddress(a), false, a);
+  assert.equal(isForbiddenAddress('не адрес'), true, 'непонятное отвергается');
+});
+
+test('net.fetch: хост, названный человеком в config, не получает link-local и адреса метаданных облака, даже если пускает на loopback и частные сети (PL-10, У-35)', async () => {
+  const bad = [...FORBIDDEN, ...FORBIDDEN_V6].filter((a) => !a.includes('%'));
+  const names = Object.fromEntries(bad.map((a, i) => [`meta${String(i)}.corp.example`, [a]]));
+  const { lookup, calls } = answer({ ...names, 'ok.corp.example': ['127.0.0.1'], 'mixed.corp.example': ['127.0.0.1', '169.254.169.254'] });
+  await using f = await fixture({ net: ['config:hubs'] }, lookup, { hubs: [...Object.keys(names), 'ok.corp.example', 'mixed.corp.example'].map((h) => `${h}:$PORT`) });
+  assert.equal((await f.net.fetch(`http://ok.corp.example:${String(f.port)}/x`)).status, 200, 'названный хост на loopback по-прежнему пускает');
+  for (const name of [...Object.keys(names), 'mixed.corp.example']) {
+    await assert.rejects(f.net.fetch(`http://${name}:${String(f.port)}/x`, { timeoutMs: 1000 }), { code: 'PermissionDenied', message: /link-local или метаданные облака/ }, name);
+  }
+  assert.equal(f.hits.length, 1, 'ни один запрос на закрытый адрес до сервера не дошёл');
+  assert.equal(calls.length, bad.length + 2, 'проверка на том же резолве, что и соединение');
+  assert.equal(f.denied().length, bad.length + 1);
+  assert.match(f.denied()[0] ?? '', /адрес 169\.254\.169\.254 локальный \(link-local или метаданные облака закрыты даже названному хосту\)/);
+});
+
+test('net.fetch: тот же закрытый адрес и у хоста, не названного человеком (имя в манифесте): отказ, как и раньше', async () => {
+  const { lookup } = answer({ 'a.example': ['169.254.169.254'], 'b.example': ['168.63.129.16'], 'c.example': ['fe80::1'] });
+  await using f = await fixture({ net: ['a.example:$PORT', 'b.example:$PORT', 'c.example:$PORT'] }, lookup);
+  for (const name of ['a', 'b', 'c']) await assert.rejects(f.net.fetch(`http://${name}.example:${String(f.port)}/x`, { timeoutMs: 1000 }), { code: 'PermissionDenied' }, name);
+  assert.equal(f.hits.length, 0);
+});
+
+test('net.fetch: адрес-литерал link-local или метаданных, названный в праве или в config, закрыт во всех записях числа, DNS не нужен', async () => {
+  const { lookup, calls } = answer({});
+  // В праве манифеста и в config (человек): IPv4 и IPv6, URL сводит десятичную, шестнадцатеричную и восьмеричную записи к одному виду.
+  await using f = await fixture({ net: ['169.254.169.254', 'config:hubs'] }, lookup, { hubs: ['168.63.129.16', '[fe80::1]', '[::ffff:a9fe:a9fe]', '[fd00:ec2::254]', '127.0.0.1:$PORT'] });
+  for (const url of ['http://169.254.169.254/', 'http://2852039166/latest/meta-data', 'http://0xA9.0xFE.0xA9.0xFE/', 'http://0251.0376.0251.0376/', 'http://0xa9fea9fe/', 'http://169.254.169.254:80/', 'http://168.63.129.16/machine', 'http://[fe80::1]/', 'http://[::ffff:169.254.169.254]/', 'http://[fd00:ec2::254]/']) {
+    await assert.rejects(f.net.fetch(url, { timeoutMs: 1000 }), { code: 'PermissionDenied', message: /link-local или метаданные облака/ }, url);
+  }
+  assert.equal((await f.net.fetch(`http://127.0.0.1:${String(f.port)}/x`)).status, 200, 'loopback, названный в config, по-прежнему пускает');
+  assert.deepEqual(calls, [], 'литералы резолва не требуют');
+  assert.equal(f.hits.length, 1);
+});
+
+test('net.fetch: переадресация на link-local или метаданные не выполняется: ответ 3xx отдан плагину, второго запроса и резолва нет', async () => {
+  const { lookup, calls } = answer({ 'ok.corp.example': ['127.0.0.1'] });
+  await using f = await fixture({ net: ['config:hubs'] }, lookup, { hubs: ['ok.corp.example:$PORT', '169.254.169.254'] });
+  const response = await f.net.fetch(`http://ok.corp.example:${String(f.port)}/redirect-meta`);
+  assert.deepEqual([response.status, response.headers.location], [302, 'http://169.254.169.254/latest/meta-data/']);
+  assert.equal(f.hits.length, 1);
+  assert.deepEqual(calls, ['ok.corp.example']);
+  await assert.rejects(f.net.fetch('http://169.254.169.254/latest/meta-data/', { timeoutMs: 1000 }), { code: 'PermissionDenied' }, 'и прямой запрос по Location закрыт');
 });
 
 test('ST-3002/4: net.fetch по node:http: метод, тело и заголовки доходят; переадресация не идёт; 204 без тела; тайм-аут и выгрузка обрывают запрос', async () => {

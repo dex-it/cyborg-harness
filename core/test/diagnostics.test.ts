@@ -410,7 +410,7 @@ test('предел числа файлов уменьшили между зап�
 });
 
 /** Выгрузка из настоящего ядра: цепочка с ошибкой, секрет, маркер аргумента, граф. */
-async function scenario(options: { diagnostics?: Partial<DiagnosticsOptions> } = {}) {
+async function scenario(options: { diagnostics?: Partial<DiagnosticsOptions>; traceArgs?: boolean } = {}) {
   const fsys = new MemoryFs();
   const d = diag(fsys, options.diagnostics);
   const marker = `МАРКЕР-${randomUUID()}`;
@@ -449,7 +449,7 @@ async function scenario(options: { diagnostics?: Partial<DiagnosticsOptions> } =
       manifest('top', { version: '0.9.1', requires: { 'dx.base': '^1' }, commands: ['top.run'], permissions: { 'secrets.ref': ['vault://x/*'] } }),
       manifest('broken', { version: '1.4.0' }),
     ],
-    { os: { dataDir: '/nonexistent/d', tempDir: '/nonexistent/t', secrets, env: { DX_ENV: 'x' } }, hosts: { a: ['base'], b: ['top'] } },
+    { os: { dataDir: '/nonexistent/d', tempDir: '/nonexistent/t', secrets, env: { DX_ENV: 'x' } }, hosts: { a: ['base'], b: ['top'] }, ...(options.traceArgs === true && { traceArgs: true }) },
   );
   return { fsys, d, k, marker, secret, ctx: ctx!, secrets };
 }
@@ -525,6 +525,48 @@ test('ST-3004/3, ST-4001/11: выгрузка: маркера аргумента
   }
   assert.ok(text.includes('токен [секрет] в строке плагина'), 'вычеркнутая ядром строка плагина в выгрузке есть');
   await k.unload();
+});
+
+test('выгрузка без флага --trace-args: заголовок говорит, что аргументов в записях нет, предупреждения об аргументах нет (K-33)', async () => {
+  const { d, k } = await scenario();
+  await assert.rejects(k.run('top.run'), { code: 'Remote' });
+  const text = d.export({ kernel: k });
+  assert.ok(text.includes('В записях нет содержимого аргументов и результатов операций'));
+  assert.ok(!text.includes('ВНИМАНИЕ'));
+  assert.ok(!text.includes('аргументы: '));
+  await k.unload();
+});
+
+test('выгрузка с флагом --trace-args: предупреждение в заголовке, аргументы в строках операций, значение секрета вычеркнуто, файл хранилища тоже с аргументами (K-33)', async () => {
+  const { fsys, d, k, marker, secret, ctx } = await scenario({ traceArgs: true });
+  await ctx.os.secrets.set('token', secret);
+  await ctx.os.secrets.get('token');
+  await assert.rejects(k.run('top.run'), { code: 'Remote' });
+  d.flush();
+  const text = d.export({ kernel: k });
+  const lines = text.split('\n');
+  const warning = lines.find((l) => l.startsWith('ВНИМАНИЕ'));
+  assert.ok(warning, 'предупреждение в заголовке');
+  assert.match(warning, /аргументы операций/);
+  assert.match(warning, /пути, имена и данные человека/);
+  assert.ok(lines.indexOf(warning) < lines.indexOf('Записи по времени:'), 'предупреждение выше записей');
+  assert.ok(!text.includes('В записях нет содержимого аргументов'), 'прежнее утверждение снято: оно было бы неверным');
+  assert.ok(lines.some((l) => l.includes('-> contract:dx.base@1#work') && l.includes(`аргументы: ["${marker}"]`)), 'аргументы члена контракта в строке операции');
+  assert.ok(lines.some((l) => l.includes('os:secrets.set') && l.includes('аргументы: ["token","[секрет]"]')));
+  assert.ok(lines.some((l) => l.includes('журнал warn трасса: запуск с --trace-args')), 'запись журнала о флаге в выгрузке');
+  const files = [...fsys.files.values()].join('\n');
+  assert.ok(!text.includes(secret) && !files.includes(secret), 'значение секрета нигде');
+  assert.ok(files.includes(marker), 'файл хранилища несёт аргументы (проверка стенда)');
+  await k.unload();
+});
+
+test('выгрузка: предупреждение зависит от содержимого файла, а не от флага этого запуска - аргументы прошлого запуска в файле тоже предупреждены (K-33)', () => {
+  const fsys = new MemoryFs();
+  fsys.files.set('diagnostics.1.log', `${JSON.stringify({ r: 1, src: 'trace', at: 3, record: { kind: 'operation', id: 1, chain: 1, at: 3, caller: 'user', target: 'command:x', boundaries: [], durationMs: 1, argsBytes: 3, resultBytes: 0, outcome: 'ok', args: '["a"]' } })}\n`);
+  const d = diag(fsys);
+  const text = d.export({ kernel: { manifests: [], journal: [], hostOf: () => undefined } });
+  assert.ok(text.includes('ВНИМАНИЕ'));
+  assert.ok(text.includes('аргументы: ["a"]'));
 });
 
 test('выгрузка: не записанное из-за отказа диска входит в выгрузку, а про отказ сказано в заголовке (FR-CH-4015, вопрос 3)', async () => {

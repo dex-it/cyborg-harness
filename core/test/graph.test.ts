@@ -39,7 +39,7 @@ test('ST-1002/1, ST-5001/2, ST-6001/7, ST-6002/1: отказ по engines кас
   assert.equal(g.bindings.get('tree')?.size, 0);
 });
 
-test('ST-5001/4: несовместимая мажорная версия поставщика - как отсутствие', () => {
+test('ST-1002/4, ST-5001/4: несовместимая мажорная версия поставщика - как отсутствие', () => {
   const g = resolveGraph(
     [m('files', { provides: { 'cyborg.files': '2.0' } }), m('sessions', { requires: { 'cyborg.files': '^1' } }), m('tree', { optional: { 'cyborg.files': '^1' } })],
     '1.0.0',
@@ -203,4 +203,192 @@ test('ST-2002/2: команда в двух манифестах - отказ о
 
   const both = resolveGraph(clash, '1.0.0', { prefixes: ['cyborg.'], bundled: new Set(['a', 'a.b']) });
   assert.deepEqual([...both.rejected.keys()].sort(), ['a', 'a.b'], 'оба встроенные - неоднозначность, отказ обоим');
+});
+
+// Отказ в конце цепочки requires каскадирует по всей цепочке, а не на одно звено; ядро стартует (#228).
+test('ST-1002/4: цепочка A -> B -> C с ошибкой у C - отказ каскадирует на B и A, optional и независимые живы', () => {
+  const g = resolveGraph(
+    [
+      m('a', { requires: { 'x.b': '^1' } }),
+      m('b', { provides: { 'x.b': '1.0' }, requires: { 'x.c': '^1' } }),
+      m('c', { engines: { cyborg: '^2' }, provides: { 'x.c': '1.0' } }),
+      m('viewer', { optional: { 'x.b': '^1', 'x.c': '^1' } }),
+      m('solo'),
+    ],
+    '1.0.0',
+  );
+  assert.equal(g.rejected.get('c')?.[0]?.kind, 'engines');
+  assert.deepEqual(g.rejected.get('b'), [{ kind: 'missing', contract: 'x.c', range: '^1' }]);
+  assert.deepEqual(g.rejected.get('a'), [{ kind: 'missing', contract: 'x.b', range: '^1' }]);
+  assert.deepEqual([...g.rejected.keys()].sort(), ['a', 'b', 'c']);
+  assert.deepEqual(g.order, ['viewer', 'solo']);
+  assert.equal(g.bindings.get('viewer')?.size, 0, 'привязок к отвергнутым нет');
+  assert.equal(g.bindings.has('a'), false);
+});
+
+test('каскад не зависит от порядка входа: все перестановки цепочки A -> B -> C дают один исход', () => {
+  const chain = [
+    m('a', { requires: { 'x.b': '^1' } }),
+    m('b', { provides: { 'x.b': '1.0' }, requires: { 'x.c': '^1' } }),
+    m('c', { engines: { cyborg: '^2' }, provides: { 'x.c': '1.0' } }),
+    m('d'),
+  ];
+  const perms = (xs: PluginManifest[]): PluginManifest[][] => (xs.length < 2 ? [xs] : xs.flatMap((x, i) => perms([...xs.slice(0, i), ...xs.slice(i + 1)]).map((rest) => [x, ...rest])));
+  for (const input of perms(chain)) {
+    const g = resolveGraph(input, '1.0.0');
+    const label = input.map((p) => p.id).join(',');
+    assert.deepEqual([...g.rejected.keys()].sort(), ['a', 'b', 'c'], label);
+    assert.deepEqual(g.order, ['d'], label);
+  }
+});
+
+test('каскад по цепочке из пяти звеньев: отказ у хвоста доходит до головы, отвергнутый в проходе не остаётся поставщиком', () => {
+  // Хвост отвергнут не до разбора связей (engines), а внутри него: у e нет поставщика x.none.
+  const g = resolveGraph(
+    [
+      m('a', { requires: { 'x.b': '^1' } }),
+      m('b', { provides: { 'x.b': '1.0' }, requires: { 'x.c': '^1' } }),
+      m('c', { provides: { 'x.c': '1.0' }, requires: { 'x.d': '^1' } }),
+      m('d', { provides: { 'x.d': '1.0' }, requires: { 'x.e': '^1' } }),
+      m('e', { provides: { 'x.e': '1.0' }, requires: { 'x.none': '^1' } }),
+      m('free'),
+    ],
+    '1.0.0',
+  );
+  assert.deepEqual([...g.rejected.keys()].sort(), ['a', 'b', 'c', 'd', 'e']);
+  assert.deepEqual(g.rejected.get('e'), [{ kind: 'missing', contract: 'x.none', range: '^1' }]);
+  for (const [id, contract] of [['d', 'x.e'], ['c', 'x.d'], ['b', 'x.c'], ['a', 'x.b']] as const) {
+    assert.deepEqual(g.rejected.get(id), [{ kind: 'missing', contract, range: '^1' }], id);
+  }
+  assert.deepEqual(g.order, ['free']);
+});
+
+test('ветвление: отказ одной ветки requires снимает потребителя, соседняя ветка и её поставщики живут', () => {
+  const g = resolveGraph(
+    [
+      m('top', { requires: { 'x.left': '^1', 'x.right': '^1' } }),
+      m('left', { provides: { 'x.left': '1.0' }, requires: { 'x.leaf': '^1' } }),
+      m('right', { provides: { 'x.right': '1.0' } }),
+      m('leaf', { engines: { cyborg: '^9' }, provides: { 'x.leaf': '1.0' } }),
+      m('other', { requires: { 'x.right': '^1' } }),
+    ],
+    '1.0.0',
+  );
+  assert.deepEqual([...g.rejected.keys()].sort(), ['leaf', 'left', 'top']);
+  assert.deepEqual(g.rejected.get('top'), [{ kind: 'missing', contract: 'x.left', range: '^1' }]);
+  assert.deepEqual(g.order, ['right', 'other']);
+  assert.equal(g.bindings.get('other')?.get('x.right'), 'right');
+});
+
+test('optional на плагин, отвергнутый при разборе связей, снимается; сам потребитель жив и порядок строится', () => {
+  const g = resolveGraph(
+    [m('ui', { optional: { 'x.b': '^1' } }), m('b', { provides: { 'x.b': '1.0' }, requires: { 'x.none': '^1' } })],
+    '1.0.0',
+  );
+  assert.deepEqual([...g.rejected.keys()], ['b']);
+  assert.deepEqual(g.order, ['ui']);
+  assert.equal(g.bindings.get('ui')?.size, 0);
+});
+
+test('optional-звено в середине цепочки не держит отвергнутого: A requires B, B optional C, C requires пустоту - живы A и B', () => {
+  const g = resolveGraph(
+    [
+      m('a', { requires: { 'x.b': '^1' } }),
+      m('b', { provides: { 'x.b': '1.0' }, optional: { 'x.c': '^1' } }),
+      m('c', { provides: { 'x.c': '1.0' }, requires: { 'x.none': '^1' } }),
+    ],
+    '1.0.0',
+  );
+  assert.deepEqual([...g.rejected.keys()], ['c']);
+  assert.deepEqual(g.order, ['b', 'a']);
+  assert.equal(g.bindings.get('b')?.size, 0);
+});
+
+test('отказ по неоднозначности поставщика каскадирует на зависящих через requires', () => {
+  const g = resolveGraph(
+    [
+      m('a', { requires: { 'x.b': '^1' } }),
+      m('b', { provides: { 'x.b': '1.0' }, requires: { 'x.lock': '^1' } }),
+      m('lock-1', { provides: { 'x.lock': '1.0' } }),
+      m('lock-2', { provides: { 'x.lock': '1.0' } }),
+    ],
+    '1.0.0',
+  );
+  assert.equal(g.rejected.get('b')?.[0]?.kind, 'ambiguous');
+  assert.deepEqual(g.rejected.get('a'), [{ kind: 'missing', contract: 'x.b', range: '^1' }]);
+  assert.deepEqual(g.order, ['lock-1', 'lock-2']);
+});
+
+test('цикл и каскад вместе: зависящие от цикла отвергаются по цепочке, независимая ветка и её отказ не мешают', () => {
+  const g = resolveGraph(
+    [
+      m('a', { provides: { 'x.a': '1.0' }, requires: { 'x.b': '^1' } }),
+      m('b', { provides: { 'x.b': '1.0' }, requires: { 'x.a': '^1' } }),
+      m('c', { provides: { 'x.c': '1.0' }, requires: { 'x.a': '^1' } }),
+      m('d', { requires: { 'x.c': '^1' } }),
+      m('p', { provides: { 'x.p': '1.0' }, requires: { 'x.none': '^1' } }),
+      m('q', { requires: { 'x.p': '^1' } }),
+      m('ok'),
+    ],
+    '1.0.0',
+  );
+  assert.deepEqual(g.rejected.get('a')?.[0], { kind: 'cycle', members: ['a', 'b'] });
+  assert.equal(g.rejected.get('b')?.[0]?.kind, 'cycle');
+  assert.deepEqual([...g.rejected.keys()].sort(), ['a', 'b', 'c', 'd', 'p', 'q']);
+  assert.deepEqual(g.order, ['ok']);
+});
+
+// Поставщик контракта - только плагин, остающийся в графе: отвергнутый каскадом не делает потребителя неоднозначным
+// (FR-CH-1004: «два поставщика при кратности one» считаются среди тех, кто загружается).
+test('поставщик, отвергнутый каскадом, не делает потребителя неоднозначным: p2 отвергнут своим requires, c связан с p1', () => {
+  const g = resolveGraph(
+    [
+      m('c', { requires: { 'x.s': '^1' } }),
+      m('p1', { provides: { 'x.s': '1.0' } }),
+      m('p2', { provides: { 'x.s': '1.0' }, requires: { 'x.none': '^1' } }),
+    ],
+    '1.0.0',
+  );
+  assert.deepEqual([...g.rejected], [['p2', [{ kind: 'missing', contract: 'x.none', range: '^1' }]]]);
+  assert.equal(g.bindings.get('c')?.get('x.s'), 'p1');
+  assert.deepEqual(g.order, ['p1', 'c']);
+});
+
+test('неоднозначность считается среди оставшихся и не зависит от порядка входа: отказ второго поставщика через два звена, optional-потребитель', () => {
+  const plugins = [
+    m('c', { requires: { 'x.s': '^1' } }),
+    m('o', { optional: { 'x.s': '^1' } }),
+    m('p1', { provides: { 'x.s': '1.0' } }),
+    m('p2', { provides: { 'x.s': '1.0' }, requires: { 'x.q': '^1' } }),
+    m('q', { provides: { 'x.q': '1.0' }, requires: { 'x.none': '^1' } }),
+  ];
+  const perms = (xs: PluginManifest[]): PluginManifest[][] => (xs.length < 2 ? [xs] : xs.flatMap((x, i) => perms([...xs.slice(0, i), ...xs.slice(i + 1)]).map((rest) => [x, ...rest])));
+  for (const input of perms(plugins)) {
+    const g = resolveGraph(input, '1.0.0');
+    const label = input.map((p) => p.id).join(',');
+    assert.deepEqual([...g.rejected.keys()].sort(), ['p2', 'q'], label);
+    assert.equal(g.bindings.get('c')?.get('x.s'), 'p1', label);
+    assert.equal(g.bindings.get('o')?.get('x.s'), 'p1', label);
+    assert.deepEqual([...g.order].sort(), ['c', 'o', 'p1'], label);
+  }
+});
+
+test('потребитель с живыми двумя поставщиками остаётся неоднозначным, а поставщик, сам отвергнутый за неоднозначность, потребителя не снимает', () => {
+  const g = resolveGraph(
+    [
+      m('c', { requires: { 'x.s': '^1' } }),
+      m('p1', { provides: { 'x.s': '1.0' }, requires: { 'x.lock': '^1' } }),
+      m('p2', { provides: { 'x.s': '1.0' } }),
+      m('lock-1', { provides: { 'x.lock': '1.0' } }),
+      m('lock-2', { provides: { 'x.lock': '1.0' } }),
+      m('d', { requires: { 'x.t': '^1' } }),
+      m('t1', { provides: { 'x.t': '1.0' } }),
+      m('t2', { provides: { 'x.t': '1.0' } }),
+    ],
+    '1.0.0',
+  );
+  assert.equal(g.rejected.get('p1')?.[0]?.kind, 'ambiguous');
+  assert.equal(g.bindings.get('c')?.get('x.s'), 'p2');
+  assert.deepEqual(g.rejected.get('d'), [{ kind: 'ambiguous', contract: 'x.t', providers: ['t1', 't2'] }]);
+  assert.deepEqual([...g.rejected.keys()].sort(), ['d', 'p1']);
 });

@@ -971,6 +971,80 @@ test('ST-3001/7, ST-3001/8, ST-3007/7: права в манифесте: неи�
   ]);
 });
 
+test('deny правила process: флаг в хвосте argv, в том числе `флаг=значение`, - PermissionDenied и запись denied с именем флага без значения; программа не запускалась', async () => {
+  await using box = await sandbox();
+  const rule = { program: process.execPath, args: ['-e'], deny: ['--output', '-X'] };
+  const { k, os, denied } = await kernel({ runner: { process: [rule] } }, { dataDir: box.data, tempDir: box.temp });
+  const marker = path.join(box.work, 'ran');
+  const code = "require('node:fs').writeFileSync(process.argv[1], 'x')";
+  const run = (...tail: string[]) => os('runner').process!.run(process.execPath, ['-e', code, marker, ...tail]);
+  for (const tail of [['--output'], ['--output=/etc/passwd'], ['a', '-X'], ['--header', 'token', '--output=secret-value'], ['-X=DELETE']]) {
+    await assert.rejects(run(...tail), { code: 'PermissionDenied' }, tail.join(' '));
+  }
+  await assert.rejects(stat(marker), { code: 'ENOENT' }, 'программа не запускалась');
+  // Одинаковые отказы за окно журнал склеивает: записей две - по флагу, повторы в `repeats`.
+  const entries = k.journal.flatMap((e) => (e.kind === 'denied' ? [e] : []));
+  assert.deepEqual(entries.map((e) => e.detail), [`запрещён флаг --output в правиле process: ${process.execPath}`, `запрещён флаг -X в правиле process: ${process.execPath}`]);
+  assert.ok(entries.every((e) => e.pluginId === 'runner' && e.method === 'process.run'));
+  assert.deepEqual(denied(), ['runner:process.run', 'runner:process.run']);
+  assert.ok(entries.every((e) => !e.detail.includes('secret-value') && !e.detail.includes('/etc/passwd') && !e.detail.includes('token')), 'значения аргументов в журнал не идут');
+  // Близкие по написанию аргументы не флаг из deny; закреплённый префикс не проверяется (`-e` стоит и в нём).
+  for (const tail of [['--outputs'], ['--output-dir=x'], ['-Xy'], ['output']]) assert.equal((await run(...tail)).code, 0, tail.join(' '));
+  assert.equal(await readFile(marker, 'utf8'), 'x');
+  await k.unload();
+});
+
+test('deny правила process: другое правило той же программы без deny разрешает запуск; запрет держит правило, а не программу', async () => {
+  await using box = await sandbox();
+  const strict = { program: process.execPath, args: ['-e'], deny: ['--output'] };
+  const { k, os } = await kernel(
+    { strict: { process: [strict] }, mixed: { process: [strict, { program: process.execPath, args: ['-e'] }] }, plain: { process: [process.execPath] } },
+    { dataDir: box.data, tempDir: box.temp },
+  );
+  const run = (id: string) => os(id).process!.run(process.execPath, ['-e', '0', 'a', '--output=x']);
+  await assert.rejects(run('strict'), { code: 'PermissionDenied' });
+  assert.equal((await run('mixed')).code, 0, 'второе правило без deny подходит по префиксу');
+  assert.equal((await run('plain')).code, 0, 'строка-правило без deny работает как раньше');
+  await k.unload();
+});
+
+test('правило process без deny работает как раньше: хвост argv не проверяется', async () => {
+  await using box = await sandbox();
+  const { k, os, denied } = await kernel({ runner: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp });
+  const got = await os('runner').process!.run(process.execPath, ['-e', 'process.stdout.write(process.argv.slice(1).join(","))', 'a', '--output=x', '-X']);
+  assert.equal(got.stdout, 'a,--output=x,-X');
+  await assert.rejects(os('runner').process!.run(process.execPath, ['-p', '1']), { code: 'PermissionDenied' }, 'префикс аргументов по-прежнему закреплён');
+  assert.equal(denied().length, 1);
+  assert.equal(k.journal.flatMap((e) => (e.kind === 'denied' ? [e.detail] : []))[0], `аргументы не по правилу process: ${process.execPath}`);
+  await k.unload();
+});
+
+test('deny в манифесте: не список строк и пустая строка отвергают манифест с именем поля; у launch поля нет; права словами называют запрещённые флаги', () => {
+  for (const key of ['process', 'pty'] as const) {
+    const rule = (deny: unknown) => manifest('p', { [key]: [{ program: 'git', args: ['log'], deny }] });
+    for (const bad of ['--output', {}, 5, [''], ['--output', ''], ['--output', 1], [['--output']], null]) {
+      const parsed = parseManifest(rule(bad));
+      assert.equal(parsed.ok, false, `${key} ${JSON.stringify(bad)}`);
+      assert.ok(!parsed.ok);
+      assert.ok(parsed.errors.some((e) => e.startsWith(`permissions.${key}[0].deny:`)), `${key}: ${parsed.errors.join('; ')}`);
+    }
+    for (const good of [[], ['--output'], ['--output', '-c', '--git-dir']]) assert.ok(parseManifest(rule(good)).ok, JSON.stringify(good));
+  }
+  const second = parseManifest(manifest('p', { process: ['git', { program: 'gh', args: ['api'], deny: [''] }] }));
+  assert.ok(!second.ok);
+  assert.ok(second.errors.some((e) => e.startsWith('permissions.process[1].deny:')), 'номер правила в имени поля');
+  const launch = parseManifest(manifest('p', { launch: [{ program: 'claude', args: [], deny: ['--x'] }] }));
+  assert.ok(!launch.ok);
+  assert.ok(launch.errors.some((e) => e.startsWith('permissions.launch[0].deny:')));
+  const good = parseManifest(manifest('p', { process: [{ program: 'git', args: ['log'], env: ['GIT_DIR'], deny: ['--output', '-c'] }, 'gh'], pty: [{ program: 'claude', args: [], deny: ['--dangerously-skip-permissions'] }] }));
+  assert.ok(good.ok);
+  assert.deepEqual(describePermissions(good.manifest.permissions), [
+    'запускает программы: git log (окружение: GIT_DIR) (запрещены флаги: --output, -c), gh - полный доступ через программу',
+    'запускает в терминале: claude (запрещены флаги: --dangerously-skip-permissions) - полный доступ через программу',
+  ]);
+  assert.deepEqual(describePermissions({ process: [{ program: 'git', args: [], deny: [] }] }), ['запускает программы: git - полный доступ через программу'], 'пустой deny ничего не запрещает и в строке не виден');
+});
+
 test('ST-3002/3: net config:<поле>: хост берётся из принятого config, а не из того, что плагин записал себе сам', async () => {
   await using box = await sandbox();
   const calls: string[] = [];

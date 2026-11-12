@@ -573,7 +573,7 @@ test('output: сводная строка хоста без плагина, не
   assert.deepEqual(logs, ['хост h [info]: строка 0', 'хост h [warn]: строк сверх предела за интервал: 3, из них error: 1; последняя error: строка 3']);
 });
 
-test('ST-3001/1: os: плагин без прав - у ctx.os нет членов под правом, а каждый запрос шлюзу в обход ctx.os (fs вне области, process, pty, net, serve, env, clipboard, secrets.ref, shell, notify, ui.lock, security.roots) - PermissionDenied и запись denied', async () => {
+test('os: плагин без прав - у ctx.os нет членов под правом, а каждый запрос шлюзу в обход ctx.os (fs вне области, process, pty, net, serve, env, clipboard, secrets.ref, shell, notify, ui.lock, security.roots) - PermissionDenied и запись denied', async () => {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-trust-os-')));
   const outside = path.join(root, 'outside');
   const file = path.join(outside, 'secret.txt');

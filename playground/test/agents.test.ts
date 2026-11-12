@@ -85,13 +85,14 @@ async function setup(store?: LayerStore, extra: readonly string[] = [], rogue?: 
     manifest: { id: 'probe', version: '1.0.0', engines: { cyborg: '^1' }, consumes: { 'cyborg.agent': '^1' } },
     module: { activate: (ctx) => void (probe = ctx) },
   };
-  const ids = [...PROVIDERS, ...extra, 'session-isolation', 'sessions'];
+  const inlineIds = inline.map((p) => (typeof p.manifest.id === 'string' ? p.manifest.id : ''));
+  const ids = [...PROVIDERS, ...extra, 'session-isolation', 'sessions', ...inlineIds];
   const k = await startKernel({
     plugins: [...ids.map((id) => path.join(PLUGINS, id)), probePlugin, ...(rogue ? [rogue] : []), ...spies.map((x) => x.plugin)],
     os: { ...os, ...osExtra },
     ...(store && { state: store }),
     // Как в приложении: поставка - плагины каталога, пространство cyborg.* закрыто всем остальным (K-15).
-    load: { onViewMessage: (pluginId, view, message) => void sent.push({ pluginId, view, message }), ...(rogue && { bundled: ids, reservedPrefixes: ['cyborg.'] }) },
+    load: { onViewMessage: (pluginId, view, message) => void sent.push({ pluginId, view, message }), ...((rogue !== undefined || inline.length > 0) && { bundled: ids, reservedPrefixes: ['cyborg.'] }) },
   });
   // С rogue его судьбу проверяет сам тест: упавший здесь setup не дал бы увидеть, что доходит до агента.
   assert.deepEqual(k.active.filter((id) => id !== 'rogue').toSorted(), [...ids, 'probe', ...spies.map((x) => String(x.plugin.manifest.id))].toSorted(), JSON.stringify(k.journal.filter((e) => e.kind === 'failed')));
@@ -302,6 +303,14 @@ test('ST-2006/12, ST-3006/2: agent-claude-code: режим разрешений 
   for (const weakening of ['--dangerously-skip-permissions', '--permission-mode', '--allowedTools', '--allowed-tools', '--disallowedTools', '--tools', 'bypassPermissions']) {
     assert.ok(!flags.includes(weakening), `${weakening} не должен попасть в запуск`);
   }
+});
+
+test('K-34: deny в манифестах стенда - claude без --dangerously-skip-permissions и без смены режима разрешений в process agent-claude-code и pty sessions', () => {
+  const rules = (id: string, right: 'process' | 'pty') => (manifestOf(id) as { permissions: Record<string, { program?: string; deny?: string[] }[]> }).permissions[right]!;
+  assert.deepEqual(rules('agent-claude-code', 'process').map((r) => r.deny), [['--dangerously-skip-permissions']]);
+  const claude = rules('sessions', 'pty').filter((r) => typeof r === 'object' && r.program === '$SHELL');
+  assert.equal(claude.length, 1);
+  for (const flag of ['--dangerously-skip-permissions', '--permission-mode', '--allowedTools', '--allowed-tools', '--disallowedTools', '--tools']) assert.ok(claude[0]?.deny?.includes(flag), flag);
 });
 
 test('ST-2006/6, ST-2006/13: agent-claude-code: хуки в события контракта; прошлое и недописанная строка не читаются', async () => {
