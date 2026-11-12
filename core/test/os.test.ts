@@ -53,7 +53,7 @@ async function kernel(plugins: Record<string, unknown>, env: Partial<OsEnvironme
   return { k, os, ctx: (id: string) => contexts.get(id)!, denied };
 }
 
-test('без прав: свои каталоги работают, чужой путь - PermissionDenied и запись в журнале', async () => {
+test('ST-3001/1: без прав: свои каталоги работают, чужой путь - PermissionDenied и запись в журнале', async () => {
   await using box = await sandbox();
   const { k, os, denied } = await kernel({ plain: undefined }, { dataDir: box.data, tempDir: box.temp });
   const own = os('plain');
@@ -86,7 +86,7 @@ test('свой каталог, подменённый ссылкой наруж�
   await k.unload();
 });
 
-test('fs.read и fs.write: область по праву, симлинк наружу не пускает, .git, защищённые пути и их соседи <файл>.* закрыты', async () => {
+test('ST-3001/2, ST-3001/4: fs.read и fs.write: область по праву, симлинк наружу не пускает, .git, защищённые пути и их соседи <файл>.* закрыты', async () => {
   await using box = await sandbox();
   await writeFile(path.join(box.outside, 'secret.txt'), 'нельзя');
   await writeFile(path.join(box.work, 'readme.md'), 'можно');
@@ -134,7 +134,7 @@ test('workspace: корни от приложения и от плагина с 
   await k.unload();
 });
 
-test('process.run: программа и префикс аргументов из права, без shell', async () => {
+test('ST-3002/2: process.run: программа и префикс аргументов из права, без shell', async () => {
   await using box = await sandbox();
   const { k, os, denied } = await kernel(
     { runner: { process: [{ program: process.execPath, args: ['-e'], env: ['X'] }], 'fs.read': [box.work] } },
@@ -153,7 +153,7 @@ test('process.run: программа и префикс аргументов и�
   await k.unload();
 });
 
-test('process.run: вывод больше предела - truncated, программа остановлена, прочитанное до предела целое по символам; предел в байтах и по потокам', async (t) => {
+test('ST-3002/7: process.run: вывод больше предела - truncated, программа остановлена, прочитанное до предела целое по символам; предел в байтах и по потокам', async (t) => {
   await using box = await sandbox();
   const { k, os } = await kernel({ runner: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp, limits: { processOutput: 1000, processOutputMax: 4000 } });
   // Иначе упавшая проверка оставит наблюдатель или программу живыми, и процесс файла не выйдет до срока job.
@@ -205,7 +205,7 @@ test('process.run: SIGKILL после выхода лидера идёт тол�
   assert.deepEqual(kill.mock.calls.map((c) => c.arguments[0]).filter((pid) => pid === leader), [], 'собранный лидер не получает сигналов по своему pid');
 });
 
-test('process.run: предел вывода по умолчанию - 16 МиБ, как и записано в SAD', async () => {
+test('ST-3002/7: process.run: предел вывода по умолчанию - 16 МиБ, как и записано в SAD', async () => {
   await using box = await sandbox();
   const { k, os } = await kernel({ runner: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp });
   const script = (mib: number) => `const b=Buffer.alloc(1048576,97);for(let i=0;i<${String(mib)};i++)process.stdout.write(b)`;
@@ -218,7 +218,7 @@ test('process.run: предел вывода по умолчанию - 16 МиБ
   await k.unload();
 });
 
-test('net.fetch: хост из права или из config, переадресация не идёт сама', async () => {
+test('ST-3002/4: net.fetch: хост из права или из config, переадресация не идёт сама', async () => {
   await using box = await sandbox();
   const calls: string[] = [];
   const fakeFetch = (async (url: URL, init: RequestInit) => {
@@ -341,7 +341,7 @@ test('ST-2004/4: notify: клик поднимает окно, закрывае�
   await k.unload();
 });
 
-test('секреты: ключи своего плагина, $secret, без шифрования ОС - Unavailable, внешний источник по маске', async () => {
+test('ST-3001/3, ST-3004/1, ST-3004/2: секреты: ключи своего плагина, $secret, без шифрования ОС - Unavailable, внешний источник по маске', async () => {
   await using box = await sandbox();
   const store = memorySecrets();
   const { k, os, ctx } = await kernel({ jira: { 'secrets.ref': ['vault://kv/jira*'] }, other: undefined }, { dataDir: box.data, tempDir: box.temp, secrets: store });
@@ -381,7 +381,7 @@ test('NotFound: нет файла, каталога или программы - 
   await k.unload();
 });
 
-test('вне области любая ошибка ОС при раскрытии пути (ENOTDIR, ELOOP, EACCES) - PermissionDenied: файл вне области не выдаёт себя ни кодом, ни текстом', async () => {
+test('ST-3001/2: вне области любая ошибка ОС при раскрытии пути (ENOTDIR, ELOOP, EACCES) - PermissionDenied: файл вне области не выдаёт себя ни кодом, ни текстом', async () => {
   await using box = await sandbox();
   const secret = path.join(box.outside, 'secret');
   await writeFile(secret, 'x');
@@ -543,7 +543,7 @@ test('fs.writeText: файл только для чтения (0444) в ката
   await k.unload();
 });
 
-test('fs: ссылка внутри области - ответ зависит от цели (вне существует - PermissionDenied, висячая - NotFound или ошибка операции, под закрытым каталогом снаружи - EACCES операции); обещание контракта только про путь, названный плагином', { skip: (process.platform === 'win32' || process.getuid?.() === 0) && 'ссылки и режимы POSIX, не root' }, async () => {
+test('ST-3001/2: fs: ссылка внутри области - ответ зависит от цели (вне существует - PermissionDenied, висячая - NotFound или ошибка операции, под закрытым каталогом снаружи - EACCES операции); обещание контракта только про путь, названный плагином', { skip: (process.platform === 'win32' || process.getuid?.() === 0) && 'ссылки и режимы POSIX, не root' }, async () => {
   await using box = await sandbox();
   const closed = path.join(box.outside, 'closed');
   await mkdir(closed);
@@ -568,7 +568,7 @@ test('fs: ссылка внутри области - ответ зависит �
   }
 });
 
-test('fs.readSlice: кусок по байтам, символ UTF-8 не рвётся, пределы и права', async () => {
+test('ST-3002/7: fs.readSlice: кусок по байтам, символ UTF-8 не рвётся, пределы и права', async () => {
   await using box = await sandbox();
   const file = path.join(box.work, 'log.jsonl');
   await writeFile(file, 'ab' + 'я'.repeat(3) + 'z');
@@ -607,7 +607,7 @@ async function armed(touch: (n: number) => Promise<unknown>, heard: () => boolea
 
 const ARMED = '.armed';
 
-test('ST-1005/1: fs.watch: имена изменённых в каталоге склеены, снятие и выгрузка закрывают наблюдение, вне области - отказ', async () => {
+test('ST-3001/3, ST-3005/1: ST-1005/1: fs.watch: имена изменённых в каталоге склеены, снятие и выгрузка закрывают наблюдение, вне области - отказ', async () => {
   await using box = await sandbox();
   const { k, os } = await kernel({ reader: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
   const fs = os('reader').fs;
@@ -889,7 +889,7 @@ test('fs.watch файла: заменён каталогом с тем же им
   }
 });
 
-test('fs.watch: лимит не обходится параллельными вызовами; сузились корни - наблюдение закрыто', async () => {
+test('ST-3002/7: fs.watch: лимит не обходится параллельными вызовами; сузились корни - наблюдение закрыто', async () => {
   await using box = await sandbox();
   const { k, os } = await kernel(
     { projects: { 'security.roots': true }, tool: { 'fs.read': ['workspace'] } },
@@ -935,7 +935,7 @@ test('$SHELL: оболочка входа из окружения приложе
   await k.unload();
 });
 
-test('права в манифесте: неизвестное право и неверная форма - ошибки манифеста; права словами', () => {
+test('ST-3001/7, ST-3001/8, ST-3007/7: права в манифесте: неизвестное право и неверная форма - ошибки манифеста; права словами', () => {
   const bad = parseManifest(manifest('p', { 'fs.raed': ['workspace'], net: ['https://x'], process: [{ program: 'git' }], notify: 'yes' }));
   assert.equal(bad.ok, false);
   assert.ok(!bad.ok);
@@ -953,7 +953,7 @@ test('права в манифесте: неизвестное право и н�
   ]);
 });
 
-test('net config:<поле>: хост берётся из принятого config, а не из того, что плагин записал себе сам', async () => {
+test('ST-3002/3: net config:<поле>: хост берётся из принятого config, а не из того, что плагин записал себе сам', async () => {
   await using box = await sandbox();
   const calls: string[] = [];
   const fakeFetch = (async (url: URL) => {
@@ -971,7 +971,7 @@ test('net config:<поле>: хост берётся из принятого con
   await k.unload();
 });
 
-test('net config:<поле>: плагин не пишет в поле хоста значение, которого не задал человек', async () => {
+test('ST-3002/3: net config:<поле>: плагин не пишет в поле хоста значение, которого не задал человек', async () => {
   await using box = await sandbox();
   const docs = new Map<string, Record<string, unknown>>([['user', { web: { $version: 1, baseUrl: 'https://jira.corp.local' } }], ['workspace', { web: { $version: 1, baseUrl: 'https://jira2.corp.local' } }]]);
   const store = await SectionStore.open({ load: async (l) => structuredClone(docs.get(l)), save: async (l, d) => void docs.set(l, structuredClone(d)) }, ['user', 'workspace']);
@@ -1008,7 +1008,7 @@ test('security.setRoots: корень ФС, домашний каталог, к�
   await free.k.unload();
 });
 
-test('чужие каталоги плагинов и данные приложения закрыты даже при праве на всю область', async () => {
+test('ST-3001/4: чужие каталоги плагинов и данные приложения закрыты даже при праве на всю область', async () => {
   await using box = await sandbox();
   const app = path.join(box.root, 'app');
   await mkdir(path.join(app, 'proj'), { recursive: true });
@@ -1041,7 +1041,7 @@ test('fs.remove: каталог с .git внутри и корень облас�
   await k.unload();
 });
 
-test('права: маски путей, workspace.git, выбор в dialog как granted, shell - без исполняемых и только свои схемы', async () => {
+test('ST-3001/5: права: маски путей, workspace.git, выбор в dialog как granted, shell - без исполняемых и только свои схемы', async () => {
   await using box = await sandbox();
   const logs = path.join(box.work, 'proj', 'logs');
   const deep = path.join(box.work, 'a', 'b', 'notes');
@@ -1106,7 +1106,7 @@ test('права: маски путей, workspace.git, выбор в dialog к�
   await k.unload();
 });
 
-test('shell.openPath: где плагин сам пишет, открывается только документ - файл с неизвестным расширением не запустится', async () => {
+test('ST-3002/1: shell.openPath: где плагин сам пишет, открывается только документ - файл с неизвестным расширением не запустится', async () => {
   await using box = await sandbox();
   const proj = path.join(box.work, 'proj');
   await mkdir(path.join(proj, 'reports'), { recursive: true });
@@ -1144,7 +1144,7 @@ test('shell.openPath: где плагин сам пишет, открывает�
   await k.unload();
 });
 
-test('shell any: документ или каталог вне корней; программа, файл не документом, пропавший путь, защищённое и чужое - отказ; читать area any не даёт', async () => {
+test('ST-3002/1: shell any: документ или каталог вне корней; программа, файл не документом, пропавший путь, защищённое и чужое - отказ; читать area any не даёт', async () => {
   await using box = await sandbox();
   const guarded = path.join(box.work, 'team.cyborg.json');
   const doc = path.join(box.outside, 'build.log');
@@ -1214,7 +1214,7 @@ test('команда ядра cyborg.workspace.reveal: среда показыв
   await bare.k.unload();
 });
 
-test('ST-1007/9: granted: выбор в dialog лежит в state воркспейса и действует после перезапуска; кривые записи и сбой записи не мешают', async () => {
+test('ST-3001/3, ST-3001/5, ST-3001/6: ST-1007/9: granted: выбор в dialog лежит в state воркспейса и действует после перезапуска; кривые записи и сбой записи не мешают', async () => {
   await using box = await sandbox();
   const [picked, kept, late] = ['picked.txt', 'kept.txt', 'late.txt'].map((name) => path.join(box.outside, name));
   for (const f of [picked!, kept!, late!]) await writeFile(f, 'текст');
@@ -1261,7 +1261,7 @@ test('ST-1007/9: granted: выбор в dialog лежит в state ворксп�
   await second.k.unload();
 });
 
-test('env правила: маска имени `ПРЕФИКС_*` принимается манифестом, звёздочка в иных местах - ошибка; права словами называют маску', () => {
+test('ST-3002/2: env правила: маска имени `ПРЕФИКС_*` принимается манифестом, звёздочка в иных местах - ошибка; права словами называют маску', () => {
   const rule = (env: unknown) => ({ process: [{ program: 'git', args: [], env }] });
   const ok = parseManifest(manifest('p', rule(['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_*', 'GIT_CONFIG_VALUE_*'])));
   assert.ok(ok.ok);
@@ -1270,7 +1270,7 @@ test('env правила: маска имени `ПРЕФИКС_*` приним�
   assert.equal(parseManifest(manifest('p', { env: ['GIT_CONFIG_KEY_*'] })).ok, false, 'право env.get маски не принимает: читать можно только названную переменную');
 });
 
-test('env правила: маска ПРЕФИКС_* покрывает только номерной хвост - GIT_CONFIG_KEY_X, GIT_SSH_COMMAND и LD_PRELOAD под неё не проходят', async () => {
+test('ST-3002/2: env правила: маска ПРЕФИКС_* покрывает только номерной хвост - GIT_CONFIG_KEY_X, GIT_SSH_COMMAND и LD_PRELOAD под неё не проходят', async () => {
   assert.equal(envNameAllowed('GIT_CONFIG_KEY_*', 'GIT_CONFIG_KEY_0'), true);
   assert.equal(envNameAllowed('GIT_CONFIG_KEY_*', 'GIT_CONFIG_KEY_12'), true);
   for (const name of ['GIT_CONFIG_KEY_X', 'GIT_CONFIG_KEY_', 'GIT_CONFIG_KEY_1a', 'GIT_CONFIG_KEY', 'GIT_CONFIG_KEY_-1']) assert.equal(envNameAllowed('GIT_CONFIG_KEY_*', name), false, name);
@@ -1286,7 +1286,7 @@ test('env правила: маска ПРЕФИКС_* покрывает тол�
   await k.unload();
 });
 
-test('env правила: программа получает GIT_CONFIG_COUNT, KEY_<n>, VALUE_<n> через маску и применяет их', async () => {
+test('ST-3002/2: env правила: программа получает GIT_CONFIG_COUNT, KEY_<n>, VALUE_<n> через маску и применяет их', async () => {
   await using box = await sandbox();
   const rule = { program: process.execPath, args: ['-e'], env: ['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_*', 'GIT_CONFIG_VALUE_*'] };
   const { k, os } = await kernel({ vcs: { process: [rule] } }, { dataDir: box.data, tempDir: box.temp });

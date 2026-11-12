@@ -14,7 +14,7 @@ test('ST-2003/3: мост: плагин кадра - первый сегмент
   assert.equal(pluginOfFrame(at('cyborg-plugin://panels/bob/ui/page.html#x'), groups), 'bob');
 });
 
-test('ST-2003/3: мост: доверие только внутри группы - адрес вне группы, чужой плагин, расхождение origin и адреса не дают плагина', () => {
+test('ST-3005/2: ST-2003/3: мост: доверие только внутри группы - адрес вне группы, чужой плагин, расхождение origin и адреса не дают плагина', () => {
   // pushState внутри origin меняет адрес кадра без загрузки: alice может назваться bob (одна группа), но не carol.
   assert.equal(pluginOfFrame(at('cyborg-plugin://panels/bob/'), groups), 'bob', 'сосед по группе: граница доверия - группа');
   assert.equal(pluginOfFrame(at('cyborg-plugin://panels/carol/'), groups), undefined, 'плагин другой группы под origin группы');
@@ -26,7 +26,7 @@ test('ST-2003/3: мост: доверие только внутри группы
   assert.equal(pluginOfFrame(at('https://panels/alice/', 'https://panels'), groups), undefined, 'чужая схема');
 });
 
-test('ST-2003/3: мост: senderPlugin берёт плагин из кадра-отправителя, без кадра - undefined', () => {
+test('ST-3005/2: ST-2003/3: мост: senderPlugin берёт плагин из кадра-отправителя, без кадра - undefined', () => {
   const event = (senderFrame: FrameLike | null) => ({ senderFrame }) as unknown as Parameters<typeof senderPlugin>[0];
   assert.equal(senderPlugin(event(at('cyborg-plugin://panels/alice/?view=main')), groups), 'alice');
   assert.equal(senderPlugin(event(at('cyborg-plugin://panels/carol/')), groups), undefined);

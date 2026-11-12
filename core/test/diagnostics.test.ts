@@ -425,7 +425,7 @@ test('выгрузка: один текстовый файл с записью �
   await k.unload();
 });
 
-test('выгрузка: маркера аргумента, значения секрета и текста исключения поставщика нет ни в файле хранилища, ни в выгрузке (FR-CH-4004, NFR-CH-4002)', async () => {
+test('ST-3004/3: выгрузка: маркера аргумента, значения секрета и текста исключения поставщика нет ни в файле хранилища, ни в выгрузке (FR-CH-4004, NFR-CH-4002)', async () => {
   const { fsys, d, k, marker, secret, ctx, secrets } = await scenario();
   await ctx.os.secrets.set('token', secret);
   assert.equal(await ctx.os.secrets.get('token'), secret);

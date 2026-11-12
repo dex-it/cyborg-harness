@@ -257,7 +257,7 @@ test('ST-2001/2: provide и section.write: хост не отдаёт необъ
   await kernel.unload();
 });
 
-test('сторонний плагин не делит хост: группа пользователя не даёт ему писать раздел соседа', async () => {
+test('ST-3001/9: сторонний плагин не делит хост: группа пользователя не даёт ему писать раздел соседа', async () => {
   const start = async (bundled: string[]) => {
     const forger = forging({
       victim: { activate: () => undefined, config: { defaults: { theme: 'light' } } },
@@ -570,7 +570,7 @@ test('output: сводная строка хоста без плагина, не
   assert.deepEqual(logs, ['хост h [info]: строка 0', 'хост h [warn]: строк сверх предела за интервал: 3, из них error: 1; последняя error: строка 3']);
 });
 
-test('os: notify.show и notify.close плагина без права notify отклоняет шлюз ядра (PermissionDenied, запись denied), а не только отсутствие ctx.os.notify (PL-02)', async () => {
+test('ST-3001/1: os: notify.show и notify.close плагина без права notify отклоняет шлюз ядра (PermissionDenied, запись denied), а не только отсутствие ctx.os.notify (PL-02)', async () => {
   const shown: string[] = [];
   const forger = forging({
     mallory: {

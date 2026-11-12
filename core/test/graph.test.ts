@@ -107,7 +107,7 @@ test('ST-1001/5: повтор id в манифестах - отказ id, ни �
 // ADR-CH-0002 п. 6: без закрепления один сторонний манифест с provides cyborg.agent делал встроенного потребителя ambiguous.
 const reserved = (...bundled: string[]) => ({ prefixes: ['cyborg.'], bundled: new Set(bundled) });
 
-test('ST-1002/6: пространство поставки: сторонний поставщик cyborg.* отвергнут, встроенный и его потребитель работают', () => {
+test('ST-3003/5: ST-1002/6: пространство поставки: сторонний поставщик cyborg.* отвергнут, встроенный и его потребитель работают', () => {
   const plugins = [
     m('claude', { provides: { 'cyborg.agent': '1.0' } }),
     m('rogue', { provides: { 'cyborg.agent': '1.0', 'acme.x': '1.0' } }),
@@ -120,7 +120,7 @@ test('ST-1002/6: пространство поставки: сторонний �
   assert.deepEqual(g.order, ['claude', 'sessions']);
 });
 
-test('ST-1002/6: пространство поставки: встроенный с тем же provides принят, id cyborg.* у стороннего - отказ, потребление cyborg.* открыто', () => {
+test('ST-3003/5: ST-1002/6: пространство поставки: встроенный с тем же provides принят, id cyborg.* у стороннего - отказ, потребление cyborg.* открыто', () => {
   const g = resolveGraph(
     [
       m('rogue', { provides: { 'cyborg.agent': '1.0' } }),

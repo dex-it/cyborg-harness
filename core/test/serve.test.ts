@@ -66,7 +66,7 @@ async function kernel(permissions: Record<string, unknown>) {
   return { k, ctx, denied: () => k.journal.filter((e) => e.kind === 'denied').map((e) => `${e.pluginId}:${e.method}`), [Symbol.asyncDispose]: dispose };
 }
 
-test('serve: запрос доходит до обработчика в хосте, ответ - клиенту; длину тела считает сервер', async () => {
+test('ST-3002/6: serve: запрос доходит до обработчика в хосте, ответ - клиенту; длину тела считает сервер', async () => {
   await using s = await kernel({ serve: true });
   const seen: ServeRequest[] = [];
   const server = await s.ctx.os.serve!.http((request) => {
@@ -85,7 +85,7 @@ test('serve: запрос доходит до обработчика в хост
   assert.equal(local.status, 201, 'localhost с тем же портом - свой Host');
 });
 
-test('serve: чужой Host, Origin и тело больше предела до обработчика не доходят', async () => {
+test('ST-3002/6: serve: чужой Host, Origin и тело больше предела до обработчика не доходят', async () => {
   await using s = await kernel({ serve: true });
   let calls = 0;
   const server = await s.ctx.os.serve!.http(() => {
@@ -100,7 +100,7 @@ test('serve: чужой Host, Origin и тело больше предела д�
   assert.equal(calls, 0);
 });
 
-test('ST-1005/1: serve: падение обработчика и чужая форма ответа - 502; без права члена нет, dispose и выгрузка закрывают сервер', async () => {
+test('ST-3002/6: ST-1005/1: serve: падение обработчика и чужая форма ответа - 502; без права члена нет, dispose и выгрузка закрывают сервер', async () => {
   await using s = await kernel({ serve: true });
   const answers: (() => unknown)[] = [
     () => Promise.reject(new Error('упал')),
@@ -128,7 +128,7 @@ test('ST-1005/1: serve: падение обработчика и чужая фо
   assert.equal(bare.ctx.os.serve, undefined);
 });
 
-test('serve: обработчик не ответил за срок - 504', async () => {
+test('ST-3002/6: serve: обработчик не ответил за срок - 504', async () => {
   const serves = new HttpServes(() => new Promise(() => undefined), 50);
   const url = await serves.open('p', 'h1');
   assert.equal((await send(url)).status, 504);

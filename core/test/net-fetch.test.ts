@@ -98,7 +98,7 @@ async function fixture(permissions: Record<string, unknown>, lookup: Lookup, con
   return { net, k, port, server, hits, hung, denied, [Symbol.asyncDispose]: dispose };
 }
 
-test('net.fetch: хост из права, резолвящийся в локальный или частный адрес, получает отказ до соединения', async () => {
+test('ST-3002/5: net.fetch: хост из права, резолвящийся в локальный или частный адрес, получает отказ до соединения', async () => {
   const bad = [...LOCAL, ...LOCAL_V6].filter((a) => !a.includes('%'));
   const { lookup, calls } = answer(Object.fromEntries(bad.map((a, i) => [`h${String(i)}.example`, [a]])));
   await using f = await fixture({ net: bad.map((_, i) => `h${String(i)}.example:$PORT`) }, lookup);
@@ -111,7 +111,7 @@ test('net.fetch: хост из права, резолвящийся в лока�
   assert.match(f.denied()[0] ?? '', /адрес 127\.0\.0\.1 локальный/);
 });
 
-test('net.fetch: один локальный адрес среди публичных в ответе - отказ', async () => {
+test('ST-3002/5: net.fetch: один локальный адрес среди публичных в ответе - отказ', async () => {
   const { lookup } = answer({ 'mixed.example': ['8.8.8.8', '127.0.0.1'] });
   await using f = await fixture({ net: ['mixed.example:$PORT'] }, lookup);
   await assert.rejects(f.net.fetch(`http://mixed.example:${String(f.port)}/`), { code: 'PermissionDenied' });
@@ -131,7 +131,7 @@ test('net.fetch: право, названное локальным адресо�
   assert.deepEqual(f.denied(), []);
 });
 
-test('net.fetch по node:http: метод, тело и заголовки доходят; переадресация не идёт; 204 без тела; тайм-аут и выгрузка обрывают запрос', async () => {
+test('ST-3002/4: net.fetch по node:http: метод, тело и заголовки доходят; переадресация не идёт; 204 без тела; тайм-аут и выгрузка обрывают запрос', async () => {
   const { lookup } = answer({});
   await using f = await fixture({ net: ['127.0.0.1:$PORT'] }, lookup);
   const at = (p: string) => `http://127.0.0.1:${String(f.port)}${p}`;

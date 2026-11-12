@@ -88,7 +88,7 @@ test('ST-1005/1: process.run: выключение плагина и выгру�
   }
 });
 
-test('process.run: timeoutMs завершает и потомков программы, а не только её саму', { skip: !posix && 'группы процессов - POSIX' }, async () => {
+test('ST-3002/2: process.run: timeoutMs завершает и потомков программы, а не только её саму', { skip: !posix && 'группы процессов - POSIX' }, async () => {
   await using box = await sandbox();
   const { k, ctx } = await kernel({ a: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp });
   const pids: number[] = [];
@@ -204,7 +204,7 @@ test('pty: kill бьёт по группе процесса - потомки о�
   }
 });
 
-test('net.fetch: тело ответа ограничено, бесконечный поток обрывается отказом, а не съедает память', async () => {
+test('ST-3002/7: net.fetch: тело ответа ограничено, бесконечный поток обрывается отказом, а не съедает память', async () => {
   await using box = await sandbox();
   let pulled = 0;
   const endless = (async () =>
@@ -223,7 +223,7 @@ test('net.fetch: тело ответа ограничено, бесконечн�
   await k.unload();
 });
 
-test('ST-1005/1: net.fetch: зависший сервер - Timeout по timeoutMs; выгрузка плагина обрывает запрос', async () => {
+test('ST-3002/7: ST-1005/1: net.fetch: зависший сервер - Timeout по timeoutMs; выгрузка плагина обрывает запрос', async () => {
   await using box = await sandbox();
   const signals: AbortSignal[] = [];
   const hanging = ((_url: URL, init: RequestInit) =>
@@ -261,7 +261,7 @@ test('fs.watch: ошибка наблюдателя (кончились inotify,
   await k.unload();
 });
 
-test('вызов контракта: зависший поставщик - потребителю Timeout, а не вечное ожидание', async () => {
+test('ST-3002/7: вызов контракта: зависший поставщик - потребителю Timeout, а не вечное ожидание', async () => {
   let consumer!: PluginContext;
   const files: TestFiles = { read: () => new Promise<string>(() => undefined) };
   const k = await load({
@@ -285,7 +285,7 @@ test('вызов контракта: зависший поставщик - по�
   await k.unload();
 });
 
-test('пределы: одновременных process.run у плагина - Invalid сверх предела, место освобождают выход, тайм-аут и выключение; readText крупнее предела и не обычный файл - Invalid', async () => {
+test('ST-3002/7: пределы: одновременных process.run у плагина - Invalid сверх предела, место освобождают выход, тайм-аут и выключение; readText крупнее предела и не обычный файл - Invalid', async () => {
   await using box = await sandbox();
   const node = [{ program: process.execPath, args: ['-e'] }];
   const { k, ctx } = await kernel({ a: { process: node, 'fs.read': [box.work] }, b: { process: node } }, { dataDir: box.data, tempDir: box.temp }, { runs: 2, readText: 16 });

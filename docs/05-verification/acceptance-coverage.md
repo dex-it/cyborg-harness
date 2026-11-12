@@ -9,7 +9,7 @@ origin: derived
 
 Таблица собрана из критериев историй, имён тестов и `acceptance.md` командой `npm run check:acceptance -- --write`; руками не правится. `npm run check:acceptance` падает, если у критерия нет ни теста с ключом `ST-NNNN/k` в имени, ни исключения в [acceptance.md](acceptance.md), если есть и то и другое, если ключ указывает на несуществующий критерий или эта таблица расходится с собранной. Исход критерия: «тест» - в имени хотя бы одного включённого теста ключ критерия (запуск - `npm run test:acceptance`); «исключение» - категория из [acceptance.md](acceptance.md); «целевое поведение» - критерий на то, чего ещё нет, проверки не требует. В ячейке «Проверка» путь файла и число тестов с ключом.
 
-Итог: историй 39, критериев 248: тест 101 (тестов с ключом 214), исключение 5, целевое поведение 22, без исхода 120.
+Итог: историй 39, критериев 248: тест 138 (тестов с ключом 313), исключение 5, целевое поведение 22, без исхода 83.
 
 Исключения по категориям: замеры 1, окно 3, ручная 1.
 
@@ -205,69 +205,69 @@ origin: derived
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-3001/1 | нет |  |
-| ST-3001/2 | нет |  |
-| ST-3001/3 | нет |  |
-| ST-3001/4 | нет |  |
-| ST-3001/5 | нет |  |
-| ST-3001/6 | нет |  |
-| ST-3001/7 | нет |  |
-| ST-3001/8 | нет |  |
-| ST-3001/9 | нет |  |
+| ST-3001/1 | тест | core/test/os.test.ts (1), core/test/trust.test.ts (1) |
+| ST-3001/2 | тест | core/test/os.test.ts (3), core/test/security-gateway.test.ts (1) |
+| ST-3001/3 | тест | core/test/os.test.ts (3) |
+| ST-3001/4 | тест | core/test/os.test.ts (2) |
+| ST-3001/5 | тест | core/test/os.test.ts (2) |
+| ST-3001/6 | тест | core/test/os.test.ts (1) |
+| ST-3001/7 | тест | core/test/os.test.ts (1) |
+| ST-3001/8 | тест | core/test/os.test.ts (1), core/test/plugin-check.test.ts (1) |
+| ST-3001/9 | тест | core/test/plugin-check.test.ts (1), core/test/trust.test.ts (1), core/test/workspace-trust.test.ts (1) |
 | ST-3001/10 | целевое поведение |  |
 
 ## ST-3002 Программы, сеть, открытие в системе и локальный сервер под правами
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-3002/1 | нет |  |
-| ST-3002/2 | нет |  |
-| ST-3002/3 | нет |  |
-| ST-3002/4 | нет |  |
-| ST-3002/5 | нет |  |
-| ST-3002/6 | нет |  |
-| ST-3002/7 | нет |  |
+| ST-3002/1 | тест | core/test/os.test.ts (2) |
+| ST-3002/2 | тест | core/test/os-lifetime.test.ts (1), core/test/os.test.ts (4), core/test/security-gateway.test.ts (1) |
+| ST-3002/3 | тест | core/test/os.test.ts (2), core/test/workspace-trust.test.ts (2) |
+| ST-3002/4 | тест | core/test/net-fetch.test.ts (1), core/test/os.test.ts (1) |
+| ST-3002/5 | тест | core/test/net-fetch.test.ts (2) |
+| ST-3002/6 | тест | core/test/serve.test.ts (4) |
+| ST-3002/7 | тест | core/test/os-lifetime.test.ts (4), core/test/os.test.ts (4) |
 
 ## ST-3003 Права не передаются через чужие контракты и команды
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-3003/1 | нет |  |
+| ST-3003/1 | тест | core/test/via-contract.test.ts (2) |
 | ST-3003/2 | целевое поведение |  |
-| ST-3003/3 | нет |  |
-| ST-3003/4 | нет |  |
-| ST-3003/5 | нет |  |
+| ST-3003/3 | тест | core/test/command-callers.test.ts (3) |
+| ST-3003/4 | тест | core/test/command-callers.test.ts (1) |
+| ST-3003/5 | тест | core/test/graph.test.ts (2), core/test/loader.test.ts (1) |
 
 ## ST-3004 Секреты не утекают, удаление плагина стирает его данные
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-3004/1 | нет |  |
-| ST-3004/2 | нет |  |
-| ST-3004/3 | нет |  |
-| ST-3004/4 | нет |  |
-| ST-3004/5 | нет |  |
+| ST-3004/1 | тест | core/test/os.test.ts (1) |
+| ST-3004/2 | тест | core/test/os.test.ts (1) |
+| ST-3004/3 | тест | core/test/diagnostics.test.ts (1), core/test/plugin-log.test.ts (1), core/test/secrets-journal.test.ts (1) |
+| ST-3004/4 | тест | core/test/uninstall.test.ts (2) |
+| ST-3004/5 | тест | core/test/plugin-log.test.ts (3) |
 
 ## ST-3005 Вид изолирован: группа рендера, закрытая CSP, окно остаётся на своих адресах
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-3005/1 | нет |  |
-| ST-3005/2 | нет |  |
-| ST-3005/3 | нет |  |
-| ST-3005/4 | тест | electron/test/view-files.test.ts (1) |
-| ST-3005/5 | нет |  |
-| ST-3005/6 | нет |  |
+| ST-3005/1 | тест | core/test/loader.test.ts (3), core/test/os.test.ts (1), core/test/workspace-trust.test.ts (1), electron/test/plugins.test.ts (1) |
+| ST-3005/2 | тест | electron/test/view-frames.test.ts (2) |
+| ST-3005/3 | тест | core/test/no-inner-html.test.ts (1) |
+| ST-3005/4 | тест | electron/test/view-files.test.ts (4) |
+| ST-3005/5 | тест | electron/test/csp-note.test.ts (1), electron/test/view-files.test.ts (1) |
+| ST-3005/6 | тест | electron/test/navigation.test.ts (3) |
 | ST-3005/7 | целевое поведение |  |
 
 ## ST-3006 Агент не получает больше, чем человек разрешил
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-3006/1 | нет |  |
-| ST-3006/2 | нет |  |
-| ST-3006/3 | нет |  |
-| ST-3006/4 | нет |  |
+| ST-3006/1 | тест | playground/test/agents.test.ts (1) |
+| ST-3006/2 | тест | playground/test/agents.test.ts (2) |
+| ST-3006/3 | тест | playground/test/agents.test.ts (1) |
+| ST-3006/4 | тест | playground/test/agents.test.ts (2) |
 | ST-3006/5 | целевое поведение |  |
 
 ## ST-3007 Установка стороннего плагина с согласием человека (этап 2)
@@ -280,15 +280,15 @@ origin: derived
 | ST-3007/4 | целевое поведение |  |
 | ST-3007/5 | целевое поведение |  |
 | ST-3007/6 | целевое поведение |  |
-| ST-3007/7 | нет |  |
+| ST-3007/7 | тест | core/test/os.test.ts (1), core/test/plugin-check.test.ts (1) |
 | ST-3007/8 | целевое поведение |  |
 
 ## ST-3008 Безопасный режим, значения не из репозитория и учёт угроз
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-3008/1 | нет |  |
-| ST-3008/2 | нет |  |
+| ST-3008/1 | тест | core/test/loader.test.ts (1), core/test/window.test.ts (1) |
+| ST-3008/2 | тест | core/test/workspace-trust.test.ts (4), core/test/workspace.test.ts (1) |
 | ST-3008/3 | целевое поведение |  |
 
 ## ST-4001 Каждая операция на границе плагинов даёт одну запись трассы

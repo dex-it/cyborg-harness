@@ -182,7 +182,7 @@ test('хуки: граф до кода, журнал по ходу, лог с id
   assert.deepEqual(seen, ['graph:a', 'log:a:привет', 'journal:activated', 'journal:deactivated']);
 });
 
-test('безопасный режим не запускает хосты', async () => {
+test('ST-3008/1: безопасный режим не запускает хосты', async () => {
   let spawned = false;
   const k = await load({
     apiVersion: PLUGIN_API_VERSION,
@@ -312,7 +312,7 @@ test('ST-1004/2, ST-1004/3, ST-1004/4: «Включить снова»: не п�
   await k.unload();
 });
 
-test('ST-2004/5: пространство поставки: отказ стороннему поставщику идёт в журнал, без bundled проверки нет', async () => {
+test('ST-3003/5: ST-2004/5: пространство поставки: отказ стороннему поставщику идёт в журнал, без bundled проверки нет', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const table = { claude: noop, rogue: noop, sessions: noop };
   const options = {
@@ -333,7 +333,7 @@ test('ST-2004/5: пространство поставки: отказ стор�
 });
 
 // K-04: группы рендера - origin и процесс рендера на группу; граница доверия видов - группа, поэтому сторонний не делит её ни с кем.
-test('группы рендера: ui.group - рекомендация, plugins.uiGroups её перекрывает, без группы - id плагина, без ui группы нет', async () => {
+test('ST-3005/1: группы рендера: ui.group - рекомендация, plugins.uiGroups её перекрывает, без группы - id плагина, без ui группы нет', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
   const ids = ['a', 'b', 'c', 'd', 'e', 'logic'];
@@ -365,7 +365,7 @@ test('группы рендера: ui.group - рекомендация, plugins.
   await plain.unload();
 });
 
-test('группы рендера: сторонний всегда один в своей группе, запись group-isolated только если ему было с кем делить', async () => {
+test('ST-3005/1: группы рендера: сторонний всегда один в своей группе, запись group-isolated только если ему было с кем делить', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
   const ids = ['files', 'tree', 'x', 'y', 'z', 'w'];
@@ -407,7 +407,7 @@ test('группы рендера: сторонний всегда один в �
   await open.unload();
 });
 
-test('группы рендера: origin стороннего в своём пространстве имён - группа поставки с тем же именем его хранилище не делит, ни в одной загрузке, ни в следующей', async () => {
+test('ST-3005/1: группы рендера: origin стороннего в своём пространстве имён - группа поставки с тем же именем его хранилище не делит, ни в одной загрузке, ни в следующей', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
   // Загрузка 1: alice и bob (поставка) в группе tp2, имя пришло от человека или манифеста; загрузка 2: человек включил сторонний плагин с id tp2.

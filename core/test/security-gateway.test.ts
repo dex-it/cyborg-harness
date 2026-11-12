@@ -43,7 +43,7 @@ test('безопасность: пустой, относительный, ~ и N
   }
 });
 
-test('безопасность: .. и симлинк наружу области не дают ни чтения, ни записи', async () => {
+test('ST-3001/2: безопасность: .. и симлинк наружу области не дают ни чтения, ни записи', async () => {
   await using b = await box({ p: workRw });
   await writeFile(path.join(b.outside, 'secret.txt'), 'секрет');
   await symlink(b.outside, path.join(b.work, 'link'));
@@ -81,7 +81,7 @@ test('безопасность: ссылка secrets.ref не обходит м�
   await assert.rejects(resolve('vault://kv/data/jira/%2e%2e/gitlab#token'), { code: 'PermissionDenied' }, 'обход маски закодированным ..');
 });
 
-test('безопасность: отказ process.run не кладёт аргументы программы (в них бывают токены) в журнал', async () => {
+test('ST-3002/2: безопасность: отказ process.run не кладёт аргументы программы (в них бывают токены) в журнал', async () => {
   await using b = await box({ p: { process: ['git'] } });
   await assert.rejects(b.ctx('p').os.process!.run('curl', ['--header', 'Authorization: Bearer TOPSECRET']), { code: 'PermissionDenied' });
   const text = JSON.stringify(b.k.journal.filter((e) => e.kind === 'denied'));

@@ -342,7 +342,7 @@ function withSecrets(): { store: Map<string, string>; os: NonNullable<LoadOption
   return { store: secrets.map, os: { dataDir: tmpdir(), tempDir: tmpdir(), secrets } };
 }
 
-test('секреты: значение из хранилища (set, get, resolve) вычёркивается из строки ctx.log; чужому плагину оно не принадлежит', async () => {
+test('ST-3004/3, ST-3004/5: секреты: значение из хранилища (set, get, resolve) вычёркивается из строки ctx.log; чужому плагину оно не принадлежит', async () => {
   const { os } = withSecrets();
   const { k, ctx, lines } = await rig(['a', 'b'], { os });
   try {
@@ -374,7 +374,7 @@ test('секреты: значение из хранилища (set, get, resolv
   }
 });
 
-test('секреты: прочитанное через get и resolve вычёркивается, в том числе из сводной записи', async () => {
+test('ST-3004/5: секреты: прочитанное через get и resolve вычёркивается, в том числе из сводной записи', async () => {
   const { store, os } = withSecrets();
   const secret = `s3cr3t-${randomUUID()}`;
   store.set('a/via-get', secret);
@@ -416,7 +416,7 @@ test('секреты: значение, разрезанное границей 
   }
 });
 
-test('секреты: значение короче 4 символов не вычёркивается - замена испортила бы строку, а скрыть такое значение нельзя', async () => {
+test('ST-3004/5: секреты: значение короче 4 символов не вычёркивается - замена испортила бы строку, а скрыть такое значение нельзя', async () => {
   const { os } = withSecrets();
   const { k, ctx, lines } = await rig(['a'], { os });
   try {

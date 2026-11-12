@@ -31,7 +31,7 @@ async function textsUnder(dir: string): Promise<string[]> {
 }
 
 // ADR-CH-0014 п. 4: значение секрета ядро не пишет ни в журнал, ни в config, ни в state.
-test('секрет не попадает в журнал, его описание словами, onJournal, onLog, файлы воркспейса и state', async (t) => {
+test('ST-3004/3: секрет не попадает в журнал, его описание словами, onJournal, onLog, файлы воркспейса и state', async (t) => {
   await using box = await sandbox();
   const secret = `s3cr3t-${randomUUID()}`;
   await writeFile(box.file, JSON.stringify({ cyborg: 2, plugins: { enabled: ['jira'] }, settings: { jira: { $version: 1, baseUrl: 'https://jira.corp.local' } } }));

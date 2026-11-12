@@ -89,7 +89,7 @@ async function world(dialog?: () => Promise<readonly string[]>) {
 const ownTree = async (dir: string) => readdir(dir).catch(() => []);
 const byPlugin = (docs: Record<string, unknown>) => (docs.$granted as { byPlugin: Record<string, string[]> } | undefined)?.byPlugin ?? {};
 
-test('uninstall: файлы, секреты, granted, память видов, документы и state плагина стёрты; config остаётся; чужое цело; в журнале список словами', async () => {
+test('ST-3004/4: uninstall: файлы, секреты, granted, память видов, документы и state плагина стёрты; config остаётся; чужое цело; в журнале список словами', async () => {
   await using w = await world();
   const { k, ctx } = await w.start(['jira', 'other']);
   for (const id of ['jira', 'other']) await w.leaveTraces(k, ctx(id));
@@ -137,7 +137,7 @@ test('uninstall: файлы, секреты, granted, память видов, �
   await k.unload();
 });
 
-test('uninstall: новый плагин с тем же id ничего не наследует: ни каталогов, ни секретов, ни выбранных путей, ни документов, ни памяти видов, ни state', async () => {
+test('ST-3004/4: uninstall: новый плагин с тем же id ничего не наследует: ни каталогов, ни секретов, ни выбранных путей, ни документов, ни памяти видов, ни state', async () => {
   await using w = await world();
   const first = await w.start(['jira']);
   await w.leaveTraces(first.k, first.ctx('jira'));

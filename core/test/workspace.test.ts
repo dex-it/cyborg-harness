@@ -210,7 +210,7 @@ test('ST-1007/3: plugins: воркспейс перекрывает enabled по
 });
 
 // K-04: plugins.uiGroups - группа рендера -> плагины; группа рендера делит мост плагинов, поэтому читается только из слоя пользователя (ADR-CH-0015, п. 5).
-test('plugins.uiGroups: действуют группы пользователя, поле файла воркспейса не действует и называется в problems', async () => {
+test('ST-3008/2: plugins.uiGroups: действуют группы пользователя, поле файла воркспейса не действует и называется в problems', async () => {
   await using box = await sandbox();
   await writeFile(box.file, JSON.stringify({ cyborg: 2, plugins: { uiGroups: { panels: ['b', 'c'], solo: ['d'] } } }));
   await mkdir(path.dirname(box.userFile), { recursive: true });

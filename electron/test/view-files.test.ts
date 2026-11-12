@@ -139,7 +139,7 @@ test('ST-2003/2, ST-3005/4: CSP вида: начинается с default-src \'
   for (const bad of ['*', 'http:', 'https:', 'blob:', "'unsafe-eval'", "'unsafe-inline'", 'ws:']) assert.ok(!csp.includes(bad), `в строгой CSP есть ${bad}`);
 });
 
-test('CSP вида зависит от флага: \'unsafe-inline\' только в style-src и только при inlineStyles, остальное то же', () => {
+test('ST-3005/4, ST-3005/5: CSP вида зависит от флага: \'unsafe-inline\' только в style-src и только при inlineStyles, остальное то же', () => {
   const off = directives(viewCsp(false));
   const on = directives(viewCsp(true));
   assert.deepEqual(off['style-src'], ["'self'"]);
@@ -150,7 +150,7 @@ test('CSP вида зависит от флага: \'unsafe-inline\' тольк�
 });
 
 // #161: default-src не покрывает base-uri и form-action: <base href> менял бы разрешение относительных адресов вида, <form action> отправлял бы данные.
-test('CSP вида: base-uri и form-action закрыты в обоих вариантах флага', () => {
+test('ST-3005/4: CSP вида: base-uri и form-action закрыты в обоих вариантах флага', () => {
   for (const inlineStyles of [false, true]) {
     const d = directives(viewCsp(inlineStyles));
     assert.deepEqual(d['base-uri'], ["'none'"], `inlineStyles=${inlineStyles}`);
@@ -158,7 +158,7 @@ test('CSP вида: base-uri и form-action закрыты в обоих вар�
   }
 });
 
-test('CSP вида: фреймы закрыты (frame-src берётся из default-src \'none\'), сосед по группе в <iframe> не встраивается', () => {
+test('ST-3005/4: CSP вида: фреймы закрыты (frame-src берётся из default-src \'none\'), сосед по группе в <iframe> не встраивается', () => {
   const d = directives(viewCsp(true));
   for (const name of ['frame-src', 'child-src', 'object-src', 'worker-src']) assert.equal(d[name], undefined, `${name} не задана: берётся из default-src или script-src`);
   assert.deepEqual(d['default-src'], ["'none'"]);
