@@ -30,13 +30,13 @@ function peerAccepts(range: string, version: string): boolean {
   return cmp(numbers(version), numbers(m[1])) >= 0 && cmp(numbers(version), numbers(m[2])) < 0;
 }
 
-test('мажор PLUGIN_API_VERSION равен мажору @cyborg-harness/contracts', () => {
+test('ST-5001/5: мажор PLUGIN_API_VERSION равен мажору @cyborg-harness/contracts', () => {
   const major = (v: string) => v.split('.')[0];
   assert.equal(major(PLUGIN_API_VERSION), major(packageVersion()));
 });
 
 describe('согласованность версий (K-21)', () => {
-  test('PLUGIN_API_VERSION - чистая x.y.z: разбор диапазонов ядра суффикс не читает, а engines.cyborg плагинов судят по ней', () => {
+  test('ST-5001/5: PLUGIN_API_VERSION - чистая x.y.z: разбор диапазонов ядра суффикс не читает, а engines.cyborg плагинов судят по ней', () => {
     assert.ok(parseVersion(PLUGIN_API_VERSION), `«${PLUGIN_API_VERSION}» не читается разбором ядра`);
     assert.match(PLUGIN_API_VERSION, /^\d+\.\d+\.\d+$/);
   });
@@ -49,7 +49,7 @@ describe('согласованность версий (K-21)', () => {
     assert.match(packageVersion(), /^\d+\.\d+\.\d+(-dev|-rc\.\d+)?$/);
   });
 
-  test('engines.cyborg каждого встроенного плагина, шаблона и проверочного потребителя: допустимый диапазон, принимает API ядра и не выходит за его мажор', () => {
+  test('ST-5001/1: engines.cyborg каждого встроенного плагина, шаблона и проверочного потребителя: допустимый диапазон, принимает API ядра и не выходит за его мажор', () => {
     const manifests = builtInManifests();
     assert.ok(manifests.length >= 20, `нашлось только ${String(manifests.length)} манифестов`);
     const major = numbers(PLUGIN_API_VERSION)[0];

@@ -144,6 +144,26 @@ describe('startKernel', () => {
     await assert.rejects(k.waitForJournal({ kind: 'denied' }, { timeout: 60 }), /нет нужной записи за 60 мс; есть: .*later:activated/);
   });
 
+  it('ST-5003/6: тест на тест-ките ждёт запись deprecated-call и видит вызывающего, контракт и член, как окно «Плагины Cyborg»', async () => {
+    const consumer = probe('caller', { requires: { 'test.old': '^1' } });
+    const provider: InlinePlugin = {
+      manifest: manifest('prov', { provides: { 'test.old': { version: '1.0', deprecated: ['list'] } } }),
+      module: {
+        activate: (ctx) => {
+          (ctx.contracts as unknown as { provide(name: string, version: string, impl: object): void }).provide('test.old', '1.0', { list: async () => ['a'], fresh: async () => ['a'] });
+        },
+      },
+    };
+    await using k = await startKernel({ plugins: [provider, consumer.plugin] });
+    const old = (consumer.ctx().contracts as unknown as { get(name: string, major: number): { list(): Promise<string[]>; fresh(): Promise<string[]> } | undefined }).get('test.old', 1);
+    assert.ok(old);
+    assert.deepEqual(await old.fresh(), ['a']);
+    assert.deepEqual(await old.list(), ['a'], 'вызов устаревшего члена выполняется как раньше');
+    const entry = await k.waitForJournal({ kind: 'deprecated-call', pluginId: 'caller' });
+    assert.deepEqual([entry.provider, entry.contract, entry.member], ['prov', 'test.old', 'list']);
+    assert.equal(k.journal.filter((e) => e.kind === 'deprecated-call').length, 1, 'непомеченный член записи не даёт');
+  });
+
   it('unload через Symbol.asyncDispose: плагины сняты, песочница удалена, повторный вызов безвреден', async () => {
     const down: string[] = [];
     const k = await startKernel({ plugins: [{ manifest: manifest('x'), module: { activate: () => ({ dispose: () => void down.push('x') }) } }] });

@@ -18,7 +18,7 @@ const files = m('files', { provides: { 'cyborg.files': ['1.4', '2.0'] } });
 const oldUser = m('old', { requires: { 'cyborg.files': '^1' } });
 const newUser = m('new', { optional: { 'cyborg.files': '^2' } });
 
-test('ST-2001/1: потребитель получает свою мажорную версию от того же поставщика', () => {
+test('ST-5001/6, ST-5002/2: ST-2001/1: потребитель получает свою мажорную версию от того же поставщика', () => {
   const r = registry([files, oldUser, newUser]);
   r.provide('files', 'cyborg.files', '1.4', { v: 1 });
   r.provide('files', 'cyborg.files', '2.0', { v: 2 });
@@ -26,7 +26,7 @@ test('ST-2001/1: потребитель получает свою мажорну
   assert.deepEqual(r.get('new', 'cyborg.files', 2), { v: 2 });
 });
 
-test('мажорная версия в get и all должна лежать в диапазоне манифеста', () => {
+test('ST-5001/4, ST-5002/2: мажорная версия в get и all должна лежать в диапазоне манифеста', () => {
   const any = m('any', { optional: { 'cyborg.files': '*' } });
   const r = registry([files, oldUser, any]);
   r.provide('files', 'cyborg.files', '1.4', { v: 1 });

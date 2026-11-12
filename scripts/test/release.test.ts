@@ -63,7 +63,7 @@ describe('hasChangelogEntry', () => {
 });
 
 describe('planRelease: тег и версия пакета', () => {
-  it('версия в теге совпадает с версией пакета и записью CHANGELOG - пакет в плане, остальные пропущены', () => {
+  it('ST-5002/7: версия в теге совпадает с версией пакета и записью CHANGELOG - пакет в плане, остальные пропущены', () => {
     const root = tree({ contracts: { version: '1.0.0' }, core: { version: '0.1.0' }, electron: { version: '0.1.0' } });
     const plan = planRelease(root, 'v0.1.0');
     assert.deepEqual(plan.packages.map((p) => [p.name, p.version, p.distTag]), [['@cyborg-harness/core', '0.1.0', 'latest'], ['@cyborg-harness/electron', '0.1.0', 'latest']]);
@@ -99,7 +99,7 @@ describe('planRelease: тег и версия пакета', () => {
 });
 
 describe('planRelease: CHANGELOG, канал, закрытость', () => {
-  it('нет записи о версии в CHANGELOG - отказ; в репетиции предупреждение', () => {
+  it('ST-5002/7: нет записи о версии в CHANGELOG - отказ; в репетиции предупреждение', () => {
     const root = tree({ core: { version: '0.1.0', changelog: '# Журнал\n\n## Unreleased\n' } });
     assert.match(problemsOf(() => planRelease(root, 'v0.1.0'))[0] ?? '', /core\/CHANGELOG\.md нет заголовка «## 0\.1\.0 - ГГГГ-ММ-ДД»/);
     const rehearsal = planRelease(root, 'v0.1.0', { rehearsal: true });

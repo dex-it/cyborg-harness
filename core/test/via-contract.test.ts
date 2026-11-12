@@ -203,7 +203,7 @@ async function deprecatedSetup() {
   return { k, file, files, calls, [Symbol.asyncDispose]: dispose };
 }
 
-test('@deprecated: вызов помеченного члена из главной части пишет запись, повторы за окно считаются, непомеченный - ничего', async () => {
+test('ST-5003/1, ST-5003/2: @deprecated: вызов помеченного члена из главной части пишет запись, повторы за окно считаются, непомеченный - ничего', async () => {
   await using s = await deprecatedSetup();
   assert.deepEqual(s.calls(), [], 'запуск и подписки записей не дают');
   for (let i = 0; i < 4; i++) await s.files('main').size(s.file);

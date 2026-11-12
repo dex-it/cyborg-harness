@@ -9,7 +9,7 @@ origin: derived
 
 Таблица собрана из критериев историй, имён тестов и `acceptance.md` командой `npm run check:acceptance -- --write`; руками не правится. `npm run check:acceptance` падает, если у критерия нет ни теста с ключом `ST-NNNN/k` в имени, ни исключения в [acceptance.md](acceptance.md), если есть и то и другое, если ключ указывает на несуществующий критерий или эта таблица расходится с собранной. Исход критерия: «тест» - в имени хотя бы одного включённого теста ключ критерия (запуск - `npm run test:acceptance`); «исключение» - категория из [acceptance.md](acceptance.md); «целевое поведение» - критерий на то, чего ещё нет, проверки не требует. В ячейке «Проверка» путь файла и число тестов с ключом.
 
-Итог: историй 39, критериев 248: тест 167 (тестов с ключом 374), исключение 6, целевое поведение 22, без исхода 53.
+Итог: историй 39, критериев 248: тест 194 (тестов с ключом 448), исключение 6, целевое поведение 22, без исхода 26.
 
 Исключения по категориям: замеры 2, окно 3, ручная 1.
 
@@ -351,49 +351,49 @@ origin: derived
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-5001/1 | нет |  |
-| ST-5001/2 | нет |  |
-| ST-5001/3 | нет |  |
-| ST-5001/4 | нет |  |
-| ST-5001/5 | нет |  |
-| ST-5001/6 | нет |  |
+| ST-5001/1 | тест | core/test/api-version.test.ts (1), core/test/semver-manifest.test.ts (1) |
+| ST-5001/2 | тест | core/test/graph.test.ts (1), core/test/loader.test.ts (1), core/test/semver-manifest.test.ts (1) |
+| ST-5001/3 | тест | core/test/semver-manifest.test.ts (2) |
+| ST-5001/4 | тест | core/test/graph.test.ts (1), core/test/registry.test.ts (1) |
+| ST-5001/5 | тест | core/test/api-version.test.ts (2) |
+| ST-5001/6 | тест | core/test/graph.test.ts (1), core/test/registry.test.ts (1) |
 
 ## ST-5002 Публичный API стабилен в пределах мажорной версии
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-5002/1 | нет |  |
-| ST-5002/2 | нет |  |
-| ST-5002/3 | нет |  |
+| ST-5002/1 | тест | core/test/api-snapshot.test.ts (3) |
+| ST-5002/2 | тест | core/test/graph.test.ts (1), core/test/registry.test.ts (2) |
+| ST-5002/3 | тест | core/test/api-snapshot.test.ts (7) |
 | ST-5002/4 | целевое поведение |  |
-| ST-5002/5 | нет |  |
-| ST-5002/6 | нет |  |
-| ST-5002/7 | нет |  |
-| ST-5002/8 | нет |  |
+| ST-5002/5 | тест | contracts/test/package.test.ts (3), core/test/api-snapshot.test.ts (2) |
+| ST-5002/6 | тест | core/test/external-plugins.test.ts (1), core/test/loader.test.ts (1) |
+| ST-5002/7 | тест | scripts/test/release.test.ts (2) |
+| ST-5002/8 | тест | core/test/loader.test.ts (1), core/test/semver-manifest.test.ts (2) |
 
 ## ST-5003 Вызовы устаревших членов видны автору
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-5003/1 | нет |  |
-| ST-5003/2 | нет |  |
-| ST-5003/3 | нет |  |
-| ST-5003/4 | нет |  |
-| ST-5003/5 | нет |  |
-| ST-5003/6 | нет |  |
+| ST-5003/1 | тест | core/test/via-contract.test.ts (1) |
+| ST-5003/2 | тест | core/test/semver-manifest.test.ts (1), core/test/via-contract.test.ts (1) |
+| ST-5003/3 | тест | core/test/journal.test.ts (4) |
+| ST-5003/4 | тест | core/test/diagnostics.test.ts (1), core/test/status.test.ts (1) |
+| ST-5003/5 | тест | core/test/api-snapshot.test.ts (1) |
+| ST-5003/6 | тест | testing/test/kit.test.ts (1) |
 
 ## ST-5004 Разделы config и state переживают обновление
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-5004/1 | нет |  |
-| ST-5004/2 | нет |  |
-| ST-5004/3 | нет |  |
-| ST-5004/4 | нет |  |
-| ST-5004/5 | нет |  |
-| ST-5004/6 | нет |  |
-| ST-5004/7 | нет |  |
-| ST-5004/8 | нет |  |
+| ST-5004/1 | тест | core/test/config.test.ts (1), core/test/loader.test.ts (1) |
+| ST-5004/2 | тест | core/test/config.test.ts (1), core/test/loader.test.ts (1) |
+| ST-5004/3 | тест | core/test/config.test.ts (1), core/test/json-schema.test.ts (1), core/test/loader.test.ts (1), core/test/workspace.test.ts (1) |
+| ST-5004/4 | тест | core/test/config.test.ts (1), core/test/stress-sections.test.ts (1) |
+| ST-5004/5 | тест | core/test/workspace.test.ts (1), playground/src/main/legacy-workspace.test.ts (4) |
+| ST-5004/6 | тест | core/test/uninstall.test.ts (2) |
+| ST-5004/7 | тест | core/test/config.test.ts (1), core/test/stress-sections.test.ts (2), core/test/stress-workspace.test.ts (4) |
+| ST-5004/8 | тест | core/test/workspace.test.ts (1) |
 
 ## ST-6001 Приложение подключает ядро пакетами и задаёт поставку списком
 

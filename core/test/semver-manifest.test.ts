@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { allowsMajor, satisfies, isValidRange } from '../src/semver.ts';
 import { checkArgs, parseManifest, type CommandSpec } from '../src/manifest.ts';
 
-test('диапазоны: каретка, тильда, префикс и звезда', () => {
+test('ST-5001/1, ST-5001/3, ST-5002/8: диапазоны: каретка, тильда, префикс и звезда', () => {
   assert.ok(satisfies('1.4.0', '^1'));
   assert.ok(satisfies('1.9.9', '^1.4'));
   assert.ok(!satisfies('1.3.9', '^1.4'));
@@ -20,7 +20,7 @@ test('диапазоны: каретка, тильда, префикс и зве
   assert.ok(!satisfies('1.x', '^1'));
 });
 
-test('allowsMajor: есть ли в диапазоне версия этой мажорной', () => {
+test('ST-5001/3, ST-5002/8: allowsMajor: есть ли в диапазоне версия этой мажорной', () => {
   assert.ok(allowsMajor('^1.4', 1));
   assert.ok(!allowsMajor('^1.4', 2));
   assert.ok(!allowsMajor('^1.4', 0));
@@ -39,7 +39,7 @@ test('ST-2004/5: манифест: незнакомое поле верхнег�
   assert.ok(parseManifest({ $schema: './manifest.schema.json', ...base }).ok);
 });
 
-test('манифест под другой API: при ошибках разбора одна причина - версия API', () => {
+test('ST-5001/2: манифест под другой API: при ошибках разбора одна причина - версия API', () => {
   const newer = { ...base, engines: { cyborg: '^1.3' }, layout: { kind: 'side' } };
   assert.deepEqual(parseManifest(newer, '1.2.0'), { ok: false, id: 'pin-lock', errors: ['engines.cyborg: нужен API Cyborg ^1.3, есть 1.2.0'] });
   assert.deepEqual(parseManifest(newer, '1.3.0'), { ok: false, id: 'pin-lock', errors: ['layout: незнакомое поле манифеста'] });
@@ -227,7 +227,7 @@ test('вид: area modal - окно по просьбе главной част�
   assert.deepEqual(docErrors({ note: { area: 'modal' } }), ['documents.note.area: модальным бывает вид, а не документ: вкладки у модального окна нет']);
 });
 
-test('манифест: deprecated у provides - члены с пометкой @deprecated, ошибки называют поле', () => {
+test('ST-5003/2: манифест: deprecated у provides - члены с пометкой @deprecated, ошибки называют поле', () => {
   const ok = parseManifest({ ...base, provides: { 'test.old': { version: ['1.4', '2.0'], deprecated: ['list', 'get_one'], guard: { list: { 'fs.read': 0 } } }, 'test.new': '1.0' } });
   assert.ok(ok.ok);
   assert.deepEqual(ok.manifest.deprecated, { 'test.old': ['list', 'get_one'] });

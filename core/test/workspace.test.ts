@@ -56,7 +56,7 @@ test('ST-1007/3: state по ключу воркспейса: тот же фай�
   assert.notEqual(workspaceKey(path.join(box.root, 'other.json')), workspaceKey(box.file));
 });
 
-test('ST-1007/5: перенос старого формата хуком приложения: копия .v1.bak, config с полем cyborg, разделы state, повтор не идёт', async () => {
+test('ST-5004/5: ST-1007/5: перенос старого формата хуком приложения: копия .v1.bak, config с полем cyborg, разделы state, повтор не идёт', async () => {
   await using box = await sandbox();
   const old = { items: ['a', 'b'], current: 'b', plugins: { enabled: ['list'] } };
   await writeFile(box.file, JSON.stringify(old));
@@ -250,7 +250,7 @@ test('plugins.uiGroups: ошибки называют поле и файл по�
   bad.close();
 });
 
-test('ST-1007/8: правка файла извне доходит до ctx.config.onChange; не прошедшая проверку - запись в журнале, значение прежнее; своя запись не будит', async (t) => {
+test('ST-5004/3, ST-5004/8: ST-1007/8: правка файла извне доходит до ctx.config.onChange; не прошедшая проверку - запись в журнале, значение прежнее; своя запись не будит', async (t) => {
   await using box = await sandbox();
   await writeFile(box.file, JSON.stringify({ cyborg: 2, plugins: { enabled: ['lock'] }, settings: { lock: { $version: 1, minutes: 5 } } }));
   const ws = await open(box);

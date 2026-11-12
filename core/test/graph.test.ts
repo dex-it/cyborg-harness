@@ -24,7 +24,7 @@ test('ST-1002/7: порядок: поставщик раньше потреби�
   assert.equal(g.rejected.size, 0);
 });
 
-test('отказ по engines каскадирует на зависимых, optional переживает', () => {
+test('ST-5001/2: отказ по engines каскадирует на зависимых, optional переживает', () => {
   const g = resolveGraph(
     [
       m('files', { engines: { cyborg: '^2' }, provides: { 'cyborg.files': '1.0' } }),
@@ -39,12 +39,12 @@ test('отказ по engines каскадирует на зависимых, op
   assert.equal(g.bindings.get('tree')?.size, 0);
 });
 
-test('ST-1002/4: несовместимая мажорная версия поставщика - как отсутствие', () => {
+test('ST-5001/4: ST-1002/4: несовместимая мажорная версия поставщика - как отсутствие', () => {
   const g = resolveGraph([m('files', { provides: { 'cyborg.files': '2.0' } }), m('sessions', { requires: { 'cyborg.files': '^1' } })], '1.0.0');
   assert.equal(g.rejected.get('sessions')?.[0]?.kind, 'missing');
 });
 
-test('поставщик с двумя мажорными версиями обслуживает старого и нового потребителя', () => {
+test('ST-5001/6, ST-5002/2: поставщик с двумя мажорными версиями обслуживает старого и нового потребителя', () => {
   const g = resolveGraph(
     [
       m('files', { provides: { 'cyborg.files': ['1.4', '2.0'] } }),

@@ -81,7 +81,7 @@ test('ST-1001/1, ST-1001/7, ST-1002/1, ST-1003/1, ST-1004/1: журнал: не�
   await k.unload();
 });
 
-test('ST-1003/1, ST-1004/1, ST-1005/1: сбой активации снимает уже отданное плагином', async () => {
+test('ST-5002/6: ST-1003/1, ST-1004/1, ST-1005/1: сбой активации снимает уже отданное плагином', async () => {
   const k = await kernel(
     {
       files: {
@@ -152,7 +152,7 @@ test('ST-1001/1, ST-1001/7: битый манифест невключённог
   assert.deepEqual(k.journal, [{ pluginId: 'old', kind: 'disabled' }]);
 });
 
-test('манифест с полем новой версии API - в журнале причина версия, а не поле', async () => {
+test('ST-5001/2, ST-5002/8: манифест с полем новой версии API - в журнале причина версия, а не поле', async () => {
   const k = await kernel({}, { enabled: ['next', 'typo'], manifests: [manifest('next', { engines: { cyborg: '^1.3' }, layout: {} }), manifest('typo', { keybinding: [] })] });
   assert.deepEqual(k.journal, [
     { pluginId: 'next', kind: 'invalid', errors: [`engines.cyborg: нужен API Cyborg ^1.3, есть ${PLUGIN_API_VERSION}`] },
@@ -198,7 +198,7 @@ test('ST-3008/1: безопасный режим не запускает хос�
   assert.deepEqual(k.journal, [{ pluginId: 'a', kind: 'safe-mode' }]);
 });
 
-test('откат версии плагина: раздел config новее манифеста - плагин не активируется, данные целы', async () => {
+test('ST-5004/2: откат версии плагина: раздел config новее манифеста - плагин не активируется, данные целы', async () => {
   const { docs, store } = memory({ user: { 'pin-lock': { $version: 3, minutes: 5 } } });
   const k = await kernel(
     { 'pin-lock': { config: { migrate: (_, d) => d }, activate() {} } },
@@ -210,7 +210,7 @@ test('откат версии плагина: раздел config новее м�
   await k.unload();
 });
 
-test('миграция config идёт в хосте, ядро записывает итог; set плагина доходит до слоя', async () => {
+test('ST-5004/1: миграция config идёт в хосте, ядро записывает итог; set плагина доходит до слоя', async () => {
   const { docs, store } = memory({ user: { 'pin-lock': { idle: 5 } } });
   let seen: unknown;
   const k = await kernel(
@@ -510,7 +510,7 @@ test('ST-1001/9, ST-1001/10: хосты: host own у плагина постав
   await k.unload();
 });
 
-test('ST-1007/8: схема раздела из манифеста: значение не по схеме - отказ плагину, правка извне не по схеме - значение прежнее', async () => {
+test('ST-5004/3: ST-1007/8: схема раздела из манифеста: значение не по схеме - отказ плагину, правка извне не по схеме - значение прежнее', async () => {
   const { docs, store } = memory({ user: { timer: { $version: 1, minutes: 'пять' } } });
   const schema = { type: 'object', properties: { minutes: { type: 'integer', minimum: 1 } }, additionalProperties: false };
   const files: Record<string, unknown> = { './config.schema.json': schema, './broken.json': { type: 'date' } };

@@ -48,7 +48,7 @@ test('ST-4005/1, ST-4005/4: запись журнала словами и уро
   );
 });
 
-test('вызов устаревшего члена: словами с вызывающим, поставщиком и повторами, уровень warn, состояние плагинов не меняет, виден обоим', () => {
+test('ST-5003/4: вызов устаревшего члена: словами с вызывающим, поставщиком и повторами, уровень warn, состояние плагинов не меняет, виден обоим', () => {
   const call: JournalEntry = { pluginId: 'tabs', kind: 'deprecated-call', provider: 'sessions', contract: 'cyborg.sessions', member: 'list' };
   assert.equal(describeEntry(call), 'tabs вызывает устаревший cyborg.sessions.list поставщика sessions');
   assert.equal(describeEntry({ ...call, repeats: 41 }), 'tabs вызывает устаревший cyborg.sessions.list поставщика sessions - ещё 41 раз за 5 с');
