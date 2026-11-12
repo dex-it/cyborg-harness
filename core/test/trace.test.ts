@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -12,7 +13,7 @@ import { load, type Kernel, type LoadOptions } from '../src/loader.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { waitFor } from './wait-for.ts';
 import type { ExitRecord, OperationRecord, StreamRecord, TraceRecord } from '../src/trace-record.ts';
-import { inlineHosts, type SpawnHost } from '../src/transports.ts';
+import { inlineHosts, type HostHandle, type SpawnHost } from '../src/transports.ts';
 import { trackKernels } from './kernels.ts';
 
 // K-28 (FR-CH-4001…4008, NFR-CH-1004, NFR-CH-4002): трасса операций на границах Г1 - Г5.
@@ -125,7 +126,7 @@ const pairManifests = [
 ];
 const pairOptions = { hosts: { f: ['files'], a: ['app'] }, os: { dataDir: '/nonexistent/d', tempDir: '/nonexistent/t', env: ENV } } as const;
 
-test('трасса: вызов ctx.os, член контракта, команда и вызов моста дают по одной записи с границами, адресатом и итогом (FR-CH-4001, NFR-CH-1004)', async () => {
+test('ST-4001/1, ST-4001/2, ST-4001/4: трасса: вызов ctx.os, член контракта, команда и вызов моста дают по одной записи с границами, адресатом и итогом (FR-CH-4001, NFR-CH-1004)', async () => {
   const r = await rig(pair, pairManifests, pairOptions);
   const app = r.ctx.app!;
   r.take();
@@ -177,7 +178,17 @@ test('трасса: вызов ctx.os, член контракта, команд
   );
 });
 
-test('итог: исключение поставщика, команда без владельца и вызов ctx.os без права - запись с кодом и причиной на английском; вызов без права не выполняется (FR-CH-4003)', async () => {
+test('ST-4001/1: трасса: вызов ctx.os.net.fetch - одна запись, последняя граница - сеть (Г5), право net (FR-CH-4001)', async () => {
+  const fakeFetch = (async () => new Response('ответ')) as unknown as typeof fetch;
+  const r = await rig({ web: { activate() {} } }, [manifest('web', { permissions: { net: ['api.example.com'] } })], { os: { dataDir: '/nonexistent/d', tempDir: '/nonexistent/t', fetch: fakeFetch } });
+  r.take();
+  assert.equal((await r.ctx.web!.os.net!.fetch('https://api.example.com/v1')).body, 'ответ');
+  const [op, ...rest] = r.take();
+  assert.equal(rest.length, 0, 'вызов net.fetch - одна запись');
+  assert.deepEqual([op!.caller, op!.target, op!.boundaries, op!.right, op!.outcome], ['plugin:web', 'os:net.fetch', ['host', 'net'], 'net', 'ok']);
+});
+
+test('ST-4001/4: итог: исключение поставщика, команда без владельца и вызов ctx.os без права - запись с кодом и причиной на английском; вызов без права не выполняется (FR-CH-4003)', async () => {
   await using box = await sandbox();
   const secretFile = box.path('secret.txt');
   await writeFile(secretFile, 'содержимое');
@@ -198,11 +209,20 @@ test('итог: исключение поставщика, команда без
   const [none] = r.take();
   assert.deepEqual([none!.target, none!.code, none!.boundaries], ['command:nobody.home', 'CommandNotFound', ['host', 'contract']]);
 
+  const stolen = box.path('stolen.txt');
+  await assert.rejects(app.os.fs.writeText(stolen, 'чужое'), { code: 'PermissionDenied' });
+  const [write] = r.take();
+  assert.deepEqual([write!.target, write!.right, write!.outcome, write!.code], ['os:fs.writeText', 'fs.write', 'error', 'PermissionDenied']);
+  assert.equal(existsSync(stolen), false, 'вызов без права не выполнялся: файла нет');
+
   const text = JSON.stringify(r.records);
   assert.ok(!text.includes('отказ поставщика') && !text.includes(secretFile), 'текст исключения и путь в запись не идут: причина - по коду');
+
+  const broken = await rig({ bad: { activate: () => Promise.reject(new Error('нет ключа')) } }, [manifest('bad')], { os: { dataDir: box.path('data2'), tempDir: box.path('temp2') } });
+  assert.ok(broken.k.journal.some((e) => e.kind === 'failed' && e.pluginId === 'bad'), 'отказ активации - запись failed в журнале');
 });
 
-test('цепочка: клик вида -> команда -> член контракта другого плагина -> ctx.os несут номер первой записи; сочетание строит цепочку так же (FR-CH-4002)', async () => {
+test('ST-4001/1, ST-4001/2, ST-4001/3: цепочка: клик вида -> команда -> член контракта другого плагина -> ctx.os несут номер первой записи; сочетание строит цепочку так же (FR-CH-4002)', async () => {
   const r = await rig(pair, pairManifests, pairOptions);
   r.take();
 
@@ -223,7 +243,7 @@ test('цепочка: клик вида -> команда -> член контр
   assert.notEqual(start.chain, first.chain, 'вторая цепочка - другая');
 });
 
-test('цепочка: событие контракта начинает цепочку, колбэк потребителя с вызовом ctx.os идёт в ней (FR-CH-4001, 4002)', async () => {
+test('ST-4001/3: цепочка: событие контракта начинает цепочку, колбэк потребителя с вызовом ctx.os идёт в ней (FR-CH-4001, 4002)', async () => {
   let fire: (n: number) => void = () => undefined;
   const table: Record<string, PluginModule> = {
     ticker: {
@@ -261,7 +281,60 @@ test('цепочка: событие контракта начинает цеп�
   assert.deepEqual([os!.target, os!.caller, os!.chain], ['os:env.get', 'plugin:user', event!.id]);
 });
 
-test('содержимое: маркер в аргументе и в результате, значение секрета и путь в записи не попадают, размеры - да (FR-CH-4004, NFR-CH-4002)', async () => {
+test('ST-4001/3: цепочка: таймер плагина начинает цепочку - команда, член контракта и ctx.os из него несут номер первой записи (FR-CH-4002)', async () => {
+  const table: Record<string, PluginModule> = {
+    ...pair,
+    app: {
+      activate(ctx) {
+        ctx.commands.register('app.go', () => ctx.contracts.get('trace.files', 1)!.env!());
+        setTimeout(() => void ctx.commands.run('app.go'), 20);
+      },
+    },
+  };
+  const r = await rig(table, pairManifests, pairOptions);
+  const targets = ['command:app.go', 'contract:trace.files@1#env', 'os:env.get'];
+  await waitFor('таймер сработал, все три операции записаны', () => r.ops().filter((x) => targets.includes(x.target)).length === 3);
+  const fromTimer = r.ops().filter((x) => targets.includes(x.target));
+  const first = fromTimer.find((x) => x.target === 'command:app.go')!;
+  assert.deepEqual([first.caller, first.chain], ['plugin:app', first.id], 'операция из таймера не входит в другую: номер цепочки равен её id');
+  assert.ok(first.id < Math.min(...fromTimer.filter((x) => x !== first).map((x) => x.id)));
+  assert.deepEqual([...new Set(fromTimer.map((x) => x.chain))], [first.id], 'порождённые операции несут номер первой');
+});
+
+test('ST-4003/6, ST-4001/4: хост поставщика упал посреди вызова: у вызова одна запись с HostGone, отдельной записи нет, виновник - в host-down журнала (FR-CH-4003)', async () => {
+  const handles = new Map<string, HostHandle>();
+  const ctx: Record<string, PluginContext> = {};
+  const inline = inlineHosts(async (entry) => ({
+    activate(c: PluginContext) {
+      ctx[entry] = c;
+      if (entry === 'files') c.contracts.provide('trace.files', '1.0', { read: () => new Promise<string>(() => undefined) });
+    },
+  }));
+  const spawn: SpawnHost = (hostId) => {
+    const handle = inline(hostId);
+    handles.set(hostId, handle);
+    return handle;
+  };
+  const r = await rig({}, [manifest('files', { provides: { 'trace.files': '1.0' } }), manifest('app', { requires: { 'trace.files': '^1' } })], { spawn, hosts: { f: ['files'], a: ['app'] } });
+  r.take();
+
+  const call = ctx.app!.contracts.get('trace.files', 1)!.read!('x');
+  const settled = assert.rejects(call, { code: 'HostGone' });
+  await sleep(20);
+  handles.get('f')!.kill();
+  await settled;
+  await waitFor('хост поставщика перезапущен', () => r.k.journal.some((e) => e.kind === 'host-restart' && e.hostId === 'f') && r.k.active.includes('files'));
+
+  const records = r.ops().filter((x) => x.target === 'contract:trace.files@1#read');
+  assert.equal(records.length, 1, 'операция кончается одной записью, отдельной записи о падении нет');
+  assert.deepEqual([records[0]!.caller, records[0]!.callee, records[0]!.outcome, records[0]!.code], ['plugin:app', 'plugin:files', 'error', 'HostGone']);
+  assert.deepEqual(r.ops().filter((x) => x.code === 'HostGone'), records, 'HostGone несёт только оборванный вызов');
+  const down = r.k.journal.find((e) => e.kind === 'host-down' && e.hostId === 'f');
+  assert.ok(down?.kind === 'host-down', 'запись host-down в журнале');
+  assert.deepEqual([down.reason, down.culprits], ['crash', ['files']], 'виновник назван в host-down');
+});
+
+test('ST-4001/5, ST-4001/11: содержимое: маркер в аргументе и в результате, значение секрета и путь в записи не попадают, размеры - да (FR-CH-4004, NFR-CH-4002)', async () => {
   await using box = await sandbox();
   const marker = `МАРКЕР-${randomUUID()}`;
   const secret = `s3cr3t-${randomUUID()}`;
@@ -323,7 +396,7 @@ test('содержимое: значение секрета, полученно�
   for (const leak of [secret, ref, 'elsewhere']) assert.ok(!text.includes(leak), `в трассе есть ${leak.slice(0, 12)}…`);
 });
 
-test('поток: 5000 сообщений pty за интервал дают одну запись-счётчик с числом сообщений и байт, а не запись на сообщение (FR-CH-4005)', async () => {
+test('ST-4001/6: поток: 5000 сообщений pty за интервал дают одну запись-счётчик с числом сообщений и байт, а не запись на сообщение (FR-CH-4005)', async () => {
   const pty = fakePty();
   const r = await rig(
     { term: { activate() {} } },
@@ -348,7 +421,7 @@ test('поток: 5000 сообщений pty за интервал дают о�
   assert.ok(r.ops().length < 10, 'операций на сообщение нет');
 });
 
-test('поток: счётчик закрывается по истечении интервала, следующий интервал считается заново (FR-CH-4005)', async () => {
+test('ST-4001/6: поток: счётчик закрывается по истечении интервала, следующий интервал считается заново (FR-CH-4005)', async () => {
   const pty = fakePty();
   const r = await rig(
     { term: { activate() {} } },
@@ -368,7 +441,7 @@ test('поток: счётчик закрывается по истечении 
   assert.deepEqual(r.records.filter(isStream).map((s) => [s.messages, s.bytes]), [[20, 40], [5, 15]]);
 });
 
-test('поток: события fs.watch пишутся счётчиком за интервал, а не записью на событие (FR-CH-4005)', async () => {
+test('ST-4001/6: поток: события fs.watch пишутся счётчиком за интервал, а не записью на событие (FR-CH-4005)', async () => {
   await using box = await sandbox();
   const dir = box.path('watched');
   await mkdir(dir);
@@ -388,7 +461,7 @@ test('поток: события fs.watch пишутся счётчиком за
   assert.ok(!r.ops().some((x) => x.target.includes('change')), 'записи на событие нет');
 });
 
-test('вызывающий в общем хосте: запись несёт id хоста и имя плагина по отметке канала (FR-CH-4006)', async () => {
+test('ST-4001/7: вызывающий в общем хосте: запись несёт id хоста и имя плагина по отметке канала (FR-CH-4006)', async () => {
   const r = await rig(
     { x: { activate() {} }, y: { activate() {} } },
     [manifest('x', { permissions: { env: ['TRACE_ENV'] } }), manifest('y', { permissions: { env: ['TRACE_ENV'] } })],
@@ -400,7 +473,7 @@ test('вызывающий в общем хосте: запись несёт id 
   assert.deepEqual(r.take().map((x) => [x.caller, x.hostId]), [['plugin:x', 'shared'], ['plugin:y', 'shared']]);
 });
 
-test('запуск программы: process.run даёт запись с правом и запись выхода с кодом без вывода программы; pty.spawn - запись запуска и запись выхода (FR-CH-4007)', async () => {
+test('ST-4001/8: запуск программы: process.run даёт запись с правом и запись выхода с кодом без вывода программы; pty.spawn - запись запуска и запись выхода (FR-CH-4007)', async () => {
   const pty = fakePty();
   const marker = `ВЫВОД-${randomUUID()}`;
   const r = await rig(
@@ -428,7 +501,7 @@ test('запуск программы: process.run даёт запись с пр
   assert.ok(!JSON.stringify(r.records).includes(marker), 'вывод программы в записях не появляется');
 });
 
-test('трасса недоступна плагину: в ctx нет члена с трассой, а сообщения ядра хостам не несут ни записей, ни их полей (FR-CH-4008)', async () => {
+test('ST-4001/9: трасса недоступна плагину: в ctx нет члена с трассой, а сообщения ядра хостам не несут ни записей, ни их полей (FR-CH-4008)', async () => {
   const r = await rig(pair, pairManifests, pairOptions);
   await r.ctx.app!.os.env!.get('TRACE_ENV');
   await r.ctx.app!.contracts.get('trace.files', 1)!.read!('x');
@@ -444,7 +517,7 @@ test('трасса недоступна плагину: в ctx нет члена
   assert.ok(!keys.some((n) => /trace/i.test(n)), 'ядро для встраивающего приложения трассу не отдаёт: её читает окно ядра через onTrace');
 });
 
-test('сообщение хоста неверной формы и подмена имени плагина - запись на границе Г1 с кодом (FR-CH-4001)', async () => {
+test('ST-4001/7: сообщение хоста неверной формы и подмена имени плагина - запись на границе Г1 с кодом (FR-CH-4001)', async () => {
   const toKernel = new Map<string, (m: unknown) => void>();
   const base = inlineHosts(async () => ({ activate() {} }));
   const spawn: SpawnHost = (hostId) => {

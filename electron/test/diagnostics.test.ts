@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
 import { inlineHosts } from '@cyborg-harness/core';
 import { diagnosticsDir, fileDiagnostics, nodeDiagnosticsFs } from '../src/diagnostics-file.ts';
 import { PluginsService, startPlugins } from '../src/plugins.ts';
@@ -38,7 +39,7 @@ async function run(userData: string, broken: boolean) {
   return { service, diagnostics };
 }
 
-test('служба окна: после перезапуска причина сбоя прошлого запуска видна у плагина, а состояние плагина - из текущего запуска (FR-CH-4013, 4014)', async () => {
+test('ST-4003/4, ST-4003/5: служба окна: после перезапуска причина сбоя прошлого запуска видна у плагина, а состояние плагина - из текущего запуска (FR-CH-4013, 4014)', async () => {
   const userData = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['disk'] } }));
   plugin(path.join(userData, 'plugins'), 'disk');
@@ -65,7 +66,7 @@ test('служба окна: после перезапуска причина с
   }
 });
 
-test('служба окна: выгрузка пишет один текстовый файл туда, куда назвал человек, с версиями, состоянием и записью о сбое; ошибки пути и отсутствие хранения - отказ с текстом (FR-CH-4015, 4016)', async () => {
+test('ST-4004/1: служба окна: выгрузка пишет один текстовый файл туда, куда назвал человек, с версиями, состоянием и записью о сбое; ошибки пути и отсутствие хранения - отказ с текстом (FR-CH-4015, 4016)', async () => {
   const userData = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['disk'] } }));
   plugin(path.join(userData, 'plugins'), 'disk');
@@ -89,6 +90,27 @@ test('служба окна: выгрузка пишет один текстов
   }
   const bare = new PluginsService({ changed: () => undefined, alert: () => undefined });
   assert.deepEqual(await bare.exportDiagnostics('/tmp/x'), { error: 'хранение диагностики не включено' });
+});
+
+// Канал выгрузки зовёт диалог Electron, которого в Node нет: имя по умолчанию берётся из исходника и вычисляется.
+test('ST-4004/1: выгрузка: имя файла по умолчанию в диалоге сохранения - cyborg-diagnostics-<время>.txt, без двоеточий и точек во времени', () => {
+  const code = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'src', 'channels.ts'), 'utf8');
+  const handler = /windowChannel\('diagnostics:export', async \(\) => \{\n\s*const file = await choose\((`[^`]*`)\);/.exec(code);
+  assert.ok(handler?.[1], 'канал diagnostics:export предлагает имя шаблоном');
+  const name: unknown = vm.runInNewContext(handler[1]);
+  assert.equal(typeof name, 'string');
+  assert.match(name as string, /^cyborg-diagnostics-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-\d{3}Z\.txt$/);
+});
+
+test('ST-4004/3: выгрузка в адаптере: хранение, служба окна и канал выгрузки не импортируют сеть и не вызывают fetch (FR-CH-4016, осмотр)', () => {
+  const src = path.resolve(import.meta.dirname, '..', 'src');
+  for (const file of ['diagnostics-file.ts', 'plugins.ts', 'channels.ts']) {
+    const code = fs.readFileSync(path.join(src, file), 'utf8');
+    assert.ok(!/from 'node:(?:net|http|https|http2|dns|tls|dgram)'/.test(code), `${file}: сетевой модуль Node`);
+    assert.ok(!/\bfetch\s*\(|XMLHttpRequest|WebSocket/.test(code), `${file}: сетевой вызов`);
+    const fromElectron = [...code.matchAll(/import\s*\{([^}]*)\}\s*from 'electron'/g)].flatMap((m) => (m[1] ?? '').split(',').map((n) => n.trim().replace(/^type\s+/, '')));
+    assert.ok(!fromElectron.some((n) => n === 'net' || n.startsWith('net ')), `${file}: net из electron`);
+  }
 });
 
 test('старт: с diagnostics записи ядра идут в файл userData, а onTrace приложения тоже получает записи', async () => {
@@ -118,7 +140,7 @@ test('старт: с diagnostics записи ядра идут в файл user
   assert.ok(kinds.includes('run') && kinds.includes('journal') && kinds.includes('trace'), kinds.join(','));
 });
 
-test('файлы на диске: ротация держит число и размер, права владельца, каталог у каждого воркспейса свой', () => {
+test('ST-4003/1: файлы на диске: ротация держит число и размер, права владельца, каталог у каждого воркспейса свой', () => {
   const userData = tmp();
   const a = diagnosticsDir(userData, path.join(userData, 'a.cyborg.json'));
   const b = diagnosticsDir(userData, path.join(userData, 'b.cyborg.json'));
@@ -141,7 +163,7 @@ test('файлы на диске: ротация держит число и ра
   assert.deepEqual(nodeDiagnosticsFs(path.join(userData, 'пусто')).list(), []);
 });
 
-test('отказ диска в адаптере: каталог недоступен для записи - ядро поднимается, операции отвечают, причина названа в снимке окна', async () => {
+test('ST-4003/3: отказ диска в адаптере: каталог недоступен для записи - ядро поднимается, операции отвечают, причина названа в снимке окна', async () => {
   const userData = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['disk'] } }));
   plugin(path.join(userData, 'plugins'), 'disk');

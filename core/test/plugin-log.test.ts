@@ -108,7 +108,7 @@ test('ctx.log хоста: слушатель fs.watch, который броси
 const summaries = (journal: readonly JournalEntry[], pluginId?: string) =>
   journal.filter((e): e is Extract<JournalEntry, { kind: 'log-summary' }> => e.kind === 'log-summary' && (pluginId === undefined || e.pluginId === pluginId));
 
-test('длина: строка длиннее предела обрезается по границе символа и помечается, короткая идёт как есть', async () => {
+test('ST-4002/3: длина: строка длиннее предела обрезается по границе символа и помечается, короткая идёт как есть', async () => {
   const { k, ctx, lines } = await rig(['a'], { limits: { logLineBytes: 64 } });
   try {
     ctx.a?.log('коротко');
@@ -129,7 +129,7 @@ test('длина: строка длиннее предела обрезаетс�
   }
 });
 
-test('длина: предел по умолчанию - 8 КиБ', async () => {
+test('ST-4002/3: длина: предел по умолчанию - 8 КиБ', async () => {
   const { k, ctx, lines } = await rig(['a']);
   try {
     ctx.a?.log('x'.repeat(8192));
@@ -142,7 +142,7 @@ test('длина: предел по умолчанию - 8 КиБ', async () => 
   }
 });
 
-test('частота: строк сверх предела за интервал в журнал по одной не идёт, в конце интервала - одна сводная с последней error; сосед и состояние целы', async () => {
+test('ST-4002/3: частота: строк сверх предела за интервал в журнал по одной не идёт, в конце интервала - одна сводная с последней error; сосед и состояние целы', async () => {
   const { k, ctx, lines, journal } = await rig(['a', 'b'], { limits: { logRate: 5, logWindowMs: 100 } });
   try {
     for (let i = 0; i < 12; i++) ctx.a?.log(`info ${String(i)}`);
@@ -162,7 +162,7 @@ test('частота: строк сверх предела за интервал
   }
 });
 
-test('частота: сводная запись не меняет состояние плагина; после интервала строки идут снова', async () => {
+test('ST-4002/3: частота: сводная запись не меняет состояние плагина; после интервала строки идут снова', async () => {
   const { k, ctx, lines, journal } = await rig(['a'], { limits: { logRate: 2, logWindowMs: 60 } });
   try {
     for (let i = 0; i < 6; i++) ctx.a?.log(`s${String(i)}`);
@@ -335,6 +335,36 @@ test('поток: интервал закрывается строкой, при
   }
 });
 
+test('ST-4002/3, ST-4002/4: пределы по умолчанию на подставных часах - 100 строк за 1 с проходят, сверх - сводная; поток 10 с выключает плагин, после «Включить снова» строки идут', { timeout: 10_000 }, async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+  const { k, ctx, lines, journal } = await rig(['a', 'b']);
+  try {
+    for (let i = 0; i < 10; i++) await burst(t, () => ctx.a, 1_000_000 + i * 1000, 101);
+    assert.equal(lines.filter(([id]) => id === 'a').length, 1000, 'за каждую секунду прошло ровно 100 строк');
+    assert.deepEqual(summaries(journal, 'a').map((e) => e.skipped), Array(9).fill(1), 'каждая закрытая секунда - сводная с одной пропущенной');
+    assert.deepEqual(switchedOff(journal, 'a'), [], '9 с потока - ещё не выключен');
+    t.mock.timers.setTime(1_010_000);
+    ctx.a?.log('на десятой секунде');
+    ctx.b?.log('сосед');
+    await until('выключение', () => switchedOff(journal, 'a').length === 1);
+    assert.equal(switchedOff(journal, 'a')[0]?.reason, 'log-flood');
+    assert.match(describeEntry(switchedOff(journal, 'a')[0]!), /поток строк/);
+    await until('строка соседа', () => lines.some(([id]) => id === 'b'));
+    assert.equal(lines.filter(([id]) => id === 'a').length, 1000, 'строка, закрывшая десятую секунду, не прошла');
+    assert.deepEqual(pluginStatuses(k.journal).map((s) => [s.id, s.state, s.revivable]), [['a', 'stopped', true], ['b', 'active', false]]);
+    await k.idle();
+    await k.enable('a');
+    ctx.a?.log('вернулся');
+    await until('строка после enable', () => lines.some(([, m]) => m === 'вернулся'));
+    await burst(t, () => ctx.a, 1_010_000, 100);
+    await burst(t, () => ctx.a, 1_011_000, 1);
+    assert.equal(summaries(journal, 'a').length, 11, 'секунда сверх предела после «Включить снова» закрыта сводной');
+    assert.equal(switchedOff(journal, 'a').length, 1, 'счёт потока после «Включить снова» начат заново');
+  } finally {
+    await k.unload();
+  }
+});
+
 // FR-CH-4018, вопрос 7 SRS фичи 04: ядро вычёркивает из строк значения, лежащие в хранилище секретов.
 /** Среда ядра с хранилищем секретов в памяти из тест-кита; `map` - то, что в хранилище лежит. */
 function withSecrets(): { store: Map<string, string>; os: NonNullable<LoadOptions['os']> } {
@@ -342,7 +372,7 @@ function withSecrets(): { store: Map<string, string>; os: NonNullable<LoadOption
   return { store: secrets.map, os: { dataDir: tmpdir(), tempDir: tmpdir(), secrets } };
 }
 
-test('секреты: значение из хранилища (set, get, resolve) вычёркивается из строки ctx.log; чужому плагину оно не принадлежит', async () => {
+test('ST-3004/5: секреты: значение из хранилища (set, get, resolve) вычёркивается из строки ctx.log; чужому плагину оно не принадлежит', async () => {
   const { os } = withSecrets();
   const { k, ctx, lines } = await rig(['a', 'b'], { os });
   try {
@@ -416,7 +446,7 @@ test('секреты: значение, разрезанное границей 
   }
 });
 
-test('секреты: значение короче 4 символов не вычёркивается - замена испортила бы строку, а скрыть такое значение нельзя', async () => {
+test('ST-3004/5: секреты: значение короче 4 символов не вычёркивается - замена испортила бы строку, а скрыть такое значение нельзя', async () => {
   const { os } = withSecrets();
   const { k, ctx, lines } = await rig(['a'], { os });
   try {

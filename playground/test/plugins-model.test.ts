@@ -17,7 +17,7 @@ describe('окно «Плагины Cyborg»: модель', () => {
     );
   });
 
-  it('журнал плагина - его записи и записи хоста, где он назван', () => {
+  it('ST-4005/1: журнал плагина - его записи и записи хоста, где он назван', () => {
     const line = (subject: string, plugins: string[]): PluginJournalLine => ({ at: 0, subject, plugins, text: subject, level: 'info' });
     const lines = [line('echo', ['echo']), line('хост a', ['echo', 'probe']), line('probe', ['probe'])];
     assert.deepEqual(
@@ -38,7 +38,7 @@ describe('окно «Плагины Cyborg»: модель', () => {
     assert.equal(summary(snapshot([row('a', 'stopped'), row('b', 'stopped'), row('d', 'disabled')], { safeMode: true })), 'Безопасный режим: включённых плагинов 2, их код не запускается.');
   });
 
-  it('кнопки: у работающего - команды, выгрузка и хост; у выгруженного - «Загрузить», у упавшего - «Включить снова»', () => {
+  it('ST-2003/5: кнопки: у работающего - команды, выгрузка и хост; у выгруженного - «Загрузить», у упавшего - «Включить снова»', () => {
     const labels = (r: PluginRow, canHang = true) => actionsFor(r, canHang).map((a) => a.label);
     assert.deepEqual(labels(row('bob', 'active', { commands: ['bob.hello'], pid: 7 })), ['bob.hello', 'Выгрузить', 'Уронить хост', 'Повесить хост', 'Журнал']);
     assert.deepEqual(labels(row('bob', 'active', { pid: 7 }), false), ['Выгрузить', 'Уронить хост', 'Журнал']);
@@ -63,7 +63,7 @@ describe('окно «Плагины Cyborg»: модель', () => {
     );
   });
 
-  it('происхождение: сторонний помечен словами с предупреждением, встроенный и не найденный - нет; плашка каталога пользователя только с флагом', () => {
+  it('ST-1001/7: происхождение: сторонний помечен словами с предупреждением, встроенный и не найденный - нет; плашка каталога пользователя только с флагом', () => {
     assert.match(originNote(row('notes', 'active', { origin: 'user' })) ?? '', /^сторонний плагин из каталога пользователя: код не проверен/);
     assert.equal(originNote(row('files', 'active', { origin: 'bundled' })), undefined);
     assert.equal(originNote(row('ghost', 'disabled')), undefined);
@@ -145,7 +145,7 @@ describe('окно «Плагины Cyborg»: действия над воркс
 });
 
 describe('окно «Плагины Cyborg»: диагностика (K-30)', () => {
-  it('причина прошлого сбоя показана отдельно от причины текущего состояния; нет сбоя - нет строки', () => {
+  it('ST-4003/4: причина прошлого сбоя показана отдельно от причины текущего состояния; нет сбоя - нет строки', () => {
     assert.equal(previousNote(row('echo', 'active')), undefined);
     const text = previousNote(row('echo', 'active', { previousFailure: { at: Date.UTC(2026, 10, 9, 12, 0, 0), text: 'выключен, сбоев подряд: 3' } }));
     assert.match(text ?? '', /^В прошлом запуске, .*09\.11\.2026.*: выключен, сбоев подряд: 3$/);
