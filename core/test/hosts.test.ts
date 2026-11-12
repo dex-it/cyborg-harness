@@ -41,7 +41,7 @@ const state = (k: Kernel) => k.run('consumer.state') as Promise<State>;
 const downs = (k: Kernel) =>
   k.journal.filter((e): e is Extract<JournalEntry, { kind: 'host-down' }> => e.kind === 'host-down').map((d) => [d.hostId, d.reason, d.culprits, d.affects]);
 
-test('вызов между процессами: данные, исключение и функция в результате', async () => {
+test('ST-1003/2: вызов между процессами: данные, исключение и функция в результате', async () => {
   const k = await start(3, forkHosts(), QUIET_MS);
   try {
     assert.equal(await k.run('consumer.call', 'read', 'a.txt'), 'data:a.txt');
@@ -53,7 +53,7 @@ test('вызов между процессами: данные, исключен
   }
 });
 
-test('зависание: сторож убивает хост, виновник назван, соседний хост жив, поставщик возвращается', async () => {
+test('ST-1003/3: зависание: сторож убивает хост, виновник назван, соседний хост жив, поставщик возвращается', async () => {
   const k = await start();
   try {
     const before = await state(k);
@@ -81,7 +81,7 @@ test('падение процесса идёт тем же путём, что и
   }
 });
 
-test('после N сбоев виновник выключается, потребитель видит пропажу', async () => {
+test('ST-1003/4: после N сбоев виновник выключается, потребитель видит пропажу', async () => {
   const k = await start(2);
   try {
     await assert.rejects(k.run('consumer.call', 'hang'), { code: 'HostGone' });
@@ -214,7 +214,7 @@ async function rejected(k: Kernel, run: () => Promise<unknown>): Promise<void> {
   await waitFor('запись unhandled-rejection в журнале', () => rejections(k).length > before);
 }
 
-test('сторож: необработанное отклонение плагина - запись на него, хост и сосед живут', async () => {
+test('ST-1003/5: сторож: необработанное отклонение плагина - запись на него, хост и сосед живут', async () => {
   const k = await startShared(5, forkHosts(), QUIET_MS);
   try {
     const pid = await k.run('calm.pid');
@@ -238,7 +238,7 @@ test('сторож: необработанное отклонение плаги
   }
 });
 
-test('сторож: отклонение после await вменяется начавшему цепочку, а не соседу, чей код шёл последним', async () => {
+test('ST-1003/5: сторож: отклонение после await вменяется начавшему цепочку, а не соседу, чей код шёл последним', async () => {
   const k = await startShared(3, forkHosts(), QUIET_MS);
   try {
     await rejected(k, async () => {
@@ -292,7 +292,7 @@ test('сторож: плагин, снятый по страйкам, остаё
   }
 });
 
-test('сторож: три отклонения подряд выключают только виновника - хост не падает и не бросается, сосед работает', async () => {
+test('ST-1003/5: сторож: три отклонения подряд выключают только виновника - хост не падает и не бросается, сосед работает', async () => {
   const k = await startShared(3, forkHosts(), QUIET_MS);
   try {
     const pid = await k.run('calm.pid');

@@ -27,7 +27,7 @@ const release = (claim: Claim) => {
   if (claim.kind === 'owner') claim.close();
 };
 
-test('второй запуск того же воркспейса: владелец получает данные раньше, чем второй узнаёт об этом, второй уходит', async () => {
+test('ST-1007/1: второй запуск того же воркспейса: владелец получает данные раньше, чем второй узнаёт об этом, второй уходит', async () => {
   await using box = await sandbox();
   const asked: unknown[] = [];
   const first = await claimInstance(key, { safeMode: false }, (data) => asked.push(data), { dir: box.dir });
@@ -38,7 +38,7 @@ test('второй запуск того же воркспейса: владел
   first.close();
 });
 
-test('разные воркспейсы - независимые владельцы', async () => {
+test('ST-1007/1: разные воркспейсы - независимые владельцы', async () => {
   await using box = await sandbox();
   const a = await claimInstance('aaaaaaaaaaaaaaaa', {}, () => undefined, { dir: box.dir });
   const b = await claimInstance('bbbbbbbbbbbbbbbb', {}, () => undefined, { dir: box.dir });
@@ -65,7 +65,7 @@ test('сбой обработчика владельца не оставляет
   release(first);
 });
 
-test('владелец жив, но молчит: второй не становится владельцем, а сообщает об этом в срок', async () => {
+test('ST-1007/2: владелец жив, но молчит: второй не становится владельцем, а сообщает об этом в срок', async () => {
   await using box = await sandbox();
   const mute = net.createServer(() => undefined);
   await new Promise<void>((resolve) => mute.listen(instanceAddress(key, box.dir), resolve));

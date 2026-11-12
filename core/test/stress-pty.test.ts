@@ -50,7 +50,7 @@ test('stress-pty: 300 pty за цикл (spawn, вывод, выход, release)
   await t.releaseAll();
 });
 
-test('stress-pty: кольцевой буфер - 5 МБ мелкими кусками не выходит за предел, хвост точный; граница ровно по размеру', async () => {
+test('ST-1008/6: stress-pty: кольцевой буфер - 5 МБ мелкими кусками не выходит за предел, хвост точный; граница ровно по размеру', async () => {
   const { t, backend } = table(1000);
   const wire = await t.spawn('p', spawnOpts);
   const proc = backend.procs[0];
@@ -281,7 +281,7 @@ test('PL-01: хост плагина упал и окно перезагруже
   assert.equal(viewNumbers.length, seq, 'новый вид получил не весь поток');
 });
 
-test('stress-pty: плагин spawn-ит pty и не подписывается на вывод - хост не копит вывод без предела', async () => {
+test('ST-1008/6: stress-pty: плагин spawn-ит pty и не подписывается на вывод - хост не копит вывод без предела', async () => {
   let ctx!: PluginContext;
   await using s = await kernelWithPty({ term: (c) => void (ctx = c) });
   const h = await ctx.os.pty!.spawn({ program: 'sh', args: [], cols: 80, rows: 24, persist: false });
@@ -299,7 +299,7 @@ test('stress-pty: плагин spawn-ит pty и не подписывается
   assert.ok(got <= 256 * 1024 + 64 * 1024, `хост накопил ${String(got)} символов до первой подписки`);
 });
 
-test('сирота: pty с persist без attach завершается по сроку; attach, release и park срок снимают', async (t) => {
+test('ST-1008/2: сирота: pty с persist без attach завершается по сроку; attach, release и park срок снимают', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const backend = fakePty();
   const expired: PtyExpiry[] = [];
@@ -325,11 +325,24 @@ test('сирота: pty с persist без attach завершается по с�
   assert.equal(table.list('back').length, 1);
   assert.equal(backend.procs[3]!.killed, undefined, 'оставленный человеком ждёт без срока');
   assert.deepEqual(table.list('gone'), [], 'запись завершившегося сироты убрана сроком');
+
+  const byDefault = new PtyTable(inlinePtyHost(backend), () => undefined, { expired: (e) => void expired.push(e) });
+  const orphan = await byDefault.spawn('late', { ...spawnOpts, program: 'late' });
+  byDefault.detach('late');
+  await settle();
+  t.mock.timers.tick(59_999);
+  await settle();
+  assert.equal(backend.procs[5]!.killed, undefined, 'срок по умолчанию короче 60 с');
+  t.mock.timers.tick(1);
+  await settle();
+  assert.equal(backend.procs[5]!.killed, 'SIGHUP', 'срок по умолчанию длиннее 60 с');
+  assert.deepEqual(expired.at(-1), { pluginId: 'late', id: orphan.id, program: 'late', graceMs: 60_000 });
   t.mock.timers.reset();
   await table.releaseAll();
+  await byDefault.releaseAll();
 });
 
-test('оставленный: release и detach его не трогают; claim вернувшегося плагина даёт срок на attach; endKept - только оставленным', async (t) => {
+test('ST-1008/3: оставленный: release и detach его не трогают; claim вернувшегося плагина даёт срок на attach; endKept - только оставленным', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const backend = fakePty();
   const expired: PtyExpiry[] = [];

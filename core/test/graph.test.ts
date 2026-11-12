@@ -9,7 +9,7 @@ function m(id: string, fields: Record<string, unknown> = {}): PluginManifest {
   return r.manifest;
 }
 
-test('порядок: поставщик раньше потребителя, независимые - в порядке входа', () => {
+test('ST-1002/7: порядок: поставщик раньше потребителя, независимые - в порядке входа', () => {
   const g = resolveGraph(
     [
       m('sessions', { requires: { 'cyborg.files': '^1' }, optional: { 'cyborg.projects': '^1' } }),
@@ -24,7 +24,7 @@ test('порядок: поставщик раньше потребителя, н
   assert.equal(g.rejected.size, 0);
 });
 
-test('отказ по engines каскадирует на зависимых, optional переживает', () => {
+test('ST-1002/1, ST-5001/2, ST-6001/7, ST-6002/1: отказ по engines каскадирует на зависимых, optional переживает', () => {
   const g = resolveGraph(
     [
       m('files', { engines: { cyborg: '^2' }, provides: { 'cyborg.files': '1.0' } }),
@@ -39,12 +39,34 @@ test('отказ по engines каскадирует на зависимых, op
   assert.equal(g.bindings.get('tree')?.size, 0);
 });
 
-test('несовместимая мажорная версия поставщика - как отсутствие', () => {
-  const g = resolveGraph([m('files', { provides: { 'cyborg.files': '2.0' } }), m('sessions', { requires: { 'cyborg.files': '^1' } })], '1.0.0');
-  assert.equal(g.rejected.get('sessions')?.[0]?.kind, 'missing');
+test('ST-5001/4: несовместимая мажорная версия поставщика - как отсутствие', () => {
+  const g = resolveGraph(
+    [m('files', { provides: { 'cyborg.files': '2.0' } }), m('sessions', { requires: { 'cyborg.files': '^1' } }), m('tree', { optional: { 'cyborg.files': '^1' } })],
+    '1.0.0',
+  );
+  assert.deepEqual(g.rejected.get('sessions'), [{ kind: 'missing', contract: 'cyborg.files', range: '^1' }]);
+  assert.equal(g.rejected.has('tree'), false);
+  assert.deepEqual(g.order, ['files', 'tree']);
+  assert.equal(g.bindings.get('tree')?.get('cyborg.files'), undefined, 'optional работает без поставщика чужой мажорной');
 });
 
-test('поставщик с двумя мажорными версиями обслуживает старого и нового потребителя', () => {
+test('ST-5001/1, ST-5001/3: engines.cyborg сверяется с версией API ядра: ^1.3 на 1.4 проходит, ^1.5 на 1.3 - отказ той же причины, что и чужая мажорная, ^1 - без отказа', () => {
+  const minor = resolveGraph([m('old', { engines: { cyborg: '^1.3' } })], '1.4.0');
+  assert.deepEqual(minor.order, ['old']);
+  assert.equal(minor.rejected.size, 0);
+  const g = resolveGraph([m('newer', { engines: { cyborg: '^1.5' } }), m('other', { engines: { cyborg: '^2' } }), m('plain', { engines: { cyborg: '^1' } })], '1.3.0');
+  assert.deepEqual(g.rejected.get('newer'), [{ kind: 'engines', range: '^1.5', api: '1.3.0' }]);
+  assert.deepEqual(g.rejected.get('other'), [{ kind: 'engines', range: '^2', api: '1.3.0' }]);
+  assert.deepEqual(g.order, ['plain']);
+});
+
+test('ST-5002/8: ядро 2.0: плагин под 2.0 проходит сверку engines.cyborg, плагин под ^1 отвергнут', () => {
+  const g = resolveGraph([m('next', { engines: { cyborg: '^2' } }), m('old', { engines: { cyborg: '^1.0' } })], '2.0.0');
+  assert.deepEqual(g.order, ['next']);
+  assert.deepEqual(g.rejected.get('old'), [{ kind: 'engines', range: '^1.0', api: '2.0.0' }]);
+});
+
+test('ST-5001/6: поставщик с двумя мажорными версиями обслуживает старого и нового потребителя', () => {
   const g = resolveGraph(
     [
       m('files', { provides: { 'cyborg.files': ['1.4', '2.0'] } }),
@@ -56,7 +78,7 @@ test('поставщик с двумя мажорными версиями об�
   assert.deepEqual(g.order, ['files', 'old', 'new']);
 });
 
-test('два поставщика кратности one - отказ потребителю, но не поставщикам', () => {
+test('ST-1002/2: два поставщика кратности one - отказ потребителю, но не поставщикам', () => {
   const g = resolveGraph(
     [
       m('lock-a', { provides: { 'cyborg.lock': '1.0' } }),
@@ -69,7 +91,7 @@ test('два поставщика кратности one - отказ потре
   assert.deepEqual(g.order, ['lock-a', 'lock-b']);
 });
 
-test('цикл отказывает всем участникам и каскадирует на зависящих от цикла', () => {
+test('ST-1002/3: цикл отказывает всем участникам и каскадирует на зависящих от цикла', () => {
   const g = resolveGraph(
     [
       m('a', { provides: { 'x.a': '1.0' }, requires: { 'x.b': '^1' } }),
@@ -85,7 +107,27 @@ test('цикл отказывает всем участникам и каска�
   assert.equal(g.rejected.get('c')?.[0]?.kind, 'missing');
 });
 
-test('consumes не создаёт ребра: циклические consumes допустимы', () => {
+test('ST-1002/3: цикл requires из трёх плагинов - отказ каждому, причина называет всех участников', () => {
+  const g = resolveGraph(
+    [
+      m('a', { provides: { 'x.a': '1.0' }, requires: { 'x.b': '^1' } }),
+      m('b', { provides: { 'x.b': '1.0' }, requires: { 'x.c': '^1' } }),
+      m('c', { provides: { 'x.c': '1.0' }, requires: { 'x.a': '^1' } }),
+      m('d'),
+    ],
+    '1.0.0',
+  );
+  assert.deepEqual(g.order, ['d']);
+  for (const id of ['a', 'b', 'c']) {
+    const reasons = g.rejected.get(id);
+    assert.equal(reasons?.length, 1, id);
+    const [reason] = reasons;
+    assert.ok(reason?.kind === 'cycle', id);
+    assert.deepEqual([...reason.members].sort(), ['a', 'b', 'c'], id);
+  }
+});
+
+test('ST-1002/5: consumes не создаёт ребра: циклические consumes допустимы', () => {
   const g = resolveGraph(
     [
       m('a', { provides: { 'x.tab': '1.0' }, consumes: { 'x.tab': '^1' } }),
@@ -98,7 +140,7 @@ test('consumes не создаёт ребра: циклические consumes �
 
 // Ядро отвергает id целиком: оба плагина не загружаются. Чтобы встроенный пережил одноимённый пользовательский, приложение
 // не передаёт ядру второй манифест (electron/test/plugins.test.ts, «поиск: …» и «старт с флагом: …»).
-test('повтор id в манифестах - отказ id, ни один из двух не загружается', () => {
+test('ST-1001/5: повтор id в манифестах - отказ id, ни один из двух не загружается', () => {
   const g = resolveGraph([m('a'), m('a'), m('b')], '1.0.0');
   assert.deepEqual(g.rejected.get('a'), [{ kind: 'duplicate' }]);
   assert.deepEqual(g.order, ['b']);
@@ -107,7 +149,7 @@ test('повтор id в манифестах - отказ id, ни один и�
 // ADR-CH-0002 п. 6: без закрепления один сторонний манифест с provides cyborg.agent делал встроенного потребителя ambiguous.
 const reserved = (...bundled: string[]) => ({ prefixes: ['cyborg.'], bundled: new Set(bundled) });
 
-test('пространство поставки: сторонний поставщик cyborg.* отвергнут, встроенный и его потребитель работают', () => {
+test('ST-1002/6, ST-3003/5: пространство поставки: сторонний поставщик cyborg.* отвергнут, встроенный и его потребитель работают', () => {
   const plugins = [
     m('claude', { provides: { 'cyborg.agent': '1.0' } }),
     m('rogue', { provides: { 'cyborg.agent': '1.0', 'acme.x': '1.0' } }),
@@ -120,7 +162,7 @@ test('пространство поставки: сторонний постав
   assert.deepEqual(g.order, ['claude', 'sessions']);
 });
 
-test('пространство поставки: встроенный с тем же provides принят, id cyborg.* у стороннего - отказ, потребление cyborg.* открыто', () => {
+test('ST-1002/6, ST-3003/5: пространство поставки: встроенный с тем же provides принят, id cyborg.* у стороннего - отказ, потребление cyborg.* открыто', () => {
   const g = resolveGraph(
     [
       m('rogue', { provides: { 'cyborg.agent': '1.0' } }),
@@ -148,7 +190,7 @@ test('пространство поставки: префикс закрывае
 });
 
 // Ревью K-22: плагины `a` и `a.b` оба проходят проверку пространства имён для `a.b.run`; кто первым зарегистрирует, тот владелец.
-test('команда в двух манифестах - отказ обоим; встроенному уступает только сторонний', () => {
+test('ST-2002/2: команда в двух манифестах - отказ обоим; встроенному уступает только сторонний', () => {
   const clash = [m('a', { commands: ['a.b.run', 'a.own'] }), m('a.b', { commands: ['a.b.run'] }), m('c', { commands: ['c.go'] })];
   const g = resolveGraph(clash, '1.0.0');
   assert.deepEqual(g.rejected.get('a'), [{ kind: 'command', command: 'a.b.run', with: ['a.b'] }]);

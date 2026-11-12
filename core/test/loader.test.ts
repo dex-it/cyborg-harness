@@ -8,6 +8,7 @@ import { toDisposable } from '../src/disposable.ts';
 import { load, type LoadOptions } from '../src/loader.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
+import type { Port } from '../src/rpc.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { describeEntry, entryLevel, pluginStatuses } from '../src/status.ts';
 import { startCancel } from './fixtures/cancel.ts';
@@ -31,21 +32,26 @@ function kernel(table: Record<string, PluginModule>, options: Omit<LoadOptions, 
 
 const kinds = (k: { journal: readonly { pluginId?: string | undefined; kind: string }[] }) => k.journal.map((e) => `${e.pluginId ?? '-'}:${e.kind}`);
 
-test('активация по графу, вызов чужого контракта через ядро, снятие в обратном порядке', async () => {
+test('ST-1002/7, ST-2001/1: активация по графу, вызов чужого контракта через ядро, снятие в обратном порядке', async () => {
   const events: string[] = [];
+  const received: unknown[][] = [];
+  let answer: unknown;
+  let seen: string[] = [];
   const k = await kernel(
     {
       files: {
         activate(ctx) {
           events.push('files:up');
-          ctx.contracts.provide('test.files', '1.0', { root: '/w', read: async (p: string) => `data:${p}` });
+          ctx.contracts.provide('test.files', '1.0', { root: '/w', read: (...args: unknown[]) => { received.push(args); return `data:${String(args[0])}`; } });
           return toDisposable(() => events.push('files:down'));
         },
       },
       sessions: {
         async activate(ctx) {
           const api = ctx.contracts.get('test.files', 1)!;
-          events.push(`sessions:${api.root ?? ''}:${(await api.read?.('a')) ?? ''}`);
+          answer = api.read?.('a');
+          seen = Object.keys(api).sort();
+          events.push(`sessions:${api.root ?? ''}:${String(await answer)}`);
           ctx.subscriptions.add(toDisposable(() => events.push('sessions:down')));
         },
       },
@@ -58,11 +64,14 @@ test('активация по графу, вызов чужого контрак
   );
   assert.deepEqual(k.active, ['files', 'sessions']);
   assert.deepEqual([k.hostOf('files'), k.hostOf('sessions')], ['one', 'two']);
+  assert.ok(answer instanceof Promise, 'синхронный член поставщика у потребителя - обещание');
+  assert.deepEqual(received, [['a']], 'поставщик получает только аргументы, без имени вызывающего');
+  assert.deepEqual(seen, ['read', 'root'], 'у потребителя только члены контракта, без имени поставщика');
   await k.unload();
   assert.deepEqual(events, ['files:up', 'sessions:/w:data:a', 'sessions:down', 'files:down']);
 });
 
-test('журнал: невалидный, выключенный, не найденный, отказ графа, сбой и пропуск зависимого', async () => {
+test('ST-1001/1, ST-1002/1, ST-1004/1, ST-3001/7, ST-5002/6, ST-6001/7: журнал: невалидный, выключенный, не найденный, отказ графа, сбой и пропуск зависимого', async () => {
   const k = await kernel(
     { files: { activate() { throw new Error('диск недоступен'); } }, sessions: { activate() {} } },
     {
@@ -81,7 +90,144 @@ test('журнал: невалидный, выключенный, не найд�
   await k.unload();
 });
 
-test('сбой активации снимает уже отданное плагином', async () => {
+test('ST-6001/7: плагины поставки с ошибкой манифеста, чужим engines.cyborg и без поставщика requires: не загружены, причина каждого в журнале и статусе, остальные работают', async () => {
+  const activated: string[] = [];
+  const k = await kernel(
+    {
+      typo: { activate: () => void activated.push('typo') },
+      next: { activate: () => void activated.push('next') },
+      lonely: { activate: () => void activated.push('lonely') },
+      fine: {
+        activate(ctx) {
+          activated.push('fine');
+          ctx.commands.register('fine.ping', () => 'fine');
+        },
+      },
+    },
+    {
+      enabled: ['typo', 'next', 'lonely', 'fine'],
+      manifests: [manifest('typo', { version: 'latest' }), manifest('next', { engines: { cyborg: '^2' } }), manifest('lonely', { requires: { 'test.nobody': '^1' } }), manifest('fine', { commands: ['fine.ping'] })],
+    },
+  );
+  assert.deepEqual(activated, ['fine']);
+  assert.deepEqual(k.active, ['fine']);
+  assert.equal(await k.run('fine.ping'), 'fine');
+  const statuses = pluginStatuses(k.journal);
+  const reason = (id: string) => {
+    const st = statuses.find((s) => s.id === id)!;
+    return `${st.state}: ${describeEntry(st.cause!)}`;
+  };
+  assert.match(reason('typo'), /^stopped: .*version: ожидается версия x\.y\.z, получено "latest"/);
+  assert.equal(reason('next'), `stopped: нужен API Cyborg ^2, есть ${PLUGIN_API_VERSION}`);
+  assert.equal(reason('lonely'), 'stopped: нет поставщика test.nobody ^1');
+  assert.equal(statuses.find((s) => s.id === 'fine')?.state, 'active');
+  await k.unload();
+});
+
+test('ST-1001/1: манифест без engines.cyborg и с version не x.y.z - одна запись invalid со всеми ошибками, код плагина не запущен', async () => {
+  const imported: string[] = [];
+  const k = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['old', 'fine'],
+    manifests: [{ id: 'old', version: 'latest' }, manifest('fine')],
+    spawnHost: inlineHosts(async (entry) => {
+      imported.push(entry);
+      return { activate: () => undefined };
+    }),
+  });
+  assert.deepEqual(
+    k.journal.filter((e) => e.pluginId === 'old'),
+    [{ pluginId: 'old', kind: 'invalid', errors: ['version: ожидается версия x.y.z, получено "latest"', 'engines.cyborg: ожидается диапазон, получено ничего'] }],
+  );
+  assert.deepEqual(imported, ['fine']);
+  assert.deepEqual(k.active, ['fine']);
+  await k.unload();
+});
+
+test('ST-3001/7: права в манифесте: неизвестное право и неверная форма - запись invalid с ошибкой каждого, код плагина не запущен, плагина нет среди активных', async () => {
+  const imported: string[] = [];
+  const k = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['typo', 'fine'],
+    manifests: [manifest('typo', { permissions: { 'fs.reed': ['$workspace'], net: 'jira.company.com' } }), manifest('fine')],
+    spawnHost: inlineHosts(async (entry) => {
+      imported.push(entry);
+      return { activate: () => undefined };
+    }),
+  });
+  const entries = k.journal.filter((e) => e.pluginId === 'typo');
+  assert.equal(entries.length, 1);
+  const [entry] = entries;
+  assert.ok(entry?.kind === 'invalid');
+  assert.match(entry.errors.join('\n'), /fs\.reed/);
+  assert.match(entry.errors.join('\n'), /net/);
+  assert.deepEqual(imported, ['fine']);
+  assert.deepEqual(k.active, ['fine']);
+  await k.unload();
+});
+
+test('ST-1001/2: манифест с id cyborg.window - invalid с причиной, остальные плагины загружены', async () => {
+  const noop: PluginModule = { activate: () => undefined };
+  const k = await kernel({ 'cyborg.window': noop, a: noop, b: noop }, { enabled: ['a', 'cyborg.window', 'b'], manifests: [manifest('a'), manifest('cyborg.window'), manifest('b')] });
+  const entries = k.journal.filter((e) => e.pluginId === 'cyborg.window');
+  assert.equal(entries.length, 1);
+  const [entry] = entries;
+  assert.ok(entry?.kind === 'invalid');
+  assert.match(entry.errors.join(), /id: "cyborg\.window" занято командами окна/);
+  assert.deepEqual(k.active, ['a', 'b']);
+  await k.unload();
+});
+
+test('ST-1002/1: requires на контракт, которого никто не даёт: плагин не загружен, причина называет контракт, независимые активны', async () => {
+  const activated: string[] = [];
+  const module = (id: string): PluginModule => ({ activate: () => void activated.push(id) });
+  const k = await kernel(
+    { lonely: module('lonely'), solo: module('solo'), other: module('other') },
+    { enabled: ['lonely', 'solo', 'other'], manifests: [manifest('lonely', { requires: { 'test.nobody': '^1' } }), manifest('solo'), manifest('other')] },
+  );
+  assert.deepEqual(
+    k.journal.filter((e) => e.pluginId === 'lonely'),
+    [{ pluginId: 'lonely', kind: 'rejected', reasons: [{ kind: 'missing', contract: 'test.nobody', range: '^1' }] }],
+  );
+  assert.match(describeEntry(k.journal.find((e) => e.pluginId === 'lonely')!), /test\.nobody/);
+  assert.deepEqual(activated, ['solo', 'other']);
+  assert.deepEqual(k.active, ['solo', 'other']);
+  await k.unload();
+});
+
+test('ST-1003/1: исключение в activate одного из двух плагинов общего хоста - failed с хостом и ошибкой, сосед по хосту и другой хост живы', async () => {
+  const k = await kernel(
+    {
+      bad: {
+        activate() {
+          throw new Error('диск недоступен');
+        },
+      },
+      mate: { activate: (ctx) => void ctx.commands.register('mate.ping', () => 'mate') },
+      far: { activate: (ctx) => void ctx.commands.register('far.ping', () => 'far') },
+    },
+    {
+      enabled: ['bad', 'mate', 'far'],
+      manifests: [manifest('bad'), manifest('mate', { commands: ['mate.ping'] }), manifest('far', { commands: ['far.ping'] })],
+      bundled: ['bad', 'mate', 'far'],
+      hosts: { shared: ['bad', 'mate'], other: ['far'] },
+    },
+  );
+  const failed = k.journal.filter((e) => e.kind === 'failed');
+  assert.equal(failed.length, 1);
+  const [fail] = failed;
+  assert.ok(fail?.kind === 'failed');
+  assert.deepEqual([fail.pluginId, fail.hostId], ['bad', 'shared']);
+  assert.match(fail.error, /диск недоступен/);
+  assert.deepEqual(k.active, ['mate', 'far']);
+  assert.equal(k.hostOf('mate'), 'shared');
+  assert.equal(await k.run('mate.ping'), 'mate');
+  assert.equal(await k.run('far.ping'), 'far');
+  assert.equal(k.journal.some((e) => e.kind === 'host-down' || e.kind === 'host-restart'), false, 'хост не перезапускался');
+  await k.unload();
+});
+
+test('ST-1004/1, ST-5002/6: сбой активации снимает уже отданное плагином', async () => {
   const k = await kernel(
     {
       files: {
@@ -102,7 +248,46 @@ test('сбой активации снимает уже отданное пла�
   await k.unload();
 });
 
-test('команды: запуск из ядра и из другого плагина, необъявленная команда отклоняется', async () => {
+test('ST-5002/6: плагин зовёт член ctx, которого в ядре нет: отказывает только он, причина в журнале и в статусе, сосед по общему хосту работает', async () => {
+  interface Removed {
+    readonly removed: { member(): void };
+  }
+  const k = await kernel(
+    {
+      bad: {
+        activate(ctx) {
+          (ctx as unknown as Removed).removed.member();
+        },
+      },
+      late: {
+        activate(ctx) {
+          ctx.commands.register('late.go', () => (ctx as unknown as Removed).removed.member());
+        },
+      },
+      mate: { activate: (ctx) => void ctx.commands.register('mate.ping', () => 'mate') },
+    },
+    {
+      enabled: ['bad', 'late', 'mate'],
+      manifests: [manifest('bad'), manifest('late', { commands: ['late.go'] }), manifest('mate', { commands: ['mate.ping'] })],
+      bundled: ['bad', 'late', 'mate'],
+      hosts: { shared: ['bad', 'late', 'mate'] },
+    },
+  );
+  const failed = k.journal.find((e) => e.pluginId === 'bad');
+  assert.ok(failed?.kind === 'failed', JSON.stringify(failed));
+  assert.equal(failed.hostId, 'shared');
+  assert.match(failed.error, /member/);
+  assert.match(describeEntry(failed), /^не поднялся в хосте shared: .*member/);
+  assert.equal(pluginStatuses(k.journal).find((st) => st.id === 'bad')?.state, 'stopped');
+  assert.deepEqual(k.active, ['late', 'mate']);
+  await assert.rejects(k.run('late.go'), /member/);
+  assert.deepEqual(k.active, ['late', 'mate']);
+  assert.equal(await k.run('mate.ping'), 'mate');
+  assert.equal(k.journal.some((e) => e.kind === 'host-down' || e.kind === 'host-restart'), false, 'общий хост не падал');
+  await k.unload();
+});
+
+test('ST-2002/1: команды: запуск из ядра и из другого плагина, необъявленная команда отклоняется', async () => {
   const k = await kernel(
     {
       lock: { activate: (ctx) => void ctx.commands.register('lock.now', (reason) => `locked:${String(reason)}`) },
@@ -121,7 +306,7 @@ test('команды: запуск из ядра и из другого плаг
   await k.unload();
 });
 
-test('функция в результате контракта - NotCloneable у вызывающего', async () => {
+test('ST-2001/5: функция в результате контракта - NotCloneable у вызывающего', async () => {
   let error: unknown;
   const k = await kernel(
     {
@@ -147,17 +332,44 @@ test('функция в результате контракта - NotCloneable �
   await k.unload();
 });
 
-test('битый манифест невключённого плагина - disabled, а не invalid', async () => {
+test('ST-1001/1: битый манифест невключённого плагина - disabled, а не invalid', async () => {
   const k = await kernel({}, { enabled: [], manifests: [{ id: 'old', version: 'latest' }] });
   assert.deepEqual(k.journal, [{ pluginId: 'old', kind: 'disabled' }]);
 });
 
-test('манифест с полем новой версии API - в журнале причина версия, а не поле', async () => {
+test('ST-5001/2: манифест с полем новой версии API - в журнале причина версия, а не поле', async () => {
   const k = await kernel({}, { enabled: ['next', 'typo'], manifests: [manifest('next', { engines: { cyborg: '^1.3' }, layout: {} }), manifest('typo', { keybinding: [] })] });
   assert.deepEqual(k.journal, [
     { pluginId: 'next', kind: 'invalid', errors: [`engines.cyborg: нужен API Cyborg ^1.3, есть ${PLUGIN_API_VERSION}`] },
     { pluginId: 'typo', kind: 'invalid', errors: ['keybinding: незнакомое поле манифеста'] },
   ]);
+});
+
+test('ST-5001/2: ядро сменило мажорную версию API на 2: плагин под ^1.0 не загружен и код его не выполнялся, причина с диапазоном и версией в журнале и в статусе, requires-потребитель снят каскадом, optional-потребитель и сосед работают', async () => {
+  const activated: string[] = [];
+  const module = (id: string): PluginModule => ({ activate: () => void activated.push(id) });
+  const v2 = { engines: { cyborg: '^2' } };
+  const k = await load({
+    apiVersion: '2.0.0',
+    enabled: ['old', 'needs', 'wants', 'next'],
+    manifests: [
+      manifest('old', { engines: { cyborg: '^1.0' }, provides: { 'test.files': '1.0' } }),
+      manifest('needs', { ...v2, requires: { 'test.files': '^1' } }),
+      manifest('wants', { ...v2, optional: { 'test.files': '^1' } }),
+      manifest('next', v2),
+    ],
+    spawnHost: inlineHosts(async (entry) => module(entry)),
+  });
+  assert.deepEqual(activated, ['wants', 'next']);
+  assert.deepEqual(k.active, ['wants', 'next']);
+  const old = k.journal.find((e) => e.pluginId === 'old')!;
+  assert.deepEqual(old, { pluginId: 'old', kind: 'rejected', reasons: [{ kind: 'engines', range: '^1.0', api: '2.0.0' }] });
+  assert.equal(describeEntry(old), 'нужен API Cyborg ^1.0, есть 2.0.0');
+  const status = pluginStatuses(k.journal).find((st) => st.id === 'old')!;
+  assert.equal(status.state, 'stopped');
+  assert.equal(describeEntry(status.cause!), 'нужен API Cyborg ^1.0, есть 2.0.0');
+  assert.deepEqual(k.journal.find((e) => e.pluginId === 'needs'), { pluginId: 'needs', kind: 'rejected', reasons: [{ kind: 'missing', contract: 'test.files', range: '^1' }] });
+  await k.unload();
 });
 
 test('хуки: граф до кода, журнал по ходу, лог с id плагина, снятие в журнале', async () => {
@@ -182,7 +394,7 @@ test('хуки: граф до кода, журнал по ходу, лог с id
   assert.deepEqual(seen, ['graph:a', 'log:a:привет', 'journal:activated', 'journal:deactivated']);
 });
 
-test('безопасный режим не запускает хосты', async () => {
+test('ST-3008/1: безопасный режим не запускает хосты', async () => {
   let spawned = false;
   const k = await load({
     apiVersion: PLUGIN_API_VERSION,
@@ -196,9 +408,13 @@ test('безопасный режим не запускает хосты', async
   });
   assert.equal(spawned, false);
   assert.deepEqual(k.journal, [{ pluginId: 'a', kind: 'safe-mode' }]);
+  await assert.rejects(k.enable('a'), { code: 'Unavailable' });
+  assert.equal(spawned, false, 'включение в безопасном режиме хост не поднимает');
+  assert.equal(describeEntry(pluginStatuses(k.journal).find((st) => st.id === 'a')!.cause!), 'безопасный режим: код плагинов не запускается');
+  await k.unload();
 });
 
-test('откат версии плагина: раздел config новее манифеста - плагин не активируется, данные целы', async () => {
+test('ST-5004/2, ST-5004/7: откат версии плагина: раздел config новее манифеста - плагин не активируется, данные целы', async () => {
   const { docs, store } = memory({ user: { 'pin-lock': { $version: 3, minutes: 5 } } });
   const k = await kernel(
     { 'pin-lock': { config: { migrate: (_, d) => d }, activate() {} } },
@@ -210,7 +426,7 @@ test('откат версии плагина: раздел config новее м�
   await k.unload();
 });
 
-test('миграция config идёт в хосте, ядро записывает итог; set плагина доходит до слоя', async () => {
+test('ST-5004/1: миграция config идёт в хосте, ядро записывает итог; set плагина доходит до слоя', async () => {
   const { docs, store } = memory({ user: { 'pin-lock': { idle: 5 } } });
   let seen: unknown;
   const k = await kernel(
@@ -236,7 +452,49 @@ test('миграция config идёт в хосте, ядро записыва�
   await k.unload();
 });
 
-test('хост упал без виновника: журнал называет задетых через consumes, хост поднимается, после лимита брошен', async () => {
+test('ST-5004/4, ST-5004/7: migrate бросил, вернул не объект или не объявлен: плагин не активен, ни один слой не записан, migrate-error со слоем, версией и причиной, сосед работает', async () => {
+  const layers = { user: { minutes: 5 }, workspace: { bad: true } };
+  const initial = {
+    user: { throws: layers.user, string: layers.user, none: layers.user, mate: { $version: 2, minutes: 1 } },
+    workspace: { throws: layers.workspace, string: layers.workspace, none: layers.workspace },
+  };
+  const { docs, store, saves } = memory(structuredClone(initial));
+  const k = await kernel(
+    {
+      throws: {
+        config: {
+          migrate: (_, d) => {
+            if (d.bad) throw new Error('перенос сломан');
+            return d;
+          },
+        },
+        activate() {},
+      },
+      string: { config: { migrate: (_, d) => (d.bad ? ('строка' as unknown as Record<string, unknown>) : d) }, activate() {} },
+      none: { activate() {} },
+      mate: { activate: (ctx) => void ctx.commands.register('mate.read', () => ctx.config?.get()) },
+    },
+    {
+      enabled: ['throws', 'string', 'none', 'mate'],
+      manifests: ['throws', 'string', 'none'].map((id) => manifest(id, { config: { version: 2 } })).concat(manifest('mate', { config: { version: 2 }, commands: ['mate.read'] })),
+      config: await SectionStore.open(store, ['user', 'workspace']),
+    },
+  );
+  assert.deepEqual(k.active, ['mate']);
+  assert.deepEqual(await k.run('mate.read'), { minutes: 1 });
+  const results = k.journal.filter((e) => e.kind === 'config').map((e) => [e.pluginId, e.kind === 'config' && e.result]);
+  assert.deepEqual(results, [
+    ['throws', { status: 'migrate-error', layer: 'workspace', from: 1, error: 'перенос сломан' }],
+    ['string', { status: 'migrate-error', layer: 'workspace', from: 1, error: 'migrate вернул не объект' }],
+    ['none', { status: 'migrate-error', layer: 'user', from: 1, error: 'у плагина нет migrate' }],
+  ]);
+  assert.equal(describeEntry(k.journal.find((e) => e.pluginId === 'throws')!), 'перенос раздела настроек слоя workspace с версии 1 не удался: перенос сломан');
+  assert.deepEqual(saves, [], 'слой user, который перенёсся бы, тоже не записан');
+  assert.deepEqual(Object.fromEntries(docs), initial);
+  await k.unload();
+});
+
+test('ST-1003/7: хост упал без виновника: журнал называет задетых через consumes, хост поднимается, после лимита брошен', async () => {
   const handles = new Map<string, HostHandle>();
   const spawn = inlineHosts(async (entry) => ({
     activate(ctx) {
@@ -265,7 +523,84 @@ test('хост упал без виновника: журнал называет
   await k.unload();
 });
 
-test('«Включить снова»: не поднявшийся плагин и потребитель следом, затем выключенный сторожем', async () => {
+test('ST-1003/7: лимит по умолчанию - хост без виновника поднимается после первого и второго падения, после третьего брошен', async () => {
+  const handles = new Map<string, HostHandle>();
+  const spawn = inlineHosts(async () => ({ activate: () => undefined }));
+  const k = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['editor', 'tabs'],
+    manifests: [manifest('editor'), manifest('tabs')],
+    hosts: { one: ['editor'], two: ['tabs'] },
+    spawnHost: (id) => {
+      const handle = spawn(id);
+      handles.set(id, handle);
+      return handle;
+    },
+  });
+  for (let i = 0; i < 3; i++) {
+    handles.get('one')!.kill();
+    await k.idle();
+  }
+  const host = k.journal.filter((e) => e.pluginId === undefined).map((e) => e.kind);
+  assert.deepEqual(host, ['host-down', 'host-restart', 'host-down', 'host-restart', 'host-down', 'host-abandoned']);
+  assert.deepEqual(k.journal.at(-1), { kind: 'host-abandoned', hostId: 'one', failures: 3, plugins: ['editor'] });
+  assert.deepEqual(k.active, ['tabs']);
+  await k.unload();
+});
+
+test('ST-1003/6: хост убит сигналом, виновника не назвал - сбой на плагин первого вызова после последнего отвеченного пинга; хост перезапущен, другой хост жив', async () => {
+  const handles = new Map<string, HostHandle>();
+  const spawn = inlineHosts(async (entry) => ({
+    activate(ctx) {
+      ctx.commands.register(`${entry}.call`, () => (entry === 'far' ? 'far' : new Promise(() => {})));
+    },
+  }));
+  const ids = ['early', 'late', 'far'];
+  const sent: string[] = [];
+  const k = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ids,
+    manifests: ids.map((id) => manifest(id, { commands: [`${id}.call`] })),
+    bundled: ids,
+    hosts: { shared: ['early', 'late'], other: ['far'] },
+    watchdog: { interval: 10, timeout: 60_000 },
+    spawnHost: (id) => {
+      const handle = spawn(id);
+      handles.set(id, handle);
+      const post = (message: unknown) => {
+        if (id === 'shared') sent.push(JSON.stringify(message));
+        handle.port.post(message);
+      };
+      const onMessage: Port['onMessage'] = (listener) => {
+        handle.port.onMessage(listener);
+      };
+      return { ...handle, port: { post, onMessage } };
+    },
+  });
+  void k.run('early.call').catch(() => undefined);
+  // Следующий пинг уходит только после ответа на прошлый: два пинга после вызова early - хост ответил на пинг, посланный уже после него.
+  await waitFor('ответ на пинг после вызова early', () => {
+    const call = sent.findIndex((m) => m.includes('early.call'));
+    return call >= 0 && sent.slice(call).filter((m) => m.includes('"m":"ping"')).length >= 2;
+  });
+  void k.run('late.call').catch(() => undefined);
+  void k.run('early.call').catch(() => undefined);
+  await tick();
+  handles.get('shared')!.kill();
+  await k.idle();
+  const down = k.journal.filter((e) => e.kind === 'host-down');
+  assert.equal(down.length, 1);
+  assert.deepEqual(down[0]?.kind === 'host-down' && { reason: down[0].reason, hostId: down[0].hostId, culprits: down[0].culprits }, { reason: 'crash', hostId: 'shared', culprits: ['late'] });
+  assert.deepEqual(
+    k.journal.filter((e) => e.kind === 'host-restart'),
+    [{ kind: 'host-restart', hostId: 'shared', plugins: ['early', 'late'] }],
+  );
+  assert.deepEqual([...k.active].sort(), ['early', 'far', 'late']);
+  assert.equal(await k.run('far.call'), 'far');
+  await k.unload();
+});
+
+test('ST-1004/2, ST-1004/3, ST-1004/4: «Включить снова»: не поднявшийся плагин и потребитель следом, затем выключенный сторожем', async () => {
   const handles = new Map<string, HostHandle>();
   let broken = true;
   const spawn = inlineHosts(async (entry) =>
@@ -304,7 +639,10 @@ test('«Включить снова»: не поднявшийся плагин 
   assert.deepEqual(k.active, ['user']);
   await k.enable('flaky');
   assert.deepEqual(k.active, ['user', 'flaky']);
+  const journalBefore = k.journal.length;
   await assert.rejects(k.enable('nobody'), /не загружается/);
+  assert.deepEqual(k.active, ['user', 'flaky'], 'отказ не трогает остальные плагины');
+  assert.equal(k.journal.length, journalBefore);
   assert.deepEqual(
     k.manifests.map((m) => m.id),
     ['flaky', 'user'],
@@ -312,7 +650,7 @@ test('«Включить снова»: не поднявшийся плагин 
   await k.unload();
 });
 
-test('пространство поставки: отказ стороннему поставщику идёт в журнал, без bundled проверки нет', async () => {
+test('ST-1002/6, ST-3003/5: пространство поставки: отказ стороннему поставщику идёт в журнал, без bundled проверки нет', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const table = { claude: noop, rogue: noop, sessions: noop };
   const options = {
@@ -365,7 +703,7 @@ test('группы рендера: ui.group - рекомендация, plugins.
   await plain.unload();
 });
 
-test('группы рендера: сторонний всегда один в своей группе, запись group-isolated только если ему было с кем делить', async () => {
+test('ST-3005/1: группы рендера: сторонний всегда один в своей группе, запись group-isolated только если ему было с кем делить', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
   const ids = ['files', 'tree', 'x', 'y', 'z', 'w'];
@@ -407,7 +745,7 @@ test('группы рендера: сторонний всегда один в �
   await open.unload();
 });
 
-test('группы рендера: origin стороннего в своём пространстве имён - группа поставки с тем же именем его хранилище не делит, ни в одной загрузке, ни в следующей', async () => {
+test('ST-3005/1: группы рендера: origin стороннего в своём пространстве имён - группа поставки с тем же именем его хранилище не делит, ни в одной загрузке, ни в следующей', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const view = (group?: string) => ({ ui: { views: { main: './ui.js' }, ...(group !== undefined && { group }) } });
   // Загрузка 1: alice и bob (поставка) в группе tp2, имя пришло от человека или манифеста; загрузка 2: человек включил сторонний плагин с id tp2.
@@ -430,7 +768,7 @@ test('группы рендера: origin стороннего в своём п�
   for (const k of [first, second, alone]) await k.unload();
 });
 
-test('хосты: из поставки - по группам, сторонний всегда один в своём хосте', async () => {
+test('ST-1003/2, ST-2004/5, ST-3008/2: хосты: из поставки - по группам, сторонний всегда один в своём хосте', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const ids = ['a', 'b', 'x', 'y', 'z', 'w'];
   const k = await kernel(Object.fromEntries(ids.map((id) => [id, noop])), {
@@ -462,7 +800,7 @@ test('хосты: из поставки - по группам, сторонни�
   await unknown.unload();
 });
 
-test('журнал: загруженный сторонний плагин получает запись third-party, плагин поставки, выключенный и загрузка без bundled - нет', async () => {
+test('ST-1001/7: журнал: загруженный сторонний плагин получает запись third-party, плагин поставки, выключенный и загрузка без bundled - нет', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const ids = ['a', 'x', 'y'];
   const k = await kernel(Object.fromEntries(ids.map((id) => [id, noop])), {
@@ -482,7 +820,7 @@ test('журнал: загруженный сторонний плагин по�
   await unknown.unload();
 });
 
-test('хосты: host own у плагина поставки - свой хост без группы; в группе с соседом - хост группы и предупреждение host-own-grouped', async () => {
+test('ST-1001/9, ST-1001/10: хосты: host own у плагина поставки - свой хост без группы; в группе с соседом - хост группы и предупреждение host-own-grouped', async () => {
   const noop: PluginModule = { activate: () => undefined };
   const ids = ['solo', 'grouped', 'mate', 'alone', 'guest', 'rogue'];
   const own = { host: 'own' };
@@ -510,8 +848,8 @@ test('хосты: host own у плагина поставки - свой хос�
   await k.unload();
 });
 
-test('схема раздела из манифеста: значение не по схеме - отказ плагину, правка извне не по схеме - значение прежнее', async () => {
-  const { docs, store } = memory({ user: { timer: { $version: 1, minutes: 'пять' } } });
+test('ST-1007/8, ST-5004/3, ST-5004/7, ST-5004/8: схема раздела из манифеста: значение не по схеме - отказ плагину, правка извне не по схеме - значение прежнее', async () => {
+  const { docs, store, saves } = memory({ user: { timer: { $version: 1, minutes: 'пять' }, mate: { $version: 1, minutes: 3 } } });
   const schema = { type: 'object', properties: { minutes: { type: 'integer', minimum: 1 } }, additionalProperties: false };
   const files: Record<string, unknown> = { './config.schema.json': schema, './broken.json': { type: 'date' } };
   const read = (_m: unknown, file: string) => {
@@ -532,9 +870,17 @@ test('схема раздела из манифеста: значение не �
     schema: read,
   });
   const config = await SectionStore.open(store, ['user', 'workspace']);
-  const refused = await kernel({ timer }, { ...options('./config.schema.json'), config });
-  assert.deepEqual(refused.active, []);
-  assert.deepEqual(refused.journal, [{ pluginId: 'timer', kind: 'config', result: { status: 'invalid', errors: ['/minutes: ожидается integer, получено string'] } }]);
+  let mateSeen: unknown;
+  const mate: PluginModule = { activate: (ctx) => void (mateSeen = ctx.config?.get()) };
+  const refused = await kernel(
+    { timer, mate },
+    { ...options('./config.schema.json'), enabled: ['timer', 'mate'], manifests: [...options('./config.schema.json').manifests, manifest('mate', { config: { version: 1, schema: './config.schema.json' } })], config },
+  );
+  assert.deepEqual(refused.active, ['mate'], 'отказ только владельцу раздела');
+  assert.deepEqual(mateSeen, { minutes: 3 });
+  assert.deepEqual(refused.journal.filter((e) => e.pluginId === 'timer'), [{ pluginId: 'timer', kind: 'config', result: { status: 'invalid', errors: ['/minutes: ожидается integer, получено string'] } }]);
+  assert.deepEqual(saves, [], 'ST-5004/7: отказ по схеме файл слоя не пишет');
+  assert.deepEqual(docs.get('user'), { timer: { $version: 1, minutes: 'пять' }, mate: { $version: 1, minutes: 3 } });
   await refused.unload();
 
   const broken: [string, string][] = [['./broken.json', './broken.json: #/type: ожидается тип из object, array, string, number, integer, boolean, null или их список'], ['./none.json', './none.json: нет файла']];
@@ -558,11 +904,63 @@ test('схема раздела из манифеста: значение не �
   await k.unload();
 });
 
+test('ST-1007/8: config и state, правленные руками не по схеме: раздел отклонён с записью, значение прежнее, файл и разделы других плагинов не тронуты', async () => {
+  const { docs, store, saves } = memory({ user: { timer: { $version: 1, minutes: 5 }, other: { $version: 1, color: 'red' } } });
+  const kept = memory({ workspace: { timer: { $version: 1, count: 1 } } });
+  const files: Record<string, unknown> = {
+    './config.schema.json': { type: 'object', properties: { minutes: { type: 'integer', minimum: 1 } } },
+    './state.schema.json': { type: 'object', properties: { count: { type: 'integer' } } },
+  };
+  const changes: unknown[] = [];
+  const reader = (id: string): PluginModule => ({
+    activate(ctx) {
+      ctx.commands.register(`${id}.read`, () => ({ config: ctx.config?.get(), state: ctx.state?.get() }));
+      ctx.config?.onChange((v) => changes.push([id, 'config', v]));
+      ctx.state?.onChange((v) => changes.push([id, 'state', v]));
+    },
+  });
+  const config = await SectionStore.open(store, ['user', 'workspace']);
+  const state = await SectionStore.open(kept.store, ['workspace']);
+  const k = await kernel(
+    { timer: reader('timer'), other: reader('other') },
+    {
+      enabled: ['timer', 'other'],
+      manifests: [
+        manifest('timer', { config: { version: 1, schema: './config.schema.json' }, state: { version: 1, schema: './state.schema.json' }, commands: ['timer.read'] }),
+        manifest('other', { config: { version: 1 }, commands: ['other.read'] }),
+      ],
+      schema: (_m, file) => files[file],
+      config,
+      state,
+    },
+  );
+  assert.deepEqual(k.active, ['timer', 'other']);
+  const userBefore = { timer: { $version: 1, minutes: 0 }, other: { $version: 1, color: 'blue' } };
+  docs.set('user', structuredClone(userBefore));
+  await k.reloadSections('config', await config.reload());
+  kept.docs.set('workspace', { timer: { $version: 1, count: 'много' } });
+  await k.reloadSections('state', await state.reload());
+
+  assert.deepEqual(
+    k.journal.filter((e) => e.kind === 'config' || e.kind === 'state'),
+    [
+      { pluginId: 'timer', kind: 'config', result: { status: 'invalid', errors: ['/minutes: ожидается >= 1'] } },
+      { pluginId: 'timer', kind: 'state', result: { status: 'invalid', errors: ['/count: ожидается integer, получено string'] } },
+    ],
+  );
+  assert.deepEqual(await k.run('timer.read'), { config: { minutes: 5 }, state: { count: 1 } });
+  assert.deepEqual(await k.run('other.read'), { config: { color: 'blue' }, state: undefined });
+  assert.deepEqual(changes, [['other', 'config', { color: 'blue' }]]);
+  assert.deepEqual([...saves, ...kept.saves], [], 'ядро не переписывает файл');
+  assert.deepEqual(docs.get('user'), userBefore);
+  await k.unload();
+});
+
 // Отмена запросов между плагинами (K-09): стенд - core/test/fixtures/cancel.ts.
 // Пауза - только для проверки «ничего не произошло»; то, что должно произойти, ждётся по условию (`waitFor`), а не срокам в 60 мс.
 const pause = (ms = 60) => new Promise((r) => setTimeout(r, ms));
 
-test('отмена вызова контракта: поставщик получает сигнал, вызывающий - Cancelled, вызовы без сигнала целы', async () => {
+test('ST-2001/8: отмена вызова контракта: поставщик получает сигнал, вызывающий - Cancelled, вызовы без сигнала целы', async () => {
   const { kernel, api, log } = await startCancel();
   const abort = new AbortController();
   const call = api.slow('a', abort.signal);
@@ -630,7 +1028,7 @@ const quiet: PluginModule = { activate() {} };
 const view = (module: string, area?: string, order?: number, title?: string) => ({ module, ...(area && { area }), ...(order !== undefined && { order }), ...(title && { title }) });
 const layoutOf = (k: { layout: readonly { pluginId: string; kind: string; name: string }[] }) => k.layout.map((e) => `${e.pluginId}/${e.name}`);
 
-test('раскладка: по order, при равенстве по id плагина, затем по имени; не зависит от порядка манифестов', async () => {
+test('ST-2003/1: раскладка: по order, при равенстве по id плагина, затем по имени; не зависит от порядка манифестов', async () => {
   const set = [
     manifest('zeta', { ui: { views: { main: view('./z.js', 'main', 100) } } }),
     manifest('alpha', { ui: { views: { b: view('./b.js', 'sidebar', 200), a: view('./a.js', 'sidebar', 200) } } }),
@@ -688,7 +1086,7 @@ test('раскладка: невключённые, выключенные и п
   await k.unload();
 });
 
-test('раскладка: плагин без видов и документов в снимок не попадает, манифест с ошибкой - тоже', async () => {
+test('ST-2003/8: раскладка: плагин без видов и документов в снимок не попадает, манифест с ошибкой - тоже', async () => {
   const k = await kernel({ bare: quiet, bad: quiet }, { enabled: ['bare', 'bad'], manifests: [manifest('bare'), manifest('bad', { ui: { views: { x: view('./x.js', 'cellar') } } })] });
   assert.deepEqual(k.layout, []);
   await k.unload();
@@ -770,7 +1168,7 @@ test('меню: снимок упорядочен по меню, order, id пл�
   await second.unload();
 });
 
-test('меню: выключение плагина делает его пункты недоступными, а не убирает; включение возвращает', async () => {
+test('ST-2002/6: меню: выключение плагина делает его пункты недоступными, а не убирает; включение возвращает', async () => {
   const flags = { open: true, project: true };
   const k = await kernel({ owner: stateOwner(flags), menu: menuPlugin }, { enabled: ['owner', 'menu'], manifests: [ownerManifest, menuManifest()] });
   assert.deepEqual(brief(k), ['menu/open:on+']);
@@ -850,7 +1248,7 @@ test('меню: источник - член собственного контр�
   await k.unload();
 });
 
-test('меню: сочетание пункта занято в едином реестре клавиш - манифест проигрывает, динамическое отказано, оба видны в журнале', async () => {
+test('ST-2002/6: меню: сочетание пункта занято в едином реестре клавиш - манифест проигрывает, динамическое отказано, оба видны в журнале', async () => {
   const flags = { open: false, project: true };
   const item = { ...open, accelerator: 'CmdOrCtrl+Shift+O' };
   const rival = manifest('rival', { commands: ['rival.run'], keybindings: [{ key: 'CmdOrCtrl+Shift+O', command: 'rival.run' }] });

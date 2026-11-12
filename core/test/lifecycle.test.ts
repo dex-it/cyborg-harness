@@ -1,14 +1,29 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import type { FSWatcher } from 'node:fs';
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { setImmediate as tick } from 'node:timers/promises';
 import { keyOfInput, normalizeKey, resolveKey } from '../src/keys.ts';
 import { load, type JournalEntry, type LoadOptions } from '../src/loader.ts';
 import { parseManifest } from '../src/manifest.ts';
+import type { OsEnvironment } from '../src/os-gateway.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { pluginStatuses } from '../src/status.ts';
-import { inlineHosts } from '../src/transports.ts';
+import { inlineHosts, type HostHandle } from '../src/transports.ts';
+import { waitFor } from './wait-for.ts';
 import { WINDOW_OWNER } from '../src/window-layer.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
+import type { Subscription } from '@cyborg-harness/contracts';
+
+declare module '@cyborg-harness/contracts' {
+  interface Contracts {
+    'test.feed': { 1: { onEvent(listener: () => void): Subscription } };
+    'test.owner': { 1: { ping(): string } };
+  }
+}
 
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 
@@ -43,7 +58,7 @@ const settle = async () => {
 const files: PluginModule = { activate: (ctx) => ctx.contracts.provide('test.files', '1.0', { read: (p: string) => p }) };
 const idle: PluginModule = { activate: () => undefined };
 
-test('disable: требующие выгружаются вместе с поставщиком, необязательный остаётся; enable поднимает их в порядке графа', async () => {
+test('ST-1005/3, ST-1005/4: disable: требующие выгружаются вместе с поставщиком, необязательный остаётся; enable поднимает их в порядке графа', async () => {
   let changes = 0;
   const { start, spawned } = kernel(
     {
@@ -88,7 +103,7 @@ test('disable: требующие выгружаются вместе с пос�
   await k.unload();
 });
 
-test('disable: выключенного человеком enable соседа не поднимает', async () => {
+test('ST-1005/5: disable: выключенного человеком enable соседа не поднимает', async () => {
   const { start } = kernel({ files, reader: idle }, {
     enabled: ['files', 'reader'],
     manifests: [manifest('files', { provides: { 'test.files': '1.0' } }), manifest('reader', { requires: { 'test.files': '^1' } })],
@@ -103,6 +118,149 @@ test('disable: выключенного человеком enable соседа �
   await assert.rejects(k.disable('nobody'), { code: 'Unavailable' });
   await k.unload();
 });
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+async function closedServer(url: string): Promise<boolean> {
+  return waitFor(`сервер ${url} закрыт`, () =>
+    fetch(url, { method: 'POST' }).then(
+      () => false,
+      () => true,
+    ),
+  );
+}
+
+const DROPS = { disable: 'выгрузка', crash: 'падение хоста', abandon: 'падение хоста сверх лимита', throw: 'сорванная активация' } as const;
+
+for (const how of ['disable', 'crash', 'abandon', 'throw'] as const) {
+  test(`ST-1005/1: ${DROPS[how]} снимает контракт, команду, подписку, сочетание, наблюдение, сервер, диалог, программу с потомками и запрос`, { skip: process.platform === 'win32' && 'группы процессов - POSIX' }, async () => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-drop-')));
+    const pidFile = path.join(root, 'pids');
+    const watchers: { closed: boolean }[] = [];
+    const watch = (() => {
+      const w = Object.assign(new EventEmitter(), { closed: false, close: () => void (w.closed = true) });
+      watchers.push(w);
+      return w as unknown as FSWatcher;
+    }) as unknown as NonNullable<OsEnvironment['watch']>;
+    const signals: AbortSignal[] = [];
+    const hanging = ((_url: URL, init: RequestInit) =>
+      new Promise((_, reject) => {
+        const signal = init.signal!;
+        signals.push(signal);
+        signal.addEventListener('abort', () => reject(signal.reason as Error));
+      })) as unknown as typeof fetch;
+    const handles = new Map<string, HostHandle>();
+    const listeners = new Set<() => void>();
+    let activations = 0;
+    let url = '';
+    const table: Record<string, PluginModule> = {
+      feed: {
+        activate(ctx) {
+          ctx.contracts.provide('test.feed', '1.0', {
+            onEvent(listener: () => void) {
+              listeners.add(listener);
+              return { dispose: () => void listeners.delete(listener) };
+            },
+          });
+          ctx.commands.register('feed.count', () => listeners.size);
+          return undefined;
+        },
+      },
+      reader: idle,
+      owner: {
+        async activate(ctx) {
+          if (activations++ > 0) return undefined;
+          ctx.contracts.provide('test.owner', '1.0', { ping: () => 'pong' });
+          ctx.commands.register('owner.cmd', () => 'cmd');
+          await ctx.contracts.get('test.feed', 1)!.onEvent(() => undefined);
+          await ctx.keys.register({ key: 'ctrl+shift+9', command: 'owner.cmd' });
+          await ctx.os.fs.watch(root, () => undefined);
+          url = (await ctx.os.serve!.http(() => ({ status: 204 }))).url;
+          void ctx.dialogs.show({ kind: 'ask', title: 'Вопрос', buttons: [{ id: 'yes', label: 'Да' }] }).catch(() => undefined);
+          void ctx.os.process!.run('/bin/sh', ['-c', `sleep 30 & echo "$$ $!" > ${pidFile}; wait`]).catch(() => undefined);
+          void ctx.os.net!.fetch('https://api.example.com/').catch(() => undefined);
+          await waitFor('pid программы и потомка', async () => /^\d+ \d+\n$/.test(await readFile(pidFile, 'utf8').catch(() => '')));
+          if (how === 'throw') throw new Error('сбой активации');
+          return undefined;
+        },
+      },
+    };
+    const ids = ['feed', 'owner', 'reader'];
+    const base = inlineHosts(async (entry) => table[entry]!);
+    const k = await load({
+      apiVersion: PLUGIN_API_VERSION,
+      enabled: ids,
+      manifests: [
+        manifest('feed', { provides: { 'test.feed': '1.0' }, commands: ['feed.count'] }),
+        manifest('owner', {
+          provides: { 'test.owner': '1.0' },
+          optional: { 'test.feed': '^1' },
+          commands: ['owner.cmd'],
+          permissions: { 'fs.read': [root], serve: true, net: ['api.example.com'], process: [{ program: '/bin/sh', args: ['-c'] }] },
+        }),
+        manifest('reader', { optional: { 'test.owner': '^1' } }),
+      ],
+      bundled: ids,
+      hosts: { f: ['feed'], own: ['owner'], r: ['reader'] },
+      os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), watch, fetch: hanging },
+      ...(how === 'abandon' && { watchdog: { strikes: 1 } }),
+      spawnHost: (id) => {
+        const handle = base(id);
+        handles.set(id, handle);
+        return handle;
+      },
+    });
+    const pids = (await readFile(pidFile, 'utf8')).trim().split(' ').map(Number);
+    try {
+      if (how !== 'throw') {
+        assert.ok(k.contracts.get('reader', 'test.owner', 1));
+        assert.equal(await k.run('owner.cmd'), 'cmd');
+        assert.equal(await k.run('feed.count'), 1);
+        assert.equal(k.keybinding('Ctrl+Shift+9')?.pluginId, 'owner');
+        assert.ok(k.window.dialog);
+        assert.deepEqual(watchers.map((w) => w.closed), [false]);
+        assert.equal(signals[0]?.aborted, false);
+      }
+      if (how === 'disable') {
+        await k.disable('owner');
+      } else if (how === 'crash') {
+        handles.get('own')!.kill();
+        await k.idle();
+        assert.ok(k.journal.some((e) => e.kind === 'host-restart' && e.hostId === 'own'), 'хост поднят заново');
+        assert.ok(k.active.includes('owner'), 'плагин вернулся без регистраций');
+      } else if (how === 'abandon') {
+        handles.get('own')!.kill();
+        await k.idle();
+        assert.equal(k.journal.at(-1)?.kind, 'host-abandoned');
+        assert.equal(k.active.includes('owner'), false);
+      } else {
+        assert.equal(k.journal.find((e) => e.pluginId === 'owner' && e.kind === 'failed')?.kind, 'failed');
+      }
+      await settle();
+      assert.equal(k.contracts.get('reader', 'test.owner', 1), undefined, 'контракт');
+      await assert.rejects(k.run('owner.cmd'), { code: 'CommandNotFound' }, 'команда');
+      assert.equal(await k.run('feed.count'), 0, 'подписка у поставщика');
+      assert.equal(k.keybindings.some((b) => b.pluginId === 'owner'), false, 'сочетание');
+      assert.deepEqual(watchers.map((w) => w.closed), [true], 'наблюдение');
+      assert.ok(await closedServer(url), 'сервер');
+      assert.equal(k.window.dialog, undefined, 'диалог');
+      await waitFor('программа и её потомок завершены', () => pids.every((pid) => !alive(pid)));
+      assert.equal(signals.length, 1);
+      assert.ok(signals[0]?.aborted, 'запрос оборван');
+    } finally {
+      for (const pid of pids) if (alive(pid)) process.kill(pid, 'SIGKILL');
+      await k.unload();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
 
 test('run: команда плагина, который сейчас поднимает enable, ждёт его активации', async () => {
   let open = () => {};
@@ -159,7 +317,7 @@ test('манифест: сочетание - на свою команду без
   assert.match(problem({ keybindings: [{ key: 'F2', command: 'pad.open' }, { key: 'f2', command: 'pad.open' }] }), /повторяется/);
 });
 
-test('plugins.keybindings: выбор пользователя перекрывает манифесты, null отдаёт сочетание окну, неверное - в журнал', async () => {
+test('ST-2002/4: plugins.keybindings: выбор пользователя перекрывает манифесты, null отдаёт сочетание окну, неверное - в журнал', async () => {
   const pad = (id: string): PluginModule => ({ activate: (ctx) => ctx.commands.register(`${id}.go`, () => id) });
   const keyed = (id: string, key: string) => manifest(id, { commands: [`${id}.go`, `${id}.alt`], keybindings: [{ key, command: `${id}.go` }] });
   const { start } = kernel(
@@ -193,7 +351,7 @@ test('plugins.keybindings: выбор пользователя перекрыв�
   await k.unload();
 });
 
-test('конфликт сочетаний: встроенный побеждает сторонний, между равными - первый по id; нажатие идёт активному владельцу', async () => {
+test('ST-2002/4: конфликт сочетаний: встроенный побеждает сторонний, между равными - первый по id; нажатие идёт активному владельцу', async () => {
   const pad = (id: string): PluginModule => ({ activate: (ctx) => ctx.commands.register(`${id}.go`, () => id) });
   const keyed = (id: string, key: string) => manifest(id, { commands: [`${id}.go`], keybindings: [{ key, command: `${id}.go` }] });
   const { start } = kernel(

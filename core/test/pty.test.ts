@@ -9,6 +9,7 @@ import { trackKernels } from './kernels.ts';
 import { describePermissions } from '../src/permissions.ts';
 import { fakePty, type FakeProc } from '../../testing/src/fake-pty.ts';
 import { inlineHosts, type HostHandle } from '../src/transports.ts';
+import type { Port } from '../src/rpc.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { fakeView } from './view-channel.ts';
 import { waitFor } from './wait-for.ts';
@@ -56,7 +57,7 @@ async function setup(plugins: Record<string, unknown>, withBackend = true, limit
 
 const shell = { pty: [{ program: '/bin/bash', args: [], env: ['COLORTERM'] }], 'fs.read': [] as string[] };
 
-test('pty.spawn: программа, окружение и cwd по праву; вывод до подписки не теряется; ввод, размер, сигнал и выход', async () => {
+test('ST-2006/2: pty.spawn: программа, окружение и cwd по праву; вывод до подписки не теряется; ввод, размер, сигнал и выход', async () => {
   await using s = await setup({ term: { ...shell, 'fs.read': ['/'] }, plain: undefined });
   const h = await s.pty('term').spawn({ program: '/bin/bash', args: ['-l'], cwd: s.work, env: { COLORTERM: 'truecolor' }, cols: 120, rows: 40 });
   const proc = s.backend.procs[0]!;
@@ -85,12 +86,13 @@ test('pty.spawn: программа, окружение и cwd по праву; 
   assert.equal(s.backend.procs.length, 1, 'запуск без права дошёл до бэкенда');
 });
 
-test('pty.spawn с describedBy: описание поставщика проходит, только если подходит и под его launch (confused deputy)', async () => {
+test('ST-2006/1, ST-2006/2: pty.spawn с describedBy: описание поставщика проходит, только если подходит и под его launch (confused deputy)', async () => {
   const rule = { program: '/bin/bash', args: ['-c', 'exec agent'], env: ['AGENT_FILE'] };
   await using s = await setup({
     consumer: { pty: [{ program: '/bin/bash', args: ['-c', 'exec agent'], env: ['AGENT_FILE', 'COLORTERM'] }] },
     honest: { launch: [rule] },
     rogue: { launch: [{ program: '/bin/bash', args: ['-c', 'exec other'] }] },
+    wide: { launch: [rule, { ...rule, program: '/bin/zsh' }] },
     silent: undefined,
   });
   const spec = { program: '/bin/bash', args: ['-c', 'exec agent', '--x'], env: { AGENT_FILE: '/f' } };
@@ -103,15 +105,17 @@ test('pty.spawn с describedBy: описание поставщика прохо
     await assert.rejects(s.pty('consumer').spawn({ ...spec, describedBy }), { code: 'PermissionDenied' }, why);
   }
   await assert.rejects(s.pty('consumer').spawn({ ...spec, env: { AGENT_FILE: '/f', COLORTERM: 'x' }, describedBy: 'honest' }), { code: 'PermissionDenied' }, 'переменная, которой нет в launch');
+  await assert.rejects(s.pty('consumer').spawn({ ...spec, program: '/bin/zsh', describedBy: 'wide' }), { code: 'PermissionDenied' }, 'программа в launch поставщика, но вне pty потребителя');
   assert.equal(s.backend.procs.length, 1);
   assert.equal(s.hasPty('honest'), false, 'launch не даёт поставщику ctx.os.pty');
   const denied = s.k.journal.flatMap((e) => (e.kind === 'denied' ? [`${e.pluginId}: ${e.detail}`] : []));
-  assert.equal(denied.length, 4);
+  assert.equal(denied.length, 5);
   assert.match(denied[0] ?? '', /^consumer: rogue: аргументы не по правилу launch: \/bin\/bash$/);
+  assert.match(denied[4] ?? '', /^consumer: .*\/bin\/zsh/);
   assert.deepEqual(describePermissions({ launch: [rule] }), ['предлагает запуск в терминале: /bin/bash -c exec agent (окружение: AGENT_FILE) - его выполнит потребитель']);
 });
 
-test('pty: чужие не видны и не трогаются; cwd вне права - отказ; без бэкенда - Unavailable; без права - нет члена', async () => {
+test('ST-1008/4, ST-3001/8, ST-3007/7: pty: чужие не видны и не трогаются; cwd вне права - отказ; без бэкенда - Unavailable; без права - нет члена', async () => {
   await using s = await setup({ a: shell, b: shell, plain: undefined });
   const mine = await s.pty('a').spawn({ program: '/bin/bash' });
   assert.deepEqual((await s.pty('b').list()).map((i) => i.id), []);
@@ -125,7 +129,7 @@ test('pty: чужие не видны и не трогаются; cwd вне п�
   await assert.rejects(bare.pty('a').spawn({ program: '/bin/bash' }), { code: 'Unavailable' });
 });
 
-test('падение хоста: pty с persist живёт и копит вывод, вернувшийся плагин забирает его через attach; без persist - завершён', async () => {
+test('ST-1003/3, ST-1008/1: падение хоста: pty с persist живёт и копит вывод, вернувшийся плагин забирает его через attach; без persist - завершён', async () => {
   await using s = await setup({ agent: shell });
   const kept = await s.pty('agent').spawn({ program: '/bin/bash', persist: true, cols: 90, rows: 20 });
   await s.pty('agent').spawn({ program: '/bin/bash' });
@@ -151,7 +155,56 @@ test('падение хоста: pty с persist живёт и копит выв�
   await waitFor('выключенный плагин не оставил pty', () => keptProc.killed === 'SIGHUP');
 });
 
-test('сирота: плагин вернулся после падения хоста, но не взял pty за срок - процесс завершён, журнал называет срок', async () => {
+test('ST-1003/3: зависание хоста: сторож снимает хост, pty с persist живёт и копит вывод, вернувшийся плагин забирает его; без persist - завершён', async () => {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-pty-')));
+  const backend = fakePty();
+  const contexts: PluginContext[] = [];
+  const spawn = inlineHosts(async () => ({ activate: (ctx: PluginContext) => void contexts.push(ctx) }));
+  const frozen = new Set<HostHandle>();
+  const handles: HostHandle[] = [];
+  const k = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['agent'],
+    manifests: [{ id: 'agent', version: '1.0.0', engines: { cyborg: '^1' }, permissions: shell }],
+    os: { dataDir: path.join(root, 'data'), tempDir: path.join(root, 'temp'), env: { PATH: '/usr/bin' }, pty: backend },
+    watchdog: { interval: 10, timeout: 50 },
+    spawnHost: (id) => {
+      const handle = spawn(id);
+      handles.push(handle);
+      // Хост, переставший читать сообщения ядра, не отвечает на пинг - для сторожа это зависание.
+      const post = (message: unknown) => {
+        if (!frozen.has(handle)) handle.port.post(message);
+      };
+      const onMessage: Port['onMessage'] = (listener) => {
+        handle.port.onMessage(listener);
+      };
+      return { ...handle, port: { post, onMessage } };
+    },
+  });
+  try {
+    const kept = await contexts[0]!.os.pty!.spawn({ program: '/bin/bash', persist: true });
+    await contexts[0]!.os.pty!.spawn({ program: '/bin/bash' });
+    const [keptProc, lostProc] = backend.procs as [FakeProc, FakeProc];
+    frozen.add(handles[0]!);
+    await waitFor('сторож снял зависший хост', () => k.journal.some((e) => e.kind === 'host-down'));
+    await waitFor('плагин вернулся', () => contexts.length === 2 && k.active.includes('agent'));
+    const down = k.journal.find((e) => e.kind === 'host-down');
+    assert.equal(down?.kind === 'host-down' && down.reason, 'hang');
+    assert.equal(lostProc.killed, 'SIGHUP');
+    assert.equal(keptProc.killed, undefined, 'pty с persist завершён вместе с зависшим хостом');
+    keptProc.emit('пока хост висел');
+
+    const back = contexts[1]!.os.pty!;
+    assert.deepEqual((await back.list()).map((p) => p.id), [kept.id]);
+    const h = await back.attach(kept.id);
+    assert.equal(h.backlog, '$ пока хост висел');
+  } finally {
+    await k.unload();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('ST-1008/2: сирота: плагин вернулся после падения хоста, но не взял pty за срок - процесс завершён, журнал называет срок', async () => {
   await using s = await setup({ agent: shell }, true, undefined, 100);
   const taken = await s.pty('agent').spawn({ program: '/bin/bash', persist: true });
   await s.pty('agent').spawn({ program: '/bin/bash', persist: true });
@@ -186,7 +239,7 @@ test('pty завершился без владельца: list показыва�
   assert.deepEqual(await s.pty('agent').list(), []);
 });
 
-test('share: билет одноразовый и только для своего UI; вид видит вывод и пишет мимо хоста, в том числе пока хоста нет', async () => {
+test('ST-1008/1: share: билет одноразовый и только для своего UI; вид видит вывод и пишет мимо хоста, в том числе пока хоста нет', async () => {
   await using s = await setup({ term: shell, other: shell });
   const h = await s.pty('term').spawn({ program: '/bin/bash', persist: true, cols: 80, rows: 24 });
   const proc = s.backend.procs[0]!;
@@ -242,7 +295,7 @@ test('share: просроченный билет не открывается', a
   }
 });
 
-test('выключение: preview называет живые pty; keepPty оставляет их ждать attach вернувшегося плагина; без keepPty и при выгрузке - завершены', async () => {
+test('ST-1008/3: выключение: preview называет живые pty; keepPty оставляет их ждать attach вернувшегося плагина; без keepPty и при выгрузке - завершены', async () => {
   await using s = await setup({ agent: shell, quiet: shell });
   const term = await s.pty('agent').spawn({ program: '/bin/bash', cols: 90, rows: 20 });
   await s.pty('agent').spawn({ program: '/bin/bash' });
@@ -272,7 +325,7 @@ test('выключение: preview называет живые pty; keepPty о�
   assert.equal(s.backend.procs.find((p) => p.pid === parked.pid)?.killed, 'SIGHUP', 'припаркованный pty пережил выгрузку ядра');
 });
 
-test('оставленный: ждёт без срока, пока плагин выключен, виден приложению и завершается человеком; вернувшийся плагин без attach теряет его по сроку', async () => {
+test('ST-1008/3: оставленный: ждёт без срока, пока плагин выключен, виден приложению и завершается человеком; вернувшийся плагин без attach теряет его по сроку', async () => {
   let changes = 0;
   await using s = await setup({ agent: shell }, true, undefined, 100, () => {
     changes++;
@@ -356,7 +409,7 @@ test('пределы pty: ввод больше предела - Invalid, pty ж
   await s.pty('term').spawn({ program: '/bin/bash' });
 });
 
-test('пределы pty по умолчанию (PL-01): ввод ровно 1 МиБ проходит, на байт больше - Invalid; размер 1 и 1000 проходит, 0 и 1001 нет - из хоста плагина и из вида', async () => {
+test('ST-1008/6: пределы pty по умолчанию (PL-01): ввод ровно 1 МиБ проходит, на байт больше - Invalid; размер 1 и 1000 проходит, 0 и 1001 нет - из хоста плагина и из вида', async () => {
   const MIB = 1024 * 1024;
   await using s = await setup({ term: shell });
   const a = await s.pty('term').spawn({ program: '/bin/bash', persist: true });
@@ -384,6 +437,15 @@ test('пределы pty по умолчанию (PL-01): ввод ровно 1 
   assert.deepEqual(await view.resize(1000, 1000), { ok: true });
   for (const [cols, rows] of [[0, 24], [80, 0], [1001, 24], [80, 1001]] as const) assert.match((await view.resize(cols, rows)).error ?? '', /целые 1\.\.1000/, `${String(cols)}x${String(rows)}`);
   assert.deepEqual([other.writes.length, other.writes[0]?.length, other.resizes], [1, MIB, [[1000, 1000]]]);
+
+  const c = await s.pty('term').spawn({ program: '/bin/bash', persist: true });
+  const out = 'x'.repeat(100 * 1024) + 'y'.repeat(200 * 1024);
+  s.backend.procs[2]!.emit(out);
+  s.handles.get('term')!.kill();
+  await s.k.idle();
+  const { backlog } = await s.pty('term').attach(c.id);
+  assert.equal(backlog.length, 256 * 1024, 'хвост по умолчанию - 256 КиБ');
+  assert.equal(backlog, `$ ${out}`.slice(-256 * 1024));
 });
 
 test('pty.write из хоста плагина: pty молчит - сверх ptyQueue Invalid сразу в вызове, вывод процесса снимает отказ (#167)', async () => {
