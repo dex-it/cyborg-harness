@@ -31,7 +31,7 @@ function walk(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]));
 }
 
-describe('package.json ядра', () => {
+describe('ST-6001/1: package.json ядра', () => {
   it('имя, версия и ESM', () => {
     assert.equal(manifest.name, '@cyborg-harness/core');
     assert.match(manifest.version ?? '', /^\d+\.\d+\.\d+$/);

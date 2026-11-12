@@ -79,7 +79,7 @@ describe('граница адаптера Electron', () => {
     assert.deepEqual(bad, []);
   });
 
-  it('playground берёт адаптер только через точки входа его exports', () => {
+  it('ST-6001/1: playground берёт адаптер только через точки входа его exports', () => {
     const all = files(path.join(root, 'playground'));
     assert.ok(all.length > 50, `файлов playground: ${String(all.length)}`);
     const bad = all.flatMap((f) => consumerViolations(f, fs.readFileSync(f, 'utf8'), path.relative(root, f)));
