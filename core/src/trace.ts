@@ -44,7 +44,7 @@ export interface TraceOptions {
   readonly failed: (error: unknown) => void;
   /**
    * Аргументы в записях (`LoadOptions.traceArgs`, K-33); без поля записи несут только размер. `limit` - `LIMITS.traceArgsBytes`; `secrets` - значения, которые вычёркиваются,
-   * для вызывающего и адресата записи (`plugin:<id>`, `view:<id>`, `host:<id>`; прочие участники секретов не имеют).
+   * для вызывающего и адресата записи (`plugin:<id>`, `view:<id>`; прочие участники секретов не имеют).
    */
   readonly args?: {
     readonly limit: number;

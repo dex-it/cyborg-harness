@@ -32,17 +32,15 @@ function defaultOs(): OsEnvironment {
 }
 
 /**
- * Значения секретов для записи трассы с аргументами (K-33): плагины, чьи значения могли попасть в аргументы, - вызывающий и адресат.
- * Участник `plugin:<id>` и `view:<id>` - этот плагин, `host:<id>` - хост, чей плагин не определён, и тогда все плагины хоста (как строка хоста в K-29); человек (`user`) и мост секретов не имеют.
+ * Значения секретов для записи трассы с аргументами (K-33): плагины, чьи значения могли попасть в аргументы, - вызывающий и адресат (`plugin:<id>`, `view:<id>`).
+ * Человек (`user`) и `host:<id>` секретов не имеют: сообщение хоста с аргументами всегда называет плагин, без имени оно отвергается до записи аргументов.
  * Чужие секреты не вычёркиваются: плагин, записавший в хранилище короткое слово, портил бы чужую диагностику.
  */
 function traceSecrets(ctx: KernelContext, caller: string, callee: string | undefined): string[] {
   const ids = new Set<string>();
   for (const who of [caller, callee]) {
-    const match = /^(plugin|view|host):(.+)$/.exec(who ?? '');
-    if (match?.[1] === undefined || match[2] === undefined) continue;
-    if (match[1] === 'host') for (const id of ctx.byId.keys()) if (ctx.hostOf(id) === match[2]) ids.add(id);
-    if (match[1] !== 'host') ids.add(match[2]);
+    const id = /^(?:plugin|view):(.+)$/.exec(who ?? '')?.[1];
+    if (id !== undefined) ids.add(id);
   }
   return ctx.gateway.secretValues(ids);
 }
