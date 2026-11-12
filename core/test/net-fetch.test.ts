@@ -131,6 +131,26 @@ test('net.fetch: право, названное локальным адресо�
   assert.deepEqual(f.denied(), []);
 });
 
+test('net.fetch: частный адрес корпоративного хоста открывает только его название человеком в config; то же имя в праве манифеста и пустое поле - отказ (PL-10, У-35)', async () => {
+  // Сервер теста слушает 127.0.0.1: имена корпоративных хостов ведут на локальный адрес подменой резолва, а пропуск или отказ виден по тому, дошёл ли запрос.
+  const { lookup } = answer({ 'gitlab.corp.example': ['127.0.0.1'], 'hub2.corp.example': ['127.0.0.1'] });
+  await using named = await fixture({ net: ['config:hubs'] }, lookup, { hubs: ['gitlab.corp.example:$PORT', 'http://hub2.corp.example:$PORT/api'] });
+  for (const host of ['gitlab.corp.example', 'hub2.corp.example']) assert.equal((await named.net.fetch(`http://${host}:${String(named.port)}/x`)).status, 200, host);
+  assert.equal(named.hits.length, 2);
+  assert.deepEqual(named.denied(), []);
+
+  // Тот же хост, записанный в манифесте именем: адрес из DNS локальный, автор плагина частную сеть не открывает.
+  await using fixed = await fixture({ net: ['gitlab.corp.example:$PORT'] }, lookup);
+  await assert.rejects(fixed.net.fetch(`http://gitlab.corp.example:${String(fixed.port)}/x`), { code: 'PermissionDenied' });
+  assert.match(fixed.denied()[0] ?? '', /адрес 127\.0\.0\.1 локальный/);
+  assert.equal(fixed.hits.length, 0);
+
+  // Поле config есть, но человек в нём ничего не назвал: частной сети плагин не получил.
+  await using empty = await fixture({ net: ['config:hubs'] }, lookup, { hubs: [] });
+  await assert.rejects(empty.net.fetch(`http://gitlab.corp.example:${String(empty.port)}/x`), { code: 'PermissionDenied' });
+  assert.equal(empty.hits.length, 0);
+});
+
 test('net.fetch по node:http: метод, тело и заголовки доходят; переадресация не идёт; 204 без тела; тайм-аут и выгрузка обрывают запрос', async () => {
   const { lookup } = answer({});
   await using f = await fixture({ net: ['127.0.0.1:$PORT'] }, lookup);

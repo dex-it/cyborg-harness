@@ -384,16 +384,25 @@ export interface ConfigView {
   readonly untrusted: Readonly<Record<string, unknown>>;
 }
 
-/** Хост записи `net`: имя как есть либо значение поля `config:<поле>` из `config`; нет значения - пусто. */
+/** Хост из значения поля config: адрес (`https://gitlab.corp:8443/api`) или хост с портом без схемы (`gitlab.corp:8443`, `new URL` читает его как схему `gitlab.corp:`). */
+function hostOf(value: string): string {
+  try {
+    const host = new URL(value).host.toLowerCase();
+    if (host !== '') return host;
+  } catch {
+    // не адрес: ниже берётся как хост
+  }
+  return value.toLowerCase();
+}
+
+/**
+ * Хосты записи `net`: имя как есть либо значение поля `config:<поле>` из `config`. Значение - строка либо список строк (хабов трекера у человека бывает несколько,
+ * PL-10); не строки из списка пропускаются, нет значения - пусто.
+ */
 function configHost(entry: string, config: Readonly<Record<string, unknown>>): string[] {
   if (!entry.startsWith('config:')) return [entry.toLowerCase()];
   const v = config[entry.slice('config:'.length)];
-  if (typeof v !== 'string') return [];
-  try {
-    return [new URL(v).host.toLowerCase()];
-  } catch {
-    return [v.toLowerCase()];
-  }
+  return (Array.isArray(v) ? v : [v]).filter((x): x is string => typeof x === 'string').map(hostOf);
 }
 
 /** Причина отказа правила `process`, `pty` или `launch`; undefined - запуск подходит. */
