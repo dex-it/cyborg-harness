@@ -389,32 +389,48 @@ test('files: ОС потеряла события каталогов при chec
   // Счётчик перечитываний не проверяется: дерево могло догнать и по закрытию слежения за ушедшим каталогом (onClose шлюза), ждём наблюдаемый итог, а не путь к нему.
 });
 
-test('files: лавина событий, из которых ОС доставила только начало - после тишины перечитываются все узлы', async () => {
+/**
+ * Лавина, из которой ОС доставила события только первых DELIVERED файлов и события конца, а середину потеряла (FSEvents при checkout). Файлы пишутся с паузой `pauseMs`: 0 - как быстрая
+ * машина, 5 - как медленный раннер, где запись трёх волн идёт дольше тишины RESYNC_QUIET_MS.
+ *
+ * Тишина считается по доставленным событиям, а плагин не видит записи, о которой ОС промолчала. Если доставка оборвана в начале записи, перечитывание наступает через 300 мс после последнего
+ * доставленного события - на медленной машине раньше, чем допишется лавина, - и прочитывает неполный каталог; недошедшие события его уже не обновят. Поэтому доставку обрывает не счёт
+ * событий (число событий на файл у ОС своё: Linux - несколько на запись, FSEvents - одно), а имя, а после конца записи тест доставляет хвост лавины - правку первых DELIVERED файлов,
+ * известных узлу: это перезапускает тишину уже после записи, и перечитывание всегда видит каталог целиком, как бы медленно он ни писался.
+ */
+const DELIVERED = 20;
+async function avalancheLost(pauseMs: number): Promise<void> {
   const many = Object.fromEntries(Array.from({ length: 150 }, (_, i) => [`bulk/f${String(i).padStart(3, '0')}.txt`, 'x']));
-  const gate = { left: Infinity };
-  const dropName = (name: string): boolean => {
-    if (!name.startsWith('bulk/')) return false;
-    gate.left--;
-    return gate.left < 0;
+  const lost = (name: string): boolean => {
+    const index = /^bulk\/f(\d+)\.txt$/.exec(name)?.[1];
+    return index !== undefined && Number(index) >= DELIVERED;
   };
-  await using s = await started({ ...FILES, 'bulk/keep.txt': 'k' }, ['files'], lossy(() => false, dropName));
+  await using s = await started({ ...FILES, 'bulk/keep.txt': 'k' }, ['files'], lossy(() => false, lost));
   const { p, repo } = s;
   await p.k.run('files.root', repo);
   await p.k.run('files.expand', path.join(repo, 'bulk'));
   await arm(p, [repo, path.join(repo, 'bulk')]);
-  // Лавина тремя волнами по 50 файлов: слежение доставит события первых файлов первой волны, остальное потеряет; перечитанный по первой пачке каталог дальше не обновится.
-  gate.left = 60;
+  // Лавина тремя волнами по 50 файлов: слежение доставит события первых DELIVERED файлов первой волны, остальное потеряет; перечитанный по первой пачке каталог дальше не обновится.
   const waves = [0, 1, 2].map((w) => Object.fromEntries(Object.entries(many).slice(w * 50, w * 50 + 50)));
   for (const wave of waves) {
-    await writeFiles(repo, wave);
+    for (const [name, text] of Object.entries(wave)) {
+      await writeFiles(repo, { [name]: text });
+      if (pauseMs > 0) await new Promise((r) => setTimeout(r, pauseMs));
+    }
     await new Promise((r) => setTimeout(r, 120));
   }
+  // Хвост лавины: запись окончена, ОС называет правки первых файлов; их не меньше STORM_NAMES, поэтому тишина отсчитывается заново, от конца записи.
+  await writeFiles(repo, Object.fromEntries(Object.entries(many).slice(0, DELIVERED).map(([name]) => [name, 'tail'])));
   const st = await waitFor('каталог перечитан после лавины', async () => {
     const cur = await state(p);
     return names(cur.nodes[path.join(repo, 'bulk')]).length === 151 ? cur : undefined;
   });
   assert.ok(st.counters.resyncs >= 1, 'перечитывание после тишины');
-});
+}
+
+test('files: лавина событий, из которых ОС доставила только начало - после тишины перечитываются все узлы', () => avalancheLost(0));
+
+test('files: лавина событий, из которых ОС доставила только начало, на медленном раннере (запись дольше тишины) - после тишины перечитываются все узлы', () => avalancheLost(5));
 
 test('files: лавина событий со всего дерева не гонит git status на каждую пачку - отметки запрашиваются один раз после тишины и приходят верными', async () => {
   const many = Object.fromEntries(Array.from({ length: 150 }, (_, i) => [`bulk/deep/f${String(i).padStart(3, '0')}.txt`, 'x']));
