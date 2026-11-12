@@ -1,0 +1,83 @@
+---
+level: verification
+feature: cyborg-harness
+status: draft
+date: 2026-11-11
+origin: derived
+---
+
+# Приёмка по критериям историй
+
+Каждый критерий приёмки истории (`docs/03-requirements/<фича>/stories/ST-*.md`) проверяется тестом, в имени которого стоит его ключ, или записан здесь исключением. Критерий на `[целевое поведение]` ни того, ни другого не получает: поведения ещё нет. Какой тест или исключение закрывает каждый критерий - в [матрице приёмки](acceptance-coverage.md).
+
+## Ключ
+
+Ключ критерия - `ST-NNNN/k`: номер истории и порядковый номер критерия в её разделе «Критерии приёмки». Ключ стоит в начале строки имени `test(`, `it(` или `describe(`:
+
+```ts
+test('ST-1002/3: цикл зависимостей отказывает всем участникам', () => { ... });
+test('ST-1002/3, ST-1002/4: ...', () => { ... });
+describe('ST-2001/1: заявка контракта', () => { ... });
+```
+
+- Несколько ключей - через запятую. Ключ на `describe` распространяется на все тесты блока.
+- Критерий могут закрывать несколько тестов, когда его «Тогда» проверяется по частям.
+- Тест под ключом проверяет каждое утверждение «Тогда» критерия: упадёт, если поведение нарушить. Совпадения темы мало.
+- Ключ вне строки имени (комментарий, тело теста) и ключ на `.skip` или `.todo` критерий не закрывают.
+
+## Команды
+
+- `npm run check:acceptance` - сверка: у каждого критерия, кроме целевого поведения, есть тест с ключом или исключение; ключ и исключение указывают на существующий критерий; у критерия не тест и исключение сразу; [матрица](acceptance-coverage.md) совпадает с собранной. Пересборка матрицы - `npm run check:acceptance -- --write`. Скрипт - `scripts/check-acceptance.ts`, шаг CI «ссылки в docs».
+- `npm run test:acceptance` - прогон только тестов с ключом (`--test-name-pattern` по `ST-NNNN/k`). В CI отдельно не идёт: размеченные тесты входят в `npm test`.
+
+## Время
+
+Бюджет `npm run test:acceptance` - 30 с локально, 60 с в CI. Замер 2026-11-12, Linux, ноутбук: 567 тестов за 8,0 с (9,8 с с пересборкой пакетов), полный `npm test` - 32,8 с. Дольше 1 с идут семь тестов: сбой и зависание хоста на настоящих процессах (ST-1003/3, ST-1003/4, ST-1004/3), установка архивов пакетов (ST-6001/8), `process.run` с потомками (ST-3002/2), разрешение точек входа пакета (ST-6001/1, ST-6001/2). Бюджет выполнен, быстрых двойников у них нет.
+
+## Исключения
+
+Критерий вне охвата приёмки на тестах: требует настоящего окна Electron, проверяется инструментом автора плагина, документом или замером, относится к этапу 2 или проверяется руками. Причина - одна из `окно`, `инструменты`, `документ`, `замер`, `этап 2`, `ручная`; в «Где проверяется» - скрипт, тест-файл инструмента или документ.
+
+| Критерий | Причина | Где проверяется |
+|---|---|---|
+| ST-1002/4 | ручная | дефект [#228](https://github.com/dex-it/cyborg-harness/issues/228): цепочка из двух звеньев с отказом на конце роняет `resolveGraph`; каскад на одно звено - `core/test/graph.test.ts` |
+| ST-1006/5 | замер | `npm run spike:gateway`, [spike-gateway.md](spike-gateway.md); бюджеты - `npm run check:budgets` (`playground/budgets.json`) |
+| ST-1007/7 | ручная | вопрос о живых pty при закрытии и смене воркспейса (`electron/src/restarts.ts`): smoke глушит диалог, [macos-check.md](macos-check.md) |
+| ST-1009/2 | документ | осмотр по SAD, раздел 2; перенос формата - `core/test/workspace.test.ts` |
+| ST-2003/4 | окно | `playground/scripts/smoke.mjs`, шаг перезапуска хоста: вид под плашкой без ввода |
+| ST-2005/1 | окно | `playground/scripts/smoke.mjs`, шаг «элементы ядра» |
+| ST-2007/2 | документ | гейты CI `.github/workflows/ci.yml`: `npm test` с `core/test/plugin-imports.test.ts`, `typecheck`, `lint`, `smoke` |
+| ST-4001/10 | замер | `npm run spike:gateway` и `-- --trace=off`, [spike-gateway.md](spike-gateway.md) |
+| ST-5002/7 | документ | `contracts/CHANGELOG.md`; формат - `scripts/test/release.test.ts` |
+| ST-5003/5 | ручная | ревью по ADR-CH-0002, п. 4: срок жизни члена с `@deprecated` сверкой рода изменения не держится (FR-CH-5003, «Ещё нет»); пометку `@deprecated` держит снимок `core/test/api-snapshot/1.0.0.txt` |
+| ST-5003/6 | инструменты | `testing/test/kit.test.ts` |
+| ST-6002/4 | окно | `npm run smoke` в CI на macOS и Linux, [macos-check.md](macos-check.md) |
+| ST-7001/1 | инструменты | `core/test/plugin-template.test.ts`, `tools/cyborg-plugin/test/template.test.ts` |
+| ST-7001/2, ST-7001/3 | инструменты | `tools/cyborg-plugin/test/build.test.ts` |
+| ST-7002/3 | ручная | дефект [#229](https://github.com/dex-it/cyborg-harness/issues/229): ошибки манифеста у `checkPlugin` без номера строки; остальные строки «файл:строка» - `core/test/plugin-check.test.ts` |
+| ST-7003/1 | инструменты | `testing/test/kit.test.ts` |
+| ST-7003/2, ST-7003/3 | инструменты | `testing/test/agent-suite.test.ts` |
+| ST-7003/4 | документ | [руководство «Тесты плагина»](../guide/authors/testing.md) |
+| ST-7004/1 | документ | [author-kit-run.md](author-kit-run.md), `scripts/test/api-reference.test.ts` |
+| ST-7004/4 | ручная | [author-kit-run.md](author-kit-run.md) |
+
+## Части вне тестов
+
+Критерий закрыт тестом с ключом, но часть его «Тогда» держится вне тестов: процесс Electron, окно, срок под значениями по умолчанию. Строка здесь требует теста с ключом; причина и «Где проверяется» - как в исключениях.
+
+| Критерий | Причина | Где проверяется |
+|---|---|---|
+| ST-1003/2 | окно | хост в `utilityProcess`: `playground/scripts/smoke.mjs` |
+| ST-1003/3 | замер | срок обнаружения зависания при значениях по умолчанию: `npm run spike:hosts`, [spike-hosts.md](spike-hosts.md) |
+| ST-1003/8 | окно | окно и виды после сбоя хоста: `playground/scripts/smoke.mjs` |
+| ST-1007/1 | окно | фокус окна: `playground/scripts/smoke.mjs` |
+| ST-1007/2 | окно | сообщение и код выхода приложения: `playground/src/main/main.ts`, `playground/scripts/smoke.mjs` |
+| ST-2002/3 | окно | `<iframe>` вида: `playground/scripts/smoke.mjs` |
+| ST-2003/2 | окно | `playground/scripts/smoke.mjs` |
+| ST-2003/5 | окно | `playground/scripts/smoke.mjs` |
+| ST-2005/2 | окно | `playground/scripts/smoke.mjs` |
+| ST-3005/2 | окно | вызов `fromWindow` на каждом канале окна: `electron/src/channels.ts`, `playground/scripts/smoke.mjs` |
+| ST-5002/1 | ручная | карта `Contracts` и контракты `cyborg.*` в роде изменения: ревью по ADR-CH-0002, п. 4 (FR-CH-5003, «Ещё нет») |
+| ST-5002/3 | ручная | новое обязательное поле JSON манифеста и карта `Contracts`: ревью по `contracts/README.md` («Что снимок не видит») и ADR-CH-0002, п. 4 |
+| ST-6001/2 | ручная | расширение экспорта только новой версией пакета: сверки перечня `exports` с версией нет (FR-CH-6004, «Ещё нет», T-06) |
+| ST-6002/1 | ручная | ломающее изменение только мажорной версией: сверки рода изменения с версией пакета нет (FR-CH-6004, «Ещё нет», T-06) |

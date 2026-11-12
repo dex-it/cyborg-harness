@@ -10,6 +10,7 @@ Cyborg Harness - микроядро для настольных приложен
 - Проверка типов - `npm run typecheck` (строгий tsconfig; TS 7 из алиаса `typescript7`, а `typescript` - TS 6 под API typescript-eslint, поэтому `npx tsc` - не тот компилятор)
 - Линтер - `npm run lint` (ESLint с strictTypeChecked по процессу на пакет, `scripts/lint.mjs`; ноль предупреждений; отключение правила - только директивой с `-- причина`)
 - Тесты - `npm test` (node --test, Node 24 снимает типы сам); подделки сообщений хоста - `core/test/trust.test.ts`; снимок API плагина - `core/test/api-snapshot.test.ts`, эталон `core/test/api-snapshot/<версия>.txt`, обновление `npm run snapshot:api` (правила - `contracts/README.md`)
+- Приёмка - ключ критерия `ST-NNNN/k` в имени теста или исключение в `docs/05-verification/acceptance.md`; сверка `npm run check:acceptance` (`-- --write` - матрица), прогон только размеченных `npm run test:acceptance`
 - Дымовой тест окна - `npm run smoke` (нужен дисплей; на Linux `xvfb-run`)
 - CI - `.github/workflows/ci.yml`: сборка, типы, линтер, тесты и smoke на macOS и Linux
 
