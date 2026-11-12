@@ -63,7 +63,7 @@ const diag = (fsys: DiagnosticsFs, options: Partial<DiagnosticsOptions> = {}) =>
 const failed = (pluginId: string, error = 'нет диска'): JournalEntry => ({ pluginId, kind: 'failed', hostId: 'h', error });
 const names = (fsys: MemoryFs) => [...fsys.files.keys()].sort();
 
-test('запись: ошибка и жизненный цикл уходят в файл сразу, обычная запись - пакетом вне вызова (FR-CH-4012, вопрос 2 SRS)', async () => {
+test('ST-4003/2: запись: ошибка и жизненный цикл уходят в файл сразу, обычная запись - пакетом вне вызова (FR-CH-4012, вопрос 2 SRS)', async () => {
   const fsys = new MemoryFs();
   const d = diag(fsys, { flushMs: 40 });
   assert.deepEqual(fsys.records('diagnostics.log').map((r) => r.src), ['run'], 'начало запуска записано');
@@ -96,7 +96,7 @@ test('запись: срочные записи чаще urgentGapMs не пре
   assert.equal(fsys.records('diagnostics.log').filter((r) => r.src === 'log').length, 100);
 });
 
-test('ротация: файлов не больше предела, каждый не больше предельного размера, оба читаются, самые новые записи на месте (FR-CH-4012)', () => {
+test('ST-4003/1: ротация: файлов не больше предела, каждый не больше предельного размера, оба читаются, самые новые записи на месте (FR-CH-4012)', () => {
   const fsys = new MemoryFs();
   const start = clock;
   const d = diag(fsys, { fileBytes: 2000, files: 3 });
@@ -136,7 +136,7 @@ test('ротация: один пакет больше предела делит
   assert.ok(names(fsys).length <= 4);
 });
 
-test('отказ диска: запись не бросает, кольцо остаётся, в нём одна запись об отказе, onProblem сказан один раз; диск вернулся - записи ушли (вопрос 3 SRS)', () => {
+test('ST-4003/3: отказ диска: запись не бросает, кольцо остаётся, в нём одна запись об отказе, onProblem сказан один раз; диск вернулся - записи ушли (вопрос 3 SRS)', () => {
   const fsys = new MemoryFs();
   const problems: string[] = [];
   const d = diag(fsys, { onProblem: (t) => problems.push(t) });
@@ -194,7 +194,7 @@ async function boot(d: Diagnostics, table: Record<string, PluginModule>, manifes
   return track(k);
 }
 
-test('отказ диска не отказывает операцию: команда, контракт и вызов ctx.os отвечают как без диагностики, запись об отказе одна (критерий приёмки)', async () => {
+test('ST-4003/3: отказ диска не отказывает операцию: команда, контракт и вызов ctx.os отвечают как без диагностики, запись об отказе одна (критерий приёмки)', async () => {
   const fsys = new MemoryFs();
   fsys.failing = { code: 'EROFS' };
   const d = diag(fsys);
@@ -208,7 +208,7 @@ test('отказ диска не отказывает операцию: кома
   d.close();
 });
 
-test('прошлый запуск: причина сбоя читается из файла на том же каталоге, состояние плагина в новом запуске выводится только из его журнала (FR-CH-4013, 4014)', async () => {
+test('ST-4003/4, ST-4003/5: прошлый запуск: причина сбоя читается из файла на том же каталоге, состояние плагина в новом запуске выводится только из его журнала (FR-CH-4013, 4014)', async () => {
   const fsys = new MemoryFs();
   const first = diag(fsys);
   first.sinks.onJournal({ pluginId: 'flaky', kind: 'activated', hostId: 'h', ms: 3 });
@@ -235,7 +235,7 @@ test('прошлый запуск: причина сбоя читается из
   assert.equal(second.previousFailures().get('flaky')?.pluginId, 'flaky', 'причина прошлого сбоя при этом остаётся видимой');
 });
 
-test('прошлый запуск: прошлым считается последний запуск, чистый запуск после сбоя причину не оставляет', () => {
+test('ST-4003/4: прошлый запуск: прошлым считается последний запуск, чистый запуск после сбоя причину не оставляет', () => {
   const fsys = new MemoryFs();
   const a = diag(fsys);
   a.sinks.onJournal(failed('p'));
@@ -271,7 +271,7 @@ test('прошлый запуск: оборванная и правленая с
   assert.match(text, /Не разобрано строк или файлов: 3\./);
 });
 
-test('NFR-CH-1005: запись каждого вида из первого запуска найдена во втором на том же каталоге при штатном закрытии', async () => {
+test('ST-4003/2: NFR-CH-1005: запись каждого вида из первого запуска найдена во втором на том же каталоге при штатном закрытии', async () => {
   const fsys = new MemoryFs();
   const first = diag(fsys);
   const entries: JournalEntry[] = [
@@ -286,7 +286,7 @@ test('NFR-CH-1005: запись каждого вида из первого за
   for (const needle of ['не поднялся в хосте h: нет диска', 'выключен, сбоев подряд: 3', 'хост hh упал, виновник: c', 'строка error a: строка с ошибкой']) assert.ok(text.includes(needle), needle);
 });
 
-test('NFR-CH-1005: записи с ошибкой и жизненного цикла в файле и тогда, когда приложение убито без закрытия', () => {
+test('ST-4003/2: NFR-CH-1005: записи с ошибкой и жизненного цикла в файле и тогда, когда приложение убито без закрытия', () => {
   const fsys = new MemoryFs();
   const d = diag(fsys);
   d.sinks.onLog('p', 'обычная строка до сбоя', 'info');
@@ -297,7 +297,7 @@ test('NFR-CH-1005: записи с ошибкой и жизненного цик
   assert.deepEqual(kept, ['обычная строка до сбоя'], 'сброс ошибки унёс и накопленное перед ней; хвост после неё потерян - это вопрос 2');
 });
 
-test('ротация: поток шумного плагина на несколько размеров файла не стирает запись failed соседа, previousFailures() её отдаёт (#180, У-49)', () => {
+test('ST-4004/4: ротация: поток шумного плагина на несколько размеров файла не стирает запись failed соседа, previousFailures() её отдаёт (#180, У-49)', () => {
   const fsys = new MemoryFs();
   const first = diag(fsys, { fileBytes: 4000, files: 3, keepBytes: 3000 });
   first.sinks.onJournal(failed('neighbour', 'причина вчерашнего сбоя'));
@@ -397,7 +397,7 @@ async function scenario(options: { diagnostics?: Partial<DiagnosticsOptions> } =
   return { fsys, d, k, marker, secret, ctx: ctx!, secrets };
 }
 
-test('выгрузка: один текстовый файл с записью об ошибке и её цепочкой, версиями ядра и плагинов, состоянием и графом, самой ранней записью (FR-CH-4015)', async () => {
+test('ST-4004/1, ST-4004/2, ST-4004/4: выгрузка: один текстовый файл с записью об ошибке и её цепочкой, версиями ядра и плагинов, состоянием и графом, самой ранней записью (FR-CH-4015)', async () => {
   const { d, k } = await scenario();
   await assert.rejects(k.run('top.run'), { code: 'Remote' });
   const text = d.export({ app: 'Тест 1.2.3', core: '0.1.0', kernel: k });
@@ -425,7 +425,7 @@ test('выгрузка: один текстовый файл с записью �
   await k.unload();
 });
 
-test('ST-3004/3: выгрузка: маркера аргумента, значения секрета и текста исключения поставщика нет ни в файле хранилища, ни в выгрузке (FR-CH-4004, NFR-CH-4002)', async () => {
+test('ST-4001/11: ST-3004/3: выгрузка: маркера аргумента, значения секрета и текста исключения поставщика нет ни в файле хранилища, ни в выгрузке (FR-CH-4004, NFR-CH-4002)', async () => {
   const { fsys, d, k, marker, secret, ctx, secrets } = await scenario();
   await ctx.os.secrets.set('token', secret);
   assert.equal(await ctx.os.secrets.get('token'), secret);
@@ -455,7 +455,7 @@ test('выгрузка: не записанное из-за отказа дис�
   await k.unload();
 });
 
-test('выгрузка: сеть не нужна и не трогается - при заблокированных fetch и net выгрузка даёт текст (FR-CH-4016)', async (t) => {
+test('ST-4004/3: выгрузка: сеть не нужна и не трогается - при заблокированных fetch и net выгрузка даёт текст (FR-CH-4016)', async (t) => {
   const { d, k } = await scenario();
   const realFetch = globalThis.fetch;
   globalThis.fetch = () => {
@@ -468,7 +468,7 @@ test('выгрузка: сеть не нужна и не трогается - п
   await k.unload();
 });
 
-test('выгрузка: модули хранения и выгрузки не импортируют сеть и не вызывают fetch (FR-CH-4016, осмотр)', () => {
+test('ST-4004/3: выгрузка: модули хранения и выгрузки не импортируют сеть и не вызывают fetch (FR-CH-4016, осмотр)', () => {
   const src = path.resolve(import.meta.dirname, '..', 'src');
   for (const file of ['diagnostics.ts', 'diagnostics-export.ts', 'diagnostics-record.ts', 'diagnostics-ring.ts']) {
     const code = fs.readFileSync(path.join(src, file), 'utf8');
@@ -477,7 +477,7 @@ test('выгрузка: модули хранения и выгрузки не �
   }
 });
 
-test('кольцо в ядре: шумный плагин выводит в журнал тысячи строк и операций, а запись о сбое соседа и его строка с ошибкой остаются (У-49, критерий приёмки)', () => {
+test('ST-4002/5: кольцо в ядре: шумный плагин выводит в журнал тысячи строк и операций, а запись о сбое соседа и его строка с ошибкой остаются (У-49, критерий приёмки)', () => {
   const fsys = new MemoryFs();
   const d = diag(fsys, { capacity: 500, perPlugin: 100 });
   d.sinks.onLog('quiet', 'ошибка соседа', 'error');
@@ -528,7 +528,7 @@ test('кольцо: шумный поставщик событий контра�
   await k.unload();
 });
 
-test('выгрузка: записи всех видов читаются строкой, граф с отказом, пустое ядро и неназванные версии, запись больше строки файла - метка, дата вне диапазона не ломает текст', () => {
+test('ST-4004/5: выгрузка: записи всех видов читаются строкой, граф с отказом, пустое ядро и неназванные версии, запись больше строки файла - метка, дата вне диапазона не ломает текст', () => {
   const fsys = new MemoryFs();
   const d = diag(fsys);
   d.sinks.onTrace({ kind: 'stream', stream: 'fs-watch', pluginId: 'p', hostId: 'h', at: 5, intervalMs: 1000, messages: 4, bytes: 80 });

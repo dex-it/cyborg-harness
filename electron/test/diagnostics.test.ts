@@ -38,7 +38,7 @@ async function run(userData: string, broken: boolean) {
   return { service, diagnostics };
 }
 
-test('служба окна: после перезапуска причина сбоя прошлого запуска видна у плагина, а состояние плагина - из текущего запуска (FR-CH-4013, 4014)', async () => {
+test('ST-4003/4, ST-4003/5: служба окна: после перезапуска причина сбоя прошлого запуска видна у плагина, а состояние плагина - из текущего запуска (FR-CH-4013, 4014)', async () => {
   const userData = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['disk'] } }));
   plugin(path.join(userData, 'plugins'), 'disk');
@@ -65,7 +65,7 @@ test('служба окна: после перезапуска причина с
   }
 });
 
-test('служба окна: выгрузка пишет один текстовый файл туда, куда назвал человек, с версиями, состоянием и записью о сбое; ошибки пути и отсутствие хранения - отказ с текстом (FR-CH-4015, 4016)', async () => {
+test('ST-4004/1: служба окна: выгрузка пишет один текстовый файл туда, куда назвал человек, с версиями, состоянием и записью о сбое; ошибки пути и отсутствие хранения - отказ с текстом (FR-CH-4015, 4016)', async () => {
   const userData = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['disk'] } }));
   plugin(path.join(userData, 'plugins'), 'disk');
@@ -118,7 +118,7 @@ test('старт: с diagnostics записи ядра идут в файл user
   assert.ok(kinds.includes('run') && kinds.includes('journal') && kinds.includes('trace'), kinds.join(','));
 });
 
-test('файлы на диске: ротация держит число и размер, права владельца, каталог у каждого воркспейса свой', () => {
+test('ST-4003/1: файлы на диске: ротация держит число и размер, права владельца, каталог у каждого воркспейса свой', () => {
   const userData = tmp();
   const a = diagnosticsDir(userData, path.join(userData, 'a.cyborg.json'));
   const b = diagnosticsDir(userData, path.join(userData, 'b.cyborg.json'));
@@ -141,7 +141,7 @@ test('файлы на диске: ротация держит число и ра
   assert.deepEqual(nodeDiagnosticsFs(path.join(userData, 'пусто')).list(), []);
 });
 
-test('отказ диска в адаптере: каталог недоступен для записи - ядро поднимается, операции отвечают, причина названа в снимке окна', async () => {
+test('ST-4003/3: отказ диска в адаптере: каталог недоступен для записи - ядро поднимается, операции отвечают, причина названа в снимке окна', async () => {
   const userData = tmp();
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['disk'] } }));
   plugin(path.join(userData, 'plugins'), 'disk');

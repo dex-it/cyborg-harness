@@ -17,7 +17,7 @@ describe('окно «Плагины Cyborg»: модель', () => {
     );
   });
 
-  it('журнал плагина - его записи и записи хоста, где он назван', () => {
+  it('ST-4005/1: журнал плагина - его записи и записи хоста, где он назван', () => {
     const line = (subject: string, plugins: string[]): PluginJournalLine => ({ at: 0, subject, plugins, text: subject, level: 'info' });
     const lines = [line('echo', ['echo']), line('хост a', ['echo', 'probe']), line('probe', ['probe'])];
     assert.deepEqual(
@@ -27,7 +27,7 @@ describe('окно «Плагины Cyborg»: модель', () => {
     assert.equal(journalFor(lines, null).length, 3);
   });
 
-  it('сводка: запуск, отказ ядра, пусто, счёт по состояниям без невключённых', () => {
+  it('ST-4005/2: сводка: запуск, отказ ядра, пусто, счёт по состояниям без невключённых', () => {
     assert.equal(summary(snapshot([], { phase: 'starting' })), 'Ядро плагинов запускается…');
     assert.equal(summary(snapshot([], { phase: 'failed', error: 'нет хоста' })), 'Ядро плагинов не запустилось: нет хоста');
     assert.match(summary(snapshot([row('off', 'disabled')])), /^Включённых плагинов нет/);
@@ -38,7 +38,7 @@ describe('окно «Плагины Cyborg»: модель', () => {
     assert.equal(summary(snapshot([row('a', 'stopped'), row('b', 'stopped'), row('d', 'disabled')], { safeMode: true })), 'Безопасный режим: включённых плагинов 2, их код не запускается.');
   });
 
-  it('ST-2003/5: кнопки: у работающего - команды, выгрузка и хост; у выгруженного - «Загрузить», у упавшего - «Включить снова»', () => {
+  it('ST-4005/1, ST-4005/2: ST-2003/5: кнопки: у работающего - команды, выгрузка и хост; у выгруженного - «Загрузить», у упавшего - «Включить снова»', () => {
     const labels = (r: PluginRow, canHang = true) => actionsFor(r, canHang).map((a) => a.label);
     assert.deepEqual(labels(row('bob', 'active', { commands: ['bob.hello'], pid: 7 })), ['bob.hello', 'Выгрузить', 'Уронить хост', 'Повесить хост', 'Журнал']);
     assert.deepEqual(labels(row('bob', 'active', { pid: 7 }), false), ['Выгрузить', 'Уронить хост', 'Журнал']);

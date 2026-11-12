@@ -26,7 +26,7 @@ test('ST-1001/8: состояние по журналу: работает, пе�
   assert.equal(view(journal)[2], 'a:restarting:revived:-');
 });
 
-test('запись журнала словами и уровень', () => {
+test('ST-4005/1, ST-4005/4: запись журнала словами и уровень', () => {
   const down: JournalEntry = { kind: 'host-down', hostId: 'ui', reason: 'crash', culprits: ['echo'], plugins: ['echo'], affects: ['probe'] };
   assert.equal(describeEntry(down), 'хост ui упал, виновник: echo; сняты: echo; задеты: probe');
   assert.equal(entryLevel(down), 'warn');

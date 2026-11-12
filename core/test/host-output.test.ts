@@ -34,7 +34,7 @@ function rig(current: () => string | undefined = () => undefined, send?: (note: 
   return { stdout, stderr, notes, console, warned };
 }
 
-test('вывод хоста: строки stdout и stderr идут ядру с плагином, чей код выполняется, и уровнем потока', () => {
+test('ST-4002/2: вывод хоста: строки stdout и stderr идут ядру с плагином, чей код выполняется, и уровнем потока', () => {
   let who: string | undefined = 'alice';
   const { stdout, stderr, notes } = rig(() => who);
   stdout.write('привет от alice\n');
@@ -49,7 +49,7 @@ test('вывод хоста: строки stdout и stderr идут ядру с 
   ]);
 });
 
-test('вывод хоста: плагин не определён - строка хоста (pluginId пустой)', () => {
+test('ST-4002/2: вывод хоста: плагин не определён - строка хоста (pluginId пустой)', () => {
   const { stdout, notes } = rig(() => undefined);
   stdout.write('сам хост\n');
   assert.deepEqual(notes, [{ pluginId: '', level: 'info', text: 'сам хост' }]);
@@ -89,7 +89,7 @@ test('вывод хоста: канал с ядром закрыт - строк�
 });
 
 // Настоящий процесс хоста: два плагина одного хоста, их console.log, console.warn и stderr приходят в onLog по плагинам.
-test('вывод хоста: console.log двух плагинов одного хоста разобран по плагинам, в том числе из таймера и продолжения', async () => {
+test('ST-4002/2: вывод хоста: console.log двух плагинов одного хоста разобран по плагинам, в том числе из таймера и продолжения', async () => {
   const lines: string[] = [];
   const k = await load({
     apiVersion: PLUGIN_API_VERSION,

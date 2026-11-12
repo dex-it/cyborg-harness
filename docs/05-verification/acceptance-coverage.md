@@ -9,9 +9,9 @@ origin: derived
 
 Таблица собрана из критериев историй, имён тестов и `acceptance.md` командой `npm run check:acceptance -- --write`; руками не правится. `npm run check:acceptance` падает, если у критерия нет ни теста с ключом `ST-NNNN/k` в имени, ни исключения в [acceptance.md](acceptance.md), если есть и то и другое, если ключ указывает на несуществующий критерий или эта таблица расходится с собранной. Исход критерия: «тест» - в имени хотя бы одного включённого теста ключ критерия (запуск - `npm run test:acceptance`); «исключение» - категория из [acceptance.md](acceptance.md); «целевое поведение» - критерий на то, чего ещё нет, проверки не требует. В ячейке «Проверка» путь файла и число тестов с ключом.
 
-Итог: историй 39, критериев 248: тест 138 (тестов с ключом 313), исключение 5, целевое поведение 22, без исхода 83.
+Итог: историй 39, критериев 248: тест 167 (тестов с ключом 374), исключение 6, целевое поведение 22, без исхода 53.
 
-Исключения по категориям: замеры 1, окно 3, ручная 1.
+Исключения по категориям: замеры 2, окно 3, ручная 1.
 
 ## ST-1001 Манифест и обнаружение: плагин с ошибками не запускается, остальные работают
 
@@ -295,57 +295,57 @@ origin: derived
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-4001/1 | нет |  |
-| ST-4001/2 | нет |  |
-| ST-4001/3 | нет |  |
-| ST-4001/4 | нет |  |
-| ST-4001/5 | нет |  |
-| ST-4001/6 | нет |  |
-| ST-4001/7 | нет |  |
-| ST-4001/8 | нет |  |
-| ST-4001/9 | нет |  |
-| ST-4001/10 | нет |  |
-| ST-4001/11 | нет |  |
+| ST-4001/1 | тест | core/test/trace.test.ts (1) |
+| ST-4001/2 | тест | core/test/trace.test.ts (1) |
+| ST-4001/3 | тест | core/test/trace.test.ts (2) |
+| ST-4001/4 | тест | core/test/trace.test.ts (1) |
+| ST-4001/5 | тест | core/test/trace.test.ts (1) |
+| ST-4001/6 | тест | core/test/trace.test.ts (3) |
+| ST-4001/7 | тест | core/test/trace.test.ts (1) |
+| ST-4001/8 | тест | core/test/trace.test.ts (1) |
+| ST-4001/9 | тест | core/test/trace.test.ts (1) |
+| ST-4001/10 | исключение | замеры |
+| ST-4001/11 | тест | core/test/diagnostics.test.ts (1), core/test/secrets-journal.test.ts (1), core/test/trace.test.ts (2) |
 
 ## ST-4002 Журнал плагина: строки ctx.log, вывод хоста и пределы
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-4002/1 | нет |  |
-| ST-4002/2 | нет |  |
-| ST-4002/3 | нет |  |
-| ST-4002/4 | нет |  |
-| ST-4002/5 | нет |  |
+| ST-4002/1 | тест | core/test/plugin-log.test.ts (1) |
+| ST-4002/2 | тест | core/test/host-output.test.ts (3) |
+| ST-4002/3 | тест | core/test/plugin-log.test.ts (4) |
+| ST-4002/4 | тест | core/test/plugin-log.test.ts (3) |
+| ST-4002/5 | тест | core/test/diagnostics-ring.test.ts (2), core/test/diagnostics.test.ts (1) |
 
 ## ST-4003 Журнал и трасса переживают закрытие: файл, ротация, причина прошлого сбоя
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-4003/1 | нет |  |
-| ST-4003/2 | нет |  |
-| ST-4003/3 | нет |  |
-| ST-4003/4 | нет |  |
-| ST-4003/5 | нет |  |
-| ST-4003/6 | нет |  |
+| ST-4003/1 | тест | core/test/diagnostics.test.ts (1), electron/test/diagnostics.test.ts (1) |
+| ST-4003/2 | тест | core/test/diagnostics.test.ts (3) |
+| ST-4003/3 | тест | core/test/diagnostics.test.ts (2), electron/test/diagnostics.test.ts (1) |
+| ST-4003/4 | тест | core/test/diagnostics.test.ts (2), electron/test/diagnostics.test.ts (1) |
+| ST-4003/5 | тест | core/test/diagnostics.test.ts (1), electron/test/diagnostics.test.ts (1) |
+| ST-4003/6 | тест | core/test/trace.test.ts (1) |
 
 ## ST-4004 Диагностика выгружается одним файлом и остаётся на машине
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-4004/1 | нет |  |
-| ST-4004/2 | нет |  |
-| ST-4004/3 | нет |  |
-| ST-4004/4 | нет |  |
-| ST-4004/5 | нет |  |
+| ST-4004/1 | тест | core/test/diagnostics.test.ts (1), electron/test/diagnostics.test.ts (1) |
+| ST-4004/2 | тест | core/test/diagnostics.test.ts (1) |
+| ST-4004/3 | тест | core/test/diagnostics.test.ts (2) |
+| ST-4004/4 | тест | core/test/diagnostics.test.ts (2) |
+| ST-4004/5 | тест | core/test/diagnostics.test.ts (1) |
 
 ## ST-4005 Окно «Плагины Cyborg» объясняет состояние и ресурсы
 
 | Критерий | Исход | Проверка |
 |---|---|---|
-| ST-4005/1 | нет |  |
-| ST-4005/2 | нет |  |
+| ST-4005/1 | тест | core/test/status.test.ts (1), electron/test/plugins.test.ts (1), playground/test/plugins-model.test.ts (2) |
+| ST-4005/2 | тест | playground/test/plugins-model.test.ts (2) |
 | ST-4005/3 | целевое поведение |  |
-| ST-4005/4 | нет |  |
+| ST-4005/4 | тест | core/test/plugin-log.test.ts (2), core/test/status.test.ts (1) |
 
 ## ST-5001 Несовместимый плагин не загружается, остальные работают
 
