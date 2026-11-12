@@ -17,7 +17,7 @@ export interface PluginPermissions {
   readonly pty?: readonly ProgramRule[];
   /** Запуски, которые поставщик описывает потребителю (`cyborg.agent`); члена в `ctx.os` не даёт, pty потребителя с `describedBy` сверяется и с ними. */
   readonly launch?: readonly ProgramRule[];
-  /** Хосты HTTP; `config:<поле>` - хост из своего раздела config. */
+  /** Хосты HTTP; `config:<поле>` - хост или список хостов из своего раздела config (значение поля - строка или список строк: адрес `https://gitlab.corp:8443` либо `хост:порт`), заданный человеком в слое пользователя. Такой хост ядро считает названным человеком: локальный и частный адрес из DNS ему разрешён, записи с фиксированным именем в манифесте - нет. */
   readonly net?: readonly string[];
   /** Имена переменных окружения, которые плагин читает через `ctx.os.env`. */
   readonly env?: readonly string[];
@@ -318,7 +318,7 @@ export interface PluginOs {
   };
   /** Сеть; есть при праве `net`. */
   readonly net?: {
-    /** HTTP-запрос к хосту из права `net` (`config:<поле>` - хост из своего раздела `config`). Метод по умолчанию `GET`; срок и предел тела - в `HttpRequest`. */
+    /** HTTP-запрос к хосту из права `net` (`config:<поле>` - хост или список хостов из своего раздела `config`). Метод по умолчанию `GET`; срок и предел тела - в `HttpRequest`. */
     fetch(url: string, request?: HttpRequest): Promise<HttpResponse>;
   };
   /** Переменные окружения; есть при праве `env`. */
