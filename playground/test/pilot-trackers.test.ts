@@ -324,7 +324,7 @@ export default {
 };
 `;
 
-test('trackers: чужая программа, другие аргументы и лишняя переменная - PermissionDenied и запись в журнале; флаг ПОСЛЕ закреплённого префикса ядро не видит (SAD, вопрос 5)', async () => {
+test('trackers: чужая программа, другие аргументы, лишняя переменная и запрещённый флаг после закреплённого префикса - PermissionDenied и запись в журнале (K-34)', async () => {
   await using box = await sandbox('cyborg-pl07-');
   const fake = await fakeTrackers(box);
   await fake.scenario({});
@@ -352,10 +352,19 @@ test('trackers: чужая программа, другие аргументы �
     assert.deepEqual(journal, ['process.run: программа не в process: rm', 'process.run: аргументы не по правилу process: gh', 'process.run: переменные не в правиле process: GH_TOKEN', 'process.run: аргументы не по правилу process: jira']);
     assert.deepEqual(await fake.calls(), [], 'отказанные вызовы не запускали программу');
 
-    // Известное ограничение: правило сверяет только префикс, всё после него (в том числе `-X DELETE` или `--hostname`) проходит. Закрывает это плагин (проверка сегментов в tools.ts); что нужно ядру - docs/05-verification/pilot-trackers.md.
-    assert.deepEqual(await run('gh', ['api', '--method', 'GET', 'repos/acme/app/issues', '-X', 'DELETE', '--hostname', 'evil.example']), { ok: true, code: 0 });
-    const [call] = await fake.calls();
-    assert.deepEqual(call?.args.slice(-4), ['-X', 'DELETE', '--hostname', 'evil.example']);
+    // K-34: флаг из `deny` правила после закреплённого префикса (`-X DELETE`, `--hostname`, `--input=`) ядро отклоняет; в журнале имя флага из deny, без значений.
+    const tail = [
+      await run('gh', ['api', '--method', 'GET', 'repos/acme/app/issues', '-X', 'DELETE', '--hostname', 'evil.example']),
+      await run('gh', ['api', '--method', 'GET', 'repos/acme/app/issues', '--hostname=evil.example']),
+      await run('glab', ['api', '--method', 'GET', 'projects/1/issues', '--input=/etc/passwd']),
+    ];
+    assert.deepEqual(tail, Array.from({ length: 3 }, () => ({ ok: false, code: 'PermissionDenied' })));
+    const flags = p.k.journal.flatMap((e) => (e.kind === 'denied' && e.pluginId === 'rogue' ? [e.detail] : [])).slice(journal.length);
+    assert.deepEqual(flags, ['запрещён флаг -X в правиле process: gh', 'запрещён флаг --hostname в правиле process: gh', 'запрещён флаг --input в правиле process: glab']);
+    assert.deepEqual(await fake.calls(), [], 'запрещённые флаги не дошли до программы');
+    // Читающий вызов без запрещённых флагов проходит: список флагов не ломает плагин.
+    assert.deepEqual(await run('gh', ['api', '--method', 'GET', 'repos/acme/app/issues?state=open']), { ok: true, code: 0 });
+    assert.equal((await fake.calls()).length, 1);
   } finally {
     await fake.cleanup();
   }
@@ -385,9 +394,11 @@ test('trackers: в вызов process.run уходят тайм-аут 120 с, �
   assert.deepEqual({ ...first.options, signal: undefined }, { cwd: '/tmp/plugin-temp', env: { GH_PROMPT_DISABLED: '1', NO_COLOR: '1' }, timeoutMs: 120_000, maxOutputBytes: 64 * MIB, signal: undefined });
   assert.ok(first.options.signal instanceof AbortSignal);
   // Манифест: правила закрепляют префикс и называют только те переменные, что плагин передаёт.
+  // K-34: хвост argv закрыт от смены метода, тела запроса, хоста и заголовков (`deny`); `jira` в примерах задачи нет, его список ведёт автор плагина отдельно.
+  const apiDeny = ['--method', '-X', '--input', '--field', '-F', '--raw-field', '-f', '--hostname', '--header', '-H'];
   assert.deepEqual(MANIFEST.permissions.process, [
-    { program: 'gh', args: ['api', '--method', 'GET'], env: ['GH_PROMPT_DISABLED', 'NO_COLOR'] },
-    { program: 'glab', args: ['api', '--method', 'GET'], env: ['NO_COLOR'] },
+    { program: 'gh', args: ['api', '--method', 'GET'], env: ['GH_PROMPT_DISABLED', 'NO_COLOR'], deny: apiDeny },
+    { program: 'glab', args: ['api', '--method', 'GET'], env: ['NO_COLOR'], deny: apiDeny },
     { program: 'jira', args: ['issue', 'list', '--raw'], env: ['NO_COLOR'] },
   ]);
 });

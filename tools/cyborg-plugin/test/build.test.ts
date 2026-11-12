@@ -171,16 +171,16 @@ describe('buildPlugin: запрещённое и отказ до записи (P
   it('ссылка манифеста на отсутствующий файл вида или схемы: отказ, как у check', async () => {
     const out = fresh('out');
     const noView = await buildPlugin(plugin({ 'ui/ui.ts': null }), { out });
-    assert.deepEqual(problems(noView), ['manifest.json: ui.views.main: файла ./ui/ui.js нет']);
+    assert.deepEqual(problems(noView), ['manifest.json:16: ui.views.main: файла ./ui/ui.js нет']);
     const noSchema = await buildPlugin(plugin({ 'config.schema.json': null }), { out });
-    assert.deepEqual(problems(noSchema), ['manifest.json: config.schema: файла ./config.schema.json нет']);
+    assert.deepEqual(problems(noSchema), ['manifest.json:21: config.schema: файла ./config.schema.json нет']);
     assert.ok(!fs.existsSync(out));
   });
 
   it('engines.cyborg не принимает версию API: отказ одной причиной; --api-version переопределяет версию', async () => {
     const dir = plugin({}, { engines: { cyborg: '^2' } });
     const refused = await buildPlugin(dir, { out: fresh('out') });
-    assert.deepEqual(problems(refused), [`manifest.json: engines.cyborg: нужен API Cyborg ^2, есть ${PLUGIN_API_VERSION}`]);
+    assert.deepEqual(problems(refused), [`manifest.json:5: engines.cyborg: нужен API Cyborg ^2, есть ${PLUGIN_API_VERSION}`]);
     assert.equal((await buildPlugin(dir, { out: fresh('out'), apiVersion: '2.0.0' })).ok, true);
   });
 

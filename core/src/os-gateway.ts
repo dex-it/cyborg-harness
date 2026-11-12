@@ -15,7 +15,7 @@ import { namedPaths } from './named-paths.ts';
 import type { PluginManifest } from './manifest.ts';
 import { closePools, guardedLookup, isLocalAddress, transport } from './net-transport.ts';
 import type { NotifyLimits, ShowNotice } from './notices.ts';
-import { ANY_PATH, envNameAllowed, LOGIN_SHELL } from './permissions.ts';
+import { ANY_PATH, deniedFlag, envNameAllowed, LOGIN_SHELL } from './permissions.ts';
 import { killGroup, PTY_SIGNALS, PtyTable, type PtyBackend, type KeptPty, type PtyExpiry, type PtyHostEvents, type TerminalChannel, type TerminalView } from './pty.ts';
 import { inlinePtyHost, type PtyWatchdog, type SpawnPtyHost } from './pty-link.ts';
 import { HttpServes, type AskHost } from './serve.ts';
@@ -398,12 +398,16 @@ function configHost(entry: string, config: Readonly<Record<string, unknown>>): s
 
 /** Причина отказа правила `process`, `pty` или `launch`; undefined - запуск подходит. */
 function ruleRefusal(m: PluginManifest, key: 'process' | 'pty' | 'launch', program: string, argv: readonly string[], envNames: readonly string[]): string | undefined {
-  const rule = (m.permissions[key] ?? []).find((r) => {
-    if (typeof r === 'string') return r === program;
-    return r.program === program && r.args.every((a, i) => argv[i] === a);
-  });
-  // Аргументы в журнал не идут: в них бывают токены (`--header 'Authorization: …'`).
-  if (rule === undefined) return (m.permissions[key] ?? []).some((r) => (typeof r === 'string' ? r : r.program) === program) ? `аргументы не по правилу ${key}: ${program}` : `программа не в ${key}: ${program}`;
+  const rules = m.permissions[key] ?? [];
+  // Правило подходит, если закреплённые аргументы совпали, а в хвосте нет флага из его `deny`; из подходящих по префиксу берётся первое без запретного флага.
+  const byPrefix = rules.filter((r) => (typeof r === 'string' ? r === program : r.program === program && r.args.every((a, i) => argv[i] === a)));
+  const rule = byPrefix.find((r) => typeof r === 'string' || deniedFlag(r, argv) === undefined);
+  if (rule === undefined) {
+    // Аргументы в журнал не идут: в них бывают токены (`--header 'Authorization: …'`); от запретного флага в журнал попадает только его имя из `deny`, без значения.
+    const flag = byPrefix.map((r) => (typeof r === 'string' ? undefined : deniedFlag(r, argv))).find((f) => f !== undefined);
+    if (flag !== undefined) return `запрещён флаг ${flag} в правиле ${key}: ${program}`;
+    return rules.some((r) => (typeof r === 'string' ? r : r.program) === program) ? `аргументы не по правилу ${key}: ${program}` : `программа не в ${key}: ${program}`;
+  }
   // Окружение - тоже ввод программы (GIT_CONFIG_*, NODE_OPTIONS, LD_PRELOAD): только имена из правила, маска `ПРЕФИКС_*` - для номерных `GIT_CONFIG_KEY_<n>`.
   const allowedEnv = typeof rule === 'string' ? [] : (rule.env ?? []);
   const foreign = envNames.filter((k) => !allowedEnv.some((a) => envNameAllowed(a, k)));
