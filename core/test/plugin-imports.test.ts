@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { describe, it } from 'node:test';
+import { describe, it, test } from 'node:test';
 import { checkDeclarations, importProblems, isTestPath } from '../src/plugin-check.ts';
 
 // SAD §6.1, дисциплина: плагин импортирует только @cyborg-harness/contracts и свои модули. Без Compartment хост не мешает обойти шлюз, поэтому правило держит статика.
@@ -26,12 +26,12 @@ function sources(dir: string): string[] {
 
 const lines = (found: readonly { readonly line?: number | undefined }[]) => found.map((p) => p.line);
 
-describe('импорты плагинов', () => {
+describe('ST-7002/6: импорты плагинов', () => {
   for (const [relRoot, relDeclarations] of Object.entries(PLUGIN_ROOTS)) {
     const root = path.join(repo, relRoot);
     const declarations = path.join(repo, relDeclarations);
 
-    it(`${relRoot}: только ${CONTRACTS}, свои модули и типы пакета объявлений`, () => {
+    it(`ST-2001/1: ${relRoot}: только ${CONTRACTS}, свои модули и типы пакета объявлений - плагин не импортирует другой плагин`, () => {
       const homes = fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => path.join(root, d.name));
       assert.ok(homes.length > 0, `в ${relRoot} нет плагинов`);
       const found = homes.flatMap((home) => sources(home).flatMap((file) => importProblems(file, fs.readFileSync(file, 'utf8'), { home, declarations: [declarations], packages: [] }).map((p) => `${path.relative(repo, file)}:${p.line} ${p.message}`)));
@@ -43,7 +43,7 @@ describe('импорты плагинов', () => {
     });
   }
 
-  it('проверка ловит то, что запрещает', () => {
+  it('ST-3001/9: проверка ловит то, что запрещает', () => {
     const home = path.join(repo, 'playground/plugins/x');
     const declarations = path.join(repo, 'playground/plugins/contracts.ts');
     const rules = { home, declarations: [declarations], packages: [] };
@@ -70,4 +70,22 @@ describe('импорты плагинов', () => {
     assert.equal(importProblems(file, viewText, rules).length, 4, 'пакет вида разрешён только в ui/');
     assert.equal(checkDeclarations(declarations, "export const x = 1;\nimport fs from 'node:fs';\nexport interface Ok { a: 1 }\n").length, 2);
   });
+});
+
+test('ST-3005/3: в core/, electron/src и playground/src нет вывода строки разметкой: innerHTML, outerHTML, insertAdjacentHTML, document.write, createContextualFragment', () => {
+  const SINK = /\b(innerHTML|outerHTML|insertAdjacentHTML|createContextualFragment)\b|\bdocument\.write(ln)?\b/;
+  const scanned = ['core', 'electron/src', 'playground/src'].flatMap((rel) =>
+    fs
+      .readdirSync(path.join(repo, rel), { recursive: true, encoding: 'utf8' })
+      .filter((f) => /\.(m|c)?[tj]sx?$|\.html$/.test(f) && !/(^|\/)(node_modules|dist|test)\//.test(f))
+      .map((f) => path.join(rel, f)),
+  );
+  assert.ok(scanned.some((f) => f.startsWith('playground/src/renderer/')) && scanned.includes('electron/src/window-layer.ts') && scanned.includes('core/elements/elements.ts'), 'скан не дошёл до окна и элементов ядра');
+  const found = scanned.flatMap((file) =>
+    fs
+      .readFileSync(path.join(repo, file), 'utf8')
+      .split('\n')
+      .flatMap((text, i) => (SINK.test(text) ? [`${file}:${String(i + 1)} ${text.trim()}`] : [])),
+  );
+  assert.deepEqual(found, []);
 });

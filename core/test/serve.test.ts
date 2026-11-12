@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext, ServeRequest, ServeResponse } from '@cyborg-harness/contracts';
 import { load } from '../src/loader.ts';
+import { describePermissions } from '../src/permissions.ts';
 import { HttpServes, MAX_REQUEST_BODY, MAX_SERVERS } from '../src/serve.ts';
 import { inlineHosts } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
@@ -66,7 +67,7 @@ async function kernel(permissions: Record<string, unknown>) {
   return { k, ctx, denied: () => k.journal.filter((e) => e.kind === 'denied').map((e) => `${e.pluginId}:${e.method}`), [Symbol.asyncDispose]: dispose };
 }
 
-test('serve: запрос доходит до обработчика в хосте, ответ - клиенту; длину тела считает сервер', async () => {
+test('ST-3002/6: serve: запрос доходит до обработчика в хосте, ответ - клиенту; длину тела считает сервер', async () => {
   await using s = await kernel({ serve: true });
   const seen: ServeRequest[] = [];
   const server = await s.ctx.os.serve!.http((request) => {
@@ -85,7 +86,7 @@ test('serve: запрос доходит до обработчика в хост
   assert.equal(local.status, 201, 'localhost с тем же портом - свой Host');
 });
 
-test('serve: чужой Host, Origin и тело больше предела до обработчика не доходят', async () => {
+test('ST-3002/6, ST-3002/7: serve: чужой Host, Origin и тело больше предела до обработчика не доходят', async () => {
   await using s = await kernel({ serve: true });
   let calls = 0;
   const server = await s.ctx.os.serve!.http(() => {
@@ -100,7 +101,7 @@ test('serve: чужой Host, Origin и тело больше предела д�
   assert.equal(calls, 0);
 });
 
-test('serve: падение обработчика и чужая форма ответа - 502; без права члена нет, dispose и выгрузка закрывают сервер', async () => {
+test('ST-3002/6: serve: падение обработчика и чужая форма ответа - 502; без права члена нет, dispose и выгрузка закрывают сервер', async () => {
   await using s = await kernel({ serve: true });
   const answers: (() => unknown)[] = [
     () => Promise.reject(new Error('упал')),
@@ -126,12 +127,41 @@ test('serve: падение обработчика и чужая форма от
 
   await using bare = await kernel({});
   assert.equal(bare.ctx.os.serve, undefined);
+  assert.deepEqual(describePermissions({ serve: true }), ['принимает запросы HTTP на 127.0.0.1 - от программ этого компьютера'], 'право словами для окна');
 });
 
-test('serve: обработчик не ответил за срок - 504', async () => {
+test('ST-3002/6: serve: обработчик не ответил за срок - 504', async () => {
   const serves = new HttpServes(() => new Promise(() => undefined), 50);
   const url = await serves.open('p', 'h1');
   assert.equal((await send(url)).status, 504);
+  serves.forget('p');
+  assert.ok(await closed(url));
+});
+
+test('ST-3002/7: serve: срок ответа обработчика по умолчанию - 30 с на подставных часах, затем 504', async (t) => {
+  let asked = 0;
+  const serves = new HttpServes(() => {
+    asked++;
+    return new Promise(() => undefined);
+  });
+  const url = await serves.open('p', 'h1');
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let status: number | undefined;
+  const pending = send(url).then((r) => (status = r.status));
+  // Под подставными часами timers/promises стоит: ждём оборотами цикла событий, ввод-вывод идёт между ними.
+  const spin = async (until: () => boolean) => {
+    for (let i = 0; i < 2000 && !until(); i++) await new Promise((resolve) => setImmediate(resolve));
+  };
+  await spin(() => asked === 1);
+  assert.equal(asked, 1);
+  t.mock.timers.tick(29_999);
+  await spin(() => status !== undefined);
+  assert.equal(status, undefined, 'срок по умолчанию короче 30 с');
+  t.mock.timers.tick(1);
+  await spin(() => status !== undefined);
+  assert.equal(status, 504, 'срок по умолчанию длиннее 30 с');
+  await pending;
+  t.mock.timers.reset();
   serves.forget('p');
   assert.ok(await closed(url));
 });

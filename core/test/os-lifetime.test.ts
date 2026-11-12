@@ -22,6 +22,12 @@ const load = async (options: LoadOptions): Promise<Kernel> => track(await loadKe
 
 const posix = process.platform !== 'win32';
 
+// Подставные часы держат и timers/promises, поэтому waitFor под ними не идёт: ждём оборотами цикла событий.
+async function settle(until?: () => boolean) {
+  for (let i = 0; i < 200 && until?.() !== true; i++) await new Promise((resolve) => setImmediate(resolve));
+  if (until) assert.ok(until(), 'условие не наступило');
+}
+
 const alive = (pid: number) => {
   try {
     process.kill(pid, 0);
@@ -88,7 +94,7 @@ test('process.run: выключение плагина и выгрузка яд�
   }
 });
 
-test('process.run: timeoutMs завершает и потомков программы, а не только её саму', { skip: !posix && 'группы процессов - POSIX' }, async () => {
+test('ST-3002/2: process.run: timeoutMs завершает и потомков программы, а не только её саму', { skip: !posix && 'группы процессов - POSIX' }, async () => {
   await using box = await sandbox();
   const { k, ctx } = await kernel({ a: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp });
   const pids: number[] = [];
@@ -204,26 +210,31 @@ test('pty: kill бьёт по группе процесса - потомки о�
   }
 });
 
-test('net.fetch: тело ответа ограничено, бесконечный поток обрывается отказом, а не съедает память', async () => {
+test('ST-3002/7: net.fetch: тело ответа ограничено, бесконечный поток обрывается отказом, а не съедает память; сам плагин и соседний хост живы', async () => {
   await using box = await sandbox();
   let pulled = 0;
-  const endless = (async () =>
-    new Response(
-      new ReadableStream<Uint8Array>({
-        // Поток конечен (64 МиБ): без предела в шлюзе красный прогон съел бы память машины, а не упал на проверке.
-        pull(c) {
-          if (++pulled > 64) c.close();
-          else c.enqueue(new Uint8Array(1024 * 1024).fill(97));
-        },
-      }),
-    )) as unknown as typeof fetch;
-  const { k, ctx } = await kernel({ web: { net: ['api.example.com'] } }, { dataDir: box.data, tempDir: box.temp, fetch: endless });
-  await assert.rejects(ctx('web').os.net!.fetch('https://api.example.com/'), (e: Error & { code?: string }) => e.code === 'Remote' && e.message.includes('больше'));
+  const endless = (async (url: URL) =>
+    url.pathname !== '/big'
+      ? new Response('ok')
+      : new Response(
+          new ReadableStream<Uint8Array>({
+            // Поток конечен (64 МиБ): без предела в шлюзе красный прогон съел бы память машины, а не упал на проверке.
+            pull(c) {
+              if (++pulled > 64) c.close();
+              else c.enqueue(new Uint8Array(1024 * 1024).fill(97));
+            },
+          }),
+        )) as unknown as typeof fetch;
+  const { k, ctx } = await kernel({ web: { net: ['api.example.com'] }, other: { net: ['api.example.com'] } }, { dataDir: box.data, tempDir: box.temp, fetch: endless });
+  await assert.rejects(ctx('web').os.net!.fetch('https://api.example.com/big'), (e: Error & { code?: string }) => e.code === 'Remote' && e.message.includes('больше'));
   assert.ok(pulled <= 20, `прочитано ${String(pulled)} МиБ`);
+  assert.equal((await ctx('web').os.net!.fetch('https://api.example.com/small')).body, 'ok', 'после отказа по пределу плагин работает дальше');
+  assert.equal((await ctx('other').os.net!.fetch('https://api.example.com/small')).body, 'ok', 'соседний хост жив');
+  assert.deepEqual([...k.active].sort(), ['other', 'web']);
   await k.unload();
 });
 
-test('net.fetch: зависший сервер - Timeout по timeoutMs; выгрузка плагина обрывает запрос', async () => {
+test('ST-3002/7: net.fetch: зависший сервер - Timeout по timeoutMs; выгрузка плагина обрывает запрос', async () => {
   await using box = await sandbox();
   const signals: AbortSignal[] = [];
   const hanging = ((_url: URL, init: RequestInit) =>
@@ -244,6 +255,31 @@ test('net.fetch: зависший сервер - Timeout по timeoutMs; выг�
   await k.unload();
 });
 
+test('ST-3002/7: net.fetch: без timeoutMs срок по умолчанию - 30 с на подставных часах, затем Timeout', async (t) => {
+  await using box = await sandbox();
+  const signals: AbortSignal[] = [];
+  const hanging = ((_url: URL, init: RequestInit) =>
+    new Promise((_, reject) => {
+      const signal = init.signal!;
+      signals.push(signal);
+      signal.addEventListener('abort', () => reject(signal.reason as Error));
+    })) as unknown as typeof fetch;
+  const { k, ctx } = await kernel({ web: { net: ['api.example.com'] } }, { dataDir: box.data, tempDir: box.temp, fetch: hanging });
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pending = ctx('web').os.net!.fetch('https://api.example.com/').catch((e: unknown) => e);
+  await settle(() => signals.length === 1);
+  t.mock.timers.tick(29_999);
+  await settle();
+  assert.equal(signals[0]!.aborted, false, 'срок по умолчанию короче 30 с');
+  t.mock.timers.tick(1);
+  assert.equal(signals[0]!.aborted, true, 'срок по умолчанию длиннее 30 с');
+  const error = (await pending) as Error & { code?: string };
+  assert.equal(error.code, 'Timeout');
+  assert.match(error.message, /30000 мс/);
+  t.mock.timers.reset();
+  await k.unload();
+});
+
 test('fs.watch: ошибка наблюдателя (кончились inotify, удалён каталог) - плагин узнаёт о закрытии, а не ждёт событий вечно', async () => {
   await using box = await sandbox();
   const watchers: EventEmitter[] = [];
@@ -261,7 +297,7 @@ test('fs.watch: ошибка наблюдателя (кончились inotify,
   await k.unload();
 });
 
-test('вызов контракта: зависший поставщик - потребителю Timeout, а не вечное ожидание', async () => {
+test('ST-3002/7: вызов контракта: зависший поставщик - потребителю Timeout, а не вечное ожидание', async () => {
   let consumer!: PluginContext;
   const files: TestFiles = { read: () => new Promise<string>(() => undefined) };
   const k = await load({
@@ -282,6 +318,49 @@ test('вызов контракта: зависший поставщик - по�
   await assert.rejects(consumer.contracts.get('test.files', 1)!.read!('x'), { code: 'Timeout' });
   await assert.rejects(k.callAs('user', 'test.files', 1, 'read', ['y']), { code: 'Timeout' });
   assert.ok(Date.now() - started < 2000);
+  await k.unload();
+});
+
+test('ST-3002/7: вызов контракта: без callTimeout срок по умолчанию - 10 минут на подставных часах, затем Timeout', async (t) => {
+  let consumer!: PluginContext;
+  let asked = 0;
+  const files: TestFiles = {
+    read: () => {
+      asked++;
+      return new Promise<string>(() => undefined);
+    },
+  };
+  const k = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    spawnHost: inlineHosts(async (entry) =>
+      entry === 'slow' ? { activate: (ctx: PluginContext) => void ctx.contracts.provide('test.files', '1.0', files) } : { activate: (ctx: PluginContext) => void (consumer = ctx) },
+    ),
+    enabled: ['slow', 'user'],
+    manifests: [
+      { id: 'slow', version: '1.0.0', engines: { cyborg: '^1' }, provides: { 'test.files': '1.0' } },
+      { id: 'user', version: '1.0.0', engines: { cyborg: '^1' }, requires: { 'test.files': '^1' } },
+    ],
+    hosts: { s: ['slow'], u: ['user'] },
+    bundled: ['slow', 'user'],
+  });
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let settled = false;
+  const pending = consumer.contracts
+    .get('test.files', 1)!
+    .read!('x')
+    .catch((e: unknown) => e)
+    .finally(() => (settled = true));
+  await settle(() => asked === 1);
+  t.mock.timers.tick(10 * 60_000 - 1);
+  await settle();
+  assert.equal(settled, false, 'срок по умолчанию короче 10 минут');
+  t.mock.timers.tick(1);
+  await settle();
+  assert.equal(settled, true, 'срок по умолчанию длиннее 10 минут');
+  const error = (await pending) as Error & { code?: string };
+  assert.equal(error.code, 'Timeout');
+  assert.match(error.message, /600000 мс/);
+  t.mock.timers.reset();
   await k.unload();
 });
 

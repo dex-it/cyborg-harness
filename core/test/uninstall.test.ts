@@ -89,7 +89,7 @@ async function world(dialog?: () => Promise<readonly string[]>) {
 const ownTree = async (dir: string) => readdir(dir).catch(() => []);
 const byPlugin = (docs: Record<string, unknown>) => (docs.$granted as { byPlugin: Record<string, string[]> } | undefined)?.byPlugin ?? {};
 
-test('uninstall: файлы, секреты, granted, память видов, документы и state плагина стёрты; config остаётся; чужое цело; в журнале список словами', async () => {
+test('ST-3004/4, ST-5004/6: uninstall: файлы, секреты, granted, память видов, документы и state плагина стёрты; config остаётся; чужое цело; в журнале список словами', async () => {
   await using w = await world();
   const { k, ctx } = await w.start(['jira', 'other']);
   for (const id of ['jira', 'other']) await w.leaveTraces(k, ctx(id));
@@ -97,6 +97,12 @@ test('uninstall: файлы, секреты, granted, память видов, �
   assert.deepEqual([...w.secrets.map.keys()].sort(), ['jira/token', 'other/token']);
 
   await k.disable('jira');
+  assert.deepEqual((await ownTree(w.dirs.dataDir)).sort(), ['jira', 'other'], 'выключение данные плагина не стирает');
+  assert.deepEqual((await ownTree(w.dirs.tempDir)).sort(), ['jira', 'other']);
+  assert.deepEqual([...w.secrets.map.keys()].sort(), ['jira/token', 'other/token'], 'выключение секреты не стирает');
+  assert.deepEqual(Object.keys(byPlugin(w.docs.workspace)).sort(), ['jira', 'other']);
+  assert.deepEqual(w.docs.workspace.jira, { $version: 1, memory: 'jira' }, 'выключение state не стирает');
+  assert.deepEqual(w.docs.user.jira, { $version: 1, theme: 'jira' }, 'выключение config не стирает');
   const report = await k.uninstall('jira');
 
   assert.deepEqual(report.erased, [
@@ -137,7 +143,7 @@ test('uninstall: файлы, секреты, granted, память видов, �
   await k.unload();
 });
 
-test('uninstall: новый плагин с тем же id ничего не наследует: ни каталогов, ни секретов, ни выбранных путей, ни документов, ни памяти видов, ни state', async () => {
+test('ST-3004/4: uninstall: новый плагин с тем же id ничего не наследует: ни каталогов, ни секретов, ни выбранных путей, ни документов, ни памяти видов, ни state', async () => {
   await using w = await world();
   const first = await w.start(['jira']);
   await w.leaveTraces(first.k, first.ctx('jira'));
@@ -259,7 +265,7 @@ test('uninstall: общий хост - соседа по хосту отказ �
   await k.unload();
 });
 
-test('uninstall: безопасный режим - включённый в списке плагин удаляется без disable (хосты не подняты, вернуть его некому)', async () => {
+test('ST-3008/1: uninstall: безопасный режим - включённый в списке плагин удаляется без disable (хосты не подняты, вернуть его некому)', async () => {
   await using w = await world();
   const first = await w.start(['jira']);
   await w.leaveTraces(first.k, first.ctx('jira'));

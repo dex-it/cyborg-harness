@@ -78,7 +78,7 @@ test('stress-workspace: одновременная запись разных р�
   }
 });
 
-test('stress-workspace: битый файл state попадает в problems и запись в него отменяется, а не затирает его', async () => {
+test('ST-3001/6: stress-workspace: битый файл state попадает в problems и запись в него отменяется, а не затирает его', async () => {
   await using s = await scratch();
   fs.mkdirSync(s.stateDir, { recursive: true });
   const ws0 = await openIn(s);

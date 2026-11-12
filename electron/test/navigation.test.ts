@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { WebFrameMain } from 'electron';
-import { navigationAllowed, navigationPlugin } from '../src/navigation.ts';
+import type { WebContents, WebFrameMain } from 'electron';
+import { guardNavigation, navigationAllowed, navigationPlugin } from '../src/navigation.ts';
 
 const frame = (origin: string) => ({ origin }) as WebFrameMain;
 const page = 'file:///app/renderer/index.html';
@@ -13,14 +13,14 @@ const panels = frame('cyborg-plugin://panels');
 const sub = (url: string, at: WebFrameMain | null, initiator: WebFrameMain | null) => navigationAllowed({ url, isMainFrame: false, frame: at, initiator }, page, main);
 const top = (url: string, initiator: WebFrameMain | null) => navigationAllowed({ url, isMainFrame: true, frame: main, initiator }, page, main);
 
-test('навигация: окно остаётся на своей странице, якорь не в счёт', () => {
+test('ST-3005/6: навигация: окно остаётся на своей странице, якорь не в счёт', () => {
   assert.equal(top(`${page}#views`, main), true);
   assert.equal(top('https://github.com/login', main), false);
   assert.equal(top('https://github.com/login', echo), false);
   assert.equal(top('file:///etc/passwd', null), false);
 });
 
-test('навигация: документ окна ставит во фрейм любой вид, вид уводит только свой фрейм и только на свой origin', () => {
+test('ST-3005/6: навигация: документ окна ставит во фрейм любой вид, вид уводит только свой фрейм и только на свой origin', () => {
   assert.equal(sub('cyborg-plugin://echo/echo/?view=main', null, main), true);
   assert.equal(sub('cyborg-plugin://chat/chat/', echo, main), true);
   assert.equal(sub('cyborg-plugin://echo/echo/other.html', echo, echo), true);
@@ -30,6 +30,32 @@ test('навигация: документ окна ставит во фрейм
   assert.equal(sub('https://evil.example/', echo, main), false);
   assert.equal(sub('data:text/html,<b>x</b>', echo, echo), false);
   assert.equal(sub('file:///app/renderer/index.html', echo, echo), false);
+});
+
+test('ST-3005/6: навигация: окно ставит обработчики - window.open отклонён, уход фрейма вида наружу отменён и записан на плагин', () => {
+  let opener: ((details: { url: string }) => { action: string }) | undefined;
+  let navigate: ((event: { url: string; isMainFrame: boolean; frame: WebFrameMain | null; initiator: WebFrameMain | null; preventDefault(): void }) => void) | undefined;
+  const contents = {
+    mainFrame: main,
+    setWindowOpenHandler: (handler: typeof opener) => void (opener = handler),
+    on: (name: string, handler: typeof navigate) => {
+      if (name === 'will-frame-navigate') navigate = handler;
+    },
+  } as unknown as WebContents;
+  const denied: string[] = [];
+  const echoView = { origin: 'cyborg-plugin://echo', url: 'cyborg-plugin://echo/echo/?view=main' } as WebFrameMain;
+  guardNavigation(contents, page, (pluginId, url) => denied.push(`${pluginId} ${url}`), { groupOf: (id) => (id === 'echo' ? 'echo' : undefined) });
+  assert.ok(opener && navigate);
+  assert.deepEqual(opener({ url: 'https://evil.example/' }), { action: 'deny' });
+  assert.deepEqual(opener({ url: 'cyborg-plugin://echo/echo/' }), { action: 'deny' }, 'и на свой вид новое окно не открывается');
+  const go = (url: string) => {
+    let prevented = false;
+    navigate!({ url, isMainFrame: false, frame: echoView, initiator: echoView, preventDefault: () => void (prevented = true) });
+    return prevented;
+  };
+  assert.equal(go('https://evil.example/'), true, 'внешний адрес отменён');
+  assert.equal(go('cyborg-plugin://echo/echo/other.html'), false, 'свой вид пропущен');
+  assert.deepEqual(denied, ['echo https://evil.example/']);
 });
 
 test('навигация: без инициатора фрейм остаётся на своём виде - перезагрузка да, подмена вида нет', () => {

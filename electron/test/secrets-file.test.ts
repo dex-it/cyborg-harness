@@ -26,7 +26,7 @@ async function sandbox() {
 
 const keysOf = async (file: string) => Object.keys(JSON.parse(await readFile(file, 'utf8')) as object).sort();
 
-test('fileSecrets: значения лежат зашифрованными, get возвращает открытое, права файла 0600', async () => {
+test('ST-3004/1: fileSecrets: значения лежат зашифрованными, get возвращает открытое, права файла 0600', async () => {
   await using box = await sandbox();
   const store = fileSecrets(box.file, cipher());
   assert.equal(await store.available(), true);
@@ -79,7 +79,7 @@ test('fileSecrets: deletePrefix стирает ключи с префиксом 
   assert.equal(await store.deletePrefix('jira/'), 0);
 });
 
-test('fileSecrets: deletePrefix не требует шифрования ОС и не создаёт файл, когда стирать нечего', async () => {
+test('ST-3004/4: fileSecrets: deletePrefix не требует шифрования ОС и не создаёт файл, когда стирать нечего', async () => {
   await using box = await sandbox();
   const sealed = fileSecrets(box.file, cipher());
   await sealed.set('jira/token', 't');

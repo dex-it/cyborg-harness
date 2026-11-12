@@ -15,7 +15,7 @@ import { describePermissions, envNameAllowed } from '../src/permissions.ts';
 import type { NoticeEvents } from '../src/notices.ts';
 import { memorySecrets } from '../../testing/src/memory.ts';
 import { OsGateway, type OsEnvironment } from '../src/os-gateway.ts';
-import { inlineHosts } from '../src/transports.ts';
+import { inlineHosts, type HostHandle } from '../src/transports.ts';
 import { PLUGIN_API_VERSION } from '../src/api-version.ts';
 import { waitFor } from './wait-for.ts';
 
@@ -86,7 +86,7 @@ test('свой каталог, подменённый ссылкой наруж�
   await k.unload();
 });
 
-test('fs.read и fs.write: область по праву, симлинк наружу не пускает, .git, защищённые пути и их соседи <файл>.* закрыты', async () => {
+test('ST-3001/2, ST-3001/4: fs.read и fs.write: область по праву, симлинк наружу не пускает, .git, защищённые пути и их соседи <файл>.* закрыты', async () => {
   await using box = await sandbox();
   await writeFile(path.join(box.outside, 'secret.txt'), 'нельзя');
   await writeFile(path.join(box.work, 'readme.md'), 'можно');
@@ -96,9 +96,11 @@ test('fs.read и fs.write: область по праву, симлинк нар
   await writeFile(workspaceFile, '{}');
   await writeFile(`${workspaceFile}.corrupt-2026-11-07T10-00-00-000Z`, '{"secret"');
   await writeFile(path.join(box.work, 'cyborg.json5'), 'чужое имя');
-  const { k, os } = await kernel(
+  await writeFile(`${workspaceFile}.lock`, JSON.stringify({ pid: process.pid }));
+  await writeFile(`${workspaceFile}.bak`, '{"old":true}');
+  const { k, os, denied } = await kernel(
     { reader: { 'fs.read': [box.work] }, writer: { 'fs.read': [box.work], 'fs.write': [box.work] } },
-    { dataDir: box.data, tempDir: box.temp, protectedPaths: [workspaceFile] },
+    { dataDir: box.data, tempDir: box.temp, protectedPaths: [workspaceFile, `${workspaceFile}.lock`] },
   );
   assert.equal(await os('reader').fs.readText(path.join(box.work, 'readme.md')), 'можно');
   await assert.rejects(os('reader').fs.readText(path.join(box.work, 'escape', 'secret.txt')), { code: 'PermissionDenied' });
@@ -107,6 +109,13 @@ test('fs.read и fs.write: область по праву, симлинк нар
   await assert.rejects(os('reader').fs.readText(`${workspaceFile}.corrupt-2026-11-07T10-00-00-000Z`), { code: 'PermissionDenied' }, 'копия битого файла несёт его содержимое');
   await assert.rejects(os('writer').fs.writeText(`${workspaceFile}.4242.tmp`, 'x'), { code: 'PermissionDenied' }, 'временный файл атомарной записи');
   assert.equal(await os('reader').fs.readText(path.join(box.work, 'cyborg.json5')), 'чужое имя', 'сосед - только с точкой после имени');
+  const before = denied().length;
+  for (const guarded of [`${workspaceFile}.lock`, `${workspaceFile}.bak`]) {
+    await assert.rejects(os('writer').fs.readText(guarded), { code: 'PermissionDenied' }, guarded);
+    await assert.rejects(os('writer').fs.writeText(guarded, '{}'), { code: 'PermissionDenied' }, guarded);
+  }
+  assert.deepEqual(denied().slice(before), ['writer:fs.readText', 'writer:fs.writeText', 'writer:fs.readText', 'writer:fs.writeText'], 'каждый отказ у замка и копии - запись denied');
+  assert.equal(await readFile(`${workspaceFile}.lock`, 'utf8'), JSON.stringify({ pid: process.pid }));
   await os('writer').fs.mkdir(path.join(box.work, 'deep'));
   await os('writer').fs.writeText(path.join(box.work, 'deep', 'new.txt'), 'x');
   assert.equal(await readFile(path.join(box.work, 'deep', 'new.txt'), 'utf8'), 'x');
@@ -134,7 +143,7 @@ test('workspace: корни от приложения и от плагина с 
   await k.unload();
 });
 
-test('process.run: программа и префикс аргументов из права, без shell', async () => {
+test('ST-3002/2: process.run: программа и префикс аргументов из права, без shell', async () => {
   await using box = await sandbox();
   const { k, os, denied } = await kernel(
     { runner: { process: [{ program: process.execPath, args: ['-e'], env: ['X'] }], 'fs.read': [box.work] } },
@@ -205,7 +214,7 @@ test('process.run: SIGKILL после выхода лидера идёт тол�
   assert.deepEqual(kill.mock.calls.map((c) => c.arguments[0]).filter((pid) => pid === leader), [], 'собранный лидер не получает сигналов по своему pid');
 });
 
-test('process.run: предел вывода по умолчанию - 16 МиБ, как и записано в SAD', async () => {
+test('ST-3002/7: process.run: предел вывода по умолчанию - 16 МиБ, как и записано в SAD', async () => {
   await using box = await sandbox();
   const { k, os } = await kernel({ runner: { process: [{ program: process.execPath, args: ['-e'] }] } }, { dataDir: box.data, tempDir: box.temp });
   const script = (mib: number) => `const b=Buffer.alloc(1048576,97);for(let i=0;i<${String(mib)};i++)process.stdout.write(b)`;
@@ -218,7 +227,7 @@ test('process.run: предел вывода по умолчанию - 16 МиБ
   await k.unload();
 });
 
-test('net.fetch: хост из права или из config, переадресация не идёт сама', async () => {
+test('ST-3002/4: net.fetch: хост из права или из config, переадресация не идёт сама', async () => {
   await using box = await sandbox();
   const calls: string[] = [];
   const fakeFetch = (async (url: URL, init: RequestInit) => {
@@ -261,7 +270,7 @@ test('env, notify, clipboard: только названное в праве; н�
   await bare.k.unload();
 });
 
-test('notify: клик поднимает окно, закрывает уведомление и запускает свою команду; команда и аргументы сверяются при show; close, пределы и выгрузка', async () => {
+test('ST-2004/4: notify: клик поднимает окно, закрывает уведомление и запускает свою команду; команда и аргументы сверяются при show; close, пределы и выгрузка', async () => {
   await using box = await sandbox();
   const shown: { title: string; body: string | undefined; events: NoticeEvents; closed: boolean }[] = [];
   const ran: unknown[] = [];
@@ -341,7 +350,7 @@ test('notify: клик поднимает окно, закрывает увед�
   await k.unload();
 });
 
-test('секреты: ключи своего плагина, $secret, без шифрования ОС - Unavailable, внешний источник по маске', async () => {
+test('ST-3001/3, ST-3004/1, ST-3004/2: секреты: ключи своего плагина, $secret, без шифрования ОС - Unavailable, внешний источник по маске', async () => {
   await using box = await sandbox();
   const store = memorySecrets();
   const { k, os, ctx } = await kernel({ jira: { 'secrets.ref': ['vault://kv/jira*'] }, other: undefined }, { dataDir: box.data, tempDir: box.temp, secrets: store });
@@ -349,18 +358,22 @@ test('секреты: ключи своего плагина, $secret, без ш
   assert.deepEqual([...store.map.keys()], ['jira/token']);
   assert.equal(await os('other').secrets.get('token'), undefined);
   assert.deepEqual(await ctx('jira').secrets.resolve({ $secret: 'token' }), { value: 't-1' });
+  store.map.set('jira/token', 't-2');
+  assert.deepEqual(await ctx('jira').secrets.resolve({ $secret: 'token' }), { value: 't-2' }, 'ядро не кэширует значение: каждый resolve идёт в хранилище');
   await assert.rejects(ctx('jira').secrets.resolve('vault://kv/jira/token'), { code: 'Unavailable' });
   await assert.rejects(ctx('jira').secrets.resolve('vault://kv/gitlab'), { code: 'PermissionDenied' });
   await assert.rejects(ctx('other').secrets.resolve('missing'), { code: 'Unavailable' });
   await os('jira').secrets.delete('token');
   assert.equal(store.map.size, 0);
   await k.unload();
-  const locked = await kernel({ x: undefined }, { dataDir: box.data, tempDir: box.temp, secrets: memorySecrets(false) });
+  const plain = memorySecrets(false);
+  const locked = await kernel({ x: undefined }, { dataDir: box.data, tempDir: box.temp, secrets: plain });
   await assert.rejects(locked.os('x').secrets.set('k', 'v'), { code: 'Unavailable' });
+  assert.equal(plain.map.size, 0, 'без шифрования ОС значение не легло в хранилище открытым текстом');
   await locked.k.unload();
 });
 
-test('NotFound: нет файла, каталога или программы - NotFound, а не безымянный Remote; чужой путь по-прежнему PermissionDenied', async () => {
+test('ST-3001/2: NotFound: нет файла, каталога или программы - NotFound, а не безымянный Remote; чужой путь по-прежнему PermissionDenied', async () => {
   await using box = await sandbox();
   await writeFile(path.join(box.work, 'file.txt'), 'x');
   const { k, os, denied } = await kernel({ reader: { 'fs.read': [box.work], 'fs.write': [box.work], process: [{ program: process.execPath, args: ['-e'] }, 'cyborg-no-such-program'] } }, { dataDir: box.data, tempDir: box.temp });
@@ -381,7 +394,7 @@ test('NotFound: нет файла, каталога или программы - 
   await k.unload();
 });
 
-test('вне области любая ошибка ОС при раскрытии пути (ENOTDIR, ELOOP, EACCES) - PermissionDenied: файл вне области не выдаёт себя ни кодом, ни текстом', async () => {
+test('ST-3001/2, ST-3001/3: вне области любая ошибка ОС при раскрытии пути (ENOTDIR, ELOOP, EACCES) - PermissionDenied: файл вне области не выдаёт себя ни кодом, ни текстом', async () => {
   await using box = await sandbox();
   const secret = path.join(box.outside, 'secret');
   await writeFile(secret, 'x');
@@ -568,7 +581,7 @@ test('fs: ссылка внутри области - ответ зависит �
   }
 });
 
-test('fs.readSlice: кусок по байтам, символ UTF-8 не рвётся, пределы и права', async () => {
+test('ST-3002/7: fs.readSlice: кусок по байтам, символ UTF-8 не рвётся, пределы и права', async () => {
   await using box = await sandbox();
   const file = path.join(box.work, 'log.jsonl');
   await writeFile(file, 'ab' + 'я'.repeat(3) + 'z');
@@ -586,6 +599,11 @@ test('fs.readSlice: кусок по байтам, символ UTF-8 не рвё
   assert.deepEqual(await fs.readSlice(file, size + 10, 64), { text: '', bytes: 0, size });
   await assert.rejects(fs.readSlice(file, -1, 64), { code: 'Invalid' });
   await assert.rejects(fs.readSlice(file, 0, 3), { code: 'Invalid' });
+  assert.deepEqual(await fs.readSlice(file, 0, 4), { text: 'abя', bytes: 4, size }, 'нижний предел - 4 байта');
+  const big = path.join(box.work, 'big.log');
+  await writeFile(big, 'x'.repeat(1024 * 1024 + 10));
+  assert.equal((await fs.readSlice(big, 0, 1024 * 1024)).bytes, 1024 * 1024, 'верхний предел - 1 МиБ');
+  await assert.rejects(fs.readSlice(big, 0, 1024 * 1024 + 1), { code: 'Invalid' }, '1 МиБ + 1');
   await assert.rejects(fs.readSlice(file, 0, 2 * 1024 * 1024), { code: 'Invalid' });
   await writeFile(path.join(box.outside, 'secret'), 'x');
   await assert.rejects(fs.readSlice(path.join(box.outside, 'secret'), 0, 64), { code: 'PermissionDenied' });
@@ -607,7 +625,7 @@ async function armed(touch: (n: number) => Promise<unknown>, heard: () => boolea
 
 const ARMED = '.armed';
 
-test('fs.watch: имена изменённых в каталоге склеены, снятие и выгрузка закрывают наблюдение, вне области - отказ', async () => {
+test('ST-3001/3: fs.watch: имена изменённых в каталоге склеены, снятие и выгрузка закрывают наблюдение, вне области - отказ', async () => {
   await using box = await sandbox();
   const { k, os } = await kernel({ reader: { 'fs.read': [box.work] } }, { dataDir: box.data, tempDir: box.temp });
   const fs = os('reader').fs;
@@ -889,7 +907,7 @@ test('fs.watch файла: заменён каталогом с тем же им
   }
 });
 
-test('fs.watch: лимит не обходится параллельными вызовами; сузились корни - наблюдение закрыто', async () => {
+test('ST-3002/7: fs.watch: лимит не обходится параллельными вызовами; сузились корни - наблюдение закрыто', async () => {
   await using box = await sandbox();
   const { k, os } = await kernel(
     { projects: { 'security.roots': true }, tool: { 'fs.read': ['workspace'] } },
@@ -918,7 +936,7 @@ test('fs.watch: лимит не обходится параллельными в
   await k.unload();
 });
 
-test('$SHELL: оболочка входа из окружения приложения, только с закреплённым скриптом', async () => {
+test('ST-3007/7: $SHELL: оболочка входа из окружения приложения, только с закреплённым скриптом', async () => {
   assert.equal(parseManifest(manifest('p', { process: ['$SHELL'] })).ok, false, 'голая оболочка запустила бы что угодно');
   assert.equal(parseManifest(manifest('p', { process: [{ program: '$SHELL', args: ['-lc'] }] })).ok, false);
   await using box = await sandbox();
@@ -935,7 +953,7 @@ test('$SHELL: оболочка входа из окружения приложе
   await k.unload();
 });
 
-test('права в манифесте: неизвестное право и неверная форма - ошибки манифеста; права словами', () => {
+test('ST-3001/7, ST-3001/8, ST-3007/7: права в манифесте: неизвестное право и неверная форма - ошибки манифеста; права словами', () => {
   const bad = parseManifest(manifest('p', { 'fs.raed': ['workspace'], net: ['https://x'], process: [{ program: 'git' }], notify: 'yes' }));
   assert.equal(bad.ok, false);
   assert.ok(!bad.ok);
@@ -953,7 +971,7 @@ test('права в манифесте: неизвестное право и н�
   ]);
 });
 
-test('net config:<поле>: хост берётся из принятого config, а не из того, что плагин записал себе сам', async () => {
+test('ST-3002/3: net config:<поле>: хост берётся из принятого config, а не из того, что плагин записал себе сам', async () => {
   await using box = await sandbox();
   const calls: string[] = [];
   const fakeFetch = (async (url: URL) => {
@@ -971,7 +989,7 @@ test('net config:<поле>: хост берётся из принятого con
   await k.unload();
 });
 
-test('net config:<поле>: плагин не пишет в поле хоста значение, которого не задал человек', async () => {
+test('ST-3002/3: net config:<поле>: плагин не пишет в поле хоста значение, которого не задал человек', async () => {
   await using box = await sandbox();
   const docs = new Map<string, Record<string, unknown>>([['user', { web: { $version: 1, baseUrl: 'https://jira.corp.local' } }], ['workspace', { web: { $version: 1, baseUrl: 'https://jira2.corp.local' } }]]);
   const store = await SectionStore.open({ load: async (l) => structuredClone(docs.get(l)), save: async (l, d) => void docs.set(l, structuredClone(d)) }, ['user', 'workspace']);
@@ -995,6 +1013,49 @@ test('net config:<поле>: плагин не пишет в поле хоста
   await k.unload();
 });
 
+test('ST-3002/3: net config:<поле>: ни новая загрузка плагина после падения хоста, ни перезапуск приложения сеть не расширяют - хост из принятого config', async () => {
+  await using box = await sandbox();
+  const docs = new Map<string, Record<string, unknown>>([['user', { web: { $version: 1, baseUrl: 'https://jira.company.com' } }], ['workspace', { web: { $version: 1, baseUrl: 'https://attacker.example' } }]]);
+  const layers: LayerStore = { load: async (l) => structuredClone(docs.get(l)), save: async (l, d) => void docs.set(l, structuredClone(d)) };
+  const calls: string[] = [];
+  const fakeFetch = (async (url: URL) => {
+    calls.push(url.host);
+    return new Response('ok');
+  }) as unknown as typeof fetch;
+  const start = async () => {
+    const contexts = new Map<string, PluginContext>();
+    const handles: HostHandle[] = [];
+    const spawn = inlineHosts(async (entry) => ({ activate: (ctx: PluginContext) => void contexts.set(entry, ctx) }));
+    const k = await load({
+      apiVersion: PLUGIN_API_VERSION,
+      spawnHost: (id) => {
+        const handle = spawn(id);
+        handles.push(handle);
+        return handle;
+      },
+      enabled: ['web'],
+      manifests: [{ ...manifest('web', { net: ['config:baseUrl'] }), config: { version: 1 } }],
+      os: { dataDir: box.data, tempDir: box.temp, fetch: fakeFetch },
+      config: await SectionStore.open(layers, ['user', 'workspace']),
+    });
+    return { k, web: () => contexts.get('web')!, handles };
+  };
+  const first = await start();
+  await assert.rejects(first.web().config!.set('user', { baseUrl: 'https://attacker.example' }), { code: 'PermissionDenied' });
+  first.handles.at(-1)!.kill();
+  await first.k.idle();
+  assert.deepEqual(first.k.active, ['web'], 'плагин загружен заново после падения хоста');
+  assert.ok(first.k.journal.some((e) => e.kind === 'host-restart'));
+  await assert.rejects(first.web().os.net!.fetch('https://attacker.example/'), { code: 'PermissionDenied' }, 'после падения хоста');
+  await first.web().os.net!.fetch('https://jira.company.com/');
+  await first.k.unload();
+  const second = await start();
+  await assert.rejects(second.web().os.net!.fetch('https://attacker.example/'), { code: 'PermissionDenied' }, 'после перезапуска приложения');
+  await second.web().os.net!.fetch('https://jira.company.com/');
+  assert.deepEqual(calls, ['jira.company.com', 'jira.company.com']);
+  await second.k.unload();
+});
+
 test('security.setRoots: корень ФС, домашний каталог, каталоги приложения и не каталог - отказ', async () => {
   await using box = await sandbox();
   const file = path.join(box.work, 'f.txt');
@@ -1008,7 +1069,7 @@ test('security.setRoots: корень ФС, домашний каталог, к�
   await free.k.unload();
 });
 
-test('чужие каталоги плагинов и данные приложения закрыты даже при праве на всю область', async () => {
+test('ST-3001/2: чужие каталоги плагинов и данные приложения закрыты даже при праве на всю область', async () => {
   await using box = await sandbox();
   const app = path.join(box.root, 'app');
   await mkdir(path.join(app, 'proj'), { recursive: true });
@@ -1041,7 +1102,7 @@ test('fs.remove: каталог с .git внутри и корень облас�
   await k.unload();
 });
 
-test('права: маски путей, workspace.git, выбор в dialog как granted, shell - без исполняемых и только свои схемы', async () => {
+test('ST-3001/5, ST-3002/1: права: маски путей, workspace.git, выбор в dialog как granted, shell - без исполняемых и только свои схемы', async () => {
   await using box = await sandbox();
   const logs = path.join(box.work, 'proj', 'logs');
   const deep = path.join(box.work, 'a', 'b', 'notes');
@@ -1060,6 +1121,7 @@ test('права: маски путей, workspace.git, выбор в dialog к�
       git: { 'fs.write': ['workspace.git'] },
       plain: { 'fs.write': ['workspace'] },
       picker: { 'fs.read': ['granted'], shell: ['granted', 'https:'] },
+      blind: undefined,
     },
     {
       dataDir: box.data,
@@ -1084,6 +1146,14 @@ test('права: маски путей, workspace.git, выбор в dialog к�
   assert.equal(await os('picker').fs.readText(picked), 'выбран');
   await assert.rejects(os('masks').fs.readText(picked), { code: 'PermissionDenied' }, 'выбор одного плагина - не право другого');
   await assert.rejects(os('picker').dialog.open({ extra: 1 } as never), { code: 'Invalid' });
+  assert.deepEqual(await os('blind').dialog.open({ title: 'Файл' }), [picked], 'диалог доступен без права');
+  await assert.rejects(os('blind').fs.readText(picked), { code: 'PermissionDenied' }, 'свой выбор без fs.read: ["granted"] не читается');
+  const folder = path.join(box.outside, 'folder');
+  await mkdir(path.join(folder, 'inner'), { recursive: true });
+  await writeFile(path.join(folder, 'inner', 'note.txt'), 'под выбранным');
+  pick = [folder];
+  await os('picker').dialog.open({ directory: true });
+  assert.equal(await os('picker').fs.readText(path.join(folder, 'inner', 'note.txt')), 'под выбранным', 'выбранный каталог открывает файлы под ним');
 
   const shell = os('picker').shell;
   if (typeof shell?.openPath !== 'function' || typeof shell.openExternal !== 'function') throw new Error('у picker нет shell.openPath и openExternal');
@@ -1106,7 +1176,7 @@ test('права: маски путей, workspace.git, выбор в dialog к�
   await k.unload();
 });
 
-test('shell.openPath: где плагин сам пишет, открывается только документ - файл с неизвестным расширением не запустится', async () => {
+test('ST-3002/1: shell.openPath: где плагин сам пишет, открывается только документ - файл с неизвестным расширением не запустится', async () => {
   await using box = await sandbox();
   const proj = path.join(box.work, 'proj');
   await mkdir(path.join(proj, 'reports'), { recursive: true });
@@ -1114,9 +1184,9 @@ test('shell.openPath: где плагин сам пишет, открывает�
   const { k, os, denied } = await kernel(
     {
       writer: { 'fs.write': ['workspace'], shell: ['workspace', 'plugin-data'] },
-      viewer: { 'fs.read': ['workspace'], shell: ['workspace'] },
+      viewer: { 'fs.read': ['workspace'], shell: ['workspace', 'https:'] },
     },
-    { dataDir: box.data, tempDir: box.temp, roots: () => [box.work], shell: { openPath: async (p) => void opened.push(p), openExternal: async () => undefined } },
+    { dataDir: box.data, tempDir: box.temp, roots: () => [box.work], shell: { openPath: async (p) => void opened.push(p), openExternal: async (u) => void opened.push(u) } },
   );
   const writer = os('writer');
   const opener = (id: string) => {
@@ -1138,13 +1208,18 @@ test('shell.openPath: где плагин сам пишет, открывает�
   assert.ok(denied().includes('writer:shell.openPath'));
 
   await opener('viewer')(payload);
+  for (const name of ['setup.exe', 'Tool.app', 'tool.desktop', 'run.sh']) {
+    await writeFile(path.join(proj, name), '');
+    await assert.rejects(opener('viewer')(path.join(proj, name)), { code: 'PermissionDenied' }, `программа по расширению в области shell: ${name}`);
+  }
+  await assert.rejects(os('viewer').shell!.openExternal!('javascript:alert(1)'), { code: 'PermissionDenied' }, 'javascript: не открывается');
   assert.deepEqual(opened, [report, own, payload]);
   assert.deepEqual(describePermissions({ 'fs.read': ['workspace'], shell: ['workspace'] }), ['читает файлы: проекты воркспейса', 'открывает в системе: проекты воркспейса - кроме программ и скриптов']);
   assert.ok(describePermissions({ shell: ['plugin-data'] }).includes('открывает в системе: свои данные - кроме программ и скриптов; где сам пишет - только документы'));
   await k.unload();
 });
 
-test('shell any: документ или каталог вне корней; программа, файл не документом, пропавший путь, защищённое и чужое - отказ; читать area any не даёт', async () => {
+test('ST-3002/1: shell any: документ или каталог вне корней; программа, файл не документом, пропавший путь, защищённое и чужое - отказ; читать area any не даёт', async () => {
   await using box = await sandbox();
   const guarded = path.join(box.work, 'team.cyborg.json');
   const doc = path.join(box.outside, 'build.log');
@@ -1214,7 +1289,7 @@ test('команда ядра cyborg.workspace.reveal: среда показыв
   await bare.k.unload();
 });
 
-test('granted: выбор в dialog лежит в state воркспейса и действует после перезапуска; кривые записи и сбой записи не мешают', async () => {
+test('ST-1007/9, ST-3001/3, ST-3001/5, ST-3001/6: granted: выбор в dialog лежит в state воркспейса и действует после перезапуска; кривые записи и сбой записи не мешают', async () => {
   await using box = await sandbox();
   const [picked, kept, late] = ['picked.txt', 'kept.txt', 'late.txt'].map((name) => path.join(box.outside, name));
   for (const f of [picked!, kept!, late!]) await writeFile(f, 'текст');
@@ -1332,7 +1407,7 @@ test('uninstall, шлюз: недопустимый id не выводит за 
   assert.equal((await stat(box.data)).isDirectory(), true);
 });
 
-test('uninstall, шлюз: eraseSecrets стирает ключи <id>/ даже без шифрования ОС, соседи с общим началом целы', async () => {
+test('ST-3004/4: uninstall, шлюз: eraseSecrets стирает ключи <id>/ даже без шифрования ОС, соседи с общим началом целы', async () => {
   await using box = await sandbox();
   const store = memorySecrets(false);
   for (const k of ['jira/token', 'jira/a/b', 'jira2/token', 'jira.sub/token', 'other/jira/token']) store.map.set(k, 'v');
@@ -1368,13 +1443,13 @@ test('uninstall, шлюз: eraseGrants убирает выбор плагина 
   assert.equal(written.length, 1, 'нечего стирать - нечего писать');
 });
 
-test('права в манифесте: маска под названным каталогом, workspace.git только у записи, shell без file:', () => {
+test('ST-3002/1: права в манифесте: маска под названным каталогом, workspace.git только у записи, shell без file:', () => {
   const errors = (permissions: unknown) => {
     const r = parseManifest(manifest('x', permissions));
     return r.ok ? [] : r.errors;
   };
   assert.deepEqual(errors({ 'fs.read': ['/a/*/b', '~/x/**', 'granted'], 'fs.write': ['workspace.git'], shell: ['https:', 'mailto:', 'workspace'] }), []);
-  for (const bad of [{ 'fs.read': ['/*'] }, { 'fs.read': ['~/*/x'] }, { 'fs.read': ['/a/../b'] }, { 'fs.read': ['/a/x**'] }, { 'fs.read': ['workspace.git'] }, { shell: ['file:'] }, { shell: ['javascript:'] }, { shell: ['https'] }]) {
+  for (const bad of [{ 'fs.read': ['/*'] }, { 'fs.read': ['~/*/x'] }, { 'fs.read': ['/a/../b'] }, { 'fs.read': ['/a/x**'] }, { 'fs.read': ['workspace.git'] }, { shell: ['file:'] }, { shell: ['javascript:'] }, { shell: ['data:'] }, { shell: ['vbscript:'] }, { shell: ['https'] }]) {
     assert.notDeepEqual(errors(bad), [], JSON.stringify(bad));
   }
   assert.ok(describePermissions({ shell: ['granted', 'https:'], 'fs.write': ['workspace.git'] }).includes('открывает в системе: выбранное человеком в диалоге, https: - кроме программ и скриптов; где сам пишет - только документы'));

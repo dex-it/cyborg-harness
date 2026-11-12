@@ -43,7 +43,7 @@ test('безопасность: пустой, относительный, ~ и N
   }
 });
 
-test('безопасность: .. и симлинк наружу области не дают ни чтения, ни записи', async () => {
+test('ST-3001/2: безопасность: .. и симлинк наружу области не дают ни чтения, ни записи', async () => {
   await using b = await box({ p: workRw });
   await writeFile(path.join(b.outside, 'secret.txt'), 'секрет');
   await symlink(b.outside, path.join(b.work, 'link'));
@@ -56,14 +56,14 @@ test('безопасность: .. и симлинк наружу области
   await assert.rejects(fs.writeText(path.join(b.work, 'file-link'), 'x'), { code: 'PermissionDenied' });
 });
 
-test('безопасность: каталог данных чужого плагина закрыт, даже с правом на родителя', async () => {
+test('ST-3001/2: безопасность: каталог данных чужого плагина закрыт, даже с правом на родителя', async () => {
   await using b = await box({ a: undefined, b: (d: Dirs) => ({ 'fs.read': [d.data] }) });
   const own = path.join(b.ctx('a').os.paths.data, 'n.txt');
   await b.ctx('a').os.fs.writeText(own, 'a-secret');
   await assert.rejects(b.ctx('b').os.fs.readText(own), { code: 'PermissionDenied' });
 });
 
-test('безопасность: запись в .git без workspace.git отбита', async () => {
+test('ST-3001/2: безопасность: запись в .git без workspace.git отбита', async () => {
   await using b = await box({ p: workRw });
   await mkdir(path.join(b.work, '.git'), { recursive: true });
   const fs = b.ctx('p').os.fs;
@@ -71,7 +71,7 @@ test('безопасность: запись в .git без workspace.git отб
   await assert.rejects(fs.writeText(path.join(b.work, '.git', 'hooks', 'pre-commit'), 'x'), { code: 'PermissionDenied' });
 });
 
-test('безопасность: ссылка secrets.ref не обходит маску через ..', async () => {
+test('ST-3004/2: безопасность: ссылка secrets.ref не обходит маску через ..', async () => {
   await using b = await box({ jira: { 'secrets.ref': ['vault://kv/data/jira*'] } });
   const { secrets } = b.ctx('jira');
   const resolve = (ref: string) => secrets.resolve(ref);
@@ -81,7 +81,7 @@ test('безопасность: ссылка secrets.ref не обходит м�
   await assert.rejects(resolve('vault://kv/data/jira/%2e%2e/gitlab#token'), { code: 'PermissionDenied' }, 'обход маски закодированным ..');
 });
 
-test('безопасность: отказ process.run не кладёт аргументы программы (в них бывают токены) в журнал', async () => {
+test('ST-3002/2: безопасность: отказ process.run не кладёт аргументы программы (в них бывают токены) в журнал', async () => {
   await using b = await box({ p: { process: ['git'] } });
   await assert.rejects(b.ctx('p').os.process!.run('curl', ['--header', 'Authorization: Bearer TOPSECRET']), { code: 'PermissionDenied' });
   const text = JSON.stringify(b.k.journal.filter((e) => e.kind === 'denied'));
