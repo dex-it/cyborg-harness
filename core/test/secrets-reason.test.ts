@@ -41,26 +41,32 @@ test('ST-3004/1: хранилище недоступно с причиной - U
   await box.k.unload();
 });
 
-test('ST-3004/1: без причины - прежний отказ «нет шифрования ОС», с причиной-undefined то же', async () => {
-  const store = { ...memorySecrets(false), unavailableReason: () => undefined };
+test('ST-3004/1: без причины - прежний отказ «нет шифрования ОС», записи в журнале при запуске нет и проба доступности не зовётся', async () => {
+  let probed = 0;
+  const store: SecretStore = { ...memorySecrets(false), available: () => (probed++, false) };
   await using box = await start(store);
+  assert.equal(probed, 0, 'при запуске available() не спрашивается: на macOS это дёрнуло бы Keychain');
+  assert.ok(!box.lines.some((l) => l.includes('хранилище секретов недоступно')), box.lines.join('\n'));
   await assert.rejects(box.os.secrets.get('token'), (e: unknown) => (e as { code?: string }).code === 'Unavailable' && (e as Error).message.includes('нет шифрования ОС'));
-  assert.ok(box.lines.some((l) => l.includes('нет шифрования ОС')));
   await box.k.unload();
 });
 
-test('ST-3004/1: хранилище доступно - записи о недоступности нет, секрет сохраняется', async () => {
-  const store = { ...memorySecrets(true), unavailableReason: () => REASON };
-  await using box = await start(store);
+test('ST-3004/1: хранилище доступно и причины не называет - записи нет, секрет сохраняется', async () => {
+  await using box = await start(memorySecrets(true));
   await box.os.secrets.set('token', 'секрет');
   assert.equal(await box.os.secrets.get('token'), 'секрет');
   assert.ok(!box.lines.some((l) => l.includes('недоступно')), box.lines.join('\n'));
   await box.k.unload();
 });
 
-test('ST-3004/1: сбой самой пробы доступности запуск не останавливает', async () => {
-  const store: SecretStore = { ...memorySecrets(true), available: () => Promise.reject(new Error('пробы нет')) };
+test('ST-3004/1: сбой самой unavailableReason запуск не останавливает', async () => {
+  const store: SecretStore = {
+    ...memorySecrets(true),
+    unavailableReason: () => {
+      throw new Error('нет ответа');
+    },
+  };
   await using box = await start(store);
-  await assert.rejects(box.os.secrets.get('token'), /пробы нет/);
+  await box.os.secrets.set('token', 'секрет');
   await box.k.unload();
 });

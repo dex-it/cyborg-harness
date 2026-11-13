@@ -218,7 +218,11 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
     };
     const parsed = parseManifest(raw, PLUGIN_API_VERSION);
     if (!parsed.ok) throw new Error(`манифест замера: ${parsed.errors.join('; ')}`);
-    const env: OsEnvironment = { ...electronOs({ userData: path.join(base, 'app'), roots: () => [], protectedPaths: [], raiseWindow: () => undefined }), limits: BENCH_LIMITS };
+    const os = electronOs({ userData: path.join(base, 'app'), roots: () => [], protectedPaths: [], raiseWindow: () => undefined });
+    // Замер мерит цену пути `secrets.get` и `secrets.set`, а не защиту значений (в замере их нет): на Linux без связки ключей backend `basic_text` (так на раннере CI)
+    // хранилище объявило бы себя недоступным (TR-04), и цену пути взять было бы не с чего - как до TR-04, шифрование идёт тем, что даёт `safeStorage`.
+    const secrets = os.secrets && { ...os.secrets, available: () => true };
+    const env: OsEnvironment = { ...os, ...(secrets && { secrets }), limits: BENCH_LIMITS };
     drainPtys = async () => {
       await env.pty?.drain?.();
     };
