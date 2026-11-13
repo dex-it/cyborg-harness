@@ -1,6 +1,6 @@
 // Спайк TR-20, пункт 4: как исполнить плагин из ПРОВЕРЕННЫХ байтов в процессе Node под --permission, не открывая файл повторно (docs/05-verification/spike-node-host.md).
 // Ядро читает пакет один раз, проверяет подпись и хеши, и отдаёт хосту байты каналом `ipc`; хосту разрешено читать только свой вход (`--allow-fs-read=<этот файл>`).
-// Способы: data: URL, module.registerHooks (виртуальная схема cyborg-verified: с графом модулей из памяти), vm.Script (cjs), vm.SourceTextModule (флаг --experimental-vm-modules)
+// Способы: data: URL, module.registerHooks (виртуальная схема cyborg-verified: с графом модулей из памяти; и вариант TR-11 - адреса file: под каталогом плагина, которого на диске для хоста нет), vm.Script (cjs), vm.SourceTextModule (флаг --experimental-vm-modules)
 // и контроль «с диска» - повторное открытие файла, которое под --permission должно упасть.
 // Запуск: node playground/scripts/spike-node-host-load.mjs [--json] [--node-bin=<node>]; бинарник Electron в режиме Node берётся из пакета electron.
 import { Buffer } from 'node:buffer';
@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { performance } from 'node:perf_hooks';
-import path from 'node:path';
+import path, { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const SOURCES = {
@@ -19,7 +19,7 @@ const SOURCES = {
   'bundle.mjs': "export default { activate() { return `бандл perm=${typeof process.permission}`; } };\n",
   'bundle.cjs': "module.exports = { activate() { return `cjs perm=${typeof module.require}/${typeof process.permission}`; } };\n",
 };
-const MODES = ['data-url', 'hooks', 'vm-script', 'vm-module', 'disk'];
+const MODES = ['data-url', 'hooks', 'hooks-file', 'hooks-file-load-only', 'vm-script', 'vm-module', 'disk'];
 
 async function host(mode) {
   const { default: vm } = await import('node:vm');
@@ -47,6 +47,25 @@ async function host(mode) {
           },
         });
         reply.result = (await import('cyborg-verified:/plugin.mjs')).default.activate();
+      } else if (mode === 'hooks-file' || mode === 'hooks-file-load-only') {
+        // Вариант этапа Б (TR-11, core/src/verified-sources.ts): адреса остаются file:, import.meta.url и относительные импорты работают; хуки resolve и load отдают проверенное из памяти,
+        // потому что обычный resolve под --permission полез бы в файловую систему (stat), а каталога плагина хосту читать нельзя.
+        // Каталог настоящий (файлы на диске те же, что проверены), но хосту его читать нельзя: файлов он не откроет, только получит из памяти.
+        const dir = `${pathToFileURL(process.argv[4]).href}/`;
+        registerHooks({
+          // Контроль «только load»: без resolve обычный разбор адреса идёт в файловую систему.
+          ...(mode === 'hooks-file' && { resolve(specifier, context, next) {
+            const url = specifier.startsWith('file:') ? specifier : context.parentURL?.startsWith(dir) && specifier.startsWith('./') ? new URL(specifier, context.parentURL).href : undefined;
+            return url?.startsWith(dir) ? { url, shortCircuit: true, format: 'module' } : next(specifier, context);
+          } }),
+          load(url, context, next) {
+            if (!url.startsWith(dir)) return next(url, context);
+            const name = url.slice(dir.length);
+            if (!(name in src)) throw new Error(`нет среди проверенных: ${name}`);
+            return { format: 'module', source: src[name], shortCircuit: true };
+          },
+        });
+        reply.result = (await import(`${dir}plugin.mjs`)).default.activate();
       } else if (mode === 'vm-script') {
         const m = { exports: {} };
         new vm.Script(`(function (module, exports) {${src['bundle.cjs']}\n})`, { filename: 'cyborg-verified:/bundle.cjs' }).runInThisContext()(m, m.exports);
@@ -60,7 +79,7 @@ async function host(mode) {
         reply.result = module.namespace.default.activate();
       } else {
         // Контроль: второе открытие файла по пути, как делает `import(путь)`.
-        reply.result = (await import(pathToFileURL(process.argv[4]).href)).default.activate();
+        reply.result = (await import(pathToFileURL(join(process.argv[4], 'bundle.mjs')).href)).default.activate();
       }
     } catch (error) {
       reply.error = error.code ?? `${error.name}: ${error.message.slice(0, 100)}`;
@@ -95,12 +114,11 @@ export async function loadExperiment(binary, { electronAsNode = false } = {}) {
     child.once('exit', () => resolve(out.trim()));
   });
   const rows = [];
-  // Файл для контроля «с диска» лежит вне --allow-fs-read хоста; в нём тот же код, что дал бы повторный import после проверки.
+  // Каталог с теми же файлами лежит вне --allow-fs-read хоста: повторный import после проверки («с диска») и file: без хука resolve под --permission должны упасть.
   const diskDir = mkdtempSync(path.join(tmpdir(), 'cyborg-spike-load-'));
-  const diskFile = path.join(diskDir, 'bundle.mjs');
-  writeFileSync(diskFile, SOURCES['bundle.mjs']);
+  for (const [name, text] of Object.entries(SOURCES)) writeFileSync(path.join(diskDir, name), text);
   try {
-    for (const mode of MODES) for (const confined of [false, true]) rows.push({ mode, confined, ...(await once(binary, mode, confined, env, mode === 'disk' ? diskFile : '')) });
+    for (const mode of MODES) for (const confined of [false, true]) rows.push({ mode, confined, ...(await once(binary, mode, confined, env, diskDir)) });
   } finally {
     rmSync(diskDir, { recursive: true, force: true });
   }
