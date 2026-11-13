@@ -33,7 +33,8 @@
 | Node, настоящий дочерний процесс хоста (`forkHosts`), macOS | `core/test/provenance.test.ts` («подмена файла между проверкой и запуском…») | зелёный |
 | Тот же набор тестов ядра на Linux (Docker, Node 24.22.3): `integrity`, `trust-store`, `provenance`, `delivery` | 51 тест | зелёные |
 | Рантайм Electron 45.2.3 (бинарник в режиме Node, Node 24.x внутри), macOS | `playground/test/host-electron-verified.test.ts` | зелёный |
-| Настоящий `utilityProcess` Electron 45, macOS (и Ubuntu 24.04 в CI, шаг «доверие») | `playground/test/real/trust-real-host.test.ts`, `npm run test:trust` («TR-11…») | см. раздел ниже |
+| Настоящий `utilityProcess` Electron 45.2.3, macOS | `playground/test/real/trust-real-host.test.ts`, `npm run test:trust` («TR-11 на настоящем utilityProcess…»: подмена после проверки не исполнена, пакет с подменой до проверки не запущен) | зелёный (13 тестов файла) |
+| То же на Ubuntu 24.04 | шаг CI «доверие» (`xvfb-run`) | запускается в CI PR; локально не запускался |
 
 ## Цена
 
@@ -51,4 +52,4 @@
 
 - `module.registerHooks` в Node 24 имеет статус «активная разработка»: canary на каждый релиз Electron и Node - сами тесты выше (CI на macOS и Linux).
 - Хук действует на весь процесс хоста: в общем хосте он обслуживает всех плагинов, адреса других плагинов проходят мимо. Модуль, уже загруженный в хост (кэш `import()` по адресу), повторная активация не перечитывает: пока хост жив, кэш держит прежние проверенные байты.
-- **Не проверено:** хук в процессе Node под `--permission` и под ограничителем ОС (этап В, TR-20/TR-21: способ загрузки там проверяется отдельно, как записано в [плане](../research/trust-and-isolation/06-work-plan.md), TR-20, критерий 4); `utilityProcess` на Linux с дисплеем локально (в CI шаг «доверие» идёт под `xvfb-run`; локально агент Linux с Electron не запускал, только Node в Docker); процесс Node на Windows (вне охвата).
+- **Не проверено:** хук в процессе Node под `--permission` и под ограничителем ОС (этап В, TR-20/TR-21: способ загрузки там проверяется отдельно, как записано в [плане](../research/trust-and-isolation/06-work-plan.md), TR-20, критерий 4); `utilityProcess` на Linux с дисплеем локально (в CI шаг «доверие» идёт под `xvfb-run`; локально агент Electron на Linux не запускал, только Node в Docker); процесс Node на Windows (вне охвата).
