@@ -26,6 +26,8 @@ import { isRecord } from './wire.ts';
 /** Хранилище секретов ядра: ключи `<pluginId>/<key>`; без шифрования ОС `available()` - false, и ядро отказывает, а не пишет открытым текстом. */
 export interface SecretStore {
   available(): boolean | Promise<boolean>;
+  /** Почему хранилище недоступно, словами для человека (например, на Linux нет хранилища паролей): ядро кладёт её в отказ `Unavailable` и в журнал строк при запуске. Без причины - общая «нет шифрования ОС». */
+  unavailableReason?(): string | undefined;
   get(key: string): Promise<string | undefined>;
   set(key: string, value: string): Promise<void>;
   delete(key: string): Promise<void>;
@@ -1168,7 +1170,7 @@ export class OsGateway {
 
   async #store(): Promise<SecretStore> {
     const store = this.#env.secrets;
-    if (store === undefined || !(await store.available())) throw new CoreError('Unavailable', 'хранилище секретов недоступно: нет шифрования ОС');
+    if (store === undefined || !(await store.available())) throw new CoreError('Unavailable', `хранилище секретов недоступно: ${store?.unavailableReason?.() ?? 'нет шифрования ОС'}`);
     return store;
   }
 

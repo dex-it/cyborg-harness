@@ -98,7 +98,7 @@ export function createHostPool(ctx: KernelContext): HostPool {
     ctx.parts.bridge.attach(host);
 
     handle.onExit(() => hostDown(host, 'crash'));
-    endpoint.request('init', ctx.wire).catch(ignore);
+    endpoint.request('init', ctx.wireOf(hostId)).catch(ignore);
     ctx.parts.contracts.announce(host);
 
     let tickAt = performance.now();

@@ -28,6 +28,7 @@
 | Пилот Monaco и xterm во фреймах: CSP, типы файлов, `sandbox`, буфер обмена, память | [05-verification/spike-monaco-xterm.md](05-verification/spike-monaco-xterm.md) |
 | Замер K-04: группы рендера, память при десяти видах | [05-verification/spike-render-groups.md](05-verification/spike-render-groups.md) |
 | Проверка на macOS: замеры хостов и фреймов, клавиши, терминал | [05-verification/macos-check.md](05-verification/macos-check.md) |
+| Проверка мер доверия этапа А на Linux: что проверяет CI, что делает человек (keyring, `--password-store=basic`, Wayland) | [05-verification/linux-trust-check.md](05-verification/linux-trust-check.md) |
 | Пилот PL-02: цепочка хук - статус - уведомление в другом плагине, задержка, ручная проверка клика | [05-verification/notify-chain.md](05-verification/notify-chain.md) |
 | Пилот PL-08: раскладка окна Cyborg на областях, вклады в меню, заголовок, `F6`, перестройка при выгрузке плагина | [05-verification/pl08-window-layout.md](05-verification/pl08-window-layout.md) |
 | Плагины вне репозитория и из упакованной сборки (asar): что грузится, что нет и почему, ограничения автора на `.ts` (T-10) | [05-verification/external-plugins.md](05-verification/external-plugins.md) |

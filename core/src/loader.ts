@@ -37,10 +37,26 @@ const createParts = (ctx: KernelContext): Parts => ({
   bridge: createBridge(ctx),
 });
 
+/**
+ * Хранилище секретов недоступно по причине, которую знает приложение (на Linux нет хранилища паролей, TR-04): она словами идёт в журнал строк при запуске,
+ * а не только в отказ первому вызвавшему плагину. Спрашивается одна `unavailableReason`, без `available()`: на macOS проба `safeStorage` дёрнула бы Keychain
+ * (запрос доступа и ожидание) до того, как какой-нибудь плагин вообще попросил секрет.
+ */
+function announceSecrets(ctx: KernelContext): void {
+  let reason: string | undefined;
+  try {
+    reason = ctx.osEnv.secrets?.unavailableReason?.();
+  } catch {
+    return;
+  }
+  if (reason !== undefined) ctx.parts.logs.hostLine('ядро', `хранилище секретов недоступно: ${reason}`, 'warn');
+}
+
 export async function load(options: LoadOptions): Promise<Kernel> {
   const ctx = await createContext(options, createParts);
   // Запись о флаге идёт первой в журнале запуска: она нужна, чтобы человек видел включённую запись данных, даже если дальше всё сломалось.
   if (options.traceArgs === true && options.onTrace !== undefined) ctx.record({ kind: 'trace-args', limit: ctx.limits.traceArgsBytes });
+  announceSecrets(ctx);
   await ctx.parts.activation.start();
   await ctx.parts.menus.start();
   return buildKernel(ctx);
