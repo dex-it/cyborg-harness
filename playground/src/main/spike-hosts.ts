@@ -12,9 +12,11 @@ export interface HostsSpikeOptions {
   readonly out: string;
   readonly hostEntry: string;
   readonly benchDir: string;
+  /** Откуда берутся хосты замера; по умолчанию utilityProcess из `hostEntry`. Спайк TR-20 подставляет процессы Node (spike-node-host.ts). */
+  readonly spawn?: () => UtilityHosts;
 }
 
-const manifest = (id: string, extra: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...extra });
+export const manifest = (id: string, extra: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...extra });
 const PROVIDER = manifest('bench-provider', {
   provides: { 'bench.rpc': '1.0' },
   commands: {
@@ -30,14 +32,14 @@ const CONSUMER = manifest('bench-consumer', {
 });
 const idleIds = (n: number) => Array.from({ length: n }, (_, i) => `idle-${i}`);
 
-interface Session {
+export interface Session {
   readonly kernel: Kernel;
   readonly hosts: UtilityHosts;
   readonly journal: { at: number; entry: JournalEntry }[];
 }
 
-async function start(options: HostsSpikeOptions, manifests: Record<string, unknown>[], groups: Readonly<Record<string, readonly string[]>>, watchdog?: Partial<WatchdogOptions>): Promise<Session> {
-  const hosts = utilityHosts(options.hostEntry);
+export async function start(options: HostsSpikeOptions, manifests: Record<string, unknown>[], groups: Readonly<Record<string, readonly string[]>>, watchdog?: Partial<WatchdogOptions>): Promise<Session> {
+  const hosts = options.spawn?.() ?? utilityHosts(options.hostEntry);
   const journal: Session['journal'] = [];
   const file = (id: string) => path.join(options.benchDir, `${id.startsWith('idle-') ? 'idle' : id.replace('bench-', '')}.ts`);
   const kernel = await load({
@@ -57,8 +59,8 @@ async function start(options: HostsSpikeOptions, manifests: Record<string, unkno
   return { kernel, hosts, journal };
 }
 
-const round = (n: number, digits = 2) => Math.round(n * 10 ** digits) / 10 ** digits;
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export const round = (n: number, digits = 2) => Math.round(n * 10 ** digits) / 10 ** digits;
+export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export interface MemoryRow {
   readonly layout: string;
@@ -69,7 +71,7 @@ export interface MemoryRow {
   readonly pssPerHostMb: number | null;
 }
 
-async function memory(options: HostsSpikeOptions): Promise<MemoryRow[]> {
+export async function memory(options: HostsSpikeOptions): Promise<MemoryRow[]> {
   const rows: MemoryRow[] = [];
   const layouts: [string, number, (ids: string[]) => Record<string, string[]>][] = [
     ['хост на плагин', 1, (ids) => Object.fromEntries(ids.map((id) => [`h-${id}`, [id]]))],
@@ -130,7 +132,7 @@ interface Percentiles {
   readonly p99: number;
 }
 
-async function rpc(options: HostsSpikeOptions): Promise<{ calls: RpcRow[]; streams: StreamRow[] }> {
+export async function rpc(options: HostsSpikeOptions): Promise<{ calls: RpcRow[]; streams: StreamRow[] }> {
   const calls: RpcRow[] = [];
   const streams: StreamRow[] = [];
   const pair = [PROVIDER, CONSUMER];
@@ -172,7 +174,7 @@ export interface PingRow {
   readonly pingDuringMs: number;
 }
 
-async function blocking(options: HostsSpikeOptions): Promise<{ work: BlockingRow[]; ping: PingRow[] }> {
+export async function blocking(options: HostsSpikeOptions): Promise<{ work: BlockingRow[]; ping: PingRow[] }> {
   // Сторож отодвинут: меряется сама работа, а не то, переживёт ли её хост.
   const session = await start(options, [PROVIDER], { prov: ['bench-provider'] }, { interval: 1000, timeout: 600_000 });
   const work: BlockingRow[] = [];
@@ -210,7 +212,7 @@ export interface WatchdogRow {
   readonly restartMs: number;
 }
 
-async function watchdogTimes(options: HostsSpikeOptions): Promise<WatchdogRow[]> {
+export async function watchdogTimes(options: HostsSpikeOptions): Promise<WatchdogRow[]> {
   const rows: WatchdogRow[] = [];
   for (const [interval, timeout] of [
     [1000, 5000],

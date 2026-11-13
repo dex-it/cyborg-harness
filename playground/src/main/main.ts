@@ -43,6 +43,7 @@ import { quietPipes } from './quiet-pipes.ts';
 import { runSpike } from './spike.ts';
 import { runHostsSpike } from './spike-hosts.ts';
 import { runTrustProbe } from './trust-probe.ts';
+import { runNodeHostSpike } from './spike-node-host.ts';
 import { runGatewaySpike } from './spike-gateway.ts';
 
 const APP_NAME = 'Cyborg Playground';
@@ -88,6 +89,8 @@ process.on('unhandledRejection', (reason) => errorReporter.report('unhandledReje
 /** `--spike=<файл>`: замеры видов во фреймах (SAD, открытый вопрос 11) вместо окна плагинов. */
 const spikeOut = process.argv.find((a) => a.startsWith('--spike='))?.slice('--spike='.length);
 const hostsSpikeOut = process.argv.find((a) => a.startsWith('--spike-hosts='))?.slice('--spike-hosts='.length);
+const nodeHostSpikeOut = process.argv.find((a) => a.startsWith('--spike-node-host='))?.slice('--spike-node-host='.length);
+const nodeHostBin = process.argv.find((a) => a.startsWith('--node-bin='))?.slice('--node-bin='.length);
 const gatewaySpikeOut = process.argv.find((a) => a.startsWith('--spike-gateway='))?.slice('--spike-gateway='.length);
 /** `--trust-probe=<файл>`: плагин-нарушитель в хосте стороннего плагина на настоящем utilityProcess (TR-01, `npm run test:trust`). */
 const trustProbeOut = process.argv.find((a) => a.startsWith('--trust-probe='))?.slice('--trust-probe='.length);
@@ -101,7 +104,7 @@ const workspaceFile = process.argv.includes('--no-workspace')
     : (recent.list()[0] ?? path.join(app.getPath('userData'), 'workspace.cyborg.json'));
 /** `--view-csp=<строка>`: CSP видов вместо `VIEW_CSP` - так пилот PL-05 (`npm run spike:monaco`) проверяет наборы директив; в Cyborg её задаёт приложение (K-05). */
 const viewCsp = process.argv.find((a) => a.startsWith('--view-csp='))?.slice('--view-csp='.length);
-const spiking = spikeOut !== undefined || hostsSpikeOut !== undefined || gatewaySpikeOut !== undefined || trustProbeOut !== undefined;
+const spiking = spikeOut !== undefined || hostsSpikeOut !== undefined || nodeHostSpikeOut !== undefined || gatewaySpikeOut !== undefined || trustProbeOut !== undefined;
 /** `--safe-mode` (BR-CH-005): манифесты разобраны, код плагинов не запускается; смена воркспейса флаг сохраняет, снимает его только «Выйти из безопасного режима». */
 const safeMode = process.argv.includes('--safe-mode');
 /** `--user-plugins` (SAD 6.1): читать каталог плагинов пользователя; без флага грузятся только плагины из поставки. Флаг только в командной строке: файл воркспейса может лежать в репозитории. Смена воркспейса и безопасного режима его сохраняет (перезапуск берёт argv). */
@@ -222,6 +225,10 @@ const start = () => {
   }
   if (trustProbeOut !== undefined) {
     void runTrustProbe({ out: trustProbeOut, hostEntry: path.join(__dirname, 'plugin-host.mjs'), probeDir: path.join(__dirname, 'trust-probe') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
+    return;
+  }
+  if (nodeHostSpikeOut !== undefined) {
+    void runNodeHostSpike({ out: nodeHostSpikeOut, utilityEntry: path.join(__dirname, 'plugin-host.mjs'), nodeEntry: path.join(__dirname, 'node-host.mjs'), benchDir: path.join(__dirname, 'bench'), ...(nodeHostBin !== undefined && { nodeBin: nodeHostBin }) }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
     return;
   }
   if (hostsSpikeOut !== undefined) {

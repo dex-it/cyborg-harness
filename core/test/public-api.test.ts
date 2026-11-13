@@ -83,6 +83,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'ExitRecord',
       'ExportContext',
       'FileLockOptions',
+      'ForkHostOptions',
       'GrantStore',
       'Guard',
       'GuardRight',

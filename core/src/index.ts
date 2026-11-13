@@ -50,6 +50,6 @@ export type { SpawnPtyHost } from './pty-link.ts';
 export type { ContractImpl, ContractRegistry, Provider } from './registry.ts';
 export type { PluginState, PluginStatus } from './status.ts';
 export type { Boundary, ExitRecord, OperationRecord, StreamRecord, TraceRecord } from './trace-record.ts';
-export type { HostHandle, SpawnHost } from './transports.ts';
+export type { ForkHostOptions, HostHandle, SpawnHost } from './transports.ts';
 export type { ShownDialog, ShownModal, WindowLock, WindowSnapshot, WindowTitle } from './window-layer.ts';
 export type { FileLockOptions, MigrateWorkspace, Migrated, OpenResult, PluginsList, Workspace, WorkspaceOptions } from './workspace.ts';
