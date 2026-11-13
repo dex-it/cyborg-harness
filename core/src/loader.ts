@@ -11,6 +11,7 @@ import type { Kernel, LoadOptions } from './kernel-types.ts';
 import { createLifecycle } from './lifecycle.ts';
 import { createMenus } from './menus.ts';
 import { createKeyRegistry } from './keybindings.ts';
+import { secretsReason } from './os-gateway.ts';
 import { createOsRequests } from './os-requests.ts';
 import { createPluginLog } from './plugin-log.ts';
 import { createSections } from './sections.ts';
@@ -43,12 +44,7 @@ const createParts = (ctx: KernelContext): Parts => ({
  * (запрос доступа и ожидание) до того, как какой-нибудь плагин вообще попросил секрет.
  */
 function announceSecrets(ctx: KernelContext): void {
-  let reason: string | undefined;
-  try {
-    reason = ctx.osEnv.secrets?.unavailableReason?.();
-  } catch {
-    return;
-  }
+  const reason = secretsReason(ctx.osEnv.secrets);
   if (reason !== undefined) ctx.parts.logs.hostLine('ядро', `хранилище секретов недоступно: ${reason}`, 'warn');
 }
 

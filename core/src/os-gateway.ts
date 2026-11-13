@@ -35,6 +35,15 @@ export interface SecretStore {
   deletePrefix(prefix: string): Promise<number>;
 }
 
+/** Причина недоступности секретов от приложения; сбой самой причины - её нет: чужая реализация не должна подменить отказ `Unavailable` своим исключением. */
+export function secretsReason(store: SecretStore | undefined): string | undefined {
+  try {
+    return store?.unavailableReason?.();
+  } catch {
+    return undefined;
+  }
+}
+
 /** Среда шлюза: каталоги и то, что даёт только приложение (Electron). Нет адаптера - вызов получает `Unavailable`. */
 export interface OsEnvironment {
   /** Каталог данных плагинов: `<dataDir>/<pluginId>` - область `plugin-data`. */
@@ -1170,7 +1179,7 @@ export class OsGateway {
 
   async #store(): Promise<SecretStore> {
     const store = this.#env.secrets;
-    if (store === undefined || !(await store.available())) throw new CoreError('Unavailable', `хранилище секретов недоступно: ${store?.unavailableReason?.() ?? 'нет шифрования ОС'}`);
+    if (store === undefined || !(await store.available())) throw new CoreError('Unavailable', `хранилище секретов недоступно: ${secretsReason(store) ?? 'нет шифрования ОС'}`);
     return store;
   }
 
