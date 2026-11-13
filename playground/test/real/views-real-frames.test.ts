@@ -75,6 +75,7 @@ describe('TR-31: виды на настоящем Electron', () => {
     assert.match((await asAt('alice', '/', 'bob.hello', '/alice/?view=main')).error ?? '', /не команда плагина alice/);
     // Номер кадра при этом не менялся: ни от pushState, ни от возврата адреса.
     const after = await frameOf('alice');
+    assert.ok(after);
     assert.equal(after.id, before.id);
     assert.equal(after.token, before.token);
   });
