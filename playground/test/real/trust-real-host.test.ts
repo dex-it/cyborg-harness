@@ -54,7 +54,7 @@ const ROWS: readonly Row[] = [
   { what: 'запускает процесс через child_process', table: '«Запускает процесс»', open: (v) => v.spawn === 'spawned', expected: 'open', until: 'TR-21' },
   { what: 'открывает TCP-соединение', table: '«Открывает TCP-соединение»', open: (v, r) => v.tcp === 'connected' && (r.tcpConnections ?? 0) > 0, expected: 'open', until: 'TR-22' },
   { what: 'слушает «сырой» process.parentPort и получает сообщения ядра', table: '«Слушает сырой parentPort»', open: (v) => v.raw.messages > 0, expected: 'open', until: 'TR-21' },
-  { what: 'читает в сыром канале данные контракта чужого поставщика', table: '«Слушает сырой parentPort» (рассылка contracts, находка 3)', open: (v) => v.raw.contractData.includes(VAULT_TOKEN), expected: 'open', until: 'TR-03' },
+  { what: 'читает в сыром канале данные контракта чужого поставщика', table: '«Слушает сырой parentPort» (рассылка contracts, находка 3)', open: (v) => v.raw.contractData.includes(VAULT_TOKEN), expected: 'closed' },
   { what: 'пишет в parentPort от имени соседа и ядро исполняет', table: '«Пишет в parentPort от имени соседа»: ядро знает хост по каналу', open: (v) => v.forged === 'ok', expected: 'closed' },
   { what: 'видит манифесты плагинов в init (listener встаёт при загрузке плагина, после init)', table: '«видит init с чужими манифестами»: в загрузчике init приходит до кода плагина', open: (v) => v.raw.initManifests.length > 0, expected: 'closed' },
 ];
