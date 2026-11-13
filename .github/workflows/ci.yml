@@ -97,10 +97,10 @@ jobs:
         run: xvfb-run --auto-servernum node playground/scripts/smoke.mjs --no-sandbox
       # TR-01, TR-21, TR-22 (docs/research/trust-and-isolation): плагин-нарушитель в хосте стороннего плагина на настоящем Electron в двух режимах - utilityProcess (возврат настройкой) и процесс Node
       # под --permission с ограничителем ОС (Seatbelt на macOS, cyborg-confine на Linux); ожидание по каждой строке - playground/test/real/trust-real-host.test.ts.
-      - name: доверие, нарушитель на настоящем Electron: utilityProcess и процесс Node (macOS)
+      - name: доверие, нарушитель на настоящем Electron, utilityProcess и процесс Node (macOS)
         if: runner.os == 'macOS'
         run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-force-exit --test-timeout=180000 playground/test/real/trust-real-host.test.ts
-      - name: доверие, нарушитель на настоящем Electron: utilityProcess и процесс Node (Linux)
+      - name: доверие, нарушитель на настоящем Electron, utilityProcess и процесс Node (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-force-exit --test-timeout=180000 playground/test/real/trust-real-host.test.ts
       # TR-31 (docs/05-verification/views-real-frames.md): виды на настоящем Electron - pushState, чужие фреймы, обход моста, привязка плагина к кадру.
