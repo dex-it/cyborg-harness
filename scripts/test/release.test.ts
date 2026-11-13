@@ -194,11 +194,11 @@ describe('packPlan и publishPlan', () => {
     const result = publishPlan(plan, out, { publish: true, env: { RELEASE_PUBLISH: 'true' }, run: (_c, args) => (calls.push([...args]), '') });
     assert.equal(result.real, true);
     assert.ok(calls.every((a) => !a.includes('--dry-run')));
-    assert.ok(calls.every((a) => a.includes('--provenance')), 'ST-3009/7: настоящий выпуск несёт происхождение сборки');
+    assert.ok(calls.every((a) => a.includes('--provenance')), 'настоящий выпуск несёт происхождение сборки');
     assert.deepEqual(calls.map((a) => path.basename(a[1] ?? '')), ['core.tgz', 'electron.tgz']);
   });
 
-  it('ST-3009/7: --provenance только у настоящего выпуска; сухой прогон его не получает; RELEASE_PROVENANCE=false выключает', () => {
+  it('ST-3009/8: --provenance только у настоящего выпуска; сухой прогон его не получает; RELEASE_PROVENANCE=false выключает', () => {
     const { out, plan } = packed();
     const flags = (publish: boolean, env: NodeJS.ProcessEnv): boolean[] => {
       const calls: string[][] = [];

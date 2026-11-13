@@ -90,7 +90,7 @@ describe('release.yml: защита выпуска', () => {
     assert.doesNotMatch(job(release, 'verify'), /id-token/);
   });
 
-  it('ST-3009/7: происхождение выпуска: потребитель после публикации проверяет npm audit signatures, задание идёт только за publish, без токена и без права записи', () => {
+  it('ST-3009/8: происхождение выпуска: потребитель после публикации проверяет npm audit signatures, задание идёт только за publish, без токена и без права записи', () => {
     const consumer = job(release, 'consumer-check');
     assert.match(consumer, /needs: publish/);
     assert.match(consumer, /if: vars\.RELEASE_PACKAGES_PUBLIC == 'true'/);

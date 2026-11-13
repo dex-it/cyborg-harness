@@ -166,3 +166,15 @@ flowchart LR
 | [`acceptance.md`](../../05-verification/acceptance.md), [`test-plan.md`](../../05-verification/test-plan.md) | Ключи новых критериев |
 | `electron/README.md` | Чек-лист фьюзов и явный `env` |
 | [Справочник прав](../../guide/reference/permissions.md) | Слова об уровне изоляции и сети |
+
+## 6.9. Статус реализации
+
+Строки этапа Б ([#247](https://github.com/dex-it/cyborg-harness/issues/247)); этап А ([#246](https://github.com/dex-it/cyborg-harness/issues/246)) ведёт свои строки в этой же таблице. Дата 2026-11-13.
+
+| ID | Статус | Что сделано | Критерии приёмки 6.2 | Чем проверено |
+|---|---|---|---|---|
+| **TR-10** | сделано | `integrity.json` (Ed25519, `node:crypto`), `cyborg-plugin keygen`, `sign`, `verify`, `revoke`; `pack` кладёт подпись и отказывает на устаревшей | 1-4 закрыты | `core/test/integrity.test.ts`, `tools/cyborg-plugin/test/sign.test.ts` (ST-3009/1, /2) |
+| **TR-11** | сделано, остаток назван | `trust.json`, проверка байтов перед запуском, исполнение проверенных байтов (`module.registerHooks`), откат, отзыв, подписанный список отзыва, режимы, `integrity-failed` в окне | 1-5 закрыты; способ загрузки проверен на macOS, Linux (Node в Docker), рантайме Electron и настоящем `utilityProcess` ([provenance-loading.md](../../05-verification/provenance-loading.md)) | `core/test/provenance.test.ts`, `core/test/trust-store.test.ts`, `electron/test/provenance.test.ts`, `playground/test/host-electron-verified.test.ts`, `playground/test/real/trust-real-host.test.ts` (ST-3009/3-5); не проверено: `utilityProcess` на Linux локально, процесс Node под `--permission` (TR-20) |
+| **TR-12** | сделано, остаток назван | подпись `delivery.json` (`delivery --sign-key`), `verifyDelivery` с ключами выпуска, запись `delivery-failed`, проверка плагина поставки по подписанным хешам | закрыт; режим отказа - отдельным решением после пилотов (по умолчанию «предупреждать») | `core/test/delivery.test.ts`, `tools/cyborg-plugin/test/delivery.test.ts`, `electron/test/provenance.test.ts` (ST-3009/6); не сделано: ключ выпуска в упакованном приложении |
+| **TR-13** | сделано, не запускалось | `--provenance` в настоящей публикации, `id-token: write` только у `publish`, задание `consumer-check` с `npm audit signatures` | условие выполнено (облачный раннер `ubuntu-24.04`); публикации не было | `scripts/test/release.test.ts`, `scripts/test/workflows.test.ts` (ST-3009/8); настоящая публикация и `npm audit signatures` на выпущенном пакете - вручную после решения о видимости пакетов |
+| **TR-14** | сделано | перечень пакетов npm и версий в выводе и отчёте `cyborg-plugin build` и `delivery` | закрыт; `npm audit --omit=dev` в CI уже есть | `tools/cyborg-plugin/test/build.test.ts` (ST-3009/7) |

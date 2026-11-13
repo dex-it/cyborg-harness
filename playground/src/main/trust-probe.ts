@@ -4,7 +4,8 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { load, PLUGIN_API_VERSION, type JournalEntry } from '@cyborg-harness/core';
+import { createProvenance, load, PLUGIN_API_VERSION, TrustStore, type JournalEntry } from '@cyborg-harness/core';
+import { generateSigningKey, hashFiles, renderIntegrity, signIntegrity } from '@cyborg-harness/core/integrity';
 import { utilityHosts } from '@cyborg-harness/electron';
 
 export interface TrustProbeOptions {
@@ -37,7 +38,62 @@ export interface TrustReport {
   readonly friendRead?: string | null;
   readonly tcpConnections?: number;
   readonly journal: readonly string[];
+  /** TR-11: подписанный плагин, файл которого подменили сразу после проверки; что ответил хост и что лежит на диске. */
+  readonly verified?: { readonly answer: unknown; readonly diskAfter: string; readonly pid: number | undefined; readonly refused: readonly string[] };
   error?: string;
+}
+
+const GOOD = "export default { activate(ctx) { ctx.commands.register('signed.hello', () => 'GOOD'); } };\n";
+const EVIL = "export default { activate(ctx) { ctx.commands.register('signed.hello', () => 'EVIL'); } };\n";
+
+/**
+ * TR-11 на настоящем utilityProcess: ядро проверяет подписанный пакет, и сразу после проверки файл на диске подменён; хост должен исполнить проверенные байты.
+ * Второй пакет с изменённым файлом в режиме отказа не запускается вовсе.
+ */
+async function verifiedScenario(hostEntry: string, dir: string): Promise<NonNullable<TrustReport['verified']>> {
+  const key = generateSigningKey();
+  const make = (name: string, tamper: boolean) => {
+    const home = path.join(dir, name);
+    fs.mkdirSync(home, { recursive: true });
+    const files = { 'manifest.json': JSON.stringify(manifest('signed', { commands: ['signed.hello'] })), 'index.mjs': GOOD };
+    for (const [file, text] of Object.entries(files)) fs.writeFileSync(path.join(home, file), text);
+    fs.writeFileSync(path.join(home, 'integrity.json'), renderIntegrity(signIntegrity({ id: 'signed', version: '1.0.0', files: hashFiles(new Map(Object.entries(files).map(([f, t]) => [f, Buffer.from(t)]))), notAfter: new Date(Date.now() + 86_400_000) }, key.secretKey)));
+    if (tamper) fs.appendFileSync(path.join(home, 'index.mjs'), '// подмена до проверки');
+    return home;
+  };
+  const run = async (home: string, swapAfterCheck: boolean) => {
+    const trust = await TrustStore.open(path.join(dir, `${path.basename(home)}-trust.json`));
+    await trust.addPublisher(key.publicKey);
+    const inner = createProvenance({ trust, releaseKeys: [], mode: () => 'enforce', bundled: () => false, homeOf: () => home });
+    const journal: JournalEntry[] = [];
+    const hosts = utilityHosts(hostEntry);
+    const kernel = await load({
+      apiVersion: PLUGIN_API_VERSION,
+      enabled: ['signed'],
+      manifests: [manifest('signed', { commands: ['signed.hello'] })],
+      spawnHost: hosts.spawn,
+      entry: () => pathToFileURL(path.join(home, 'index.mjs')).href,
+      provenance: {
+        async check(m) {
+          const verdict = await inner.check(m);
+          if (swapAfterCheck) fs.writeFileSync(path.join(home, 'index.mjs'), EVIL);
+          return verdict;
+        },
+      },
+      onJournal: (entry) => journal.push(entry),
+    });
+    try {
+      await kernel.idle();
+      const active = kernel.active.includes('signed');
+      return { answer: active ? await kernel.run('signed.hello') : null, pid: active ? hosts.pidOf(kernel.hostOf('signed') ?? '') : undefined, journal: journal.flatMap((e) => (e.kind === 'integrity-failed' ? [`${e.code}/${e.mode}`] : [])) };
+    } finally {
+      await kernel.unload();
+    }
+  };
+  const good = make('good', false);
+  const swapped = await run(good, true);
+  const refused = await run(make('tampered', true), false);
+  return { answer: swapped.answer, diskAfter: fs.readFileSync(path.join(good, 'index.mjs'), 'utf8') === EVIL ? 'EVIL' : 'GOOD', pid: swapped.pid, refused: refused.journal };
 }
 
 export async function runTrustProbe(options: TrustProbeOptions): Promise<void> {
@@ -92,6 +148,7 @@ export async function runTrustProbe(options: TrustProbeOptions): Promise<void> {
     report.violator = (await kernel.run('violator.probe', { port, secretPath })) as NonNullable<TrustReport['violator']>;
     report.friendRead = (await kernel.run('friend.read')) as string | null;
     report.tcpConnections = connections;
+    report.verified = await verifiedScenario(options.hostEntry, dir);
   } catch (error) {
     report.error = error instanceof Error ? (error.stack ?? error.message) : String(error);
     process.exitCode = 1;
