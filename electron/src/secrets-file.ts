@@ -4,6 +4,8 @@ import { withFileLock, type SecretStore } from '@cyborg-harness/core';
 /** Шифр ОС (в приложении - `safeStorage`); отдельно от файла, чтобы файловую часть проверял юнит-тест без Electron. */
 export interface SecretCipher {
   available(): boolean | Promise<boolean>;
+  /** Почему шифрование ОС недоступно, словами для человека; ядро показывает её в отказе и в журнале строк. */
+  unavailableReason?(): string | undefined;
   encrypt(text: string): Promise<Buffer>;
   /** `shouldReEncrypt`: ключ ОС сменился, старое шифрование ещё читается. */
   decrypt(sealed: Buffer): Promise<{ readonly result: string; readonly shouldReEncrypt: boolean }>;
@@ -38,6 +40,7 @@ export function fileSecrets(file: string, cipher: SecretCipher): SecretStore {
   };
   return {
     available: () => cipher.available(),
+    ...(cipher.unavailableReason !== undefined && { unavailableReason: () => cipher.unavailableReason?.() }),
     get: async (key) => {
       const sealed = read()[key];
       if (sealed === undefined) return undefined;

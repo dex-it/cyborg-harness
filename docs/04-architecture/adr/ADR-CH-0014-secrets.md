@@ -1,7 +1,7 @@
 ---
 id: ADR-CH-0014
 status: proposed
-date: 2026-11-10
+date: 2026-11-13
 relates_to: 03-security-trust
 origin: derived
 ---
@@ -22,7 +22,7 @@ origin: derived
 
 ## Decision
 
-1. **Хранилище ядра - корень доверия.** `ctx.os.secrets` на `safeStorage`, ключи `<pluginId>/<key>`: плагин видит только свои ключи, работает без плагинов; без шифрования ОС вызов получает `Unavailable`. Проверка: `core/test/os.test.ts` («секреты: ключи своего плагина, $secret, без шифрования ОС - Unavailable, внешний источник по маске»).
+1. **Хранилище ядра - корень доверия.** `ctx.os.secrets` на `safeStorage`, ключи `<pluginId>/<key>`: плагин видит только свои ключи, работает без плагинов; без шифрования ОС вызов получает `Unavailable`. Шифрованием ОС не считается и Linux-backend `basic_text` (`safeStorage.getSelectedStorageBackend()`: нет GNOME Keyring и KWallet, Electron шифрует «зашитым открытым паролем»): хранилище тоже недоступно, причина словами для человека стоит в отказе и в строке журнала при запуске (TR-04, [исследование доверия](../../research/trust-and-isolation/05-decision.md#57-слой-секреты-и-ключи)); на macOS поведение прежнее. Проверка: `core/test/os.test.ts` («секреты: ключи своего плагина, $secret, без шифрования ОС - Unavailable, внешний источник по маске»), `core/test/secrets-reason.test.ts`, `electron/test/secrets-backend.test.ts`; на Linux с настоящим keyring и с `--password-store=basic` - вручную, [linux-trust-check.md](../../05-verification/linux-trust-check.md).
 2. **Внешний источник - плагин, поставщик `cyborg.secret-source`.** Кратность `many`, поставщик выбирается по схеме ссылки; два поставщика одной схемы - отказ при загрузке, как при `one`. Свой токен источник держит в хранилище ядра. Проверка: нет - контракт не реализован, см. расхождения.
 3. **В `config` только ссылка** `{ "$secret": "vault://kv/data/jira#token" }`; ссылка без схемы - ключ хранилища ядра вызывающего плагина. Ядро сверяет ссылку с правом `secrets.ref` **вызывающего** до передачи источнику - тот же механизм `via-contract`, что для путей ([ADR-CH-0005](ADR-CH-0005-plugin-interaction.md), п. 8). Проверка: `core/test/os.test.ts` (тот же тест), `core/test/via-contract.test.ts`.
 4. **Значение секрета ядро не кэширует и не пишет** в `config`, `state` и журнал; кэш до `expiresAt` - решение потребителя. Значение не проходит через третьи плагины. Проверка: `core/test/secrets-journal.test.ts` (секрет из хранилища, `$secret`, заголовок `net.fetch`, отказы `process`, `net`, `secrets.ref` и `config.set` не оставляют значения в журнале, его описании словами, `onJournal`, `onLog`, файлах воркспейса и `state`).
@@ -31,7 +31,7 @@ origin: derived
 
 - Positive: секреты работают без плагинов; утечка источника ограничена его схемой и масками `secrets.ref`; выключение источника не лишает секретов остальных.
 - Negative: каждый вызов секрета из источника - запрос к нему; кэш потребитель ведёт сам.
-- Risks: на Linux без keyring хранилище недоступно; источник со своим токеном зависит от хранилища ядра.
+- Risks: на Linux без keyring (или с `basic_text`) хранилище недоступно, человеку названа причина; источник со своим токеном зависит от хранилища ядра.
 
 ## Alternatives Considered
 
