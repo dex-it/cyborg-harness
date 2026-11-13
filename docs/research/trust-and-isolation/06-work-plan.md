@@ -51,6 +51,35 @@
 
 **Влияние на публичный API: итог.** Рекомендованные задачи не меняют форму `ctx`, `ctx.os`, манифеста и контрактов. Кандидатов `rc.N` может быть два, оба условные: новые виды записей журнала (TR-06, TR-11, TR-21) и поле уровня изоляции в публичном описании состояния (TR-24). Окно согласия и установка (TR-23) - отдельное решение владельца. Менять `ctx.os.paths.home` не предлагаем: домашний каталог и так известен коду Node.
 
+## Статус реализации
+
+Состояние на 2026-11-13. Стек PR идёт снизу вверх: этап А ([#250](https://github.com/dex-it/cyborg-harness/pull/250), задача [#246](https://github.com/dex-it/cyborg-harness/issues/246)), затем этап Б ([#247](https://github.com/dex-it/cyborg-harness/issues/247)), этап В1 ([#248](https://github.com/dex-it/cyborg-harness/issues/248)) и этап В2 ([#249](https://github.com/dex-it/cyborg-harness/issues/249)); слияние снизу вверх. Строки других этапов дополняют их исполнители.
+
+| Задача | PR | Что сделано | Не сделано, замечания |
+|---|---|---|---|
+| TR-01 | [#250](https://github.com/dex-it/cyborg-harness/pull/250) | Проба `--trust-probe` в playground и тест `playground/test/real/trust-real-host.test.ts` (`npm run test:trust`) на настоящем `utilityProcess`: нарушитель в хосте стороннего плагина читает окружение и файл ядра, запускает процесс, открывает TCP, слушает сырой `parentPort`, пишет от имени соседа; ожидания по строкам таблицы 2.8; шаг CI на macOS и Linux | Открытые дыры записаны «ожидаемо открыто» со ссылкой на TR-21 (файлы, процесс, `parentPort`, `process.permission`) и TR-22 (сеть). Замечание к таблице 2.8: `init` плагин сырым слушателем не прочтёт, потому что код плагина грузится после `init`; утечка манифестов в `init` ловится записью канала в `core/test/host-minimum.test.ts` |
+| TR-02 | [#250](https://github.com/dex-it/cyborg-harness/pull/250) | `utilityHosts` запускает хост с `env` из `HOST_ENV_KEYS` (`PATH`); строка «видит токен главного процесса» в пробе перевёрнута в «закрыто»; перечень описан в `electron/README.md` | Проверка Wayland и перечня на настоящем Linux-рабочем столе - вручную ([linux-trust-check.md](../../05-verification/linux-trust-check.md)); перечень расширять по доказательству |
+| TR-03 | [#250](https://github.com/dex-it/cyborg-harness/pull/250) | `contracts` уходит только в хосты с потребителем (`requires`, `optional`, `consumes`), `init` - манифесты своего хоста и связанных по графу, привязки только своих плагинов; тесты с записью канала (`core/test/host-minimum.test.ts`), `disable`, `enable`, перезапуск хоста; строка «данные контракта чужого поставщика» в пробе перевёрнута | `consumes` граф не привязывает, манифест поставщика такой хост не получает; `system` и `paths.home` всем хостам (строки 3 и 4 таблицы 2.4) не тронуты; сырой `parentPort` своего хоста слушать по-прежнему можно (TR-21) |
+| TR-04 | [#250](https://github.com/dex-it/cyborg-harness/pull/250) | Linux с backend `basic_text`: хранилище секретов недоступно, `Unavailable` с причиной словами, строка в журнале строк при запуске; `SecretStore.unavailableReason` (необязательный член типа для приложения); ADR-CH-0014, п. 1 | Ручная проверка на Linux с keyring и `--password-store=basic` не выполнена, процедура и таблица результата - [linux-trust-check.md](../../05-verification/linux-trust-check.md); ответ `isAsyncEncryptionAvailable()` при `basic_text` по-прежнему не проверен |
+| TR-05 | [#250](https://github.com/dex-it/cyborg-harness/pull/250) | `cyborg.json`, `state`, «Недавние» - `0600`, `state` и `diagnostics` - `0700` независимо от umask, прежние открытые права сужаются; тесты с umask 022 и 000 | Права `plugin-data`, `plugin-temp` и `userData` целиком не менялись |
+| TR-06 | [#250](https://github.com/dex-it/cyborg-harness/pull/250) | Загрузчик зовёт `checkPlugin` для плагина вне поставки перед первой активацией; найденное - предупреждение в журнале строк плагина (без нового вида `JournalEntry`, API не менялся); плагин не блокируется | Динамику (`globalThis.process`) проверка не видит: это дисциплина, не защита (У-04 до этапа 2) |
+| TR-07 | не в этом PR | - | Ждёт решения владельца по `RunAsNode` (вопрос 2) |
+| TR-10 - TR-14 | этап Б, PR см. [#247](https://github.com/dex-it/cyborg-harness/issues/247) | - | - |
+| TR-20, TR-21, TR-22a, TR-22b, TR-23, TR-24, TR-25, TR-31 | этап В1 и В2, PR см. [#248](https://github.com/dex-it/cyborg-harness/issues/248) и [#249](https://github.com/dex-it/cyborg-harness/issues/249) | - | - |
+
+### Решения этапа А
+
+Принято по поручению владельца 2026-11-13 (рекомендации [раздела 7.1](07-open-questions.md#71-вопросы-владельцу) и «Предложение» исследования):
+
+| Вопрос | Решение | Где записано |
+|---|---|---|
+| 1. Принять ли этап А без повода для этапа 2 | Да, этап А принят и реализован ([#250](https://github.com/dex-it/cyborg-harness/pull/250)) | эта таблица, [ADR-CH-0003](../../04-architecture/adr/ADR-CH-0003-trust-and-isolation.md), «Расхождения» |
+| Перечень переменных окружения хоста (TR-02) | Только `PATH`; расширять по доказательству | [`electron/README.md`](../../../electron/README.md), «Окружение хоста плагинов» |
+| Состав `init` и `contracts` (TR-03) | `init` - свой хост плюс связанные по графу (`requires`, `optional`), `contracts` - в хосты с потребителем | [SAD 3.5](../../04-architecture/design/sad.md#35-изоляция-сбоев-хосты-и-сторож), [FR-CH-3025](../../03-requirements/03-security-trust/srs.md) |
+| Что считать недоступным хранилищем на Linux (TR-04) | Только `basic_text`; причина - в отказе и строкой журнала при запуске | [ADR-CH-0014](../../04-architecture/adr/ADR-CH-0014-secrets.md), п. 1 |
+| Форма записи TR-06 | Предупреждение в журнале строк плагина, нового вида `JournalEntry` нет, `rc.N` не нужен | [ADR-CH-0003](../../04-architecture/adr/ADR-CH-0003-trust-and-isolation.md), «Расхождения» |
+| Какие файлы закрывать (TR-05) | Файлы данных приложения в `userData`; файл воркспейса в месте, выбранном человеком, не трогать | [FR-CH-3026](../../03-requirements/03-security-trust/srs.md) |
+
 ## 6.3. Связь с открытыми задачами и угрозами
 
 | Что | Связь | Что делает этот план |
