@@ -32,7 +32,7 @@ origin: derived
 | ST-1002/6 | `core/test/graph.test.ts`, `core/test/loader.test.ts` |
 | ST-1002/7 | `core/test/graph.test.ts`, `core/test/loader.test.ts` |
 | ST-1003/1 | `core/test/loader.test.ts` |
-| ST-1003/2 | `core/test/hosts.test.ts`, `core/test/loader.test.ts`, `electron/test/plugins.test.ts`; часть - окно: хост в `utilityProcess`: `playground/scripts/smoke.mjs` |
+| ST-1003/2 | `core/test/hosts.test.ts`, `core/test/loader.test.ts`, `electron/test/plugins.test.ts`, `playground/test/real/trust-real-host.test.ts`; часть - окно: хост в `utilityProcess`: `playground/scripts/smoke.mjs`; сторонний плагин в своём процессе на настоящих хостах: `npm run test:trust` (`playground/test/real/trust-real-host.test.ts`, шаг CI «доверие») |
 | ST-1003/3 | `core/test/hosts.test.ts`, `core/test/pty.test.ts`; часть - замер: срок обнаружения зависания при значениях по умолчанию: `npm run spike:hosts`, [spike-hosts.md](spike-hosts.md) |
 | ST-1003/4 | `core/test/hosts.test.ts`, `core/test/stress-lifecycle.test.ts` |
 | ST-1003/5 | `core/test/hosts.test.ts` |
