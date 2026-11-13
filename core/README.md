@@ -97,6 +97,10 @@ forkHosts({ entry: require.resolve('@cyborg-harness/core/host-entry') });
 
 Хосты в `utilityProcess` не используют `forkHosts`: приложение запускает свой файл, а он вызывает `runHost` из `@cyborg-harness/core/host` (пример - `electron/src/host-entry.ts`).
 
+### Хост стороннего плагина: запреты, ограничитель, уровень изоляции (TR-21, TR-22, TR-24)
+
+`SpawnHost` получает вторым аргументом `HostRequest` (плагины хоста, их каталоги, `thirdParty`), и приложение выбирает способ запуска по происхождению. `forkHosts` принимает `execPath`, `execArgv`, `env`, `cwd`, `serialization: 'json'` (канал с кодеком типов поверх `structuredClone`: Map, Set, Date, BigInt, байты, Error), `wrap` (обёртка команды ограничителем ОС) и `isolation` - заявление `HostIsolation` об уровне 0-3 и причине. Если в заявлении есть `canary`, ядро до первой активации просит хост доказать запреты (`sandbox.canary`: чтение вне каталога, процесс, поток, аддон, сокет) и при провале не активирует плагин, а пишет `sandbox-ineffective`; доказанный уровень пишется записью `isolation` и виден в `PluginStatus.isolation`. Пример на Electron - `electron/README.md`, решение - [ADR-CH-0019](../docs/04-architecture/adr/ADR-CH-0019-third-party-host-isolation.md).
+
 ## Сборка и проверка
 
 ```sh

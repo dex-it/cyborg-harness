@@ -19,3 +19,4 @@
 | [ADR-CH-0016](ADR-CH-0016-command-callers.md) | права вызывающего у команд | accepted |
 | [ADR-CH-0017](ADR-CH-0017-plugin-provenance.md) | происхождение плагинов: подпись, доверие, откат | proposed |
 | [ADR-CH-0018](ADR-CH-0018-node-host-fuses-agent-config.md) | процесс Node для сторонних плагинов, фьюзы сборки, защищённая конфигурация агента (этап В1) | accepted |
+| [ADR-CH-0019](ADR-CH-0019-third-party-host-isolation.md) | изоляция процесса стороннего плагина: запреты Node, canary, ограничитель ОС (Seatbelt, Landlock и seccomp), уровень изоляции (этап В2) | accepted |

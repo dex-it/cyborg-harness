@@ -11,6 +11,7 @@
 | Импорт | Что даёт | Где работает |
 |---|---|---|
 | `@cyborg-harness/electron` | служба плагинов (`PluginsService`, `startPlugins`, `discoverPlugins`), хосты (`utilityHosts`), среда ОС (`electronOs`), хранение диагностики в `userData` (`fileDiagnostics`, `StartOptions.diagnostics`; K-30), схема видов (`registerViewScheme`, `serveViews`, `resolveViewRequest`, `guardNavigation`), каналы (`registerWindowChannels`, `registerViewChannels`, `windowChannel`, `viewChannel`), окно и приложение (`windowEvents`, `bindWindow`, `bindAppMenu`, `appMenuTemplate`, `watchPower`, `watchTheme`, `singleInstance`, `workspaceInstance` (экземпляр на воркспейс, K-20), `isolateSession`, `quitAfterPlugins`, `showWindow`), перезапуски и «новое окно» (`restarts`, `workspaceInfo`, `newWindowArgs`, `DEFAULT_RESTART_FLAGS`), ключ и каталог экземпляра (`instanceKey`, `NO_WORKSPACE_KEY`, `sessionDataDir`), проверка соседних окон для `uninstall` (`workspaceNeighbors`, `StartOptions.neighbors`, `PluginsService.working`; #154) | главный процесс Electron |
+| `@cyborg-harness/electron/isolation` | способ запуска хоста по происхождению плагина и ограничители ОС без импорта Electron (`pluginHosts`, `nodeIsolation`, `utilityIsolation`, `landlockConfiner`, `seatbeltConfiner`, `ConfinerLauncher`): тесты и проверки гоняют те же запуски в обычном Node | главный процесс и обычный Node |
 | `@cyborg-harness/electron/host-entry` | точка входа файла для `utilityProcess`: `process.parentPort` -> `runHost` ядра; имён не экспортирует | процесс хоста (`utilityProcess`) |
 | `@cyborg-harness/electron/preload` | мосты: `windowApi()` (окно просит у главного процесса), `exposeViewBridge()` (`window.cyborgView` во фрейме вида), `inViewFrame`, `inWindowDocument` | preload (песочница) |
 | `@cyborg-harness/electron/window` | общее главного процесса и окна: снимок `PluginsSnapshot` и строки `PluginRow`, `WindowLayerView` (слой окна: диалоги видов и замки), протокол видов (`VIEW_SCHEME`, `viewOrigin`, `groupOfOrigin`, `PATH_MIME`) | окно (браузер), без `node:*` и Electron |
@@ -56,7 +57,32 @@ Peer-зависимости: `@cyborg-harness/core`, `@cyborg-harness/contracts`
 
 Перечень переменных хоста - `HOST_ENV_KEYS` в `electron/src/host-env.ts`, сегодня одна: `PATH`. Список минимальный и расширяется по доказательству (хост без переменной не стартует или плагин не находит программу), а не «на всякий случай»; проверяется на macOS и Linux дымовым тестом и пробой `npm run test:trust` (`playground/test/real/trust-real-host.test.ts`). Для самих программ плагина окружение по-прежнему собирает шлюз (`BASE_ENV` и имена из правила `process`, FR-CH-3003). Хост pty (`utilityPtyHost`) код плагинов не исполняет и окружение наследует.
 
-Это ограничивает случайную утечку, а не злой умысел: код плагина в хосте по-прежнему читает файлы и открывает сеть мимо шлюза до этапа 2 (изоляция процесса, [ADR-CH-0003](../docs/04-architecture/adr/ADR-CH-0003-trust-and-isolation.md), «Расхождения»).
+Это ограничивает случайную утечку, а не злой умысел: код плагина в `utilityProcess` по-прежнему читает файлы и открывает сеть мимо шлюза. Закрывает это изоляция процесса стороннего плагина ниже ([ADR-CH-0019](../docs/04-architecture/adr/ADR-CH-0019-third-party-host-isolation.md)).
+
+## Изоляция процесса стороннего плагина: `isolatedHosts`
+
+TR-21, TR-22, TR-24 ([FR-CH-3032..3034](../docs/03-requirements/03-security-trust/srs.md)). Ядро говорит запуску, кто будет жить в хосте и откуда он (`HostRequest`), а адаптер выбирает способ: плагины поставки - общий `utilityProcess` (уровень изоляции 1), сторонний - свой процесс Node под `--permission` с пустым окружением и чтением только каталога плагина и кода хоста, под ограничителем ОС, если он есть.
+
+```ts
+import { isolatedHosts } from '@cyborg-harness/electron';
+
+const hosts = isolatedHosts(hostEntryForUtilityProcess, {
+  // отдельный Node из поставки приложения (`RunAsNode` выключен, ADR-CH-0018) и бандл host-entry ядра для него (в нём читается только его каталог)
+  node: { binary: nodeBinaryPath, entry: nodeHostBundle },
+  // 'node' (по умолчанию, если задан node) или 'utility': возврат одной настройкой
+  thirdPartyHost: 'node',
+  // 'auto': Seatbelt на macOS, cyborg-confine на Linux; 'off'; или свой ConfinerLauncher
+  confiner: 'auto',
+  confinerBinary: cyborgConfinePath, // только Linux (npm run build:confiner)
+});
+await service.start({ /* … */ spawnHost: hosts.spawn, pidOf: hosts.pidOf });
+```
+
+- **Что задаёт приложение:** бинарник Node (отдельный, подписанный вместе с приложением; около 120 МБ), `host-entry` ядра одним бандлом в своём каталоге (playground: `dist/node-host/host.mjs`), запускатель `cyborg-confine` для Linux. Без `node` сторонний плагин остаётся в `utilityProcess` на уровне 1, и причина названа в окне.
+- **Что делает адаптер:** `--permission`, `--allow-fs-read` на каталог кода хоста и каталог плагина (каталог со `*` в имени хост не получает), `env: {}`, рабочий каталог - каталог плагина, канал `json` с кодеком типов (`core/src/wire-codec.ts`), обёртка команды ограничителем (`ConfinerLauncher`).
+- **Ограничитель ОС:** macOS - `sandbox-exec` с профилем (`seatbeltProfile`); Linux - `cyborg-confine` (`electron/native/cyborg-confine.c`, сборка `npm run build:confiner`, один файл C без зависимостей: `no_new_privs`, Landlock по ABI ядра, seccomp). Ядро Linux без Landlock - уровень 2, сеть закрыта seccomp, файлы держат запреты Node. Свой ограничитель - реализация `ConfinerLauncher` (`@cyborg-harness/electron/isolation`).
+- **Проверка:** перед первой активацией хост доказывает запреты сам (ядро, `sandbox.canary`); не доказал - плагин не запущен, запись `sandbox-ineffective`. Уровень 0-3 и причина - `PluginRow.isolation`, запись `isolation` журнала.
+- В playground: `--node-host=<Node>`, `--third-party-host=utility|node`, `--confiner=auto|off`, `--confiner-bin=<cyborg-confine>`; проверка на настоящем Electron - `npm run test:trust`, замеры шлюза на этом хосте - `npm run spike:gateway -- --node-host=<Node>`.
 
 ## Происхождение пакетов: `StartOptions.trust`
 
@@ -240,6 +266,7 @@ cp node_modules/@cyborg-harness/electron/dist/shell/shell.{js,js.map,css} dist/s
 
 ## Проверки
 
+- `npm run build:confiner` - запускатель Linux `electron/native/build/linux-<arch>/cyborg-confine` (на других ОС пропуск); без него тесты Linux-ограничителя (`electron/test/confine-linux.test.ts`) пропускаются с причиной.
 - `npm run build:electron` - сборка `electron/dist` (`electron/scripts/build.mjs`: tsc 7 по `electron/tsconfig.build.json`, объявления переписываются с `.ts` на `.js`, оболочка вида собирается esbuild). Идёт перед `build`, `typecheck`, `lint` и `test`.
 - `npm test` - тесты пакета в `electron/test`: состав входов, граница, каналы, пример из этого файла, файлы видов, навигация, терминалы видов, перетаскивание, служба плагинов.
 - Состав архива: `cd electron && npm pack --dry-run`.
