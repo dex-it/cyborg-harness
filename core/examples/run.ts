@@ -159,6 +159,8 @@ function journalLine(e: JournalEntry): string {
       return `${yellow('◌')} ${id} сторонний: код не из поставки, не проверен`;
     case 'integrity-failed':
       return `${e.mode === 'enforce' ? red('✖') : yellow('◌')} ${id} происхождение пакета не подтверждено (${e.code}): ${e.reason}${e.mode === 'enforce' ? '; не запущен' : ''}`;
+    case 'delivery-failed':
+      return `${e.mode === 'enforce' ? red('✖') : yellow('⚠')} поставка не прошла проверку: ${e.reasons.join('; ')}`;
     case 'host-own-grouped':
       return `${yellow('◌')} ${id} просит свой хост, но группа ${e.group} сажает его к ${e.neighbours.join(', ')}`;
   }

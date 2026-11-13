@@ -78,6 +78,12 @@ export type JournalEntry =
    * `warn` - запущен как раньше и человек предупреждён. `code` - причина для машины, `reason` - слова человека (так её видит окно «Плагины Cyborg»); `keyId` - ключ из подписи, если он был прочитан.
    */
   | { readonly pluginId: string; readonly kind: 'integrity-failed'; readonly code: IntegrityCode; readonly reason: string; readonly mode: 'warn' | 'enforce'; readonly keyId?: string }
+  /**
+   * Поставка приложения не прошла сверку при старте (TR-12, ADR-CH-0017): `delivery.json` не подписан ключом выпуска или подпись не сходится, файл плагина изменён, лишний или пропал.
+   * `reasons` - слова человека, по строке на расхождение. `mode: 'enforce'` - плагины поставки, чьи файлы не сошлись, не запускаются (по отдельной записи `integrity-failed` на плагин);
+   * `warn` - запускаются как раньше. Запись пишет приложение до загрузки ядра, а не сам загрузчик: каталог поставки ему не известен.
+   */
+  | { readonly pluginId?: undefined; readonly kind: 'delivery-failed'; readonly reasons: readonly string[]; readonly mode: 'warn' | 'enforce' }
   /** Промис плагина отклонён без обработчика; хост держится, плагину страйк. */
   | { readonly pluginId: string; readonly kind: 'unhandled-rejection'; readonly error: string }
   /** Плагин поставки просит свой хост (`"host": "own"`), а группа plugins.hosts сажает его к соседям: действует группа. */

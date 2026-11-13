@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import { deliveryEntries, type DeliveryManifest } from './delivery.ts';
+import { deliveryEntries, type DeliveryManifest, type DeliverySignature } from './delivery.ts';
 import { INTEGRITY_FILE, describeDiff, diffHashes, keyIdOf, readPackageTree, verifyIntegrity, type IntegrityCode, type PackageTree } from './integrity.ts';
 import { compareVersions, parseVersion } from './semver.ts';
 import type { TrustStore } from './trust-store.ts';
@@ -30,9 +30,6 @@ export type ProvenanceVerdict =
 export interface Provenance {
   check(manifest: { readonly id: string; readonly version: string }): Promise<ProvenanceVerdict>;
 }
-
-/** Итог проверки подписи `delivery.json` при старте (TR-12). */
-export type DeliverySignature = { readonly ok: true; readonly keyId: string; readonly notAfter: string } | { readonly ok: false; readonly code: IntegrityCode; readonly reason: string; readonly keyId?: string };
 
 export interface DeliveryState {
   readonly manifest: DeliveryManifest | undefined;

@@ -77,7 +77,6 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'DiagnosticsFs',
       'DiagnosticsInfo',
       'DiagnosticsOptions',
-      'DeliverySignature',
       'DeliveryState',
       'DisableOptions',
       'DisablePreview',
@@ -188,7 +187,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
     values: ['INTEGRITY_FILE', 'INTEGRITY_FORMAT', 'canonicalBytes', 'checkPublicKey', 'describeDiff', 'diffHashes', 'generateSigningKey', 'hashFiles', 'keyIdOf', 'parseIntegrity', 'publicKeyOf', 'readPackageTree', 'renderIntegrity', 'sha256Hex', 'signBytes', 'signIntegrity', 'signRevocations', 'verifyBytes', 'verifyIntegrity', 'verifyRevocations'],
     types: ['HashDiff', 'IntegrityCode', 'IntegrityManifest', 'IntegrityVerdict', 'PackageBytes', 'PackageTree', 'RevocationInput', 'RevocationList', 'SignInput', 'SigningKey', 'VerifyPolicy'],
   },
-  './delivery': { source: 'src/index-delivery.ts', values: ['DELIVERY_FILE', 'readDelivery', 'verifyDelivery', 'writeDelivery'], types: ['DeliveryManifest'] },
+  './delivery': { source: 'src/index-delivery.ts', values: ['DELIVERY_FILE', 'readDelivery', 'verifyDelivery', 'verifyDeliverySignature', 'writeDelivery'], types: ['DeliveryManifest', 'DeliverySignature', 'DeliverySignatureRecord', 'WriteDeliveryOptions'] },
   './window': { source: 'src/index-window.ts', values: ['WINDOW_OWNER'], types: ['Area', 'DisablePreview', 'DocumentRow', 'LayoutEntry', 'ShownDialog', 'ShownModal', 'WindowLock', 'WindowSnapshot', 'WindowTitle'] },
   './elements': { source: 'elements/elements.ts', values: ['defineElements'], types: [] },
 };

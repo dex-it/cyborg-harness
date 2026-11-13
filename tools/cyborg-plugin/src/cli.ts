@@ -1,6 +1,8 @@
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { checkPlugin, formatProblem, type CheckOptions } from '@cyborg-harness/core/plugin-check';
 import { buildPlugin } from './build.ts';
+import { publicKeyOf } from '@cyborg-harness/core/integrity';
 import { buildDelivery } from './delivery.ts';
 import { packPlugin } from './pack.ts';
 import { DEFAULT_DAYS, keygen, signPlugin, verifyPlugin, writeRevocations } from './sign.ts';
@@ -15,7 +17,7 @@ const USAGE = [
   'Использование:',
   '  cyborg-plugin check [каталог] [--source] [--out <каталог>] [--api-version <x.y.z>] [--declarations <файл>]... [--declarations-package <имя>]...',
   '  cyborg-plugin build [каталог] [--out <каталог>] [--api-version <x.y.z>] [--declarations <файл>]... [--declarations-package <имя>]...',
-  '  cyborg-plugin delivery <каталог плагина>... --out <каталог> [--api-version <x.y.z>] [--declarations <файл>]... [--declarations-package <имя>]...',
+  '  cyborg-plugin delivery <каталог плагина>... --out <каталог> [--api-version <x.y.z>] [--declarations <файл>]... [--declarations-package <имя>]... [--sign-key <файл закрытого ключа выпуска> [--days <N> | --expires <дата>]]',
   '  cyborg-plugin pack [каталог] [--out <файл>] [--api-version <x.y.z>] [--dry-run]',
   '  cyborg-plugin keygen --out <префикс>',
   '  cyborg-plugin sign [каталог] --key <файл закрытого ключа> [--days <N> | --expires <дата>]',
@@ -43,7 +45,7 @@ type Command = 'check' | 'build' | 'delivery' | 'pack' | 'keygen' | 'sign' | 've
 const VALUES: Readonly<Record<Command, readonly string[]>> = {
   check: ['--out', '--api-version', '--declarations', '--declarations-package'],
   build: ['--out', '--api-version', '--declarations', '--declarations-package'],
-  delivery: ['--out', '--api-version', '--declarations', '--declarations-package'],
+  delivery: ['--out', '--api-version', '--declarations', '--declarations-package', '--sign-key', '--days', '--expires'],
   pack: ['--out', '--api-version'],
   keygen: ['--out'],
   sign: ['--key', '--days', '--expires'],
@@ -142,7 +144,40 @@ async function runDelivery(parsed: Parsed, io: CliIo): Promise<number> {
     for (const line of USAGE) io.err(line);
     return 2;
   }
-  const report = await buildDelivery(parsed.dirs, { ...checkOptions(parsed), out });
+  const signKey = parsed.values.get('--sign-key')?.[0];
+  const days = parsed.values.get('--days')?.[0];
+  const expires = parsed.values.get('--expires')?.[0];
+  if (signKey === undefined && (days !== undefined || expires !== undefined)) {
+    io.err('cyborg-plugin: delivery: --days и --expires задают срок подписи, а подписи без --sign-key нет');
+    return 2;
+  }
+  if ((days !== undefined && expires !== undefined) || (days !== undefined && !/^[1-9]\d{0,4}$/.test(days))) {
+    io.err('cyborg-plugin: delivery: срок подписи - либо --days <целое>, либо --expires <дата>');
+    return 2;
+  }
+  let sign: { secretKey: string; notAfter: Date } | undefined;
+  if (signKey !== undefined) {
+    let secretKey: string;
+    try {
+      secretKey = (await fs.readFile(signKey, 'utf8')).trim();
+    } catch (error) {
+      io.err(`cyborg-plugin: delivery: закрытый ключ ${signKey} не прочитан: ${error instanceof Error ? error.message : String(error)}`);
+      return 1;
+    }
+    try {
+      publicKeyOf(secretKey);
+    } catch (error) {
+      io.err(`cyborg-plugin: delivery: ${signKey} - не закрытый ключ: ${error instanceof Error ? error.message : String(error)}`);
+      return 1;
+    }
+    const notAfter = expires === undefined ? new Date(Date.now() + Number(days ?? DEFAULT_DAYS) * 86_400_000) : parseExpires(expires);
+    if (Number.isNaN(notAfter.getTime()) || notAfter.getTime() <= Date.now()) {
+      io.err('cyborg-plugin: delivery: срок подписи - дата в будущем');
+      return 2;
+    }
+    sign = { secretKey, notAfter };
+  }
+  const report = await buildDelivery(parsed.dirs, { ...checkOptions(parsed), out, ...(sign !== undefined && { sign }) });
   for (const warning of report.warnings) io.err(`предупреждение: ${warning}`);
   for (const problem of report.problems) io.err(formatProblem(problem));
   if (!report.ok) {
@@ -150,6 +185,7 @@ async function runDelivery(parsed: Parsed, io: CliIo): Promise<number> {
     return 1;
   }
   io.out(`Поставка: ${report.out} (плагинов: ${String(report.plugins.length)}) - ${report.plugins.join(', ')}`);
+  io.out(report.keyId === undefined ? 'delivery.json не подписан (нет --sign-key)' : `delivery.json подписан ключом выпуска ${report.keyId}`);
   return 0;
 }
 

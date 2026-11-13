@@ -129,7 +129,7 @@ test('ST-3009/5: поставка по умолчанию в режиме «пр
   const row = tampered.snapshot().plugins.find((r) => r.id === 'files');
   assert.equal(row?.state, 'active', 'warn не останавливает');
   assert.equal(row.origin, 'bundled');
-  const line = tampered.snapshot().journal.find((j) => j.text.includes('режим «предупреждать»'));
+  const line = tampered.snapshot().journal.find((j) => j.plugins.includes('files') && j.text.includes('режим «предупреждать»'));
   assert.equal(line?.level, 'warn');
   assert.match(line.text, /файл изменён после выпуска поставки: index\.mjs/);
 });
@@ -155,4 +155,56 @@ test('ST-3009/3: startPlugins без trust не проверяет ничего 
   t.after(() => kernel.unload());
   assert.deepEqual(kernel.active, ['notes']);
   assert.equal(kernel.journal.some((e) => e.kind === 'integrity-failed'), false);
+});
+
+test('ST-3009/6: подписанная поставка ключом выпуска чиста; неподписанная, подписанная чужим ключом и правленная - запись delivery-failed в журнале окна, предупреждение и problems', async (t) => {
+  const release = generateSigningKey();
+  const { userData, builtinDir } = setup(['files']);
+  const home = plugin(builtinDir, 'files');
+  await writeDelivery(builtinDir, { sign: { secretKey: release.secretKey, notAfter: new Date(NOW + DAY) } });
+  const trust = { releaseKeys: [release.publicKey], now: () => NOW };
+  const clean = await start({ userData, builtinDir, trust });
+  assert.deepEqual(clean.snapshot().journal.filter((j) => j.text.includes('поставка')), []);
+  assert.deepEqual(clean.snapshot().journal.filter((j) => j.text.includes('происхождение')), []);
+  assert.equal(clean.snapshot().plugins.find((r) => r.id === 'files')?.state, 'active');
+  await clean.unload();
+
+  await writeDelivery(builtinDir);
+  const unsigned = await start({ userData, builtinDir, trust });
+  t.after(() => unsigned.unload());
+  const snap = unsigned.snapshot();
+  const delivery = snap.journal.find((j) => j.subject === 'поставка');
+  assert.equal(delivery?.level, 'warn');
+  assert.match(delivery.text, /режим «предупреждать»: плагины запущены.*delivery\.json не подписан ключом выпуска/);
+  assert.ok(snap.problems.some((p) => p.startsWith('подпись поставки: ')));
+  assert.equal(snap.plugins.find((r) => r.id === 'files')?.state, 'active', 'warn не останавливает');
+  assert.ok(snap.journal.some((j) => j.plugins.includes('files') && j.text.includes('delivery.json не подписан')), 'и запись плагина');
+
+  await writeDelivery(builtinDir, { sign: { secretKey: generateSigningKey().secretKey, notAfter: new Date(NOW + DAY) } });
+  const foreign = await start({ userData, builtinDir, trust });
+  t.after(() => foreign.unload());
+  assert.match(foreign.snapshot().journal.find((j) => j.subject === 'поставка')?.text ?? '', /которого нет среди ключей выпуска приложения/);
+
+  await writeDelivery(builtinDir, { sign: { secretKey: release.secretKey, notAfter: new Date(NOW + DAY) } });
+  fs.appendFileSync(path.join(home, 'index.mjs'), '// подмена');
+  const strict = await start({ userData, builtinDir, trust: { ...trust, modes: { bundled: 'enforce' } } });
+  t.after(() => strict.unload());
+  const row = strict.snapshot().plugins.find((r) => r.id === 'files');
+  assert.equal(row?.state, 'stopped');
+  assert.match(row.reason ?? '', /файл изменён после выпуска поставки: index\.mjs/);
+  const line = strict.snapshot().journal.find((j) => j.subject === 'поставка');
+  assert.deepEqual([line?.level, line?.plugins], ['error', []]);
+  assert.match(line?.text ?? '', /режим «отказывать»/);
+});
+
+test('ST-3009/6: без trust расхождение поставки тоже пишется в журнал (режим «предупреждать»), плагины не проверяются', async (t) => {
+  const { userData, builtinDir } = setup(['files']);
+  const home = plugin(builtinDir, 'files');
+  await writeDelivery(builtinDir);
+  fs.appendFileSync(path.join(home, 'index.mjs'), '// подмена');
+  const service = await start({ userData, builtinDir });
+  t.after(() => service.unload());
+  const snap = service.snapshot();
+  assert.match(snap.journal.find((j) => j.subject === 'поставка')?.text ?? '', /файл|контрольная сумма/);
+  assert.equal(snap.plugins.find((r) => r.id === 'files')?.state, 'active');
 });

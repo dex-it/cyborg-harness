@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { DELIVERY_FILE, readDelivery, verifyDelivery, writeDelivery } from '../src/delivery.ts';
+import { DELIVERY_FILE, readDelivery, verifyDelivery, verifyDeliverySignature, writeDelivery } from '../src/delivery.ts';
+import { generateSigningKey } from '../src/integrity.ts';
 
 // P-07: контрольные суммы поставки. Формат - delivery.json в каталоге поставки: плагин -> файл (путь через /) -> sha256.
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'cyborg-delivery-'));
@@ -131,5 +132,50 @@ describe('поставка: проверка', () => {
     const manifest = await writeDelivery(root);
     fs.rmSync(root, { recursive: true });
     assert.deepEqual((await verifyDelivery(root, manifest)).sort(), ['alpha: каталога плагина нет в поставке', 'beta: каталога плагина нет в поставке']);
+  });
+});
+
+describe('ST-3009/6: подпись delivery.json (TR-12)', () => {
+  const NOW = Date.parse('2026-11-13T12:00:00Z');
+  const future = new Date(NOW + 86_400_000);
+
+  it('подписанный список читается обратно, проходит verifyDelivery с ключами выпуска; подпись не мешает старому разбору хешей', async () => {
+    const root = catalog();
+    const key = generateSigningKey();
+    const written = await writeDelivery(root, { sign: { secretKey: key.secretKey, notAfter: future } });
+    assert.equal(written.signature?.keyId, key.keyId);
+    assert.equal(written.signature.notAfter, future.toISOString());
+    const read = await readDelivery(root);
+    assert.deepEqual(read, written);
+    assert.deepEqual(await verifyDelivery(root, read, { releaseKeys: [key.publicKey], now: NOW }), []);
+    assert.deepEqual(verifyDeliverySignature(written, [key.publicKey], NOW), { ok: true, keyId: key.keyId, notAfter: future.toISOString() });
+    const plain = await writeDelivery(root);
+    assert.deepEqual(plain.plugins, written.plugins, 'хеши те же, подпись - надстройка');
+    assert.equal('signature' in plain, false);
+  });
+
+  it('verifyDelivery отказывает: нет подписи, правленный список, чужой ключ, истёкший срок, подмена хеша; без ключей подпись не проверяется', async () => {
+    const root = catalog();
+    const key = generateSigningKey();
+    const signed = await writeDelivery(root, { sign: { secretKey: key.secretKey, notAfter: future } });
+    const reason = async (manifest: Parameters<typeof verifyDelivery>[1], keys: string[] = [key.publicKey], now = NOW) => (await verifyDelivery(root, manifest, { releaseKeys: keys, now }))[0] ?? 'чисто';
+    assert.match(await reason({ format: 1, plugins: signed.plugins }), /не подписан ключом выпуска/);
+    assert.match(await reason(signed, [generateSigningKey().publicKey]), /ключом .* которого нет среди ключей выпуска/);
+    assert.match(await reason(signed, [], NOW), /которого нет среди ключей выпуска/);
+    assert.match(await reason(signed, [key.publicKey], future.getTime() + 1), /срок подписи delivery\.json истёк/);
+    const forged = { ...signed, plugins: { ...signed.plugins, alpha: { ...signed.plugins.alpha, 'index.mjs': 'f'.repeat(64) } } };
+    const problems = await verifyDelivery(root, forged, { releaseKeys: [key.publicKey], now: NOW });
+    assert.match(problems[0] ?? '', /подпись delivery\.json не сходится/);
+    assert.ok(problems.some((p) => p.includes('alpha/index.mjs: контрольная сумма не совпала')), 'и сверка файлов идёт дальше');
+    assert.match(await reason({ ...signed, signature: { ...signed.signature!, notAfter: '2099-01-01T00:00:00.000Z' } }), /подпись delivery\.json не сходится/);
+    assert.deepEqual(await verifyDelivery(root, { format: 1, plugins: signed.plugins }), [], 'без releaseKeys подпись не требуется');
+    assert.equal(verifyDeliverySignature({ ...signed, signature: { keyId: key.keyId, notAfter: 'не дата', value: 'x' } }, [key.publicKey], NOW).ok, false);
+    await assert.rejects(writeDelivery(root, { sign: { secretKey: key.secretKey, notAfter: new Date('nope') } }), /ожидалась дата/);
+  });
+
+  it('readDelivery: поле signature неверной формы - отказ с причиной', async () => {
+    const root = tmp();
+    fs.writeFileSync(path.join(root, DELIVERY_FILE), JSON.stringify({ format: 1, plugins: {}, signature: { keyId: 1 } }));
+    await assert.rejects(readDelivery(root), /signature - ожидались keyId, notAfter и value/);
   });
 });

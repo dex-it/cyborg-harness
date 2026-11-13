@@ -39,7 +39,7 @@ import {
   MENU_OWNER,
   WINDOW_OWNER,
 } from '@cyborg-harness/core';
-import { readDelivery, verifyDelivery } from '@cyborg-harness/core/delivery';
+import { readDelivery, verifyDelivery, verifyDeliverySignature } from '@cyborg-harness/core/delivery';
 import { errorMessage, isRecord } from './guards.ts';
 import type { DiagnosticsExport, DiagnosticsStatus, FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginOrigin, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from './snapshot.ts';
 import { violationDetail } from './shell/csp-note.ts';
@@ -152,14 +152,20 @@ export function readSchemaFile(home: string | undefined, file: string): unknown 
   return JSON.parse(fs.readFileSync(real, 'utf8'));
 }
 
-/** Сверка каталога поставки с `delivery.json`: строки о расхождениях; этап 1 только сообщает, подпись и отказ - этап 2. */
-async function checkDelivery(dir: string): Promise<string[]> {
+/**
+ * Сверка каталога поставки с `delivery.json` при старте: строки о расхождениях (в `problems` и в журнал) и состояние для проверки перед запуском плагина.
+ * Подпись списка проверяется, если приложение дало ключи выпуска (TR-12); без ключей список читается как раньше.
+ */
+async function checkDelivery(dir: string, releaseKeys: readonly string[], now: number): Promise<{ readonly problems: string[]; readonly state: DeliveryState }> {
   try {
     const list = await readDelivery(dir);
-    if (list === undefined) return [`в каталоге поставки ${dir} нет delivery.json: контрольные суммы не проверены`];
-    return (await verifyDelivery(dir, list)).map((p) => `контрольная сумма поставки: ${p}`);
+    if (list === undefined) return { problems: [`в каталоге поставки ${dir} нет delivery.json: контрольные суммы не проверены`], state: { manifest: undefined } };
+    const problems = (await verifyDelivery(dir, list)).map((p) => `контрольная сумма поставки: ${p}`);
+    const signature = releaseKeys.length > 0 ? verifyDeliverySignature(list, releaseKeys, now) : undefined;
+    if (signature !== undefined && !signature.ok) problems.unshift(`подпись поставки: ${signature.reason}`);
+    return { problems, state: { manifest: list, ...(signature !== undefined && { signature }) } };
   } catch (error) {
-    return [`контрольные суммы поставки ${dir}: ${errorMessage(error)}`];
+    return { problems: [`контрольные суммы поставки ${dir}: ${errorMessage(error)}`], state: { manifest: undefined } };
   }
 }
 
@@ -255,7 +261,7 @@ export interface StartOptions {
 const tracesArgs = (options: Pick<StartOptions, 'traceArgs' | 'diagnostics' | 'onTrace'>): boolean => options.traceArgs === true && (options.diagnostics !== undefined || options.onTrace !== undefined);
 
 /** Хранилище доверия, список отзыва и проверка пакетов (TR-11). Всё, что не удалось, - в `report` словами; проверка тогда отказывает сама (хранилище закрыто на запись). */
-async function openProvenance(options: StartOptions, found: Discovered, delivery: boolean, report: (problem: string) => void): Promise<Provenance> {
+async function openProvenance(options: StartOptions, found: Discovered, delivery: boolean, state: DeliveryState | undefined, report: (problem: string) => void): Promise<Provenance> {
   const trust = options.trust ?? {};
   const store = await TrustStore.open(trust.file ?? path.join(options.userData, TRUST_FILE));
   if (store.error !== undefined) report(`${store.error}: проверка пакетов отказывает, пока файл не исправлен`);
@@ -272,7 +278,6 @@ async function openProvenance(options: StartOptions, found: Discovered, delivery
   if (store.revocationsStale(now())) report(`список отзыва устарел (срок вышел ${store.revocationState()?.notAfter ?? ''}): отозванное остаётся отозванным, получите свежий список`);
   const modes = { bundled: trust.modes?.bundled ?? 'warn', user: trust.modes?.user ?? 'enforce' };
   const bundled = new Set([...found.origins].filter(([, dir]) => dir === options.builtinDir).map(([id]) => id));
-  const state: DeliveryState | undefined = delivery && countDirs(options.builtinDir) > 0 ? await deliveryState(options.builtinDir) : undefined;
   return createProvenance({
     trust: store,
     releaseKeys,
@@ -284,16 +289,6 @@ async function openProvenance(options: StartOptions, found: Discovered, delivery
     delivery: state,
     now,
   });
-}
-
-/** `delivery.json` каталога поставки, как его читает проверка перед запуском. */
-async function deliveryState(dir: string): Promise<DeliveryState> {
-  try {
-    return { manifest: await readDelivery(dir) };
-  } catch {
-    // Нечитаемый файл сообщает checkDelivery; проверка плагина откажет с «нет delivery.json».
-    return { manifest: undefined };
-  }
 }
 
 export async function startPlugins(options: StartOptions): Promise<Kernel & { readonly workspace: string }> {
@@ -316,9 +311,21 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     if (skipped > 0) options.log(`[plugins] каталог плагинов пользователя ${userDir} не читается (плагинов в нём: ${String(skipped)}); сторонний код загружается только запуском с ${USER_PLUGINS_FLAG}`);
   }
   for (const p of found.problems) report(p);
-  if (delivery && countDirs(options.builtinDir) > 0) for (const p of await checkDelivery(options.builtinDir)) report(p);
+  const journal = (entry: JournalEntry) => {
+    options.log(`[plugins] ${JSON.stringify(entry)}`);
+    options.diagnostics?.sinks.onJournal(entry);
+    options.onJournal?.(entry);
+  };
+  let deliveryState: DeliveryState | undefined;
+  if (delivery && countDirs(options.builtinDir) > 0) {
+    const checked = await checkDelivery(options.builtinDir, options.trust?.releaseKeys ?? [], (options.trust?.now ?? Date.now)());
+    deliveryState = checked.state;
+    for (const p of checked.problems) report(p);
+    // Расхождение поставки - в журнал (TR-12): окно показывает его словами; отказ запуска плагинов включает режим `enforce` у поставки.
+    if (checked.problems.length > 0) journal({ kind: 'delivery-failed', reasons: checked.problems, mode: options.trust?.modes?.bundled === 'enforce' ? 'enforce' : 'warn' });
+  }
   options.onDiscovered?.(found);
-  if (options.trust !== undefined) provenance = await openProvenance(options, found, delivery, report);
+  if (options.trust !== undefined) provenance = await openProvenance(options, found, delivery, deliveryState, report);
 
   const kernel = await load({
     apiVersion: PLUGIN_API_VERSION,
@@ -343,11 +350,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     config: ws.config,
     state: ws.state,
     schema: (m, file) => readSchemaFile(found.homes.get(m.id), file),
-    onJournal: (entry) => {
-      options.log(`[plugins] ${JSON.stringify(entry)}`);
-      options.diagnostics?.sinks.onJournal(entry);
-      options.onJournal?.(entry);
-    },
+    onJournal: journal,
     watchdog: options.watchdog,
     os: options.os,
     platform: options.platform,
@@ -849,7 +852,7 @@ export class PluginsService implements ViewGroups {
     }));
     const journal: PluginJournalLine[] = this.entries.map(({ at, entry }) => ({
       at,
-      subject: entry.pluginId ?? (entry.kind === 'key-ignored' ? 'сочетания' : entry.kind === 'trace-args' ? 'трасса' : `хост ${entry.hostId}`),
+      subject: entry.pluginId ?? (entry.kind === 'key-ignored' ? 'сочетания' : entry.kind === 'trace-args' ? 'трасса' : entry.kind === 'delivery-failed' ? 'поставка' : `хост ${entry.hostId}`),
       // Задетые потребители тоже: в журнале плагина видно, что его поставщик пропадал.
       plugins: [...new Set([...entryPlugins(entry), ...('affects' in entry ? entry.affects : [])])],
       text: describeEntry(entry),

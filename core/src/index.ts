@@ -50,7 +50,7 @@ export type { CommandHandler, PluginContext, PluginModule, PluginSection } from 
 export type { KeptPty, PtyBackend, PtyProcess, PtyWire, TerminalChannel, TerminalView } from './pty.ts';
 export type { SpawnPtyHost } from './pty-link.ts';
 export type { ContractImpl, ContractRegistry, Provider } from './registry.ts';
-export type { DeliverySignature, DeliveryState, Provenance, ProvenanceOptions, ProvenanceVerdict, TrustMode, VerifiedPackage } from './provenance.ts';
+export type { DeliveryState, Provenance, ProvenanceOptions, ProvenanceVerdict, TrustMode, VerifiedPackage } from './provenance.ts';
 export type { PluginState, PluginStatus } from './status.ts';
 export type { Publisher, RevocationState, Revoked } from './trust-store.ts';
 export type { Boundary, ExitRecord, OperationRecord, StreamRecord, TraceRecord } from './trace-record.ts';

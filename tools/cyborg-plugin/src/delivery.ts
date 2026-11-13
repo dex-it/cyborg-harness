@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { DELIVERY_FILE, writeDelivery } from '@cyborg-harness/core/delivery';
+import { keyIdOf, publicKeyOf } from '@cyborg-harness/core/integrity';
 import type { Problem } from '@cyborg-harness/core/plugin-check';
 import { buildPlugin, type BuildOptions } from './build.ts';
 import { BUILD_MARKER, exists } from './fsx.ts';
@@ -11,6 +12,8 @@ import { BUILD_MARKER, exists } from './fsx.ts';
 export interface DeliveryOptions extends Omit<BuildOptions, 'out' | 'main'> {
   /** Каталог поставки: нет такого пути, пустой или результат прежней сборки поставки (в нём `delivery.json`). */
   readonly out: string;
+  /** Подписать `delivery.json` ключом выпуска (TR-12, ADR-CH-0017): закрытый ключ `ed25519-secret:…` и срок подписи. Без него список не подписан, как раньше. */
+  readonly sign?: { readonly secretKey: string; readonly notAfter: Date };
 }
 
 export interface DeliveryReport {
@@ -22,6 +25,8 @@ export interface DeliveryReport {
   /** Нарушения; у нарушений плагина в `file` стоит `<id или каталог>: <файл>`. */
   readonly problems: readonly Problem[];
   readonly warnings: readonly string[];
+  /** Идентификатор ключа, которым подписан `delivery.json`; нет, если список не подписан. */
+  readonly keyId?: string;
 }
 
 const errorCode = (error: unknown): unknown => (error instanceof Error && 'code' in error ? error.code : undefined);
@@ -76,13 +81,13 @@ export async function buildDelivery(dirs: readonly string[], options: DeliveryOp
     if (problems.length > 0) return fail(problems, warnings);
     // Метка сборки нужна только следующей сборке плагина в этом же `out`; в поставке её нет и хеши её не считают.
     for (const id of ids) await fs.rm(path.join(staging, id, BUILD_MARKER), { force: true });
-    await writeDelivery(staging);
+    await writeDelivery(staging, options.sign === undefined ? {} : { sign: options.sign });
     // Между проверкой и заменой `out` мог появиться чужой файл: проверка повторяется непосредственно перед заменой.
     const late = await outRefusal(out);
     if (late !== undefined) return fail([{ file: '.', message: late }], warnings);
     if (await exists(out)) await fs.rm(out, { recursive: true });
     await fs.rename(staging, out);
-    return { ok: true, out, plugins: ids.sort(), problems: [], warnings };
+    return { ok: true, out, plugins: ids.sort(), problems: [], warnings, ...(options.sign !== undefined && { keyId: keyIdOf(publicKeyOf(options.sign.secretKey)) }) };
   } finally {
     await fs.rm(staging, { recursive: true, force: true });
   }

@@ -6,6 +6,7 @@ import { after, describe, it } from 'node:test';
 import { forkHosts, load, PLUGIN_API_VERSION } from '@cyborg-harness/core';
 import { readDelivery, verifyDelivery, DELIVERY_FILE } from '@cyborg-harness/core/delivery';
 import { formatProblem } from '@cyborg-harness/core/plugin-check';
+import { generateSigningKey } from '@cyborg-harness/core/integrity';
 import { buildDelivery } from '../src/delivery.ts';
 import { runCli } from '../src/cli.ts';
 import { cleanup, fresh, plugin, write } from './fixture.ts';
@@ -133,5 +134,46 @@ describe('cyborg-plugin delivery (командная строка)', () => {
     const r = await cli('delivery', bad, '--out', fresh('delivery'));
     assert.equal(r.code, 1);
     assert.ok(r.err.some((l) => l.includes('node:fs')));
+  });
+});
+
+describe('ST-3009/6: подпись поставки (TR-12)', () => {
+  it('buildDelivery с ключом выпуска подписывает delivery.json; verifyDelivery с открытым ключом чисто, без подписи и с чужим ключом - отказ', async () => {
+    const key = generateSigningKey();
+    const out = fresh('delivery');
+    const report = await buildDelivery([plugin(), second()], { out, sign: { secretKey: key.secretKey, notAfter: new Date(Date.now() + 86_400_000) } });
+    assert.deepEqual(problems(report), []);
+    assert.equal(report.keyId, key.keyId);
+    const list = await readDelivery(out);
+    assert.equal(list?.signature?.keyId, key.keyId);
+    assert.deepEqual(await verifyDelivery(out, list, { releaseKeys: [key.publicKey] }), []);
+    assert.match((await verifyDelivery(out, list, { releaseKeys: [generateSigningKey().publicKey] }))[0] ?? '', /которого нет среди ключей выпуска/);
+    const plain = fresh('delivery');
+    assert.equal((await buildDelivery([plugin()], { out: plain })).keyId, undefined);
+    assert.match((await verifyDelivery(plain, (await readDelivery(plain)) ?? { format: 1, plugins: {} }, { releaseKeys: [key.publicKey] }))[0] ?? '', /не подписан ключом выпуска/);
+  });
+
+  it('cyborg-plugin delivery --sign-key: подпись и срок; --days без ключа, плохой ключ и срок в прошлом - отказ', async () => {
+    const prefix = fresh('rel');
+    const lines: string[] = [];
+    const run = async (...argv: string[]) => {
+      lines.length = 0;
+      const code = await runCli(argv, { out: (l) => lines.push(l), err: (l) => lines.push(l) });
+      return { code, text: lines.join('\n') };
+    };
+    assert.equal((await run('keygen', '--out', prefix)).code, 0);
+    const out = fresh('delivery');
+    const signed = await run('delivery', plugin(), '--out', out, '--sign-key', `${prefix}.key`, '--days', '30');
+    assert.equal(signed.code, 0, signed.text);
+    assert.match(signed.text, /delivery\.json подписан ключом выпуска [0-9a-f]{32}/);
+    const list = await readDelivery(out);
+    assert.ok(Date.parse(list?.signature?.notAfter ?? '') > Date.now() + 29 * 86_400_000);
+    const unsigned = await run('delivery', plugin(), '--out', fresh('delivery'));
+    assert.match(unsigned.text, /delivery\.json не подписан \(нет --sign-key\)/);
+    assert.equal((await run('delivery', plugin(), '--out', fresh('delivery'), '--days', '5')).code, 2);
+    assert.equal((await run('delivery', plugin(), '--out', fresh('delivery'), '--sign-key', `${prefix}.key`, '--days', '5', '--expires', '2099-01-01')).code, 2);
+    assert.equal((await run('delivery', plugin(), '--out', fresh('delivery'), '--sign-key', `${prefix}.key`, '--expires', '2001-01-01')).code, 2);
+    assert.equal((await run('delivery', plugin(), '--out', fresh('delivery'), '--sign-key', `${prefix}.pub`)).code, 1, 'открытый ключ вместо закрытого');
+    assert.equal((await run('delivery', plugin(), '--out', fresh('delivery'), '--sign-key', `${prefix}.нет`)).code, 1);
   });
 });
