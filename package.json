@@ -29,6 +29,7 @@
     "test:trust": "npm run build && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-force-exit --test-timeout=180000 playground/test/real/trust-real-host.test.ts",
     "demo": "node core/examples/run.ts",
     "smoke": "npm run build && node playground/scripts/smoke.mjs",
+    "test:views": "npm run build && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-force-exit --test-timeout=240000 playground/test/real/views-real-frames.test.ts",
     "pack:delivery": "npm run build && node playground/scripts/pack-delivery.mjs",
     "spike": "npm run build && node playground/scripts/spike-iframe.mjs",
     "spike:hosts": "npm run build && node playground/scripts/spike-hosts.mjs",

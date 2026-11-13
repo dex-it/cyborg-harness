@@ -9,7 +9,7 @@ origin: derived
 
 Собрана из историй, имён тестов и исключений [acceptance.md](acceptance.md) командой `npm run check:acceptance -- --write`; руками не правится.
 
-Итог: критериев 251; тестом 206, исключением 19, целевое поведение 26.
+Итог: критериев 253; тестом 208, исключением 19, целевое поведение 26.
 
 | Критерий | Чем проверяется |
 |---|---|
@@ -158,6 +158,8 @@ origin: derived
 | ST-3005/5 | `core/test/semver-manifest.test.ts`, `electron/test/plugins.test.ts`, `electron/test/view-files.test.ts` |
 | ST-3005/6 | `electron/test/navigation.test.ts` |
 | ST-3005/7 | целевое поведение |
+| ST-3005/8 | `playground/test/real/views-real-frames.test.ts`; часть - окно: настоящий Electron: `npm run test:views` (`playground/test/real/views-real-frames.test.ts`), шаг CI «виды на настоящем Electron»; на подставных кадрах привязку держит `electron/test/view-frames.test.ts` |
+| ST-3005/9 | `playground/test/real/views-real-frames.test.ts`; часть - окно: настоящий Electron: `npm run test:views`, шаг CI «виды на настоящем Electron» |
 | ST-3006/1 | `playground/test/agents.test.ts` |
 | ST-3006/2 | `playground/test/agents.test.ts` |
 | ST-3006/3 | `playground/test/agents.test.ts` |

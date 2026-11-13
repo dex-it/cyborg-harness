@@ -430,18 +430,19 @@ async function main() {
   assert.match(aliceFrame.url, /^cyborg-plugin:\/\/duo\/alice\/\?view=main$/, 'адрес вида не несёт плагина в пути');
   assert.ok(aliceFrame.pid && aliceFrame.pid === bobFrame.pid, `виды одной группы в разных процессах рендера: ${String(aliceFrame.pid)} и ${String(bobFrame.pid)}`);
   assert.ok(echoFrame.pid !== aliceFrame.pid && builtFrame.pid !== aliceFrame.pid && echoFrame.pid !== builtFrame.pid, 'виды разных групп делят процесс рендера');
-  // Адрес кадра можно сменить без загрузки (history.pushState): плагин вне группы кадра мост не признаёт, сосед по группе - признаёт (граница доверия - группа).
+  // Адрес кадра можно сменить без загрузки (history.pushState), но плагин кадра привязан к нему при создании документа (TR-31, frameTreeNodeId): личность не меняется, кадр остаётся alice.
   const asAt = (path, command) =>
     inView('alice', `(async () => { history.pushState({}, '', ${JSON.stringify(path)}); try { return await window.cyborgView.run(${JSON.stringify(command)}); } finally { history.replaceState({}, '', '/alice/?view=main'); } })()`);
-  assert.deepEqual(await asAt('/echo/', 'echo.ping'), { error: 'не вид плагина' }, 'вид группы вызвал команду плагина вне группы подменой адреса');
-  assert.deepEqual(await asAt('/built-dep/', 'echo.ping'), { error: 'не вид плагина' }, 'вид группы назвался сторонним плагином');
-  assert.equal((await asAt('/bob/', 'alice.hello'))?.error, 'alice.hello: не команда плагина bob', 'вид alice, назвавшийся bob, прошёл как alice');
+  assert.equal((await asAt('/echo/', 'echo.ping'))?.error, 'echo.ping: не команда плагина alice', 'вид группы вызвал команду плагина вне группы подменой адреса');
+  assert.equal((await asAt('/built-dep/', 'echo.ping'))?.error, 'echo.ping: не команда плагина alice', 'вид группы назвался сторонним плагином');
+  assert.equal((await asAt('/bob/', 'bob.hello'))?.error, 'bob.hello: не команда плагина alice', 'вид alice, назвавшийся bob, прошёл как bob');
+  assert.equal((await asAt('/bob/', 'alice.hello'))?.error, undefined, 'вид alice, назвавшийся bob, потерял свою команду');
   assert.equal(await inView('alice', 'location.pathname'), '/alice/', 'адрес кадра не вернулся');
   assert.match(await text('#plugins-list [data-plugin="built-dep"] .plugin-group-note'), /сторонний плагин не делит группу рендера: группа duo не действует, работает в своей built-dep/, 'нет предупреждения о группе у built-dep');
   assert.equal(await text('#plugins-list [data-plugin="alice"] .plugin-group'), 'группа duo');
   assert.equal(await ev(`document.querySelector('#plugins-list [data-plugin="echo"] .plugin-group') === null`), true, 'у плагина в своей группе метка группы');
   assert.ok(lines().some((l) => l.includes('"pluginId":"built-dep","kind":"group-isolated","group":"duo","renderGroup":"built-dep"')), 'нет записи group-isolated у built-dep');
-  log('группы рендера: alice и bob в одном процессе рендера, echo и built-dep в своих; подмена адреса вне группы отклонена; предупреждение у стороннего');
+  log('группы рендера: alice и bob в одном процессе рендера, echo и built-dep в своих; подмена адреса личность кадра не меняет (привязка к кадру при создании документа); предупреждение у стороннего');
 
   // K-05: закрытая CSP вида и флаг ui.inlineStyles. echo, alice и bob флага не объявили, sessions и editor объявили (xterm и Monaco).
   const viewCspHeader = (id) => inView(id, 'fetch(location.href).then((r) => r.headers.get("content-security-policy"))');
