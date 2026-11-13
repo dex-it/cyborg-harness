@@ -132,7 +132,7 @@ origin: derived
 | ST-3001/9 | `core/test/plugin-imports.test.ts`, `core/test/third-party-check.test.ts`, `core/test/trust.test.ts`, `core/test/workspace-trust.test.ts` |
 | ST-3001/10 | целевое поведение |
 | ST-3001/11 | `core/test/host-minimum.test.ts`, `electron/test/host-env.test.ts` |
-| ST-3001/12 | `core/test/agent-config.test.ts` |
+| ST-3001/12 | `core/test/protected-files.test.ts`, `electron/test/agent-files.test.ts` |
 | ST-3002/1 | `core/test/os.test.ts` |
 | ST-3002/2 | `core/test/os-lifetime.test.ts`, `core/test/os.test.ts`, `core/test/security-gateway.test.ts` |
 | ST-3002/3 | `core/test/os.test.ts`, `core/test/workspace-trust.test.ts` |

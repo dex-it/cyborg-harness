@@ -42,7 +42,7 @@ export type { WireKind } from './wire.ts';
 export type { Guard, GuardRight, MemberGuards } from './via-contract.ts';
 export type { Lookup } from './net-transport.ts';
 export type { NoticeEvents, NoticeHandle, NotifyLimits, ShowNotice } from './notices.ts';
-export type { GrantStore, OsEnvironment, SecretStore } from './os-gateway.ts';
+export type { GrantStore, OsEnvironment, ProtectedFileRule, SecretStore } from './os-gateway.ts';
 export type { PluginPermissions } from './permissions.ts';
 export type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';
 export type { KeptPty, PtyBackend, PtyProcess, PtyWire, TerminalChannel, TerminalView } from './pty.ts';

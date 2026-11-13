@@ -129,6 +129,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'Placement',
       'PreviousFailure',
       'Provider',
+      'ProtectedFileRule',
       'PtyBackend',
       'PtyProcess',
       'PtyWire',

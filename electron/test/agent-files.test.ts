@@ -4,11 +4,10 @@ import { mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PluginContext } from '@cyborg-harness/contracts';
-import { load } from '../src/loader.ts';
-import { inlineHosts } from '../src/transports.ts';
-import { PLUGIN_API_VERSION } from '../src/api-version.ts';
+import { inlineHosts, load, PLUGIN_API_VERSION } from '@cyborg-harness/core';
+import { AGENT_FILES } from '../src/agent-files.ts';
 
-// TR-25 (У-46, вопрос 15 SRS, вариант (а)): конфигурация агента закрыта для плагинов как защищённый путь.
+// TR-25 (У-46, вопрос 15 SRS, вариант (а), FR-CH-3027): конфигурация агента закрыта для плагинов как защищённый путь; перечень - AGENT_FILES адаптера, механизм - ядро (core/test/protected-files.test.ts).
 // Запись закрыта везде; чтение закрыто там, где в файле бывают ключи и переменные окружения; тексты инструкций (CLAUDE.md) читать можно.
 
 const manifest = (id: string, permissions?: unknown) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...(permissions !== undefined && { permissions }) });
@@ -27,7 +26,7 @@ async function box() {
       manifest('writer', { 'fs.read': [dirs.work, dirs.home], 'fs.write': [dirs.work, dirs.home] }),
       manifest('reader', { 'fs.read': [dirs.work] }),
     ],
-    os: { dataDir: dirs.data, tempDir: dirs.temp, home: dirs.home },
+    os: { dataDir: dirs.data, tempDir: dirs.temp, home: dirs.home, protectedFiles: AGENT_FILES },
   });
   const denied = () => k.journal.filter((e) => e.kind === 'denied').map((e) => `${e.pluginId}:${e.method}`);
   return { k, root, ...dirs, fs: (id: string) => contexts.get(id)!.os.fs, denied, [Symbol.asyncDispose]: () => rm(root, { recursive: true, force: true }) };
@@ -81,7 +80,7 @@ test('ST-3001/12: существующий файл настроек не пер
   await fs.writeText(worktree, 'ok');
   assert.equal(await fs.readText(worktree), 'ok');
   await fs.writeText(path.join(b.work, 'settings.json'), '{}');
-  await fs.writeText(path.join(b.work, 'CLAUDE.md.txt'), 'не настройки: имя другое');
+  await fs.writeText(path.join(b.work, 'CLAUDE-notes.txt'), 'не настройки: имя другое');
   await fs.writeText(path.join(b.home, '.claude', 'projects.txt'), 'ok');
   assert.equal(await readFile(path.join(b.home, '.claude', 'projects.txt'), 'utf8'), 'ok');
 });
