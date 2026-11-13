@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
-import { CoreError, forkHosts, load, parseManifest, PLUGIN_API_VERSION, SectionStore, type ContractGraph, type JournalEntry, type LayerStore, type Rejection } from '../src/index.ts';
+import { CoreError, describeIsolation, forkHosts, load, parseManifest, PLUGIN_API_VERSION, SectionStore, type ContractGraph, type JournalEntry, type LayerStore, type Rejection } from '../src/index.ts';
 import { scenarios, type Documents, type Scenario } from './scenarios.ts';
 
 // Сценарии идут через публичный вход ядра (их же гоняет consumer.test.ts на пакете), поэтому мелкие помощники свои.
@@ -157,6 +157,10 @@ function journalLine(e: JournalEntry): string {
       return `${yellow('◌')} ${id} сторонний: группа рендера ${e.group} не действует, своя ${e.renderGroup}`;
     case 'third-party':
       return `${yellow('◌')} ${id} сторонний: код не из поставки, не проверен`;
+    case 'isolation':
+      return `${dim('·')} ${id} ${describeIsolation(e)}`;
+    case 'sandbox-ineffective':
+      return `${red('✖')} ${id} хост не доказал заявленную изоляцию (уровень ${String(e.level)}): ${e.reasons.join('; ')}; не запущен`;
     case 'integrity-failed':
       return `${e.mode === 'enforce' ? red('✖') : yellow('◌')} ${id} происхождение пакета не подтверждено (${e.code}): ${e.reason}${e.mode === 'enforce' ? '; не запущен' : ''}`;
     case 'delivery-failed':

@@ -4,6 +4,7 @@ import type { DocumentRow } from './documents.ts';
 import type { ContractGraph, Rejection } from './graph.ts';
 import type { SystemEvent } from './host-runtime.ts';
 import type { IntegrityCode } from './integrity.ts';
+import type { IsolationLevel } from './isolation.ts';
 import type { LayoutEntry } from './layout.ts';
 import type { MenuEntry } from './menu-entry.ts';
 import type { ResourceLimits } from './limits.ts';
@@ -75,6 +76,10 @@ export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'third-party' }
   /** Происхождение пакета не подтверждено (TR-11, ADR-CH-0017): подпись, хеши, версия, отзыв. `enforce` - плагин не запущен, `warn` - запущен; `reason` - слова для окна «Плагины Cyborg», `keyId` - ключ подписи. */
   | { readonly pluginId: string; readonly kind: 'integrity-failed'; readonly code: IntegrityCode; readonly reason: string; readonly mode: 'warn' | 'enforce'; readonly keyId?: string }
+  /** Уровень изоляции процесса плагина 0-3 и причина словами (TR-24, ADR-CH-0019): пишется, когда хост прошёл проверку запретов (или не обязан); запуск без заявления записи не оставляет. `open` - сеть мимо `ctx.os.net` не закрыта (FR-CH-3021). */
+  | { readonly pluginId: string; readonly kind: 'isolation'; readonly hostId: string; readonly level: IsolationLevel; readonly reason: string; readonly network: 'open' | 'closed' }
+  /** Хост не доказал заявленные запреты (TR-21, canary): `--permission` не действует или сокет открылся при ограничителе ОС. Плагин не активирован, хост остановлен; `level` заявленный, `reasons` - что не подтвердилось. */
+  | { readonly pluginId: string; readonly kind: 'sandbox-ineffective'; readonly hostId: string; readonly level: IsolationLevel; readonly reasons: readonly string[] }
   /** Поставка не прошла сверку при старте (TR-12): `delivery.json` без подписи ключа выпуска или файл не сошёлся. Запись пишет приложение до загрузки ядра; запуск плагинов решает `mode` через `integrity-failed`. */
   | { readonly pluginId?: undefined; readonly kind: 'delivery-failed'; readonly reasons: readonly string[]; readonly mode: 'warn' | 'enforce' }
   /** Промис плагина отклонён без обработчика; хост держится, плагину страйк. */

@@ -36,10 +36,35 @@ function formatOf(rel: string, files: ReadonlyMap<string, Uint8Array>): Format {
   return 'commonjs';
 }
 
+/** Каталог проверенного плагина, под которым лежит адрес, и путь от каталога через `/`; адрес вне проверенных - undefined. */
+function locate(url: string): { readonly files: ReadonlyMap<string, Uint8Array>; readonly rel: string } | undefined {
+  for (const { base, files } of installed.values()) {
+    if (!url.startsWith(base)) continue;
+    return { files, rel: decodeURIComponent(new URL(url).pathname.slice(new URL(base).pathname.length)) };
+  }
+  return undefined;
+}
+
 function hook(): void {
   if (hooked) return;
   hooked = true;
   registerHooks({
+    // TR-21 (ADR-CH-0019, п. 5): процесс под `--permission` читать каталог плагина не может, а обычный разбор адреса его открывает (`stat`). Адрес под проверенным каталогом
+    // разбирается по набору проверенных файлов; чего в наборе нет, того нет (`ERR_MODULE_NOT_FOUND`), на диск разбор не идёт. Остальное (`node:*`, пакеты) - обычным путём.
+    resolve(specifier, context, nextResolve) {
+      const relative = specifier.startsWith('./') || specifier.startsWith('../') || specifier.startsWith('/') || specifier.startsWith('file:');
+      if (!relative) return nextResolve(specifier, context);
+      let url: string;
+      try {
+        url = new URL(specifier, context.parentURL).href;
+      } catch {
+        return nextResolve(specifier, context);
+      }
+      const found = locate(url);
+      if (found === undefined) return nextResolve(specifier, context);
+      if (!found.files.has(found.rel)) throw Object.assign(new Error(`${found.rel}: файла нет среди проверенных, загрузка отклонена`), { code: 'ERR_MODULE_NOT_FOUND' });
+      return { url, format: formatOf(found.rel, found.files), shortCircuit: true };
+    },
     load(url, context, nextLoad) {
       for (const { base, files } of installed.values()) {
         if (!url.startsWith(base)) continue;

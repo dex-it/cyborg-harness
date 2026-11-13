@@ -4,6 +4,7 @@ import { resolveSection, VERSION_KEY, type SectionResult } from './config.ts';
 import { DisposableStore, toDisposable, type Disposable } from './disposable.ts';
 import { loadEntry } from './entry-load.ts';
 import type { VerifiedPackage } from './provenance.ts';
+import { runCanary } from './sandbox-canary.ts';
 import { installVerified, releaseVerified } from './verified-sources.ts';
 import { compileSchema } from './json-schema.ts';
 import type { AskDialog, ContractName, ContractType, DocumentChange, DocumentInfo, DocumentInit, HttpServer, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue, ServeRequest, ServeResponse, ViewChannel, ModalInit, WatchOptions } from '@cyborg-harness/contracts';
@@ -521,6 +522,8 @@ export function runHost(port: Port, importer: Importer, options: HostOptions = {
   endpoint.handle('view.message', (p: { pluginId: string; view: string; message: unknown }) => system.viewMessage(p));
 
   endpoint.handle('ping', () => running.answered());
+  // TR-21: проверка эффективности запретов изнутри, до первого плагина (ADR-CH-0019, п. 2).
+  endpoint.handle('sandbox.canary', () => runCanary());
 
   endpoint.handle('init', (p: { manifests: PluginManifest[]; bindings: [string, [string, string][]][] }) => {
     manifests = new Map(p.manifests.map((m) => [m.id, m]));
