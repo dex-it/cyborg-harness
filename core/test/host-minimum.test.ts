@@ -8,6 +8,12 @@ import type { Kernel } from '../src/kernel-types.ts';
 import type { PluginModule } from '../src/plugin.ts';
 import { inlineHosts, type SpawnHost } from '../src/transports.ts';
 
+declare module '@cyborg-harness/contracts' {
+  interface Contracts {
+    'test.vault': { 1: { readonly token: string; read(): Promise<string> } };
+  }
+}
+
 const TOKEN = 'vault-data-of-provider';
 const manifest = (id: string, fields: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...fields });
 const settle = () => new Promise((r) => setImmediate(r));
@@ -31,17 +37,23 @@ function recording(table: Record<string, PluginModule>) {
     const real = base(hostId);
     const log = sent.get(hostId) ?? [];
     sent.set(hostId, log);
-    killers.set(hostId, real.kill);
+    killers.set(hostId, () => {
+      real.kill();
+    });
     return {
       port: {
         post(message, transfer) {
           log.push(structuredClone(message) as Sent);
           real.port.post(message, transfer);
         },
-        onMessage: (listener) => void real.port.onMessage(listener),
+        onMessage(listener) {
+          real.port.onMessage(listener);
+        },
       },
       kill: () => real.kill(),
-      onExit: (listener) => void real.onExit(listener),
+      onExit(listener) {
+        real.onExit(listener);
+      },
     };
   };
   const received = (hostId: string, method: string): Sent[] => (sent.get(hostId) ?? []).filter((m) => m.m === method);
@@ -159,5 +171,38 @@ test('TR-03: поставщик выключен и включён снова - 
   await kernel.idle();
   assert.equal(await kernel.run('cons.read'), TOKEN);
   assert.deepEqual(rec.received('hx', 'contracts'), []);
+  await kernel.unload();
+});
+
+const initIds = (rec: ReturnType<typeof recording>, hostId: string): string[][] => rec.received(hostId, 'init').map((n) => (n.p?.manifests ?? []).map((m) => m.id).sort());
+
+test('TR-03: init хосту несёт манифесты плагинов хоста и тех, с кем у них привязки графа; чужих манифестов нет', async () => {
+  const { kernel, rec } = await start();
+  assert.deepEqual(initIds(rec, 'hx'), [['other']], 'плагин без привязок: только свой манифест');
+  assert.deepEqual(initIds(rec, 'hc'), [['cons', 'prov']], 'потребитель: свой манифест и поставщика');
+  assert.deepEqual(initIds(rec, 'ho'), [['opt', 'prov']]);
+  // consumes граф не привязывает (поставщиков много, они приходят описаниями в contracts), поэтому манифеста поставщика хост consumes-потребителя не получает.
+  assert.deepEqual(initIds(rec, 'ha'), [['all']]);
+  assert.deepEqual(initIds(rec, 'hp'), [['cons', 'opt', 'prov']], 'поставщик: свой манифест и тех, кто к нему привязан через requires и optional');
+  // Привязки - только плагинов этого хоста: зеркало контрактов спрашивает о них, чужих привязок хост не получает.
+  const bindings = (hostId: string) => rec.received(hostId, 'init').map((n) => (n.p?.bindings ?? []).map(([id]) => id));
+  assert.deepEqual(bindings('hc'), [['cons']]);
+  assert.deepEqual(bindings('hx'), [['other']]);
+  await kernel.unload();
+});
+
+test('TR-03: init после disable, enable и перезапуска хоста тот же, зеркало хоста работает', async () => {
+  const { kernel, rec } = await start();
+  await kernel.disable('cons');
+  await kernel.enable('cons');
+  rec.kill('hc');
+  await kernel.idle();
+  await settle();
+  await kernel.idle();
+  assert.equal(await kernel.run('cons.read'), TOKEN);
+  const inits = initIds(rec, 'hc');
+  assert.ok(inits.length >= 2, 'хост поднимался заново');
+  for (const ids of inits) assert.deepEqual(ids, ['cons', 'prov']);
+  assert.deepEqual(initIds(rec, 'hx'), [['other']]);
   await kernel.unload();
 });
