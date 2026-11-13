@@ -26,7 +26,7 @@ import {
   showWindow,
   TRACE_ARGS_FLAG,
   USER_PLUGINS_FLAG,
-  utilityHosts,
+  isolatedHosts,
   utilityPtyHost,
   watchPower,
   watchTheme,
@@ -40,7 +40,7 @@ import {
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
 import { createErrorReporter, type ErrorNotice } from './main-errors.ts';
 import { quietPipes } from './quiet-pipes.ts';
-import { trustFromArgv } from './trust-args.ts';
+import { isolationFromArgv, trustFromArgv } from './trust-args.ts';
 import { runSpike } from './spike.ts';
 import { runHostsSpike } from './spike-hosts.ts';
 import { runTrustProbe } from './trust-probe.ts';
@@ -228,15 +228,15 @@ quietPipes();
 
 const start = () => {
   if (gatewaySpikeOut !== undefined) {
-    void runGatewaySpike({ out: gatewaySpikeOut, hostEntry: path.join(__dirname, 'plugin-host.mjs'), benchDir: path.join(__dirname, 'bench'), trace: !process.argv.includes('--gateway-trace=off') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
+    void runGatewaySpike({ out: gatewaySpikeOut, hostEntry: path.join(__dirname, 'plugin-host.mjs'), benchDir: path.join(__dirname, 'bench'), trace: !process.argv.includes('--gateway-trace=off'), ...(process.argv.some((a) => a.startsWith('--node-host=')) && { isolation: isolationFromArgv(process.argv, path.join(__dirname, 'node-host', 'host.mjs')) }) }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
     return;
   }
   if (trustProbeOut !== undefined) {
-    void runTrustProbe({ out: trustProbeOut, hostEntry: path.join(__dirname, 'plugin-host.mjs'), probeDir: path.join(__dirname, 'trust-probe') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
+    void runTrustProbe({ out: trustProbeOut, hostEntry: path.join(__dirname, 'plugin-host.mjs'), probeDir: path.join(__dirname, 'trust-probe'), isolation: isolationFromArgv(process.argv, path.join(__dirname, 'node-host', 'host.mjs')) }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
     return;
   }
   if (nodeHostSpikeOut !== undefined) {
-    void runNodeHostSpike({ out: nodeHostSpikeOut, utilityEntry: path.join(__dirname, 'plugin-host.mjs'), nodeEntry: path.join(__dirname, 'node-host.mjs'), benchDir: path.join(__dirname, 'bench'), ...(nodeHostBin !== undefined && { nodeBin: nodeHostBin }) }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
+    void runNodeHostSpike({ out: nodeHostSpikeOut, utilityEntry: path.join(__dirname, 'plugin-host.mjs'), nodeEntry: path.join(__dirname, 'node-host', 'host.mjs'), benchDir: path.join(__dirname, 'bench'), ...(nodeHostBin !== undefined && { nodeBin: nodeHostBin }) }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
     return;
   }
   if (hostsSpikeOut !== undefined) {
@@ -272,7 +272,7 @@ const start = () => {
     plugins.withoutWorkspace();
     return;
   }
-  const hosts = utilityHosts(path.join(__dirname, 'plugin-host.mjs'));
+  const hosts = isolatedHosts(path.join(__dirname, 'plugin-host.mjs'), isolationFromArgv(process.argv, path.join(__dirname, 'node-host', 'host.mjs')));
   // K-30: журнал, строки плагинов и трасса уходят в кольцо и в файлы `userData/diagnostics/<воркспейс>`; окно показывает причину сбоя прошлого запуска и выгружает диагностику.
   const version = `${APP_NAME} ${app.getVersion()}`;
   // eslint-disable-next-line no-console -- отказ диска виден в stderr приложения и в строке «Диагностика» окна

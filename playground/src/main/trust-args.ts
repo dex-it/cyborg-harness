@@ -1,4 +1,5 @@
 import type { TrustOptions } from '@cyborg-harness/electron';
+import type { IsolationSettings } from '@cyborg-harness/electron/isolation';
 
 // TR-11, TR-12 (ADR-CH-0017): проверка происхождения пакетов в стенде включается только командной строкой, как `--user-plugins`: файл воркспейса приходит из репозитория
 // команды и не может ни включить проверку, ни выключить её. Без флагов стенд ведёт себя как раньше (пакеты не проверяются).
@@ -32,4 +33,30 @@ export function trustFromArgv(argv: readonly string[]): TrustArgs {
     ...(user !== undefined && { user: user as 'off' | 'warn' | 'enforce' }),
   };
   return { trust: { releaseKeys, modes } };
+}
+
+// TR-21, TR-22 (ADR-CH-0019): способ запуска сторонних плагинов - тоже только командная строка (файл воркспейса не должен ни включить изоляцию, ни снять её).
+//   --node-host=<бинарник Node>       сторонние плагины - процесс Node под запретами (без флага - utilityProcess, уровень 1)
+//   --third-party-host=utility|node   возврат на utilityProcess одной настройкой, даже если задан --node-host
+//   --confiner=auto|off               ограничитель ОС (по умолчанию auto: Seatbelt на macOS, запускатель Linux)
+//   --confiner-bin=<cyborg-confine>   запускатель Linux (сборка: npm run build:confiner)
+export const NODE_HOST_FLAG = '--node-host=';
+export const THIRD_PARTY_HOST_FLAG = '--third-party-host=';
+export const CONFINER_FLAG = '--confiner=';
+export const CONFINER_BIN_FLAG = '--confiner-bin=';
+
+/** Настройки изоляции из командной строки; `entry` - бандл `host-entry` ядра рядом с приложением. Неверное значение флага - исключение: приложение не стартует вполсилы. */
+export function isolationFromArgv(argv: readonly string[], entry: string): IsolationSettings {
+  const node = valuesOf(argv, NODE_HOST_FLAG).at(-1);
+  const mode = valuesOf(argv, THIRD_PARTY_HOST_FLAG).at(-1);
+  const confiner = valuesOf(argv, CONFINER_FLAG).at(-1);
+  const bin = valuesOf(argv, CONFINER_BIN_FLAG).at(-1);
+  if (mode !== undefined && mode !== 'utility' && mode !== 'node') throw new Error(`${THIRD_PARTY_HOST_FLAG}${mode}: ожидается utility или node`);
+  if (confiner !== undefined && confiner !== 'auto' && confiner !== 'off') throw new Error(`${CONFINER_FLAG}${confiner}: ожидается auto или off`);
+  return {
+    ...(node !== undefined && { node: { binary: node, entry } }),
+    ...(mode !== undefined && { thirdPartyHost: mode }),
+    ...(confiner !== undefined && { confiner }),
+    ...(bin !== undefined && { confinerBinary: bin }),
+  };
 }
