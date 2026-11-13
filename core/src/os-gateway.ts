@@ -232,6 +232,29 @@ const inside = (dir: string, target: string) => target === dir || target.startsW
 /** Сосед `<файл>.<что угодно>` несёт содержимое защищённого файла: копия `.corrupt-<время>`, `.v1.bak`, временный файл атомарной записи. */
 const sibling = (file: string, target: string) => path.dirname(target) === path.dirname(file) && path.basename(target).startsWith(`${path.basename(file)}.`);
 
+/** Каталоги `.claude/`, куда агент подгружает инструкции и команды: файл там читается как указание агенту или запускается им. */
+const AGENT_DIRS = new Set(['hooks', 'commands', 'agents', 'skills', 'output-styles']);
+const AGENT_SETTINGS = /^settings(\.[^./]+)*\.json(\..*)?$/;
+
+/**
+ * Конфигурация агента (У-46, вопрос 15 SRS, вариант (а)): хук в настройках, правило `allow`, сервер MCP или строка в `CLAUDE.md` - это команда с правами пользователя мимо `process`.
+ * `config` - файлы с ключами и переменными окружения (`~/.claude.json`, `.mcp.json`, `settings*.json` в `.claude/`): закрыты и для чтения, и для записи.
+ * `text` - инструкции и команды агента (`CLAUDE.md`, `CLAUDE.local.md`, `.claude/{hooks,commands,agents,skills,output-styles}`): читать можно, писать нельзя.
+ * Имена сверяются без учёта регистра: на macOS `claude.md` и `CLAUDE.md` - один файл. Соседи `<файл>.*` (копии, `.bak`) закрыты вместе с файлом.
+ */
+function agentConfig(home: string, target: string): 'config' | 'text' | undefined {
+  const parts = target.split(path.sep).map((s) => s.toLowerCase());
+  const name = parts.at(-1) ?? '';
+  const dir = parts.at(-2);
+  if (name === '.mcp.json' || name.startsWith('.mcp.json.')) return 'config';
+  if ((name === '.claude.json' || name.startsWith('.claude.json.')) && path.dirname(target).toLowerCase() === home.toLowerCase()) return 'config';
+  if (dir === '.claude' && AGENT_SETTINGS.test(name)) return 'config';
+  if (name === 'claude.md' || name === 'claude.local.md') return 'text';
+  const at = parts.lastIndexOf('.claude');
+  if (at !== -1 && at < parts.length - 1 && AGENT_DIRS.has(parts[at + 1] ?? '')) return 'text';
+  return undefined;
+}
+
 /** Закрытые места внутри области чтения (`#zones`), настоящие пути. */
 interface Zones {
   readonly own: readonly string[];
@@ -239,9 +262,11 @@ interface Zones {
   readonly appDir?: string;
   readonly appRoots: readonly string[];
   readonly protectedPaths: readonly string[];
+  /** Настоящий домашний каталог: `~/.claude.json` - конфигурация агента только прямо в нём. */
+  readonly home: string;
 }
 
-const ZONE_TEXT = { plugin: 'каталог другого плагина', app: 'данные приложения', protected: 'защищённый путь' } as const;
+const ZONE_TEXT = { plugin: 'каталог другого плагина', app: 'данные приложения', protected: 'защищённый путь', agent: 'конфигурация агента' } as const;
 
 /** `own` - путь в своих каталогах плагина, открыт целиком; иначе к какому закрытому месту относится путь. Для записи предок защищённого пути закрыт тоже: удаление или перезапись каталога унесли бы и его. */
 function zoneOf(zones: Zones, target: string, write: boolean): 'own' | keyof typeof ZONE_TEXT | undefined {
@@ -249,6 +274,8 @@ function zoneOf(zones: Zones, target: string, write: boolean): 'own' | keyof typ
   if (zones.plugins.some((dir) => inside(dir, target))) return 'plugin';
   if (zones.appDir !== undefined && inside(zones.appDir, target) && !zones.appRoots.some((r) => inside(r, target))) return 'app';
   if (zones.protectedPaths.some((p) => inside(p, target) || (write && inside(target, p)) || sibling(p, target))) return 'protected';
+  const agent = agentConfig(zones.home, target);
+  if (agent === 'config' || (agent === 'text' && write)) return 'agent';
   return undefined;
 }
 
@@ -699,7 +726,7 @@ export class OsGateway {
     // Корни приложения нужны, только если путь и каталог приложения лежат один в другом: иначе вопрос не возникает.
     const appRoots = appDir !== undefined && (inside(appDir, target) || inside(target, appDir)) ? await Promise.all((this.#env.roots?.() ?? []).map(real)) : [];
     const protectedPaths = await Promise.all((this.#env.protectedPaths ?? []).map(real));
-    return { own: [ownData, ownTemp], plugins, ...(appDir !== undefined && { appDir }), appRoots, protectedPaths };
+    return { own: [ownData, ownTemp], plugins, ...(appDir !== undefined && { appDir }), appRoots, protectedPaths, home: await this.#realApp(this.#home()) };
   }
 
   async #checkPath(m: PluginManifest, method: string, raw: unknown, write: boolean, right: 'fs.read' | 'fs.write' | 'shell' = write ? 'fs.write' : 'fs.read', reason?: 'via-contract'): Promise<string> {
@@ -712,7 +739,9 @@ export class OsGateway {
     });
     const area = matched[0]?.dir;
     if (area === undefined) throw this.#denied(m, method, `вне области ${right}: ${given}`, reason);
-    const zone = zoneOf(await this.#zones(m, target), target, write);
+    const zones = await this.#zones(m, target);
+    // Имя, которым плагин назвал путь, проверяется тоже: ссылка `CLAUDE.md` на обычный файл после realpath обычным файлом и стала бы.
+    const zone = zoneOf(zones, target, write) ?? zoneOf({ ...zones, own: [] }, path.resolve(given), write);
     if (zone === 'own') return target;
     if (zone !== undefined) throw this.#denied(m, method, `${ZONE_TEXT[zone]}: ${given}`, reason);
     const gitOk = matched.some((a) => a.git);

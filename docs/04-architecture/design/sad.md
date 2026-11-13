@@ -2,7 +2,7 @@
 level: design
 feature: cyborg-harness
 status: review
-date: 2026-11-12
+date: 2026-11-13
 origin: derived
 ---
 
