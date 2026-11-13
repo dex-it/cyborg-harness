@@ -41,6 +41,8 @@ for (const entry of readdirSync(plugins, { withFileTypes: true })) {
   if (!report.ok) throw new Error(`плагин ${entry.name}: ${report.problems.map((p) => `${p.file}${p.line === undefined ? '' : `:${String(p.line)}`}: ${p.message}`).join('; ')}`);
 }
 cpSync(join(root, 'bench'), join(dist, 'bench'), { recursive: true });
+// Плагины пробы доверия (TR-01): нарушитель, поставщик и потребитель; `--trust-probe` грузит их исходниками, как bench.
+cpSync(join(root, 'trust-probe'), join(dist, 'trust-probe'), { recursive: true });
 // Воркеры Monaco - файлы того же origin, а не blob: (PL-05): каждый - отдельный классический скрипт, у воркера нет общего модуля с видом.
 const monaco = join(root, '..', 'node_modules', 'monaco-editor', 'esm', 'vs');
 const workers = { editor: 'editor/editor.worker.js', json: 'language/json/json.worker.js', css: 'language/css/css.worker.js', html: 'language/html/html.worker.js', ts: 'language/typescript/ts.worker.js' };

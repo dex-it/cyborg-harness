@@ -12,6 +12,7 @@ Cyborg Harness - микроядро для настольных приложен
 - Тесты - `npm test` (node --test, Node 24 снимает типы сам); подделки сообщений хоста - `core/test/trust.test.ts`; снимок API плагина - `core/test/api-snapshot.test.ts`, эталон `core/test/api-snapshot/<версия>.txt`, обновление `npm run snapshot:api` (правила - `contracts/README.md`)
 - Приёмка - ключ критерия `ST-NNNN/k` в имени теста или исключение в `docs/05-verification/acceptance.md`; сверка `npm run check:acceptance` (`-- --write` - матрица), прогон только размеченных `npm run test:acceptance`
 - Дымовой тест окна - `npm run smoke` (нужен дисплей; на Linux `xvfb-run`)
+- Проба доверия на настоящем `utilityProcess` - `npm run test:trust` (плагин-нарушитель в хосте стороннего плагина, ожидаемо открытые дыры названы в `playground/test/real/trust-real-host.test.ts`; нужен дисплей, на Linux `xvfb-run`)
 - CI - `.github/workflows/ci.yml`: сборка, типы, линтер, тесты и smoke на macOS и Linux
 
 ## Карта

@@ -8,7 +8,7 @@ import { DocumentTable } from './documents.ts';
 import { assignHosts } from './host-pool.ts';
 import { assignUiGroups } from './ui-groups.ts';
 import { appendBounded, DeniedCollapse, DeprecatedCollapse, PTY_HOST_ID } from './journal.ts';
-import type { KernelContext, Parts } from './kernel-context.ts';
+import type { HostWire, KernelContext, Parts } from './kernel-context.ts';
 import type { JournalEntry, LoadOptions } from './kernel-types.ts';
 import { applyUserKeys, bindKeys } from './keybindings.ts';
 import { limitsOf } from './limits.ts';
@@ -178,7 +178,6 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
   await options.onGraph?.(graph);
 
   const byId = new Map(manifests.map((m) => [m.id, m]));
-  const wire = { manifests, bindings: [...graph.bindings].map(([id, b]) => [id, [...b]] as const) };
   const registry = new ContractRegistry(manifests, graph.bindings);
   const manifestOf = (pluginId: string): PluginManifest => {
     const m = byId.get(pluginId);
@@ -187,6 +186,24 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
   };
   const hostIds = assignHosts(manifests, options.hosts ?? {}, new Set(options.bundled ?? []), record);
   const groupIds = assignUiGroups(manifests, options.uiGroups ?? {}, new Set(options.bundled ?? []), record);
+  /**
+   * `init` хосту (TR-03): плагины хоста, поставщики, к которым привязаны их requires и optional, и потребители, привязанные к их контрактам;
+   * привязки - только тех, кто живёт в хосте: зеркало контрактов спрашивает их, чужих привязок хост не читает.
+   */
+  const wireOf = (hostId: string): HostWire => {
+    const own = new Set(graph.order.filter((id) => hostIds.get(id) === hostId));
+    const related = new Set(own);
+    for (const [consumer, bound] of graph.bindings) {
+      for (const provider of bound.values()) {
+        if (own.has(consumer)) related.add(provider);
+        if (own.has(provider)) related.add(consumer);
+      }
+    }
+    return {
+      manifests: manifests.filter((m) => related.has(m.id)),
+      bindings: [...graph.bindings].filter(([id]) => own.has(id)).map(([id, b]) => [id, [...b]] as const),
+    };
+  };
   const accepted = graph.order.map(manifestOf);
   // Без `bundled` поставку не от чего отличить: записи нет, как нет и проверки зарезервированных пространств.
   if (options.bundled) for (const pluginId of graph.order) if (!options.bundled.includes(pluginId)) record({ pluginId, kind: 'third-party' });
@@ -216,7 +233,7 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
     byId,
     graph,
     registry,
-    wire,
+    wireOf,
     manifestOf,
     hostOf: (pluginId) => hostIds.get(pluginId),
     groupOf: (pluginId) => groupIds.get(pluginId),

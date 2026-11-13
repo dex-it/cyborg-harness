@@ -1,8 +1,12 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { CoreError, errorMessage, ignore } from './errors.ts';
 import { providesMatching } from './graph.ts';
 import type { ActivateResult } from './host-runtime.ts';
 import type { Activation, Host, KernelContext } from './kernel-context.ts';
 import type { PluginManifest } from './manifest.ts';
+import { checkPlugin, ENTRY_FILES, formatProblem } from './plugin-check.ts';
 import type { Provenance, ProvenanceVerdict, VerifiedPackage } from './provenance.ts';
 
 /** Проверка происхождения, которая не может уронить активацию: бросок проверяющего - отказ `unavailable` в режиме `enforce`. */
@@ -14,12 +18,43 @@ async function check(provenance: Provenance, m: PluginManifest): Promise<Provena
   }
 }
 
+/** Сколько найденных нарушений ядро пишет строками: остальное одной строкой «и ещё N»; журнал строк плагина ограничен по частоте. */
+const AUDIT_LINES = 10;
+
 /** Активация плагина и ленивые плагины, которые ждут первой команды, сочетания, показа вида или потребителя. */
 export function createActivation(ctx: KernelContext): Activation {
   const { options, graph, active, gateway } = ctx;
   const waiting = new Set<string>();
   const waking = new Map<string, Promise<void>>();
   const activating = new Map<string, Promise<void>>();
+  const audited = new Set<string>();
+
+  /**
+   * Плагин вне поставки (TR-06, ADR-CH-0003, п. 6): до первой активации `checkPlugin` читает его исходники и манифест, найденное идёт в журнал строк плагина
+   * уровнем `warn`. Плагин при этом не блокируется: проверка - дисциплина автора, а не защита (код может обойти её динамикой). Один раз за запуск ядра.
+   * Каталог плагина берётся из точки входа (`index.mjs|js|ts` рядом с `manifest.json`); нет файла-точки или `manifest.json` рядом - проверять нечего.
+   */
+  async function auditImports(m: PluginManifest): Promise<void> {
+    if (options.bundled === undefined || options.bundled.includes(m.id) || audited.has(m.id)) return;
+    audited.add(m.id);
+    const entry = options.entry?.(m);
+    if (typeof entry !== 'string' || !entry.startsWith('file:')) return;
+    let file: string;
+    try {
+      file = fileURLToPath(entry);
+    } catch {
+      return;
+    }
+    const dir = path.dirname(file);
+    if (!ENTRY_FILES.includes(path.basename(file)) || !fs.existsSync(path.join(dir, 'manifest.json'))) return;
+    try {
+      const { problems } = await checkPlugin(dir, { apiVersion: options.apiVersion });
+      for (const problem of problems.slice(0, AUDIT_LINES)) ctx.parts.logs.pluginLine(m.id, `проверка импортов (плагин вне поставки, загрузка не останавливается): ${formatProblem(problem)}`, 'warn');
+      if (problems.length > AUDIT_LINES) ctx.parts.logs.pluginLine(m.id, `проверка импортов: и ещё ${String(problems.length - AUDIT_LINES)} замечаний, полный список - \`cyborg-plugin check\``, 'warn');
+    } catch (error) {
+      ctx.parts.logs.pluginLine(m.id, `проверка импортов не выполнилась: ${errorMessage(error)}`, 'warn');
+    }
+  }
 
   /** Поставщики по графу (requires, optional) - их ждём; поставщики consumes будятся без ожидания: у many бывают встречные пары. */
   async function wakeProviders(m: PluginManifest): Promise<void> {
@@ -61,6 +96,7 @@ export function createActivation(ctx: KernelContext): Activation {
         if (verdict.mode === 'enforce') return;
       } else verified = verdict.verified;
     }
+    await auditImports(m);
     const hostId = ctx.hostOf(m.id) ?? m.id;
     let host: Host;
     try {

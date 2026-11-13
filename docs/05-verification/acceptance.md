@@ -2,7 +2,7 @@
 level: verification
 feature: cyborg-harness
 status: draft
-date: 2026-11-12
+date: 2026-11-13
 origin: derived
 ---
 
@@ -64,7 +64,7 @@ describe('ST-2001/1: заявка контракта', () => { ... });
 
 | Критерий | Причина | Где проверяется |
 |---|---|---|
-| ST-1003/2 | окно | хост в `utilityProcess`: `playground/scripts/smoke.mjs` |
+| ST-1003/2 | окно | хост в `utilityProcess`: `playground/scripts/smoke.mjs`; сторонний плагин в своём процессе на настоящих хостах: `npm run test:trust` (`playground/test/real/trust-real-host.test.ts`, шаг CI «доверие») |
 | ST-1003/3 | замер | срок обнаружения зависания при значениях по умолчанию: `npm run spike:hosts`, [spike-hosts.md](spike-hosts.md) |
 | ST-1003/8 | окно | окно и виды после сбоя хоста: `playground/scripts/smoke.mjs` |
 | ST-1007/1 | окно | фокус окна: `playground/scripts/smoke.mjs` |

@@ -2,10 +2,22 @@ import path from 'node:path';
 import { BrowserWindow, clipboard, dialog, Notification, safeStorage, shell } from 'electron';
 import type { NoticeEvents, NoticeHandle, OsEnvironment, SpawnPtyHost } from '@cyborg-harness/core';
 import { nodePtyBackend } from './pty-backend.ts';
+import { secretsBackendProblem } from './secrets-backend.ts';
 import { fileSecrets, type SecretCipher } from './secrets-file.ts';
 
+/** `getSelectedStorageBackend` есть только на Linux; сбой вызова (до готовности приложения) не причина отказывать: backend считается неизвестным. */
+function storageBackend(): string | undefined {
+  if (process.platform !== 'linux') return undefined;
+  try {
+    return safeStorage.getSelectedStorageBackend();
+  } catch {
+    return undefined;
+  }
+}
+
 const safeCipher: SecretCipher = {
-  available: () => safeStorage.isAsyncEncryptionAvailable(),
+  available: async () => secretsBackendProblem(process.platform, storageBackend()) === undefined && (await safeStorage.isAsyncEncryptionAvailable()),
+  unavailableReason: () => secretsBackendProblem(process.platform, storageBackend()),
   encrypt: (text) => safeStorage.encryptStringAsync(text),
   decrypt: (sealed) => safeStorage.decryptStringAsync(sealed),
 };

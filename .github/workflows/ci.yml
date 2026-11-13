@@ -83,6 +83,13 @@ jobs:
       - name: smoke (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum node playground/scripts/smoke.mjs --no-sandbox
+      # TR-01 (docs/research/trust-and-isolation): плагин-нарушитель в хосте стороннего плагина на настоящем utilityProcess; дыры записаны как «ожидаемо открыто» (playground/test/real/trust-real-host.test.ts).
+      - name: доверие, нарушитель на настоящем utilityProcess (macOS)
+        if: runner.os == 'macOS'
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-force-exit --test-timeout=180000 playground/test/real/trust-real-host.test.ts
+      - name: доверие, нарушитель на настоящем utilityProcess (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-force-exit --test-timeout=180000 playground/test/real/trust-real-host.test.ts
       # Проба упакованной поставки (P-07, docs/05-verification/bundled-delivery.md): app.asar с dist/delivery, node-pty распакован; на macOS ещё и codesign ad hoc.
       - name: упакованная поставка (macOS)
         if: runner.os == 'macOS'
