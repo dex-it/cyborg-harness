@@ -9,7 +9,7 @@ origin: derived
 
 Собрана из историй, имён тестов и исключений [acceptance.md](acceptance.md) командой `npm run check:acceptance -- --write`; руками не правится.
 
-Итог: критериев 261; тестом 216, исключением 19, целевое поведение 26.
+Итог: критериев 269; тестом 223, исключением 20, целевое поведение 26.
 
 | Критерий | Чем проверяется |
 |---|---|
@@ -184,6 +184,14 @@ origin: derived
 | ST-3009/6 | `core/test/delivery.test.ts`, `electron/test/provenance.test.ts`, `tools/cyborg-plugin/test/delivery.test.ts` |
 | ST-3009/7 | `tools/cyborg-plugin/test/build.test.ts` |
 | ST-3009/8 | `scripts/test/release.test.ts`, `scripts/test/workflows.test.ts` |
+| ST-3010/1 | `core/test/fork-permission.test.ts`, `core/test/sandbox-canary.test.ts`, `core/test/wire-codec.test.ts`, `electron/test/node-hosts.test.ts` |
+| ST-3010/2 | `core/test/sandbox-canary.test.ts`, `electron/test/node-hosts.test.ts` |
+| ST-3010/3 | `playground/test/real/trust-real-host.test.ts` |
+| ST-3010/4 | замер: `npm run spike:gateway -- --node-host=<Node>` на хосте стороннего плагина и `npm run check:budgets`, шаг CI «бюджеты»; числа - [isolation-check.md](isolation-check.md) |
+| ST-3010/5 | `electron/test/node-hosts.test.ts`, `playground/src/main/trust-args.test.ts` |
+| ST-3010/6 | `electron/test/node-hosts.test.ts`, `playground/test/real/trust-real-host.test.ts` |
+| ST-3010/7 | `electron/test/confine-linux.test.ts`, `electron/test/node-hosts.test.ts` |
+| ST-3010/8 | `core/test/sandbox-canary.test.ts`, `electron/test/node-hosts.test.ts`, `playground/test/plugins-model.test.ts`, `playground/test/real/trust-real-host.test.ts` |
 | ST-4001/1 | `core/test/trace.test.ts` |
 | ST-4001/2 | `core/test/trace.test.ts` |
 | ST-4001/3 | `core/test/trace.test.ts` |

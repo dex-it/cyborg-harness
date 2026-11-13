@@ -8,6 +8,13 @@ export type PluginState = 'active' | 'waiting' | 'restarting' | 'stopped' | 'dis
 
 export type PluginOrigin = 'bundled' | 'user';
 
+/** Как изолирован процесс плагина (TR-24, FR-CH-3021): уровень 0-3 из журнала ядра и причина словами; `network: 'open'` - соединение мимо `ctx.os.net` плагин открыть может. */
+export interface PluginIsolationRow {
+  readonly level: 0 | 1 | 2 | 3;
+  readonly reason: string;
+  readonly network: 'open' | 'closed';
+}
+
 export interface PluginRow {
   readonly id: string;
   readonly version?: string;
@@ -21,6 +28,8 @@ export interface PluginRow {
   readonly groupWarning?: string;
   /** Процесс хоста; есть, пока хост жив и он отдельный процесс. */
   readonly pid?: number;
+  /** Уровень изоляции процесса и причина; нет, если запуск об изоляции ничего не заявил или хост не доказал заявленное (причина - в `reason`, запись `sandbox-ineffective`). */
+  readonly isolation?: PluginIsolationRow;
   readonly state: PluginState;
   /** Причина состояния словами из журнала. */
   readonly reason?: string;

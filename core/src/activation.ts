@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CoreError, errorMessage, ignore } from './errors.ts';
 import { providesMatching } from './graph.ts';
 import type { ActivateResult } from './host-runtime.ts';
@@ -15,6 +15,20 @@ async function check(provenance: Provenance, m: PluginManifest): Promise<Provena
     return await provenance.check({ id: m.id, version: m.version });
   } catch (error) {
     return { ok: false, code: 'unavailable', reason: `проверка не выполнена: ${errorMessage(error)}`, mode: 'enforce' };
+  }
+}
+
+/**
+ * Адрес точки входа для хоста. Проверенный пакет несёт настоящий путь каталога (`realpath`), а адрес мог быть назван через ссылку (`/var` -> `/private/var` на macOS):
+ * хуки хоста сверяют адрес с проверенным каталогом буквально, и под `--permission` загрузка с диска невозможна. Адрес приводится к настоящему пути, если пакет проверен.
+ */
+function entryOf(entry: string | undefined, pluginId: string, verified: VerifiedPackage | undefined): string {
+  if (entry === undefined) return pluginId;
+  if (verified === undefined || !entry.startsWith('file:')) return entry;
+  try {
+    return pathToFileURL(fs.realpathSync(fileURLToPath(entry))).href;
+  } catch {
+    return entry;
   }
 }
 
@@ -106,6 +120,16 @@ export function createActivation(ctx: KernelContext): Activation {
       ctx.record({ pluginId, kind: 'failed', hostId, error: `хост не запустился: ${errorMessage(error)}` });
       return;
     }
+    // TR-21: заявленные запреты хоста доказаны им самим до того, как код плагина загружен; не доказаны - плагин не запускается, хост останавливается.
+    const problems = await pool.verifySandbox(host);
+    if (problems !== undefined && problems.length > 0) {
+      lifecycle.forgetOs(pluginId);
+      ctx.record({ pluginId, kind: 'sandbox-ineffective', hostId, level: host.handle.isolation?.level ?? 0, reasons: problems });
+      pool.stop(host, new CoreError('Unavailable', `хост ${hostId}: заявленные запреты не действуют`));
+      return;
+    }
+    const isolation = host.handle.isolation;
+    if (isolation !== undefined) ctx.record({ pluginId, kind: 'isolation', hostId, level: isolation.level, reason: isolation.reason, network: isolation.network });
     const started = performance.now();
     try {
       const config = sections.input('config', m);
@@ -117,7 +141,7 @@ export function createActivation(ctx: KernelContext): Activation {
         }
       }
       gateway.approve(pluginId);
-      const params = { pluginId, entry: options.entry?.(m) ?? pluginId, paths: gateway.pathsOf(pluginId), config, state, ...(verified !== undefined && { verified }) };
+      const params = { pluginId, entry: entryOf(options.entry?.(m), pluginId, verified), paths: gateway.pathsOf(pluginId), config, state, ...(verified !== undefined && { verified }) };
       const result = await pool.call<ActivateResult>(host, pluginId, 'activate', params, ctx.activationTimeout);
       if (!result.ok) {
         ctx.record({ pluginId, kind: result.kind, result: result.result });

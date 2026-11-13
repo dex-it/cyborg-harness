@@ -18,7 +18,21 @@ export function sortedPlugins(rows: readonly PluginRow[]): PluginRow[] {
 /** Метка строки стороннего плагина: права словами рядом, но проверки кода на этапе 1 нет, поэтому это предупреждение, а не защита. */
 export function originNote(row: PluginRow): string | undefined {
   if (row.origin !== 'user') return undefined;
-  return 'сторонний плагин из каталога пользователя: код не проверен, на этапе 1 исполняется в обычном процессе Node и может обойти шлюз ctx.os; права ниже - то, что он заявил, а не то, что ему можно';
+  return 'сторонний плагин из каталога пользователя: код не проверен; права ниже - то, что он заявил, а не то, что ему можно. Что процессу плагина закрыто на самом деле, сказано в строке «Изоляция»';
+}
+
+/** Метка уровня изоляции в шапке строки (TR-24): «Изоляция 2 из 3»; нет, если запуск об изоляции не заявил. */
+export function isolationLabel(row: PluginRow): string | undefined {
+  return row.isolation === undefined ? undefined : `Изоляция ${String(row.isolation.level)} из 3`;
+}
+
+/**
+ * Уровень изоляции словами (FR-CH-3021): что закрыто и что нет. Сеть без ограничителя названа прямо: уровни 0-2 не закрывают сокеты, плагин в них может открыть соединение мимо шлюза.
+ */
+export function isolationNote(row: PluginRow): string | undefined {
+  const { isolation } = row;
+  if (isolation === undefined) return undefined;
+  return `Изоляция ${String(isolation.level)} из 3 (${isolation.network === 'open' ? 'сеть открыта' : 'сеть закрыта ограничителем ОС'}): ${isolation.reason}`;
 }
 
 /** Метка группы рендера: нужна, только когда плагин делит origin и процесс рендера с другими, то есть группа не его id. Сторонний всегда один (его группа - `solo_<id>`), метки у него нет. */

@@ -32,6 +32,8 @@ description: "Записи журнала плагинов: когда ядро 
 | `host-isolated` | предупреждение | Сторонний плагин назван в группе, но получил отдельный хост | `group`, `hostId` |
 | `group-isolated` | предупреждение | Сторонний плагин назван в группе рендера с другими (`reason: 'third-party'`): плагин получил свою группу (`renderGroup` - его id, origin его видов - `solo_<id>`) | `group`, `renderGroup`, `reason` |
 | `integrity-failed` | предупреждение или ошибка | Происхождение пакета не подтверждено (подпись, хеши, версия, отзыв; [Подпись и проверка пакета](/authors/signing/)). `mode: 'enforce'` - плагин не запущен (ошибка), `warn` - запущен (предупреждение). Состояние «остановлен» с причиной словами и «Включить снова» | `code` (`no-integrity`, `malformed`, `unknown-key`, `revoked-key`, `bad-signature`, `expired`, `mismatch`, `modified`, `missing`, `extra`, `symlink`, `rollback`, `revoked-hash`, `unavailable`), `reason`, `mode`, `keyId?` |
+| `isolation` | инфо | Уровень изоляции процесса плагина: `level` 0-3, `reason` словами (что закрыто и что нет; сеть без ограничителя ОС названа открытой), `network` (`open` или `closed`), `hostId`. Пишется после проверки запретов хоста, перед `activated`; запуск, который об изоляции не заявил, записи не оставляет. Состояние не меняет; значение видно в строке плагина «Плагины Cyborg» ([уровни](/concepts/isolation/#уровни-изоляции-процесса)) | `hostId`, `level`, `reason`, `network` |
+| `sandbox-ineffective` | ошибка | Хост не доказал заявленные запреты: `--permission` не действует (как в `utilityProcess`) или сокет открылся при ограничителе ОС. Плагин не запущен, хост остановлен. Состояние «остановлен» с причиной словами и «Включить снова» | `hostId`, `level` (заявленный), `reasons` |
 | `third-party` | предупреждение | Загружен плагин не из поставки: на первом этапе это плагин из каталога пользователя, включённого флагом `--user-plugins`. Код не проверен; запись состояния не меняет. Пишется, только когда приложение передало ядру список поставки `bundled` | - |
 | `host-own-grouped` | предупреждение | Плагин поставки просит `"host": "own"`, а группа `plugins.hosts` сажает его к соседям: действует группа | `group`, `neighbours` |
 
@@ -79,7 +81,7 @@ description: "Записи журнала плагинов: когда ядро 
 
 ## Состояние плагина по журналу
 
-Состояние вычисляется по последней записи жизненного цикла. Записи `key-conflict`, `key-ignored`, `trace-args`, `denied`, `deprecated-call`, `unhandled-rejection`, `pty-expired`, `host-isolated`, `group-isolated`, `host-own-grouped`, `third-party`, `delivery-failed` и `log-summary` о работе плагина ничего не говорят и состояние не меняют: они приходят и после снятия плагина, но запись снятия не перекрывают. По той же последней записи жизненного цикла зависимого `enable` поставщика решает, поднимать ли его: поднимается зависимый, снятый вместе с этим поставщиком (`unloaded` с `by` поставщика), или пропущенный (`skipped`).
+Состояние вычисляется по последней записи жизненного цикла. Записи `key-conflict`, `key-ignored`, `trace-args`, `isolation`, `denied`, `deprecated-call`, `unhandled-rejection`, `pty-expired`, `host-isolated`, `group-isolated`, `host-own-grouped`, `third-party`, `delivery-failed` и `log-summary` о работе плагина ничего не говорят и состояние не меняют: они приходят и после снятия плагина, но запись снятия не перекрывают. По той же последней записи жизненного цикла зависимого `enable` поставщика решает, поднимать ли его: поднимается зависимый, снятый вместе с этим поставщиком (`unloaded` с `by` поставщика), или пропущенный (`skipped`).
 
 | Запись | Состояние | «Включить снова» |
 |---|---|---|
@@ -87,13 +89,13 @@ description: "Записи журнала плагинов: когда ядро 
 | `waiting` | Ждёт | - |
 | `disabled` | Выключен в настройках | - |
 | `host-down`, `host-restart`, `revived` | Перезапускается | - |
-| `switched-off`, `failed`, `skipped`, `host-abandoned` | Остановлен | Есть |
+| `switched-off`, `failed`, `skipped`, `host-abandoned`, `sandbox-ineffective` | Остановлен | Есть |
 | `unloaded` (выгружен сам) | Остановлен | Есть |
 | `unloaded` (вместе с поставщиком), `uninstalled`, `invalid`, `not-found`, `rejected`, `safe-mode`, `config`, `state`, `deactivated` | Остановлен | Нет: причина в манифесте, настройках или у поставщика |
 
 ## Уровни
 
-- **инфо:** `activated`, `waiting`, `disabled`, `revived`, `host-restart`; `unloaded`, `deactivated` и `uninstalled` без ошибки.
+- **инфо:** `activated`, `waiting`, `disabled`, `revived`, `host-restart`, `isolation`; `unloaded`, `deactivated` и `uninstalled` без ошибки.
 - **предупреждение:** `denied`, `key-conflict`, `key-ignored`, `trace-args`, `safe-mode`, `skipped`, `unhandled-rejection`, `pty-expired`, `host-down`, `host-isolated`, `group-isolated`, `host-own-grouped`, `third-party`, `log-summary`; `unloaded` и `deactivated` с ошибкой.
 - **ошибка:** все остальные, а также `config` и `state`, если статус не `ok`, и `uninstalled` с `error`.
 

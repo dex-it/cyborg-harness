@@ -14,6 +14,7 @@
   "scripts": {
     "build:core": "node core/scripts/build.mjs",
     "build:testing": "node testing/scripts/build.mjs",
+    "build:confiner": "node electron/scripts/build-confiner.mjs",
     "build:electron": "node electron/scripts/build.mjs",
     "build:tools": "node tools/cyborg-plugin/scripts/build.mjs && npm rebuild cyborg-plugin --ignore-scripts",
     "build:packages": "npm run build:core && npm run build:testing && npm run build:electron && npm run build:tools",

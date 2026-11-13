@@ -43,6 +43,13 @@ jobs:
           done
           exit 1
       - run: npm run build
+      # TR-22b (ADR-CH-0019, п. 6): запускатель ограничителя Linux (один файл C, компилятор раннера); тесты ниже (npm test, доверие) используют его, если он собран.
+      - name: запускатель Linux (cyborg-confine)
+        if: runner.os == 'Linux'
+        run: |
+          npm run build:confiner
+          uname -r
+          electron/native/build/linux-*/cyborg-confine --probe
       - run: npm run typecheck
       # ESLint со strictTypeChecked в одном процессе подбирался к 2 ГиБ кучи Node на раннере macOS и падал «JavaScript heap out of memory» (#153).
       # Теперь линт идёт по процессу на пакет (scripts/lint.mjs), пик около 1 ГиБ; 4 ГиБ оставлены запасом на рост самого большого пакета.
@@ -88,11 +95,12 @@ jobs:
       - name: smoke (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum node playground/scripts/smoke.mjs --no-sandbox
-      # TR-01 (docs/research/trust-and-isolation): плагин-нарушитель в хосте стороннего плагина на настоящем utilityProcess; дыры записаны как «ожидаемо открыто» (playground/test/real/trust-real-host.test.ts).
-      - name: доверие, нарушитель на настоящем utilityProcess (macOS)
+      # TR-01, TR-21, TR-22 (docs/research/trust-and-isolation): плагин-нарушитель в хосте стороннего плагина на настоящем Electron в двух режимах - utilityProcess (возврат настройкой) и процесс Node
+      # под --permission с ограничителем ОС (Seatbelt на macOS, cyborg-confine на Linux); ожидание по каждой строке - playground/test/real/trust-real-host.test.ts.
+      - name: доверие, нарушитель на настоящем Electron, utilityProcess и процесс Node (macOS)
         if: runner.os == 'macOS'
         run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-force-exit --test-timeout=180000 playground/test/real/trust-real-host.test.ts
-      - name: доверие, нарушитель на настоящем utilityProcess (Linux)
+      - name: доверие, нарушитель на настоящем Electron, utilityProcess и процесс Node (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-force-exit --test-timeout=180000 playground/test/real/trust-real-host.test.ts
       # TR-31 (docs/05-verification/views-real-frames.md): виды на настоящем Electron - pushState, чужие фреймы, обход моста, привязка плагина к кадру.
@@ -121,6 +129,29 @@ jobs:
         continue-on-error: true
         timeout-minutes: 6
         run: xvfb-run --auto-servernum node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON playground/scripts/spike-monaco.mjs memory sandbox --no-sandbox
+
+  # TR-22b: запускатель Linux на двух версиях ядра образов раннера (ubuntu-22.04 и ubuntu-24.04); печатает uname -r и версию ABI Landlock в начале теста.
+  # До ядра 6.7 (ABI < 4) сеть держит один seccomp, с 6.7 к нему добавляются правила TCP Landlock; тест различает оба случая по ответу --probe, а не по номеру образа.
+  confiner:
+    name: ограничитель Linux (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: сборка запускателя и ядро
+        run: |
+          uname -r
+          node electron/scripts/build-confiner.mjs
+          electron/native/build/linux-*/cyborg-confine --probe
+      - name: запускатель на настоящем ядре
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test electron/test/confine-linux.test.ts
 
   # Бюджеты NFR-CH-1001 (P-10): замеры шлюза ctx.os и хостов против порогов из playground/budgets.json. Отдельное задание рядом с `check`,
   # чтобы три прогона замера не съедали его 15 минут. Блокирует только платформа из `gateway.blocking` файла порогов (сейчас Linux);
@@ -152,6 +183,9 @@ jobs:
           done
           exit 1
       - run: npm run build
+      - name: запускатель Linux (cyborg-confine)
+        if: runner.os == 'Linux'
+        run: npm run build:confiner
       - name: замеры и сверка с порогами (spike:gateway, spike:hosts)
         timeout-minutes: 10
         shell: bash
@@ -166,6 +200,26 @@ jobs:
               exit 0
             fi
             echo "::warning::бюджет превышен (попытка $attempt из 2)"
+          done
+          exit 1
+      # TR-21 (критерий 4): тот же бюджет на реальном способе запуска стороннего плагина - процесс Node под --permission и ограничителем ОС (Seatbelt, cyborg-confine); шлюз ctx.os замеряется из плагина в этом хосте.
+      - name: замеры и сверка с порогами на хосте стороннего плагина (процесс Node)
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            prefix="xvfb-run --auto-servernum"
+            extra="--no-sandbox --confiner-bin=$(ls "$PWD"/electron/native/build/linux-*/cyborg-confine)"
+          else
+            prefix=""; extra=""
+          fi
+          for attempt in 1 2; do
+            $prefix node playground/scripts/spike-gateway.mjs --json --node-host="$(command -v node)" $extra > "$RUNNER_TEMP/gateway-node.json" || true
+            if npm run --silent check:budgets -- --gateway "$RUNNER_TEMP/gateway-node.json" --summary "$GITHUB_STEP_SUMMARY"; then
+              [ "$attempt" = 1 ] || echo "::warning::бюджет на хосте Node выдержан только со второй попытки: раннер шумит, смотри сводку запуска"
+              exit 0
+            fi
+            echo "::warning::бюджет на хосте Node превышен (попытка $attempt из 2)"
           done
           exit 1
 

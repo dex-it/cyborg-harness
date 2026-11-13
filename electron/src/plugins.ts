@@ -829,6 +829,7 @@ export class PluginsService implements ViewGroups {
         ...(isolated && { groupWarning: describeEntry(isolated) }),
         ...(host !== undefined && { host }),
         ...(pid !== undefined && { pid }),
+        ...(s.isolation !== undefined && { isolation: s.isolation }),
         ...(s.cause && s.state !== 'active' && { reason: describeEntry(s.cause) }),
         ...(previous !== undefined && { previousFailure: { at: previous.at, text: previous.text } }),
         ...(kept.some((p) => p.pluginId === s.id) && {

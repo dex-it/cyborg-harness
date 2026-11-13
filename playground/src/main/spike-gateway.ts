@@ -9,7 +9,8 @@ import { safeStorage } from 'electron';
 import { load, OsGateway, parseManifest, PLUGIN_API_VERSION, type JournalEntry, type OsEnvironment, type PluginManifest, type TraceRecord } from '@cyborg-harness/core';
 import { closePools, guardedLookup, isLocalAddress, transport, type Lookup } from '../../../core/src/net-transport.ts';
 import { measure, PTY_SCRIPT, SAMPLES, WARMUP, type ProbeOs, type ProbePath, type Sampled } from '../../bench/gateway-probe.ts';
-import { electronOs, fileDiagnostics, utilityHosts } from '@cyborg-harness/electron';
+import { electronOs, fileDiagnostics, isolatedHosts } from '@cyborg-harness/electron';
+import type { IsolationSettings } from '@cyborg-harness/electron/isolation';
 
 export interface GatewaySpikeOptions {
   readonly out: string;
@@ -17,6 +18,11 @@ export interface GatewaySpikeOptions {
   readonly benchDir: string;
   /** Трасса операций (K-28, NFR-CH-4001) включена: ядро получает приёмник записей, как в приложении. По умолчанию да; `--trace=off` скрипта замера выключает. */
   readonly trace?: boolean;
+  /**
+   * Где работает плагин замера. Без поля - в общем хосте поставки (`utilityProcess`, как замер всегда шёл). С полем - плагин не из поставки, и его хост запускает адаптер по этим настройкам:
+   * процесс Node под `--permission` и ограничителем ОС - реальный способ запуска стороннего плагина (TR-21, бюджеты NFR-CH-1001 на нём: `npm run check:budgets`).
+   */
+  readonly isolation?: IsolationSettings;
 }
 
 export type Variant = 'плагин' | 'шлюз' | 'голое';
@@ -43,7 +49,11 @@ export interface GatewayReport {
   readonly secretsBackend: string;
   /** Была ли включена трасса в ядре замера и сколько записей она дала. */
   readonly trace: 'on' | 'off';
+  /** Где работал плагин замера: общий `utilityProcess` поставки или процесс Node стороннего плагина под запретами. */
+  readonly host: 'utilityProcess' | 'node';
   traceRecords?: number;
+  /** Пути, которые в этом режиме не мерились, и причина. */
+  notMeasured?: string[];
   rows?: GatewayRow[];
   error?: string;
 }
@@ -181,6 +191,7 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
     warmup: WARMUP,
     samples: SAMPLES,
     trace: options.trace === false ? 'off' : 'on',
+    host: options.isolation?.node === undefined ? 'utilityProcess' : 'node',
     secretsBackend: process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : process.platform === 'darwin' ? 'keychain' : 'dpapi',
   };
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'cyborg-spike-gateway-'));
@@ -221,9 +232,10 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
       apiVersion: PLUGIN_API_VERSION,
       enabled: [ID],
       manifests: [raw],
-      spawnHost: utilityHosts(options.hostEntry).spawn,
+      spawnHost: isolatedHosts(options.hostEntry, options.isolation ?? {}).spawn,
       entry: () => pathToFileURL(path.join(options.benchDir, 'gateway.ts')).href,
-      bundled: [ID],
+      // Узел замера «node»: плагин не из поставки, адаптер даёт ему процесс Node под запретами.
+      bundled: options.isolation?.node === undefined ? [ID] : ['bench-bundled'],
       hosts: { bench: [ID] },
       os: env,
       limits: BENCH_LIMITS,
@@ -236,7 +248,9 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
       }),
     });
     await kernel.idle();
-    if (!journal.some((e) => e.kind === 'activated') || journal.some((e) => e.kind !== 'activated')) throw new Error(`загрузка не чистая: ${JSON.stringify(journal)}`);
+    // Записи о происхождении и изоляции (сторонний плагин в процессе Node) загрузку не портят; остальное - ошибка.
+    const harmless = new Set<JournalEntry['kind']>(['activated', 'third-party', 'host-isolated', 'isolation']);
+    if (!journal.some((e) => e.kind === 'activated') || journal.some((e) => !harmless.has(e.kind))) throw new Error(`загрузка не чистая: ${JSON.stringify(journal)}`);
     const denied: string[] = [];
     const inMain: Record<Exclude<Variant, 'плагин'>, ProbeOs> = { голое: bareOs(env), шлюз: gatewayOs(env, parsed.manifest, denied) };
     const run = (variant: Variant, probe: ProbePath, target: string, size: number): Promise<Sampled> =>
@@ -253,7 +267,10 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
       return dir;
     });
     // Размер дописанного не меняет событие: оно несёт имена, а не данные.
-    await each('fs.watch', [64], (variant) => prepare(`watch-${variant}`));
+    // Нагрузку для fs.watch (дописывание в файл) создаёт сам плагин замера через node:fs: хосту стороннего плагина писать на диск нельзя (--permission), поэтому в режиме «node» путь не мерится.
+    // Событие идёт тем же кодом ядра и тем же каналом, что и в режиме utilityProcess; его цена сверяется в замере utilityProcess (check:budgets, первый шаг).
+    if (options.isolation?.node === undefined) await each('fs.watch', [64], (variant) => prepare(`watch-${variant}`));
+    else report.notMeasured = ['fs.watch: нагрузку создаёт плагин замера через node:fs, хосту под --permission писать нельзя'];
     await each('pty.write', SIZES, () => '');
     await each('secrets.get', SIZES, (_v, size) => `key-${String(size)}`);
     await each('net.fetch', SIZES, (_v, size) => `http://${host}/${String(size)}`);

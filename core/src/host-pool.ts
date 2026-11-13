@@ -1,9 +1,17 @@
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { CoreError, errorMessage, ignore } from './errors.ts';
 import type { SystemEvent } from './host-runtime.ts';
+import { canaryProblems, type CanaryReport } from './isolation.ts';
 import type { Counter, Host, HostPool, KernelContext } from './kernel-context.ts';
 import type { JournalEntry } from './kernel-types.ts';
 import type { PluginManifest } from './manifest.ts';
 import { cancelError, Endpoint } from './rpc.ts';
+import type { HostRequest } from './transports.ts';
+import { isRecord } from './wire.ts';
+
+/** Сколько ждать ответа хоста на проверку запретов, мс: хост только что поднялся, проверка - несколько системных вызовов. */
+const CANARY_TIMEOUT = 10_000;
 
 // Граница доверия ядра - процесс хоста: внутри хоста плагины неразличимы, поэтому сторонний не делит процесс ни с кем.
 export function assignHosts(
@@ -90,8 +98,30 @@ export function createHostPool(ctx: KernelContext): HostPool {
     return host;
   }
 
+  /** Каталог плагина: где лежит его точка входа (`file:`); для хоста стороннего плагина это единственный каталог, который ему разрешено читать. */
+  function homeOf(pluginId: string): string | undefined {
+    try {
+      const entry = options.entry?.(ctx.manifestOf(pluginId));
+      return typeof entry === 'string' && entry.startsWith('file:') ? path.dirname(fileURLToPath(entry)) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Кто будет жить в хосте и откуда они: по этому адаптер выбирает способ запуска (встроенные - общий `utilityProcess`, сторонний - свой процесс Node под запретами). */
+  function requestFor(hostId: string): HostRequest {
+    const ids = ctx.graph.order.filter((id) => ctx.hostOf(id) === hostId);
+    return {
+      plugins: ids.map((id) => {
+        const home = homeOf(id);
+        return home === undefined ? { id } : { id, home };
+      }),
+      thirdParty: options.bundled !== undefined && ids.some((id) => !options.bundled?.includes(id)),
+    };
+  }
+
   function start(hostId: string): Host {
-    const handle = options.spawnHost(hostId);
+    const handle = options.spawnHost(hostId, requestFor(hostId));
     const host: Host = { id: hostId, handle, endpoint: new Endpoint(handle.port, ctx.trace.owner), inflight: new Map(), seq: 0, answered: 0, notes: 0, down: false };
     hosts.set(hostId, host);
     const { endpoint } = host;
@@ -124,6 +154,16 @@ export function createHostPool(ctx: KernelContext): HostPool {
     }, watchdog.interval);
     host.timer.unref();
     return host;
+  }
+
+  function verifySandbox(host: Host): Promise<readonly string[]> | undefined {
+    const expect = host.handle.isolation?.canary;
+    if (expect === undefined) return undefined;
+    host.sandbox ??= host.endpoint.request('sandbox.canary', null, AbortSignal.timeout(CANARY_TIMEOUT)).then(
+      (report) => (isRecord(report) ? canaryProblems(expect, report as unknown as CanaryReport) : ['хост ответил на проверку не по форме']),
+      (error: unknown) => [`проверка запретов не выполнена: ${error instanceof CoreError && error.code === 'Cancelled' ? `хост не ответил за ${String(CANARY_TIMEOUT)} мс` : errorMessage(error)}`],
+    );
+    return host.sandbox;
   }
 
   function stop(host: Host, error: CoreError): void {
@@ -182,6 +222,7 @@ export function createHostPool(ctx: KernelContext): HostPool {
     hosts,
     start,
     stop,
+    verifySandbox,
     call,
     live,
     forgetFailures: (hostId) => hostFailures.delete(hostId),

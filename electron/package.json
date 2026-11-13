@@ -10,6 +10,7 @@
   "exports": {
     ".": { "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" },
     "./host-entry": { "types": "./dist/src/host-entry.d.ts", "default": "./dist/src/host-entry.js" },
+    "./isolation": { "types": "./dist/src/index-isolation.d.ts", "default": "./dist/src/index-isolation.js" },
     "./pty-host-entry": { "types": "./dist/src/pty-host-entry.d.ts", "default": "./dist/src/pty-host-entry.js" },
     "./preload": { "types": "./dist/src/index-preload.d.ts", "default": "./dist/src/index-preload.js" },
     "./window": { "types": "./dist/src/index-window.d.ts", "default": "./dist/src/index-window.js" },
@@ -17,7 +18,7 @@
     "./shell/shell.css": "./dist/shell/shell.css",
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md", "CHANGELOG.md"],
+  "files": ["dist", "native/cyborg-confine.c", "README.md", "CHANGELOG.md"],
   "repository": { "type": "git", "url": "git+https://github.com/dex-it/cyborg-harness.git", "directory": "electron" },
   "publishConfig": { "registry": "https://registry.npmjs.org/", "access": "restricted" },
   "peerDependencies": {

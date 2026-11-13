@@ -7,7 +7,7 @@ import { byId, el } from './dom.ts';
 import { ViewsPanel } from './views-panel.ts';
 import { moveFocus } from './focus.ts';
 import { SideTabs } from './side-tabs.ts';
-import { actionsFor, clock, conflictText, diagnosticsLine, exportMessage, groupLabel, groupNote, journalFor, keyStatus, mergeFeed, originNote, previousNote, sortedPlugins, STATE_LABEL, summary, traceArgsNotice, userPluginsNotice, workspaceActionError, type ActionButton } from './plugins-model.ts';
+import { actionsFor, clock, conflictText, diagnosticsLine, exportMessage, groupLabel, groupNote, isolationLabel, isolationNote, journalFor, keyStatus, mergeFeed, originNote, previousNote, sortedPlugins, STATE_LABEL, summary, traceArgsNotice, userPluginsNotice, workspaceActionError, type ActionButton } from './plugins-model.ts';
 import { SessionStrip } from './session-strip.ts';
 import { windowPlan } from './window-plan.ts';
 
@@ -222,10 +222,18 @@ export class PluginsPanel {
     const group = groupLabel(row);
     if (group) head.append(el('span', 'plugin-group', group));
     if (row.origin === 'user') head.append(el('span', 'plugin-origin', 'сторонний'));
+    const level = isolationLabel(row);
+    if (level) {
+      const badge = el('span', 'plugin-isolation', level);
+      if (row.isolation) badge.dataset.level = String(row.isolation.level);
+      head.append(badge);
+    }
     head.append(el('span', 'spacer'), el('span', 'plugin-state', STATE_LABEL[row.state]));
     item.append(head);
     const origin = originNote(row);
     if (origin) item.append(el('p', 'plugin-origin-note', origin));
+    const isolation = isolationNote(row);
+    if (isolation) item.append(el('p', 'plugin-isolation-note', isolation));
     const groupWarning = groupNote(row);
     if (groupWarning) item.append(el('p', 'plugin-group-note', groupWarning));
     if (row.reason) item.append(el('p', 'plugin-reason', row.reason));

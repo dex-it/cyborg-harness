@@ -50,6 +50,8 @@ export interface Host {
   /** Плагин, чей код завершил процесс хоста: хост называет его из обработчика exit. */
   exiting?: string | undefined;
   down: boolean;
+  /** Итог проверки запретов хоста (TR-21): пусто - заявленное подтверждено, иначе что не подтвердилось. Проверка идёт один раз за жизнь процесса. */
+  sandbox?: Promise<readonly string[]> | undefined;
   pingAt?: number | undefined;
   timer?: ReturnType<typeof setInterval>;
 }
@@ -83,6 +85,11 @@ export interface HostPool {
   readonly hosts: Map<string, Host>;
   start(hostId: string): Host;
   stop(host: Host, error: CoreError): void;
+  /**
+   * Проверка запретов хоста до активации плагина (TR-21, canary): хост пробует запрещённое, ядро сверяет с заявленным запуском. `undefined` - запуск ничего не заявил, проверять нечего.
+   * Пустой список - заявленное подтверждено. Результат на хост запоминается.
+   */
+  verifySandbox(host: Host): Promise<readonly string[]> | undefined;
   /** `signal` отменяет вызов и у вызывающего, и у хоста поставщика; `timeout` - то же самое с причиной `Timeout`. */
   call<T>(host: Host, pluginId: string, method: string, params: unknown, timeout?: number, signal?: AbortSignal, discard?: (value: unknown) => void): Promise<T>;
   /** Хост активного плагина; плагин не активен - `Unavailable`. */

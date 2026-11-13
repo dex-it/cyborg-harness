@@ -1,14 +1,25 @@
 import type { SectionResult } from './config.ts';
 import type { Rejection } from './graph.ts';
 import { DENIED_WINDOW_MS, DEPRECATED_WINDOW_MS, PTY_HOST_ID } from './journal.ts';
+import { LEVEL_TITLES, type IsolationLevel } from './isolation.ts';
 import type { JournalEntry } from './kernel-types.ts';
 
 /** Что показать на месте плагина: работает, ждёт перезапуска хоста, выключен (сбоем или человеком) или не включён в настройках. */
 export type PluginState = 'active' | 'waiting' | 'restarting' | 'stopped' | 'disabled';
 
+/** Уровень изоляции процесса плагина для окна «Плагины Cyborg» (TR-24): число 0-3, причина словами, закрыта ли сеть. */
+export interface PluginIsolation {
+  readonly level: IsolationLevel;
+  readonly reason: string;
+  /** `open` - соединение мимо `ctx.os.net` плагин открыть может. */
+  readonly network: 'open' | 'closed';
+}
+
 export interface PluginStatus {
   readonly id: string;
   readonly state: PluginState;
+  /** Как изолирован процесс плагина; нет, если запуск об изоляции ничего не заявил или плагин не прошёл проверку запретов (`sandbox-ineffective`). */
+  readonly isolation?: PluginIsolation;
   /** Запись журнала, которая привела к состоянию. */
   readonly cause?: JournalEntry;
   /** «Включить снова» имеет смысл: причина в работе плагина, а не в манифесте или настройках. */
@@ -53,6 +64,8 @@ const LIFECYCLE: Record<JournalEntry['kind'], boolean> = {
   'group-isolated': false,
   'host-own-grouped': false,
   'third-party': false,
+  isolation: false,
+  'sandbox-ineffective': true,
   'integrity-failed': true,
   'delivery-failed': false,
   'log-summary': false,
@@ -61,7 +74,7 @@ const LIFECYCLE: Record<JournalEntry['kind'], boolean> = {
 /** Запись о жизненном цикле плагина (таблица `LIFECYCLE`). */
 export const isLifecycleEntry = (entry: JournalEntry): boolean => LIFECYCLE[entry.kind];
 
-const REVIVABLE = new Set<JournalEntry['kind']>(['switched-off', 'failed', 'skipped', 'host-abandoned', 'integrity-failed']);
+const REVIVABLE = new Set<JournalEntry['kind']>(['switched-off', 'failed', 'skipped', 'host-abandoned', 'integrity-failed', 'sandbox-ineffective']);
 
 /** Плагины, которых касается запись: свой id или перечень у записей хоста; у вызова устаревшего члена ещё и поставщик, чтобы он видел своих вызывающих. */
 export function entryPlugins(entry: JournalEntry): readonly string[] {
@@ -74,9 +87,13 @@ export function entryPlugins(entry: JournalEntry): readonly string[] {
 /** Состояние каждого плагина по журналу, в порядке первого упоминания. */
 export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[] {
   const states = new Map<string, PluginStatus>();
+  const isolations = new Map<string, PluginIsolation>();
   const revivable = (id: string, cause: JournalEntry) => REVIVABLE.has(cause.kind) || (cause.kind === 'unloaded' && cause.by === id);
   const set = (id: string, state: PluginState, cause: JournalEntry) => states.set(id, { id, state, cause, revivable: state === 'stopped' && revivable(id, cause) });
   for (const entry of journal) {
+    if (entry.kind === 'isolation') isolations.set(entry.pluginId, { level: entry.level, reason: entry.reason, network: entry.network });
+    // Заявленная изоляция не подтвердилась: прежняя запись о ней больше не верна.
+    if (entry.kind === 'sandbox-ineffective') isolations.delete(entry.pluginId);
     if (!isLifecycleEntry(entry)) continue;
     for (const id of entryPlugins(entry)) {
       switch (entry.kind) {
@@ -102,8 +119,14 @@ export function pluginStatuses(journal: readonly JournalEntry[]): PluginStatus[]
       }
     }
   }
-  return [...states.values()];
+  return [...states.values()].map((status) => {
+    const isolation = isolations.get(status.id);
+    return isolation === undefined ? status : { ...status, isolation };
+  });
 }
+
+/** Уровень изоляции словами для окна и журнала: «уровень 2 из 3 (запреты Node, сеть открыта): причина». */
+export const describeIsolation = (isolation: PluginIsolation): string => `уровень изоляции ${String(isolation.level)} из 3 (${LEVEL_TITLES[isolation.level]}): ${isolation.reason}`;
 
 function rejection(r: Rejection): string {
   switch (r.kind) {
@@ -202,6 +225,10 @@ export function describeEntry(e: JournalEntry): string {
       return `сторонний плагин не делит группу рендера: группа ${e.group} не действует, работает в своей ${e.renderGroup}`;
     case 'third-party':
       return 'сторонний плагин: код не из поставки, не проверен; на этапе 1 хост - обычный процесс Node, и плагин может обойти шлюз ctx.os';
+    case 'isolation':
+      return describeIsolation(e);
+    case 'sandbox-ineffective':
+      return `плагин не запущен: хост не доказал заявленную изоляцию (уровень ${String(e.level)}) - ${e.reasons.join('; ')}`;
     case 'integrity-failed':
       return e.mode === 'enforce' ? `плагин не запущен: происхождение пакета не подтверждено - ${e.reason}` : `происхождение пакета не подтверждено, плагин запущен (режим «предупреждать») - ${e.reason}`;
     case 'delivery-failed':
@@ -232,11 +259,13 @@ export function describeEntry(e: JournalEntry): string {
 /** Ошибка или предупреждение - то, что человеку стоит заметить в журнале. */
 export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
   switch (e.kind) {
+    // Уровень изоляции (`isolation`) - сведение, а не сбой: что он низкий у стороннего плагина, говорит его текст и запись third-party.
     case 'activated':
     case 'waiting':
     case 'disabled':
     case 'revived':
     case 'host-restart':
+    case 'isolation':
       return 'info';
     case 'unloaded':
       return e.error ? 'warn' : 'info';
@@ -256,6 +285,7 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
     case 'integrity-failed':
     case 'delivery-failed':
       return e.mode === 'enforce' ? 'error' : 'warn';
+
     case 'config':
     case 'state':
       return e.result.status === 'ok' ? 'info' : 'error';
