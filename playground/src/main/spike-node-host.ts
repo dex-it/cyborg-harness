@@ -186,7 +186,7 @@ const CLONE_CASES: readonly [string, () => unknown][] = [
   ['ArrayBuffer 1 МиБ', () => new Uint8Array(1 << 20).buffer],
   ['Error', () => new RangeError('x', { cause: 'y' })],
   ['циклическая ссылка', () => { const o: Record<string, unknown> = {}; o.self = o; return o; }],
-  ['разреженный массив, -0, NaN, undefined', () => [1, , -0, Number.NaN, undefined]],
+  ['разреженный массив, -0, NaN, undefined', () => { const a: unknown[] = []; a[0] = 1; a[2] = -0; a[3] = Number.NaN; a[4] = undefined; return a; }],
   ['экземпляр класса', () => new (class Point { x = 1; })()],
   ['RegExp', () => /a+/gi],
   ['функция', () => ({ f: () => 1 })],

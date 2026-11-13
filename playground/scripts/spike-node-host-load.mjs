@@ -3,11 +3,13 @@
 // Способы: data: URL, module.registerHooks (виртуальная схема cyborg-verified: с графом модулей из памяти), vm.Script (cjs), vm.SourceTextModule (флаг --experimental-vm-modules)
 // и контроль «с диска» - повторное открытие файла, которое под --permission должно упасть.
 // Запуск: node playground/scripts/spike-node-host-load.mjs [--json] [--node-bin=<node>]; бинарник Electron в режиме Node берётся из пакета electron.
+import { Buffer } from 'node:buffer';
 import { fork } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
+import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 

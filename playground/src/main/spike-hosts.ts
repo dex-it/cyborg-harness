@@ -16,7 +16,7 @@ export interface HostsSpikeOptions {
   readonly spawn?: () => UtilityHosts;
 }
 
-export const manifest = (id: string, extra: Record<string, unknown> = {}) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...extra });
+export const manifest = (id: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...extra });
 const PROVIDER = manifest('bench-provider', {
   provides: { 'bench.rpc': '1.0' },
   commands: {
@@ -59,8 +59,8 @@ export async function start(options: HostsSpikeOptions, manifests: Record<string
   return { kernel, hosts, journal };
 }
 
-export const round = (n: number, digits = 2) => Math.round(n * 10 ** digits) / 10 ** digits;
-export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export const round = (n: number, digits = 2): number => Math.round(n * 10 ** digits) / 10 ** digits;
+export const sleep = (ms: number): Promise<unknown> => new Promise((r) => setTimeout(r, ms));
 
 export interface MemoryRow {
   readonly layout: string;

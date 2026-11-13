@@ -1,6 +1,7 @@
 // Фьюзы Electron без пакета @electron/fuses: чтение и переключение в бинарнике (TR-07, TR-20; docs/05-verification/spike-node-host.md, electron/README.md).
 // Формат («провод» фьюзов) - sentinel `dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX`, байт версии (1), байт длины N и N байт состояния: '1' - включён, '0' - выключен, 'r' - удалён.
 // Порядок и имена - FuseV1Options из @electron/fuses 2.1.3 (dist/config.js); на Electron 45.2.3 в бинарнике 9 фьюзов, состояние по умолчанию сверено тестом playground/test/fuses.test.ts.
+import { Buffer } from 'node:buffer';
 import { closeSync, fstatSync, openSync, readFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 

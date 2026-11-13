@@ -35,7 +35,14 @@ function start(spawnHost = confined()): Promise<Kernel> {
 /** Хост как в TR-21: пустой env, чтение только каталогов ядра и плагина, без child-process, worker и аддонов. */
 const confined = () => forkHosts({ silent: true, env: {}, execArgv: ['--permission', `--allow-fs-read=${CORE_SRC}`, `--allow-fs-read=${FIXTURES}`] });
 
-type Probe = { pid: number; permission: string; env: string[]; execArgv: string[]; readOutside: string; spawn: string };
+interface Probe {
+  pid: number;
+  permission: string;
+  env: string[];
+  execArgv: string[];
+  readOutside: string;
+  spawn: string;
+}
 const downs = (k: Kernel) => k.journal.filter((e): e is Extract<JournalEntry, { kind: 'host-down' }> => e.kind === 'host-down').map((d) => [d.hostId, d.reason]);
 
 test('TR-20: хост под --permission и с пустым env: запреты действуют внутри процесса плагина, env пуст', async () => {
