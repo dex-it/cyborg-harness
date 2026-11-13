@@ -9,6 +9,7 @@ import {
   readPackageTree,
   renderIntegrity,
   signIntegrity,
+  signRevocations,
   verifyIntegrity,
   type IntegrityVerdict,
   type PackageBytes,
@@ -217,4 +218,52 @@ export async function verifyPlugin(target: string, options: VerifyOptions): Prom
   if (verdict.ok && (id === undefined || version === undefined)) problems.push({ file: 'manifest.json', message: 'нет id или version: пакет подписан, но это не пакет плагина' });
   if (verdict.ok && root !== undefined && root !== id) problems.push({ file: target, message: `корень архива ${root} не равен id плагина ${id ?? ''}` });
   return { ok: problems.length === 0, target: abs, problems, verdict, ...(id !== undefined && { id }), ...(version !== undefined && { version }), files: bytes.files.size };
+}
+
+export interface RevokeOptions {
+  /** Файл закрытого ключа, которому ядро доверяет отзыв (ключ поставки). */
+  readonly keyFile: string;
+  /** Номер списка: каждый следующий выше прежнего. */
+  readonly serial: number;
+  readonly keys: readonly string[];
+  readonly hashes: readonly string[];
+  readonly reason?: string;
+  /** Сколько дней список считается свежим; по умолчанию 30. */
+  readonly days?: number;
+  readonly out: string;
+  readonly now?: number;
+}
+
+export interface RevokeReport {
+  readonly ok: boolean;
+  readonly problems: readonly Problem[];
+  readonly out?: string;
+  readonly notAfter?: string;
+}
+
+/** Подписанный список отозванных ключей и хешей (`revocations.json` в userData приложения, TR-11). Существующий файл не затирается. */
+export async function writeRevocations(options: RevokeOptions): Promise<RevokeReport> {
+  const secret = await readKey(options.keyFile, 'закрытый ключ');
+  if (secret.problem !== undefined || secret.text === undefined) return { ok: false, problems: secret.problem === undefined ? [] : [secret.problem] };
+  if (options.keys.length + options.hashes.length === 0) return { ok: false, problems: [{ file: '.', message: 'нечего отзывать: нужен --revoke-key или --revoke-hash' }] };
+  const now = options.now ?? Date.now();
+  const notAfter = new Date(now + (options.days ?? 30) * DAY_MS);
+  const reason = options.reason ?? '';
+  try {
+    const text = signRevocations(
+      {
+        serial: options.serial,
+        keys: Object.fromEntries(options.keys.map((id) => [id, reason])),
+        hashes: Object.fromEntries(options.hashes.map((id) => [id, reason])),
+        issuedAt: new Date(now),
+        notAfter,
+      },
+      secret.text,
+    );
+    await fs.writeFile(options.out, text, { flag: 'wx' });
+    return { ok: true, problems: [], out: path.resolve(options.out), notAfter: notAfter.toISOString() };
+  } catch (error) {
+    const why = codeOf(error) === 'EEXIST' ? 'файл уже есть, не затираю: выберите другой --out' : error instanceof Error ? error.message : String(error);
+    return { ok: false, problems: [{ file: options.out, message: why }] };
+  }
 }

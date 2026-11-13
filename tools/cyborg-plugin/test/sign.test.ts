@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
+import { TrustStore } from '@cyborg-harness/core';
 import { INTEGRITY_FILE } from '@cyborg-harness/core/integrity';
 import { formatProblem } from '@cyborg-harness/core/plugin-check';
 import { buildPlugin } from '../src/build.ts';
 import { runCli } from '../src/cli.ts';
 import { packPlugin } from '../src/pack.ts';
-import { keygen, signPlugin, verifyPlugin } from '../src/sign.ts';
+import { keygen, signPlugin, verifyPlugin, writeRevocations } from '../src/sign.ts';
 import { tarGz, untarGz } from '../src/tar.ts';
 import { cleanup, fresh, plugin } from './fixture.ts';
 import { runCommand } from '../../../core/test/run-command.ts';
@@ -214,5 +215,46 @@ describe('ST-3009/1: командная строка', () => {
     const dated = await cli('sign', dir, '--key', `${prefix}.key`, '--expires', '2099-01-31');
     assert.equal(dated.code, 0, dated.err);
     assert.match(dated.out, /действует до 2099-01-31T23:59:59\.999Z/);
+  });
+});
+
+describe('ST-3009/4: revoke - подписанный список отзыва', () => {
+  it('список подписан ключом поставки и читается ядром; существующий файл не затирается; без записей и с плохим ключом - отказ', async () => {
+    const k = await keys();
+    const bad = await keys();
+    const out = path.join(fresh('rev'), 'revocations.json');
+    fs.mkdirSync(path.dirname(out));
+    const none = await writeRevocations({ keyFile: k.secret, serial: 1, keys: [], hashes: [], out });
+    assert.match(problems(none).join(), /нечего отзывать/);
+    const made = await writeRevocations({ keyFile: k.secret, serial: 1, keys: [bad.keyId], hashes: ['a'.repeat(64)], reason: 'утёк', out, now: Date.now() });
+    assert.deepEqual(problems(made), []);
+    const store = await TrustStore.open(path.join(path.dirname(out), 'trust.json'));
+    const applied = await store.applyRevocations(fs.readFileSync(out, 'utf8'), [fs.readFileSync(k.pub, 'utf8').trim()], Date.now());
+    assert.deepEqual(applied, { ok: true, added: 2, serial: 1 });
+    assert.equal(store.revoked().keys[bad.keyId], 'утёк');
+    assert.match(problems(await writeRevocations({ keyFile: k.secret, serial: 2, keys: [bad.keyId], hashes: [], out })).join(), /не затираю/);
+    assert.match(problems(await writeRevocations({ keyFile: k.pub, serial: 2, keys: [bad.keyId], hashes: [], out: out + '2' })).join(), /ed25519-secret/);
+    assert.match(problems(await writeRevocations({ keyFile: k.secret, serial: 2, keys: ['abc'], hashes: [], out: out + '3' })).join(), /keys\.abc/);
+    assert.match(problems(await writeRevocations({ keyFile: path.join(path.dirname(out), 'нет'), serial: 2, keys: [bad.keyId], hashes: [], out: out + '4' })).join(), /не прочитан/);
+  });
+
+  it('командная строка revoke: код 0, 1 и 2', async () => {
+    const k = await keys();
+    const victim = await keys();
+    const out = path.join(fresh('rev'), 'r.json');
+    fs.mkdirSync(path.dirname(out));
+    const run = async (...argv: string[]) => {
+      const lines: string[] = [];
+      const code = await runCli(argv, { out: (l) => lines.push(l), err: (l) => lines.push(l) });
+      return { code, text: lines.join('\n') };
+    };
+    assert.equal((await run('revoke', '--key', k.secret)).code, 2);
+    assert.equal((await run('revoke', '--key', k.secret, '--serial', '0', '--out', out)).code, 2);
+    assert.equal((await run('revoke', '--key', k.secret, '--serial', '1', '--out', out)).code, 1, 'ничего не отозвано');
+    const ok = await run('revoke', '--key', k.secret, '--serial', '3', '--out', out, '--revoke-key', victim.keyId, '--reason', 'утёк', '--days', '7');
+    assert.equal(ok.code, 0, ok.text);
+    assert.match(ok.text, /Список отзыва №3/);
+    assert.equal((JSON.parse(fs.readFileSync(out, 'utf8')) as { serial: number }).serial, 3);
+    assert.equal((await run('revoke', '--key', k.secret, '--serial', '4', '--out', out, '--revoke-key', victim.keyId)).code, 1, 'файл уже есть');
   });
 });
