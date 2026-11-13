@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, clipboard, dialog, Notification, powerMonitor, shell } from 'electron';
-import { RecentWorkspaces, withFileLock } from '@cyborg-harness/core';
+import { PRIVATE_FILE_MODE, RecentWorkspaces, withFileLock, writeFileAtomic } from '@cyborg-harness/core';
 import {
   alertNotification,
   baseAccelerators,
@@ -243,9 +243,7 @@ const start = () => {
   // Два процесса на пустом userData: файл появляется целиком (rename) и один раз (под замком), иначе второй прочтёт полфайла.
   withFileLock(config, () => {
     if (fs.existsSync(config)) return;
-    const tmp = `${config}.${String(process.pid)}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(DEFAULT_CONFIG, null, 2), { mode: 0o600 });
-    fs.renameSync(tmp, config);
+    writeFileAtomic(config, JSON.stringify(DEFAULT_CONFIG, null, 2), { mode: PRIVATE_FILE_MODE });
   });
   createWindow();
   bindAppMenu(plugins, menuBase);

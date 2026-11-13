@@ -1,11 +1,11 @@
 // TR-05 (docs/research/trust-and-isolation/06-work-plan.md): файлы данных приложения в userData создаются 0600, свои каталоги 0700 независимо от umask.
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { RecentWorkspaces } from '../src/recent.ts';
-import { openWorkspace } from '../src/workspace.ts';
+import { openWorkspace, workspaceKey } from '../src/workspace.ts';
 
 const posix = process.platform !== 'win32';
 const mode = async (file: string): Promise<string> => ((await stat(file)).mode & 0o777).toString(8);
@@ -70,3 +70,69 @@ test('ST-3004/6: каталог state, созданный раньше с отк
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('ST-3004/6: временный файл прошлого запуска с тем же pid и открытыми правами не переносит их в cyborg.json', { skip: !posix }, async () => {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-modes-')));
+  try {
+    await withUmask(0o022, async () => {
+      const userFile = path.join(root, 'cyborg.json');
+      await writeFile(`${userFile}.${String(process.pid)}.tmp`, 'остаток', { mode: 0o644 });
+      const opened = await openWorkspace({ file: path.join(root, 'w.cyborg.json'), userFile, stateDir: path.join(root, 'state') });
+      assert.ok(opened.ok);
+      await opened.workspace.config.write('user', 'plugin-a', 1, { a: 1 });
+      opened.workspace.close();
+      assert.equal(await mode(userFile), '600');
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('ST-3004/6: перенос старого формата пишет state 0600 в каталог 0700 при umask 000', { skip: !posix }, async () => {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-modes-')));
+  try {
+    await withUmask(0o000, async () => {
+      const file = path.join(root, 'w.cyborg.json');
+      const stateDir = path.join(root, 'state');
+      await writeFile(file, JSON.stringify({ old: true }));
+      const opened = await openWorkspace({ file, userFile: path.join(root, 'cyborg.json'), stateDir, migrate: () => ({ config: {}, state: { 'plugin-a': { b: 2 } } }) });
+      assert.ok(opened.ok);
+      opened.workspace.close();
+      assert.ok(opened.workspace.migrated.length > 0, 'перенос выполнен');
+      assert.equal(await mode(opened.workspace.stateFile), '600');
+      assert.equal(await mode(stateDir), '700');
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+for (const mask of [0o022, 0o000]) {
+  test(`ST-3004/6: копия битого cyborg.json и state 0600, копия битого файла воркспейса прав не получает, umask ${mask.toString(8).padStart(3, '0')}`, { skip: !posix }, async () => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-modes-')));
+    try {
+      await withUmask(mask, async () => {
+        const file = path.join(root, 'w.cyborg.json');
+        const userFile = path.join(root, 'user', 'cyborg.json');
+        const stateDir = path.join(root, 'state');
+        await mkdir(path.dirname(userFile), { recursive: true });
+        await mkdir(stateDir, { recursive: true });
+        const stateFile = path.join(stateDir, `${workspaceKey(file)}.json`);
+        for (const f of [file, userFile, stateFile]) await writeFile(f, '{битый', { mode: 0o644 });
+        const opened = await openWorkspace({ file, userFile, stateDir });
+        assert.ok(opened.ok);
+        opened.workspace.close();
+        const copyOf = async (f: string) => {
+          const name = (await readdir(path.dirname(f))).find((n) => n.startsWith(`${path.basename(f)}.corrupt-`));
+          assert.ok(name !== undefined, `копия ${f}: ${opened.workspace.problems.join('; ')}`);
+          return path.join(path.dirname(f), name);
+        };
+        assert.equal(await mode(await copyOf(userFile)), '600', 'копия слоя пользователя');
+        assert.equal(await mode(await copyOf(stateFile)), '600', 'копия state');
+        assert.notEqual(await mode(await copyOf(file)), '600', 'копия файла воркспейса');
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
