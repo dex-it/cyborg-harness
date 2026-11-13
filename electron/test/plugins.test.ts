@@ -674,6 +674,9 @@ test('виды: адрес у плагина с ui в манифесте и у �
   const dir = path.join(userData, 'plugins');
   fs.writeFileSync(path.join(userData, 'cyborg.json'), JSON.stringify({ plugins: { enabled: ['face', 'voice'] } }));
   plugin(dir, 'face', { commands: { 'face.hi': {}, 'face.sum': { args: ['number', 'number'] } }, optional: { 'demo.echo': '^1' }, ui: { views: { main: './ui/ui.js' } } }, 'export default {}');
+  // Модуль вида лежит на месте: загрузчик проверяет плагин вне поставки (TR-06) и о недостающем файле предупредил бы в ленте плагина.
+  fs.mkdirSync(path.join(dir, 'face', 'ui'));
+  fs.writeFileSync(path.join(dir, 'face', 'ui', 'ui.js'), 'export default {}');
   plugin(dir, 'voice', { commands: { 'voice.ping': { callers: 'plugins' } }, provides: { 'demo.echo': '1.0' } }, 'export default {}');
   const modules: Record<string, PluginModule> = {
     face: {

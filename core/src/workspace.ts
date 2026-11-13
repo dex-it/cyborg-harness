@@ -10,12 +10,35 @@ import type { UserKeybinding } from './kernel-types.ts';
 /** Формат главного конфига; документ без поля `cyborg` - старый формат приложения, его переводит хук `migrate`. */
 export const CONFIG_FORMAT = 2;
 
-/** Запись через временный файл и rename: оборванная запись не оставляет полупустой файл. */
-export function writeJsonAtomic(file: string, data: unknown, mode?: number): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
+/** Права файлов данных приложения в `userData` (TR-05): владелец читает и пишет, остальным ничего; umask их только сужает, а не задаёт. */
+export const PRIVATE_FILE_MODE = 0o600;
+export const PRIVATE_DIR_MODE = 0o700;
+
+/**
+ * Свой каталог данных приложения: создаётся с `0700`, а прежний, созданный с правами по умолчанию (`0755` при umask 022), сужается.
+ * Только для каталогов, которые заводит само приложение (`state`, `diagnostics`), - не для `userData` целиком и не для места, которое выбрал человек.
+ */
+export function ensurePrivateDir(dir: string): void {
+  fs.mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR_MODE });
+  try {
+    if ((fs.statSync(dir).mode & 0o077) !== 0) fs.chmodSync(dir, PRIVATE_DIR_MODE);
+  } catch {
+    // Чужой каталог или нет права менять: остаётся как есть, запись файла внутри всё равно идёт с закрытыми правами.
+  }
+}
+
+/**
+ * Запись через временный файл и rename: оборванная запись не оставляет полупустой файл.
+ * `mode` - права нового файла (rename подменяет файл целиком, поэтому и прежний с открытыми правами заменяется закрытым); `privateDir` - каталог файла свой, `0700`.
+ */
+export function writeJsonAtomic(file: string, data: unknown, mode?: number, privateDir = false): void {
+  if (privateDir) ensurePrivateDir(path.dirname(file));
+  else fs.mkdirSync(path.dirname(file), { recursive: true });
   // pid в имени: два экземпляра приложения не делят временный файл.
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', mode === undefined ? undefined : { mode });
+  // Временный файл прошлого запуска с тем же pid мог остаться с открытыми правами: режим при создании к существующему не применяется.
+  if (mode !== undefined) fs.chmodSync(tmp, mode);
   fs.renameSync(tmp, file);
 }
 
@@ -262,13 +285,13 @@ export interface Migrated {
 export type MigrateWorkspace = (doc: Record<string, unknown>) => Migrated | undefined;
 
 /** Слой config поверх `settings` файла; остальные поля файла (`plugins`, `cyborg`) не трогаются. */
-export function settingsLayer(file: string): { load(): Record<string, unknown> | undefined; save(settings: Record<string, unknown>): void } {
+export function settingsLayer(file: string, mode?: number): { load(): Record<string, unknown> | undefined; save(settings: Record<string, unknown>): void } {
   return {
     load: () => {
       const settings = readJson(file)?.settings;
       return isRecord(settings) ? settings : undefined;
     },
-    save: (settings) => writeJsonAtomic(file, { ...readJson(file), settings }),
+    save: (settings) => writeJsonAtomic(file, { ...readJson(file), settings }, mode),
   };
 }
 
@@ -415,7 +438,7 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
       // Сбой на любом шаге раньше оставляет прежний файл, и следующее открытие повторит перенос целиком (запись копии и state идемпотентна).
       copyFileAtomic(file, `${file}.v1.bak`);
       if (Object.keys(legacy.state).length > 0) {
-        writeJsonAtomic(stateFile, { ...readJson(stateFile), ...legacy.state });
+        writeJsonAtomic(stateFile, { ...readJson(stateFile), ...legacy.state }, PRIVATE_FILE_MODE, true);
         migrated.push(`state: ${Object.keys(legacy.state).join(', ')}`);
       }
       writeJsonAtomic(file, { ...legacy.config, cyborg: CONFIG_FORMAT });
@@ -424,7 +447,7 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
       writeJsonAtomic(file, { cyborg: CONFIG_FORMAT, plugins: {}, settings: {} });
     }
 
-    const layers: Record<Layer, ReturnType<typeof settingsLayer>> = { user: settingsLayer(options.userFile), workspace: settingsLayer(file) };
+    const layers: Record<Layer, ReturnType<typeof settingsLayer>> = { user: settingsLayer(options.userFile, PRIVATE_FILE_MODE), workspace: settingsLayer(file) };
     const written = new Map<string, string>();
     const remember = (f: string) => {
       try {
@@ -483,7 +506,7 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
       save: async (_layer, document) => {
         // Битый файл - правка человека: запись его не затирает.
         if (broken(stateFile)) throw new Error(`${stateFile}: не разобран, запись отменена`);
-        writeJsonAtomic(stateFile, document);
+        writeJsonAtomic(stateFile, document, PRIVATE_FILE_MODE, true);
       },
     };
     const config = await SectionStore.open(configStore, ['user', 'workspace']);

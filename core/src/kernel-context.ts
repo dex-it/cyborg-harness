@@ -259,6 +259,12 @@ export interface Parts {
   readonly bridge: Bridge;
 }
 
+/** `init` хосту: манифесты и привязки графа `[потребитель, [[контракт, поставщик]]]`. */
+export interface HostWire {
+  readonly manifests: readonly PluginManifest[];
+  readonly bindings: readonly (readonly [string, readonly (readonly [string, string])[]])[];
+}
+
 export interface KernelContext {
   readonly options: LoadOptions;
   readonly journal: JournalEntry[];
@@ -285,8 +291,8 @@ export interface KernelContext {
   readonly byId: ReadonlyMap<string, PluginManifest>;
   readonly graph: ContractGraph;
   readonly registry: ContractRegistry;
-  /** Что хост получает в `init`: снимок на момент запуска ядра. */
-  readonly wire: { readonly manifests: readonly PluginManifest[]; readonly bindings: readonly (readonly [string, readonly (readonly [string, string])[]])[] };
+  /** Что хост `hostId` получает в `init` (TR-03): манифесты плагинов этого хоста и тех, с кем у них есть привязки графа, и привязки его плагинов; снимок на момент запуска ядра. */
+  readonly wireOf: (hostId: string) => HostWire;
   readonly manifestOf: (pluginId: string) => PluginManifest;
   readonly hostOf: (pluginId: string) => string | undefined;
   readonly groupOf: (pluginId: string) => string | undefined;

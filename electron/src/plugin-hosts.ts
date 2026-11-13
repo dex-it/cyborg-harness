@@ -1,6 +1,7 @@
 import { utilityProcess } from 'electron';
 import type { MessagePortMain } from 'electron';
 import type { HostHandle, SpawnHost, SpawnPtyHost } from '@cyborg-harness/core';
+import { hostEnv } from './host-env.ts';
 
 export interface UtilityHosts {
   readonly spawn: SpawnHost;
@@ -8,11 +9,11 @@ export interface UtilityHosts {
   readonly pidOf: (hostId: string) => number | undefined;
 }
 
-/** Хост плагинов - utilityProcess: postMessage клонирует как structuredClone и бросает на функции, как ждёт Endpoint. */
+/** Хост плагинов - utilityProcess: postMessage клонирует как structuredClone и бросает на функции, как ждёт Endpoint. Окружение хоста явное (`hostEnv`, TR-02), а не `process.env` главного процесса. */
 export function utilityHosts(entry: string): UtilityHosts {
   const pids = new Map<string, number>();
   const spawn: SpawnHost = (hostId) => {
-    const child = utilityProcess.fork(entry, [hostId], { serviceName: `Cyborg plugins: ${hostId}`, stdio: 'inherit' });
+    const child = utilityProcess.fork(entry, [hostId], { serviceName: `Cyborg plugins: ${hostId}`, stdio: 'inherit', env: hostEnv() });
     let alive = true;
     child.once('spawn', () => {
       if (child.pid !== undefined) pids.set(hostId, child.pid);

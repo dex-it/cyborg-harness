@@ -42,6 +42,7 @@ import { createErrorReporter, type ErrorNotice } from './main-errors.ts';
 import { quietPipes } from './quiet-pipes.ts';
 import { runSpike } from './spike.ts';
 import { runHostsSpike } from './spike-hosts.ts';
+import { runTrustProbe } from './trust-probe.ts';
 import { runGatewaySpike } from './spike-gateway.ts';
 
 const APP_NAME = 'Cyborg Playground';
@@ -88,6 +89,8 @@ process.on('unhandledRejection', (reason) => errorReporter.report('unhandledReje
 const spikeOut = process.argv.find((a) => a.startsWith('--spike='))?.slice('--spike='.length);
 const hostsSpikeOut = process.argv.find((a) => a.startsWith('--spike-hosts='))?.slice('--spike-hosts='.length);
 const gatewaySpikeOut = process.argv.find((a) => a.startsWith('--spike-gateway='))?.slice('--spike-gateway='.length);
+/** `--trust-probe=<файл>`: плагин-нарушитель в хосте стороннего плагина на настоящем utilityProcess (TR-01, `npm run test:trust`). */
+const trustProbeOut = process.argv.find((a) => a.startsWith('--trust-probe='))?.slice('--trust-probe='.length);
 const recent = new RecentWorkspaces(path.join(app.getPath('userData'), 'recent.json'));
 /** `--workspace=<файл>` по SAD §3.1; без флага - последний из «Недавних», без них - `<userData>/workspace.cyborg.json`; `--no-workspace` - окно без воркспейса. */
 const workspaceArg = process.argv.find((a) => a.startsWith('--workspace='))?.slice('--workspace='.length);
@@ -98,7 +101,7 @@ const workspaceFile = process.argv.includes('--no-workspace')
     : (recent.list()[0] ?? path.join(app.getPath('userData'), 'workspace.cyborg.json'));
 /** `--view-csp=<строка>`: CSP видов вместо `VIEW_CSP` - так пилот PL-05 (`npm run spike:monaco`) проверяет наборы директив; в Cyborg её задаёт приложение (K-05). */
 const viewCsp = process.argv.find((a) => a.startsWith('--view-csp='))?.slice('--view-csp='.length);
-const spiking = spikeOut !== undefined || hostsSpikeOut !== undefined || gatewaySpikeOut !== undefined;
+const spiking = spikeOut !== undefined || hostsSpikeOut !== undefined || gatewaySpikeOut !== undefined || trustProbeOut !== undefined;
 /** `--safe-mode` (BR-CH-005): манифесты разобраны, код плагинов не запускается; смена воркспейса флаг сохраняет, снимает его только «Выйти из безопасного режима». */
 const safeMode = process.argv.includes('--safe-mode');
 /** `--user-plugins` (SAD 6.1): читать каталог плагинов пользователя; без флага грузятся только плагины из поставки. Флаг только в командной строке: файл воркспейса может лежать в репозитории. Смена воркспейса и безопасного режима его сохраняет (перезапуск берёт argv). */
@@ -217,6 +220,10 @@ const start = () => {
     void runGatewaySpike({ out: gatewaySpikeOut, hostEntry: path.join(__dirname, 'plugin-host.mjs'), benchDir: path.join(__dirname, 'bench'), trace: !process.argv.includes('--gateway-trace=off') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
     return;
   }
+  if (trustProbeOut !== undefined) {
+    void runTrustProbe({ out: trustProbeOut, hostEntry: path.join(__dirname, 'plugin-host.mjs'), probeDir: path.join(__dirname, 'trust-probe') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
+    return;
+  }
   if (hostsSpikeOut !== undefined) {
     void runHostsSpike({ out: hostsSpikeOut, hostEntry: path.join(__dirname, 'plugin-host.mjs'), benchDir: path.join(__dirname, 'bench') }).finally(() => app.exit(process.exitCode === undefined ? 0 : Number(process.exitCode)));
     return;
@@ -237,7 +244,7 @@ const start = () => {
   withFileLock(config, () => {
     if (fs.existsSync(config)) return;
     const tmp = `${config}.${String(process.pid)}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(DEFAULT_CONFIG, null, 2));
+    fs.writeFileSync(tmp, JSON.stringify(DEFAULT_CONFIG, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, config);
   });
   createWindow();

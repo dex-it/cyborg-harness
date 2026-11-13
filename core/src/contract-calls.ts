@@ -18,8 +18,26 @@ export function createContractCalls(ctx: KernelContext): ContractCalls {
   const subscriptions = new Map<number, Subscription>();
   let subscriptionSeq = 0;
 
+  // Минимум данных (TR-03): описание поставщика с его `data` уходит только в хосты, где есть потребитель контракта (requires, optional, consumes).
+  // Состав плагинов хоста задан при запуске ядра (граф не меняется), поэтому таблица строится один раз; enable, disable и перезапуск хоста её не меняют.
+  let wanted: Map<string, Set<string>> | undefined;
+  const hostWants = (hostId: string, contract: string): boolean => {
+    if (!wanted) {
+      wanted = new Map();
+      for (const id of ctx.graph.order) {
+        const hostOf = ctx.hostOf(id);
+        if (hostOf === undefined) continue;
+        const manifest = ctx.manifestOf(id);
+        const set = wanted.get(hostOf) ?? new Set<string>();
+        for (const declared of [manifest.requires, manifest.optional, manifest.consumes]) for (const name of Object.keys(declared)) set.add(name);
+        wanted.set(hostOf, set);
+      }
+    }
+    return wanted.get(hostId)?.has(contract) ?? false;
+  };
+
   const broadcast = (contract: string) => {
-    for (const host of ctx.parts.pool.hosts.values()) host.endpoint.notify('contracts', { contract, providers: descriptors.get(contract) ?? [] });
+    for (const host of ctx.parts.pool.hosts.values()) if (hostWants(host.id, contract)) host.endpoint.notify('contracts', { contract, providers: descriptors.get(contract) ?? [] });
   };
 
   function dropProvided(pluginId: string, contract: string, version: string): void {
@@ -161,7 +179,7 @@ export function createContractCalls(ctx: KernelContext): ContractCalls {
   return {
     attach,
     announce(host) {
-      for (const contract of descriptors.keys()) host.endpoint.notify('contracts', { contract, providers: descriptors.get(contract) });
+      for (const contract of descriptors.keys()) if (hostWants(host.id, contract)) host.endpoint.notify('contracts', { contract, providers: descriptors.get(contract) });
     },
     dropFor(pluginId) {
       for (const [n, s] of [...subscriptions]) if (s.consumer === pluginId || s.provider === pluginId) release(n);

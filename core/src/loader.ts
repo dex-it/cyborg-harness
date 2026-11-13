@@ -37,10 +37,22 @@ const createParts = (ctx: KernelContext): Parts => ({
   bridge: createBridge(ctx),
 });
 
+/** Хранилище секретов недоступно (нет шифрования ОС): причина словами идёт в журнал строк при запуске, а не только в отказ первому вызвавшему плагину (TR-04). */
+async function announceSecrets(ctx: KernelContext): Promise<void> {
+  const store = ctx.osEnv.secrets;
+  // Проба недоступности ничего не решает: сбой самой пробы запуск не останавливает, первый вызов плагина получит свой отказ.
+  const available = await Promise.resolve()
+    .then(() => store?.available())
+    .catch(() => true);
+  if (store === undefined || available !== false) return;
+  ctx.parts.logs.hostLine('ядро', `хранилище секретов недоступно: ${store.unavailableReason?.() ?? 'нет шифрования ОС'}`, 'warn');
+}
+
 export async function load(options: LoadOptions): Promise<Kernel> {
   const ctx = await createContext(options, createParts);
   // Запись о флаге идёт первой в журнале запуска: она нужна, чтобы человек видел включённую запись данных, даже если дальше всё сломалось.
   if (options.traceArgs === true && options.onTrace !== undefined) ctx.record({ kind: 'trace-args', limit: ctx.limits.traceArgsBytes });
+  await announceSecrets(ctx);
   await ctx.parts.activation.start();
   await ctx.parts.menus.start();
   return buildKernel(ctx);
