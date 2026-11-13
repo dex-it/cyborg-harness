@@ -9,7 +9,7 @@
 | Что | Документ |
 |---|---|
 | Обзор: что это, состав репозитория, архитектура коротко | [OVERVIEW.md](OVERVIEW.md) |
-| Ресёрч: метод, [bb](research/bb.md), [DeepSeek Harness](research/deepseek-harness.md), [сравнение](research/comparison.md), [Cyborg сегодня](research/cyborg-today.md) | [research/](research/README.md) |
+| Ресёрч: метод, [bb](research/bb.md), [DeepSeek Harness](research/deepseek-harness.md), [сравнение](research/comparison.md), [Cyborg сегодня](research/cyborg-today.md), [доверие и изоляция](research/trust-and-isolation.md) | [research/](research/README.md) |
 | Стратегия на одной странице: зачем ядро и плагины, для кого, меры успеха | [00-strategy/IDEA-01-cyborg-harness.md](00-strategy/IDEA-01-cyborg-harness.md), список идей - [00-strategy/README.md](00-strategy/README.md) |
 | BRD продукта: цели, стороны, бизнес-требования BR-CH-001…010, ограничения | [01-product/brd.md](01-product/brd.md) |
 | Сценарии: обновление, сбой плагина, разбор сбоя по трассе, обновление ядра, встраивание ядра, автор плагина, автор встроенного плагина, второй агент, установка стороннего плагина | [02-use-cases/](02-use-cases/README.md) |
