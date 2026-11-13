@@ -89,6 +89,14 @@ describe('TR-01: нарушитель в хосте стороннего пла�
     assert.equal(report.friendRead, VAULT_TOKEN);
   });
 
+  test('ST-3009/3: TR-11 на настоящем utilityProcess: файл подменён сразу после проверки - хост исполняет проверенные байты; изменённый до проверки пакет не запущен', () => {
+    assert.ok(report.verified, 'сценарий проверенных байтов выполнен');
+    assert.equal(report.verified.diskAfter, 'EVIL', 'на диске после проверки подмена');
+    assert.equal(report.verified.answer, 'GOOD', 'в хосте исполнен проверенный код');
+    assert.ok(report.verified.pid !== undefined && report.verified.pid !== report.mainPid, 'код исполнен в utilityProcess');
+    assert.deepEqual(report.verified.refused, ['modified/enforce']);
+  });
+
   for (const row of ROWS) {
     const label = row.expected === 'open' ? `ожидаемо открыто до ${row.until ?? '?'}` : 'закрыто';
     test(`${row.key === undefined ? '' : `${row.key}: `}нарушитель: ${row.what} - ${label}`, () => {

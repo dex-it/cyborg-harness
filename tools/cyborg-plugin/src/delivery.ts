@@ -1,8 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { DELIVERY_FILE, writeDelivery } from '@cyborg-harness/core/delivery';
+import { keyIdOf, publicKeyOf } from '@cyborg-harness/core/integrity';
 import type { Problem } from '@cyborg-harness/core/plugin-check';
-import { buildPlugin, type BuildOptions } from './build.ts';
+import { buildPlugin, type BuildOptions, type BundledPackage } from './build.ts';
 import { BUILD_MARKER, exists } from './fsx.ts';
 
 // P-07: поставка приложения (SAD 6.1, «Поставка плагинов приложения») - каталог собранных плагинов `<id>/` и `delivery.json` с хешами их файлов.
@@ -11,6 +12,8 @@ import { BUILD_MARKER, exists } from './fsx.ts';
 export interface DeliveryOptions extends Omit<BuildOptions, 'out' | 'main'> {
   /** Каталог поставки: нет такого пути, пустой или результат прежней сборки поставки (в нём `delivery.json`). */
   readonly out: string;
+  /** Подписать `delivery.json` ключом выпуска (TR-12, ADR-CH-0017): закрытый ключ `ed25519-secret:…` и срок подписи. Без него список не подписан, как раньше. */
+  readonly sign?: { readonly secretKey: string; readonly notAfter: Date };
 }
 
 export interface DeliveryReport {
@@ -22,6 +25,10 @@ export interface DeliveryReport {
   /** Нарушения; у нарушений плагина в `file` стоит `<id или каталог>: <файл>`. */
   readonly problems: readonly Problem[];
   readonly warnings: readonly string[];
+  /** Пакеты npm в бандле каждого плагина (TR-14): id плагина -> перечень; плагины без зависимостей входят с пустым перечнем. */
+  readonly bundles?: Readonly<Record<string, readonly BundledPackage[]>>;
+  /** Идентификатор ключа, которым подписан `delivery.json`; нет, если список не подписан. */
+  readonly keyId?: string;
 }
 
 const errorCode = (error: unknown): unknown => (error instanceof Error && 'code' in error ? error.code : undefined);
@@ -52,6 +59,7 @@ export async function buildDelivery(dirs: readonly string[], options: DeliveryOp
   const problems: Problem[] = [];
   const warnings: string[] = [];
   const ids: string[] = [];
+  const bundles: Record<string, readonly BundledPackage[]> = {};
   const seen = new Map<string, string>();
   try {
     await fs.mkdir(staging, { recursive: true });
@@ -71,18 +79,21 @@ export async function buildDelivery(dirs: readonly string[], options: DeliveryOp
       const report = await buildPlugin(home, { ...options, out: path.join(staging, id), main: 'bundle' });
       warnings.push(...report.warnings.map((w) => `${id}: ${w}`));
       problems.push(...report.problems.map((p) => ({ ...p, file: `${id}: ${p.file}` })));
-      if (report.ok) ids.push(id);
+      if (report.ok) {
+        ids.push(id);
+        bundles[id] = report.packages;
+      }
     }
     if (problems.length > 0) return fail(problems, warnings);
     // Метка сборки нужна только следующей сборке плагина в этом же `out`; в поставке её нет и хеши её не считают.
     for (const id of ids) await fs.rm(path.join(staging, id, BUILD_MARKER), { force: true });
-    await writeDelivery(staging);
+    await writeDelivery(staging, options.sign === undefined ? {} : { sign: options.sign });
     // Между проверкой и заменой `out` мог появиться чужой файл: проверка повторяется непосредственно перед заменой.
     const late = await outRefusal(out);
     if (late !== undefined) return fail([{ file: '.', message: late }], warnings);
     if (await exists(out)) await fs.rm(out, { recursive: true });
     await fs.rename(staging, out);
-    return { ok: true, out, plugins: ids.sort(), problems: [], warnings };
+    return { ok: true, out, plugins: ids.sort(), problems: [], warnings, bundles, ...(options.sign !== undefined && { keyId: keyIdOf(publicKeyOf(options.sign.secretKey)) }) };
   } finally {
     await fs.rm(staging, { recursive: true, force: true });
   }

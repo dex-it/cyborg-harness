@@ -1,11 +1,13 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { checkPlugin, CHECKED_KEYS, isTestPath, type Problem } from '@cyborg-harness/core/plugin-check';
+import { INTEGRITY_FILE, hashFiles, parseIntegrity } from '@cyborg-harness/core/integrity';
 import { inside, listFiles, realpathLoose, toPosix } from './fsx.ts';
 import { tarGz, type TarEntry } from './tar.ts';
 
 // P-06: формат поставки плагина (SAD 6.1) - каталог результата `build`; `pack` складывает его в один воспроизводимый tar.gz.
-// Подписи, хеша и источника в формате нет: это этап 2 (вопрос 8 SAD), формат архива до решения владельца предварительный.
+// Подпись (TR-10, ADR-CH-0017) ставит `sign` на каталог до упаковки: `integrity.json` едет в архив обычным файлом, а `pack` проверяет, что он не устарел.
+// Источник установки (вопрос 8 SAD) формат не задаёт.
 
 export interface PackOptions {
   /** Файл архива; по умолчанию `<id>-<версия>.tgz` в текущем каталоге. */
@@ -54,6 +56,7 @@ export async function packPlugin(dir: string, options: PackOptions = {}): Promis
       if (!all.includes(rel)) problems.push({ file: 'manifest.json', message: `${ref.field}: в поставке нет ${ref.file} (виды и схемы - готовые файлы, без исходников)` });
     }
   }
+  if (all.includes(INTEGRITY_FILE)) problems.push(...(await staleSignature(home, all)));
   if (problems.length > 0) return bad(problems, { id: manifest.id, version: manifest.version });
 
   const archive = path.resolve(options.out ?? `${manifest.id}-${manifest.version}.tgz`);
@@ -74,4 +77,18 @@ export async function packPlugin(dir: string, options: PackOptions = {}): Promis
     return bad([{ file: '.', message: error instanceof Error ? error.message : String(error) }], { id: manifest.id, version: manifest.version, files });
   }
   return { ok: true, dir: home, id: manifest.id, version: manifest.version, problems: [], archive: options.dryRun === true ? undefined : archive, files, bytes: packed.length };
+}
+
+/**
+ * Подпись, оставшаяся от прежней сборки, в архив не едет: после правки файла она описывает не то, что упаковано, и `verify` отказал бы на стороне установки.
+ * Ключа у `pack` нет, поэтому сверяются хеши и состав; верность самой подписи проверяет `verify`.
+ */
+async function staleSignature(home: string, all: readonly string[]): Promise<Problem[]> {
+  const parsed = parseIntegrity(await fs.readFile(path.join(home, INTEGRITY_FILE), 'utf8'));
+  if (typeof parsed === 'string') return [{ file: INTEGRITY_FILE, message: parsed }];
+  const files = new Map<string, Buffer>();
+  for (const rel of all) if (rel !== INTEGRITY_FILE) files.set(rel, await fs.readFile(path.join(home, rel)));
+  const actual = hashFiles(files);
+  const changed = [...new Set([...Object.keys(actual), ...Object.keys(parsed.files)])].filter((file) => actual[file] !== parsed.files[file]);
+  return changed.length === 0 ? [] : [{ file: INTEGRITY_FILE, message: `подпись устарела, не совпадают: ${changed.slice(0, 5).join(', ')}${changed.length > 5 ? ' и другие' : ''}; подпишите заново (cyborg-plugin sign)` }];
 }

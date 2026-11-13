@@ -32,6 +32,19 @@ export interface BuildReport {
   readonly warnings: readonly string[];
   /** Файлы результата, пути от `out` через `/`; пусто, если сборка отказала до записи. */
   readonly files: readonly string[];
+  /**
+   * Пакеты npm, код которых попал в бандл главной части (TR-14, У-42): имя, версия, сколько байт вклада. Пусто в режиме `source` и когда зависимостей нет.
+   * Это перечень для ревью поставки и для `npm audit`, а не проверка содержимого пакетов.
+   */
+  readonly packages: readonly BundledPackage[];
+}
+
+export interface BundledPackage {
+  readonly name: string;
+  /** Версия из `package.json` пакета; `undefined`, если файла нет или в нём нет версии. */
+  readonly version: string | undefined;
+  /** Байт этого пакета в `index.mjs` (метафайл сборщика). */
+  readonly bytes: number;
 }
 
 /** Версия сборщика: цель node - Node из Electron 45, цель вида - Chromium оттуда же (как было в build.mjs стенда). */
@@ -198,6 +211,47 @@ function bundleProblems(meta: Metafile, home: string): Problem[] {
   return found;
 }
 
+/** Имя пакета и каталог его корня по пути входа метафайла (`node_modules/@acme/dep/lib/x.js`); берётся последний `node_modules` пути. */
+function packageOfInput(input: string): { name: string; root: string } | undefined {
+  const parts = toPosix(input).split('/');
+  const at = parts.lastIndexOf('node_modules');
+  const first = parts[at + 1];
+  if (at < 0 || first === undefined) return undefined;
+  const scoped = first.startsWith('@');
+  const second = parts[at + 2];
+  if (scoped && second === undefined) return undefined;
+  const length = scoped ? 2 : 1;
+  return { name: parts.slice(at + 1, at + 1 + length).join('/'), root: parts.slice(0, at + 1 + length).join('/') };
+}
+
+/** Пакеты npm в бандле главной части по метафайлу: что именно и какой версии уйдёт в поставку вместе с плагином (TR-14). */
+async function bundledPackages(meta: readonly Metafile[], home: string): Promise<BundledPackage[]> {
+  const found = new Map<string, { name: string; root: string; bytes: number }>();
+  for (const m of meta) {
+    for (const output of Object.values(m.outputs)) {
+      for (const [input, info] of Object.entries(output.inputs)) {
+        const pkg = packageOfInput(input);
+        if (pkg === undefined) continue;
+        const key = pkg.root;
+        const have = found.get(key);
+        found.set(key, { ...pkg, bytes: (have?.bytes ?? 0) + info.bytesInOutput });
+      }
+    }
+  }
+  const list: BundledPackage[] = [];
+  for (const { name, root, bytes } of found.values()) {
+    let version: string | undefined;
+    try {
+      const raw: unknown = JSON.parse(await fs.readFile(path.resolve(home, root, 'package.json'), 'utf8'));
+      version = typeof raw === 'object' && raw !== null && 'version' in raw && typeof raw.version === 'string' ? raw.version : undefined;
+    } catch {
+      version = undefined;
+    }
+    list.push({ name, version, bytes });
+  }
+  return list.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : (a.version ?? '') < (b.version ?? '') ? -1 : 1));
+}
+
 /** Ссылки манифеста на файлы: что нужно положить в результат. Модуль `.js` без одноимённого исходника копируется, с исходником - собирается. */
 async function manifestRefs(home: string, refs: readonly string[]): Promise<{ views: string[]; copy: string[] }> {
   const views: string[] = [];
@@ -227,7 +281,7 @@ async function copyFile(home: string, out: string, rel: string): Promise<void> {
 export async function buildPlugin(dir: string, options: BuildOptions = {}): Promise<BuildReport> {
   const mode = options.main ?? 'bundle';
   const abs = path.resolve(dir);
-  const fail = (problems: Problem[], extra: Partial<BuildReport> = {}): BuildReport => ({ ok: false, dir: abs, out: path.resolve(options.out ?? path.join(abs, 'dist')), problems, warnings: [], files: [], ...extra });
+  const fail = (problems: Problem[], extra: Partial<BuildReport> = {}): BuildReport => ({ ok: false, dir: abs, out: path.resolve(options.out ?? path.join(abs, 'dist')), problems, warnings: [], files: [], packages: [], ...extra });
   let home: string;
   try {
     home = await fs.realpath(abs);
@@ -306,7 +360,7 @@ export async function buildPlugin(dir: string, options: BuildOptions = {}): Prom
     const files = await listFiles(staging);
     const refusal = await replaceOut(staging, out);
     if (refusal !== undefined) return fail([{ file: '.', message: refusal }], { dir: home, out, id });
-    return { ok: true, dir: home, out, id, problems: [], warnings: compiled.warnings, files };
+    return { ok: true, dir: home, out, id, problems: [], warnings: compiled.warnings, files, packages: await bundledPackages(compiled.meta, home) };
   } finally {
     await fs.rm(staging, { recursive: true, force: true });
   }

@@ -55,7 +55,7 @@ function describeRecord({ record }: StoredRecord): string {
       return `запуск приложения${record.app === undefined ? '' : ` ${record.app}`}`;
     case 'journal': {
       const e = record.entry;
-      const subject = e.pluginId ?? (e.kind === 'key-ignored' ? 'сочетания' : e.kind === 'trace-args' ? 'трасса' : `хост ${e.hostId}`);
+      const subject = e.pluginId ?? (e.kind === 'key-ignored' ? 'сочетания' : e.kind === 'trace-args' ? 'трасса' : e.kind === 'delivery-failed' ? 'поставка' : `хост ${e.hostId}`);
       return `журнал ${entryLevel(e)} ${subject}: ${oneLine(describeEntry(e))}`;
     }
     case 'log':

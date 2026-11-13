@@ -13,7 +13,11 @@ import {
   load,
   pluginStatuses,
   openWorkspace,
+  createProvenance,
   PLUGIN_API_VERSION,
+  TRUST_FILE,
+  TrustStore,
+  type DeliveryState,
   type Diagnostics,
   type JournalEntry,
   type Kernel,
@@ -23,17 +27,19 @@ import {
   type MenuEntry,
   type MigrateWorkspace,
   type OsEnvironment,
+  type Provenance,
   type SpawnHost,
   type SystemEvent,
   type TerminalChannel,
   type TerminalView,
   type TraceRecord,
+  type TrustMode,
   type WatchdogOptions,
   type WindowSnapshot,
   MENU_OWNER,
   WINDOW_OWNER,
 } from '@cyborg-harness/core';
-import { readDelivery, verifyDelivery } from '@cyborg-harness/core/delivery';
+import { readDelivery, verifyDelivery, verifyDeliverySignature } from '@cyborg-harness/core/delivery';
 import { errorMessage, isRecord } from './guards.ts';
 import type { DiagnosticsExport, DiagnosticsStatus, FeedLine, KeyRow, LayoutRow, PluginJournalLine, PluginOrigin, PluginRow, PluginsSnapshot, Reply, WorkspaceInfo } from './snapshot.ts';
 import { violationDetail } from './shell/csp-note.ts';
@@ -62,6 +68,8 @@ function countDirs(dir: string): number {
 
 export interface Discovered {
   readonly manifests: unknown[];
+  /** id -> разобранный JSON манифеста, как его прочёл поиск: проверка пакета сверяет с ним подписанный `manifest.json`. */
+  readonly rawManifests: Map<string, unknown>;
   /** id -> file URL точки входа (первая найденная по порядку `ENTRY_FILES`; файла нет - путь первого кандидата, причина в `problems`); при повторе id остаётся первый, второй манифест пропущен с записью в `problems`. */
   readonly entries: Map<string, string>;
   /** id -> каталог, где найден первым. */
@@ -82,7 +90,7 @@ export interface DiscoverOptions {
 
 /** Каталоги по порядку приоритета: встроенные раньше пользовательских. */
 export function discoverPlugins(dirs: readonly string[], options: DiscoverOptions = {}): Discovered {
-  const found: Discovered = { manifests: [], entries: new Map(), origins: new Map(), views: new Map(), homes: new Map(), missing: new Map(), problems: [] };
+  const found: Discovered = { manifests: [], rawManifests: new Map(), entries: new Map(), origins: new Map(), views: new Map(), homes: new Map(), missing: new Map(), problems: [] };
   for (const dir of dirs) {
     let names: string[];
     try {
@@ -127,6 +135,7 @@ export function discoverPlugins(dirs: readonly string[], options: DiscoverOption
       if (id) {
         found.origins.set(id, dir);
         found.homes.set(id, home);
+        found.rawManifests.set(id, raw);
         if (isRecord(raw) && raw.ui !== undefined) found.views.set(id, home);
       }
     }
@@ -143,15 +152,34 @@ export function readSchemaFile(home: string | undefined, file: string): unknown 
   return JSON.parse(fs.readFileSync(real, 'utf8'));
 }
 
-/** Сверка каталога поставки с `delivery.json`: строки о расхождениях; этап 1 только сообщает, подпись и отказ - этап 2. */
-async function checkDelivery(dir: string): Promise<string[]> {
+/**
+ * Сверка каталога поставки с `delivery.json` при старте: строки о расхождениях (в `problems` и в журнал) и состояние для проверки перед запуском плагина.
+ * Подпись списка проверяется, если приложение дало ключи выпуска (TR-12); без ключей список читается как раньше.
+ */
+async function checkDelivery(dir: string, releaseKeys: readonly string[], now: number): Promise<{ readonly problems: string[]; readonly state: DeliveryState }> {
   try {
     const list = await readDelivery(dir);
-    if (list === undefined) return [`в каталоге поставки ${dir} нет delivery.json: контрольные суммы не проверены`];
-    return (await verifyDelivery(dir, list)).map((p) => `контрольная сумма поставки: ${p}`);
+    if (list === undefined) return { problems: [`в каталоге поставки ${dir} нет delivery.json: контрольные суммы не проверены`], state: { manifest: undefined } };
+    const problems = (await verifyDelivery(dir, list)).map((p) => `контрольная сумма поставки: ${p}`);
+    const signature = releaseKeys.length > 0 ? verifyDeliverySignature(list, releaseKeys, now) : undefined;
+    if (signature !== undefined && !signature.ok) problems.unshift(`подпись поставки: ${signature.reason}`);
+    return { problems, state: { manifest: list, ...(signature !== undefined && { signature }) } };
   } catch (error) {
-    return [`контрольные суммы поставки ${dir}: ${errorMessage(error)}`];
+    return { problems: [`контрольные суммы поставки ${dir}: ${errorMessage(error)}`], state: { manifest: undefined } };
   }
+}
+
+/** Проверка происхождения пакетов (TR-11, ADR-CH-0017): подпись, хеши, версия, отзыв до запуска. Без этого поля пакеты не проверяются, как раньше. */
+export interface TrustOptions {
+  /** Открытые ключи издателя поставки (`ed25519:…`), зашитые в приложение: корень доверия - само приложение. Ими же проверяется подпись `delivery.json` и принимаются пакеты каталога пользователя. */
+  readonly releaseKeys?: readonly string[];
+  /** Режим по происхождению. По умолчанию поставка - `warn` (подпись не «окирпичивает» приложение, пока выпуск не обкатан), каталог пользователя - `enforce`. Режим стенда (`builtinMode: 'stand'`) поставку не проверяет вовсе. */
+  readonly modes?: { readonly bundled?: TrustMode; readonly user?: TrustMode };
+  /** Файл хранилища доверия; по умолчанию `<userData>/trust.json`. */
+  readonly file?: string;
+  /** Подписанный список отозванных ключей и хешей (`cyborg-plugin revoke`), который применяется при каждом запуске; по умолчанию `<userData>/revocations.json`, если файл есть. */
+  readonly revocations?: string;
+  readonly now?: () => number;
 }
 
 export interface StartOptions {
@@ -225,10 +253,43 @@ export interface StartOptions {
   readonly safeMode?: boolean;
   /** Соседние окна того же `userData` (`workspaceNeighbors`): `Kernel.uninstall` не стирает общие данные из-под плагина, который может работать у соседа (#154). */
   readonly neighbors?: LoadOptions['neighbors'];
+  /** Проверка происхождения пакетов перед запуском (TR-11); без поля - как раньше, без проверки. */
+  readonly trust?: TrustOptions;
 }
 
 /** Аргументы в трассе действуют, если их просили флагом и есть кому записи читать (то же условие у ядра). */
 const tracesArgs = (options: Pick<StartOptions, 'traceArgs' | 'diagnostics' | 'onTrace'>): boolean => options.traceArgs === true && (options.diagnostics !== undefined || options.onTrace !== undefined);
+
+/** Хранилище доверия, список отзыва и проверка пакетов (TR-11). Всё, что не удалось, - в `report` словами; проверка тогда отказывает сама (хранилище закрыто на запись). */
+async function openProvenance(options: StartOptions, found: Discovered, delivery: boolean, state: DeliveryState | undefined, report: (problem: string) => void): Promise<Provenance> {
+  const trust = options.trust ?? {};
+  const store = await TrustStore.open(trust.file ?? path.join(options.userData, TRUST_FILE));
+  if (store.error !== undefined) report(`${store.error}: проверка пакетов отказывает, пока файл не исправлен`);
+  const releaseKeys = trust.releaseKeys ?? [];
+  const now = trust.now ?? Date.now;
+  const revocations = trust.revocations ?? path.join(options.userData, 'revocations.json');
+  try {
+    const applied = await store.applyRevocations(fs.readFileSync(revocations, 'utf8'), releaseKeys, now());
+    if (!applied.ok && !applied.reason.includes('не новее')) report(`список отзыва ${revocations}: ${applied.reason}`);
+    if (applied.ok) options.log(`[plugins] список отзыва №${String(applied.serial)} применён, новых записей: ${String(applied.added)}`);
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) report(`список отзыва ${revocations}: ${errorMessage(error)}`);
+  }
+  if (store.revocationsStale(now())) report(`список отзыва устарел (срок вышел ${store.revocationState()?.notAfter ?? ''}): отозванное остаётся отозванным, получите свежий список`);
+  const modes = { bundled: trust.modes?.bundled ?? 'warn', user: trust.modes?.user ?? 'enforce' };
+  const bundled = new Set([...found.origins].filter(([, dir]) => dir === options.builtinDir).map(([id]) => id));
+  return createProvenance({
+    trust: store,
+    releaseKeys,
+    // Поставка стенда собрана как исходники и сумм не имеет: проверять нечего.
+    mode: (id) => (bundled.has(id) ? (delivery ? modes.bundled : 'off') : modes.user),
+    bundled: (id) => bundled.has(id),
+    homeOf: (id) => found.homes.get(id),
+    rawManifestOf: (id) => found.rawManifests.get(id),
+    delivery: state,
+    now,
+  });
+}
 
 export async function startPlugins(options: StartOptions): Promise<Kernel & { readonly workspace: string }> {
   const report = (p: string) => {
@@ -243,14 +304,28 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
   for (const m of ws.migrated) options.log(`[plugins] ${m}`);
   const userDir = path.join(options.userData, 'plugins');
   const delivery = options.builtinMode !== 'stand';
+  let provenance: Provenance | undefined;
   const found = discoverPlugins(options.userPlugins === true ? [options.builtinDir, userDir] : [options.builtinDir], { strictEntry: delivery ? [options.builtinDir] : [] });
   if (options.userPlugins !== true) {
     const skipped = countDirs(userDir);
     if (skipped > 0) options.log(`[plugins] каталог плагинов пользователя ${userDir} не читается (плагинов в нём: ${String(skipped)}); сторонний код загружается только запуском с ${USER_PLUGINS_FLAG}`);
   }
   for (const p of found.problems) report(p);
-  if (delivery && countDirs(options.builtinDir) > 0) for (const p of await checkDelivery(options.builtinDir)) report(p);
+  const journal = (entry: JournalEntry) => {
+    options.log(`[plugins] ${JSON.stringify(entry)}`);
+    options.diagnostics?.sinks.onJournal(entry);
+    options.onJournal?.(entry);
+  };
+  let deliveryState: DeliveryState | undefined;
+  if (delivery && countDirs(options.builtinDir) > 0) {
+    const checked = await checkDelivery(options.builtinDir, options.trust?.releaseKeys ?? [], (options.trust?.now ?? Date.now)());
+    deliveryState = checked.state;
+    for (const p of checked.problems) report(p);
+    // Расхождение поставки - в журнал (TR-12): окно показывает его словами; отказ запуска плагинов включает режим `enforce` у поставки.
+    if (checked.problems.length > 0) journal({ kind: 'delivery-failed', reasons: checked.problems, mode: options.trust?.modes?.bundled === 'enforce' ? 'enforce' : 'warn' });
+  }
   options.onDiscovered?.(found);
+  if (options.trust !== undefined) provenance = await openProvenance(options, found, delivery, deliveryState, report);
 
   const kernel = await load({
     apiVersion: PLUGIN_API_VERSION,
@@ -265,6 +340,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     // ADR-CH-0002 п. 6: cyborg.* - пространство поставки; чужой поставщик cyborg.agent сделал бы встроенного потребителя ambiguous.
     reservedPrefixes: ['cyborg.'],
     spawnHost: options.spawnHost,
+    ...(provenance !== undefined && { provenance }),
     entry: (m) => {
       const entry = found.entries.get(m.id);
       // Выброшенное здесь ядро записывает в журнал как отказ активации этого плагина, с текстом причины.
@@ -274,11 +350,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     config: ws.config,
     state: ws.state,
     schema: (m, file) => readSchemaFile(found.homes.get(m.id), file),
-    onJournal: (entry) => {
-      options.log(`[plugins] ${JSON.stringify(entry)}`);
-      options.diagnostics?.sinks.onJournal(entry);
-      options.onJournal?.(entry);
-    },
+    onJournal: journal,
     watchdog: options.watchdog,
     os: options.os,
     platform: options.platform,
@@ -780,7 +852,7 @@ export class PluginsService implements ViewGroups {
     }));
     const journal: PluginJournalLine[] = this.entries.map(({ at, entry }) => ({
       at,
-      subject: entry.pluginId ?? (entry.kind === 'key-ignored' ? 'сочетания' : entry.kind === 'trace-args' ? 'трасса' : `хост ${entry.hostId}`),
+      subject: entry.pluginId ?? (entry.kind === 'key-ignored' ? 'сочетания' : entry.kind === 'trace-args' ? 'трасса' : entry.kind === 'delivery-failed' ? 'поставка' : `хост ${entry.hostId}`),
       // Задетые потребители тоже: в журнале плагина видно, что его поставщик пропадал.
       plugins: [...new Set([...entryPlugins(entry), ...('affects' in entry ? entry.affects : [])])],
       text: describeEntry(entry),

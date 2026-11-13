@@ -7,7 +7,7 @@ import type { PluginContext } from '@cyborg-harness/contracts';
 import { inlineHosts, load, PLUGIN_API_VERSION } from '@cyborg-harness/core';
 import { AGENT_FILES } from '../src/agent-files.ts';
 
-// TR-25 (У-46, вопрос 15 SRS, вариант (а), FR-CH-3027): конфигурация агента закрыта для плагинов как защищённый путь; перечень - AGENT_FILES адаптера, механизм - ядро (core/test/protected-files.test.ts).
+// TR-25 (У-46, вопрос 15 SRS, вариант (а), FR-CH-3031): конфигурация агента закрыта для плагинов как защищённый путь; перечень - AGENT_FILES адаптера, механизм - ядро (core/test/protected-files.test.ts).
 // Запись закрыта везде; чтение закрыто там, где в файле бывают ключи и переменные окружения; тексты инструкций (CLAUDE.md) читать можно.
 
 const manifest = (id: string, permissions?: unknown) => ({ id, version: '1.0.0', engines: { cyborg: '^1' }, ...(permissions !== undefined && { permissions }) });
