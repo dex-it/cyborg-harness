@@ -98,6 +98,7 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-force-exit --test-timeout=240000 playground/test/real/views-real-frames.test.ts
       # Проба упакованной поставки (P-07, docs/05-verification/bundled-delivery.md): app.asar с dist/delivery, node-pty распакован; на macOS ещё и codesign ad hoc.
+      # TR-07: на упакованном приложении проверяются фьюзы (RunAsNode, NODE_OPTIONS, --inspect, OnlyLoadAppFromAsar; на macOS ASAR integrity с подменой app.asar - в CI, переменная CI).
       - name: упакованная поставка (macOS)
         if: runner.os == 'macOS'
         run: node playground/scripts/pack-delivery.mjs
