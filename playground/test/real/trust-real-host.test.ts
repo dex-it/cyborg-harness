@@ -49,7 +49,7 @@ interface Row {
 
 const ROWS: readonly Row[] = [
   { what: 'process.permission определён (запреты Node действуют)', table: '«process.permission»', open: (v) => v.permission === 'undefined', expected: 'open', until: 'TR-21' },
-  { what: 'видит токен главного процесса в process.env', table: '«Видит токен главного процесса»', open: (v) => v.envToken !== null, expected: 'open', until: 'TR-02' },
+  { what: 'видит токен главного процесса в process.env', table: '«Видит токен главного процесса»', open: (v) => v.envToken !== null, expected: 'closed' },
   { what: 'читает файл «ядра» через node:fs', table: '«Читает файл секретов ядра»', open: (v) => v.coreFile.includes('secret-of-core'), expected: 'open', until: 'TR-21' },
   { what: 'запускает процесс через child_process', table: '«Запускает процесс»', open: (v) => v.spawn === 'spawned', expected: 'open', until: 'TR-21' },
   { what: 'открывает TCP-соединение', table: '«Открывает TCP-соединение»', open: (v, r) => v.tcp === 'connected' && (r.tcpConnections ?? 0) > 0, expected: 'open', until: 'TR-22' },
