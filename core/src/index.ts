@@ -44,7 +44,7 @@ export type { WireKind } from './wire.ts';
 export type { Guard, GuardRight, MemberGuards } from './via-contract.ts';
 export type { Lookup } from './net-transport.ts';
 export type { NoticeEvents, NoticeHandle, NotifyLimits, ShowNotice } from './notices.ts';
-export type { GrantStore, OsEnvironment, SecretStore } from './os-gateway.ts';
+export type { GrantStore, OsEnvironment, ProtectedFileRule, SecretStore } from './os-gateway.ts';
 export type { PluginPermissions } from './permissions.ts';
 export type { CommandHandler, PluginContext, PluginModule, PluginSection } from './plugin.ts';
 export type { KeptPty, PtyBackend, PtyProcess, PtyWire, TerminalChannel, TerminalView } from './pty.ts';
@@ -54,6 +54,6 @@ export type { DeliveryState, Provenance, ProvenanceOptions, ProvenanceVerdict, T
 export type { PluginState, PluginStatus } from './status.ts';
 export type { Publisher, RevocationState, Revoked } from './trust-store.ts';
 export type { Boundary, ExitRecord, OperationRecord, StreamRecord, TraceRecord } from './trace-record.ts';
-export type { HostHandle, SpawnHost } from './transports.ts';
+export type { ForkHostOptions, HostHandle, SpawnHost } from './transports.ts';
 export type { ShownDialog, ShownModal, WindowLock, WindowSnapshot, WindowTitle } from './window-layer.ts';
 export type { FileLockOptions, MigrateWorkspace, Migrated, OpenResult, PluginsList, Workspace, WorkspaceOptions } from './workspace.ts';

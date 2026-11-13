@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { BrowserWindow, clipboard, dialog, Notification, safeStorage, shell } from 'electron';
-import type { NoticeEvents, NoticeHandle, OsEnvironment, SpawnPtyHost } from '@cyborg-harness/core';
+import type { NoticeEvents, NoticeHandle, OsEnvironment, ProtectedFileRule, SpawnPtyHost } from '@cyborg-harness/core';
+import { AGENT_FILES } from './agent-files.ts';
 import { nodePtyBackend } from './pty-backend.ts';
 import { secretsBackendProblem } from './secrets-backend.ts';
 import { fileSecrets, type SecretCipher } from './secrets-file.ts';
@@ -51,6 +52,8 @@ export interface ElectronOsOptions {
   readonly userData: string;
   readonly roots: () => readonly string[];
   readonly protectedPaths: readonly string[];
+  /** Файлы, закрытые плагинам по имени в любом каталоге; по умолчанию - файлы настроек агента (`AGENT_FILES`, У-46), `[]` защиту снимает. */
+  readonly protectedFiles?: readonly ProtectedFileRule[];
   readonly workspaceFile?: string;
   readonly raiseWindow: () => void;
   /** Отдельный процесс pty-хоста (`utilityPtyHost`, K-01): `node-pty` живёт в нём, ядро следит за ним сторожем. Сильнее `pty`. */
@@ -65,6 +68,7 @@ export function electronOs(options: ElectronOsOptions): OsEnvironment {
     tempDir: path.join(options.userData, 'plugin-temp'),
     appDir: options.userData,
     protectedPaths: options.protectedPaths,
+    protectedFiles: options.protectedFiles ?? AGENT_FILES,
     ...(options.workspaceFile !== undefined && { workspaceFile: options.workspaceFile }),
     roots: options.roots,
     secrets: fileSecrets(path.join(options.userData, 'secrets.json'), safeCipher),

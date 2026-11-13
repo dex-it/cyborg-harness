@@ -34,18 +34,22 @@ test('ST-3005/6: навигация: документ окна ставит во
 
 test('ST-3005/6: навигация: окно ставит обработчики - window.open отклонён, уход фрейма вида наружу отменён и записан на плагин', () => {
   let opener: ((details: { url: string }) => { action: string }) | undefined;
+  const events: string[] = [];
   let navigate: ((event: { url: string; isMainFrame: boolean; frame: WebFrameMain | null; initiator: WebFrameMain | null; preventDefault(): void }) => void) | undefined;
   const contents = {
     mainFrame: main,
     setWindowOpenHandler: (handler: typeof opener) => void (opener = handler),
     on: (name: string, handler: typeof navigate) => {
       if (name === 'will-frame-navigate') navigate = handler;
+      events.push(name);
     },
+    once: () => undefined,
   } as unknown as WebContents;
   const denied: string[] = [];
   const echoView = { origin: 'cyborg-plugin://echo', url: 'cyborg-plugin://echo/echo/?view=main' } as WebFrameMain;
   guardNavigation(contents, page, (pluginId, url) => denied.push(`${pluginId} ${url}`), { groupOf: (id) => (id === 'echo' ? 'echo' : undefined) });
   assert.ok(opener && navigate);
+  assert.ok(events.includes('did-frame-navigate'), 'плагин привязывается к кадру при фиксации его документа (TR-31)');
   assert.deepEqual(opener({ url: 'https://evil.example/' }), { action: 'deny' });
   assert.deepEqual(opener({ url: 'cyborg-plugin://echo/echo/' }), { action: 'deny' }, 'и на свой вид новое окно не открывается');
   const go = (url: string) => {

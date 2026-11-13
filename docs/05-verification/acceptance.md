@@ -74,6 +74,8 @@ describe('ST-2001/1: заявка контракта', () => { ... });
 | ST-2003/5 | окно | `playground/scripts/smoke.mjs` |
 | ST-2005/2 | окно | `playground/scripts/smoke.mjs` |
 | ST-3005/2 | окно | вызов `fromWindow` на каждом канале окна: `electron/src/channels.ts`, `playground/scripts/smoke.mjs` |
+| ST-3005/8 | окно | настоящий Electron: `npm run test:views` (`playground/test/real/views-real-frames.test.ts`), шаг CI «виды на настоящем Electron»; на подставных кадрах привязку держит `electron/test/view-frames.test.ts` |
+| ST-3005/9 | окно | настоящий Electron: `npm run test:views`, шаг CI «виды на настоящем Electron» |
 | ST-5002/1 | ручная | карта `Contracts` и контракты `cyborg.*` в роде изменения: ревью по ADR-CH-0002, п. 4 (FR-CH-5003, «Ещё нет») |
 | ST-5002/3 | ручная | новое обязательное поле JSON манифеста и карта `Contracts`: ревью по `contracts/README.md` («Что снимок не видит») и ADR-CH-0002, п. 4 |
 | ST-6001/2 | ручная | расширение экспорта только новой версией пакета: сверки перечня `exports` с версией нет (FR-CH-6004, «Ещё нет», T-06) |

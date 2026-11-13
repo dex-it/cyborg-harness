@@ -18,6 +18,8 @@ const common = { bundle: true, sourcemap: true, logLevel: 'warning' };
 await build({ ...common, entryPoints: [join(src, 'main/main.ts')], outfile: join(dist, 'main.js'), platform: 'node', format: 'cjs', target: 'node22', external: ['electron', 'node-pty'], logOverride: { 'empty-import-meta': 'silent' } });
 // ESM, а не cjs: в cjs esbuild заменил бы import(entry) плагина на require.
 await build({ ...common, stdin: { contents: "import '@cyborg-harness/electron/host-entry';", resolveDir: root }, outfile: join(dist, 'plugin-host.mjs'), platform: 'node', format: 'esm', target: 'node22' });
+// Вход хоста для процесса Node (child_process.fork, `forkHosts`): спайк TR-20 (docs/05-verification/spike-node-host.md); приложение его не использует.
+await build({ ...common, stdin: { contents: "import '@cyborg-harness/core/host-entry';", resolveDir: root }, outfile: join(dist, 'node-host.mjs'), platform: 'node', format: 'esm', target: 'node22' });
 // Процесс pty-хоста (K-01): cjs, как главный, - `node-pty` нативный и подгружается снаружи бандла.
 await build({ ...common, stdin: { contents: "import '@cyborg-harness/electron/pty-host-entry';", resolveDir: root }, outfile: join(dist, 'pty-host.js'), platform: 'node', format: 'cjs', target: 'node22', external: ['electron', 'node-pty'] });
 await build({ ...common, entryPoints: [join(src, 'main/preload.ts')], outfile: join(dist, 'preload.js'), platform: 'node', format: 'cjs', target: 'node22', external: ['electron'] });

@@ -27,7 +27,7 @@ Peer-зависимости: `@cyborg-harness/core`, `@cyborg-harness/contracts`
 Даёт пакет, поведение одно для всех приложений:
 
 - хосты плагинов процессами `utilityProcess` со сторожем ядра: `utilityHosts(entry)` и файл `host-entry`; окружение хоста явное, не `process.env` приложения (см. «Окружение хоста плагинов»);
-- среду `ctx.os` на Electron: секреты в файле под `safeStorage`, pty через `node-pty` с убийством группы, `shell`, `dialog`, `clipboard`, уведомления ОС;
+- среду `ctx.os` на Electron: файлы настроек агента (`CLAUDE.md`, `.claude/settings*.json`, `.mcp.json`, `~/.claude.json`, хуки и команды) закрыты плагинам по умолчанию (`AGENT_FILES`, `electronOs({ protectedFiles })` заменяет перечень, `[]` снимает защиту; FR-CH-3031), секреты в файле под `safeStorage`, pty через `node-pty` с убийством группы, `shell`, `dialog`, `clipboard`, уведомления ОС;
 - службу плагинов для окна: поиск плагинов в каталогах, старт ядра, снимок (`PluginsSnapshot`: плагины, раскладка видов, клавиши, лента, журнал, слой окна, документы), команды, выключение и включение;
 - схему `cyborg-plugin://<группа>/<плагин>/`: origin на группу рендера (виды плагинов группы делят процесс рендера, сторонний плагин всегда один в своей группе), плагин в пути адреса, оболочка и файлы вида, строгая CSP, защита от выхода за каталог плагина и от симлинков, запрет новых окон и ухода окна со своих адресов (`guardNavigation`);
 - каналы IPC: окно -> служба плагинов и вид -> служба плагинов (плагин всегда берётся из адреса фрейма внутри его группы, не из аргументов), терминалы видов, перетаскивание файлов между видами, тема видов;
@@ -205,6 +205,25 @@ cp node_modules/@cyborg-harness/electron/dist/shell/shell.{js,js.map,css} dist/s
 
 Хост плагинов - отдельный процесс со своим бандлом: ядро запускает `utilityProcess.fork(<файл>)`, поэтому `host-entry` собирается в файл приложения (путь передаётся в `utilityHosts`), а не импортируется из пакета на лету.
 
+## Сборка приложения: фьюзы и подпись (TR-07)
+
+Пакет `@cyborg-harness/electron` фьюзы не переключает: бинарник Electron собирает приложение-потребитель. Что приложение обязано сделать при сборке (исследование доверия: [план, TR-07](../docs/research/trust-and-isolation/06-work-plan.md#62-задачи), [5.3, п. 5](../docs/research/trust-and-isolation/05-decision.md), [вопрос 2](../docs/research/trust-and-isolation/07-open-questions.md#71-вопросы-владельцу)); проверка на упакованном приложении - `npm run pack:delivery` (`playground/scripts/pack-delivery.mjs`, шаг CI «упакованная поставка», [bundled-delivery.md](../docs/05-verification/bundled-delivery.md)).
+
+| Фьюз (`FuseV1Options`) | Значение | Зачем | Проверка на упакованном приложении |
+|---|---|---|---|
+| `RunAsNode` | **выключен** | `ELECTRON_RUN_AS_NODE` делает подписанный бинарник приложения Node-интерпретатором с личностью приложения (доступ к ключу `safeStorage` в Keychain, права TCC): любой процесс пользователя получил бы их. Приложению режим Node не нужен: хосты плагинов и pty-хост - `utilityProcess`. Решение принято по поручению владельца 2026-11-13 по рекомендации вопроса 2 и результату спайка TR-20 ([spike-node-host.md](../docs/05-verification/spike-node-host.md)); процесс Node для сторонних плагинов (TR-21) идёт отдельным бинарником Node, а не этим | под `ELECTRON_RUN_AS_NODE=1` приложение поднимается как приложение, исходный Electron становится Node |
+| `EnableNodeOptionsEnvironmentVariable` | **выключен** | `NODE_OPTIONS=--require=…` исполнил бы чужой код в главном процессе | `NODE_OPTIONS=--require` исходным Electron исполняется, упакованным приложением - нет |
+| `EnableNodeCliInspectArguments` | **выключен** (отладочную сборку можно оставить включённой) | `--inspect` и сигнал `SIGUSR1` открывали бы отладчик главного процесса | `--inspect=0` в приложении по чек-листу не открывает отладчик, в копии с включённым фьюзом открывает |
+| `EnableEmbeddedAsarIntegrityValidation` | **включён на macOS и Windows** (Linux этот фьюз Electron не поддерживает) | подмена `app.asar` в `Resources` отвергается; нужен `ElectronAsarIntegrity` в `Info.plist` (macOS) или ресурс `Integrity` (Windows) с sha256 заголовка архива (`getRawHeader` из `@electron/asar`) | macOS: подменённый `app.asar` при прежнем хеше - приложение завершается (SIGTRAP) |
+| `OnlyLoadAppFromAsar` | **включён** | без него код приложения ищется в `app.asar`, затем в каталоге `app`, и проверка целостности обходится каталогом рядом | без `app.asar` каталог `resources/app` не исполняется |
+| `EnableCookieEncryption` | **включён** | cookie на диске шифруются ключом ОС (на macOS нужна подпись приложения, как для `safeStorage`); переход односторонний | фьюз прочитан из бинарника |
+| `GrantFileProtocolExtraPrivileges` | по умолчанию (включён) | окно приложения грузится как `file://`; выключение отнимает у `file://` особые права и может сломать окно потребителя | не проверялось: решение за приложением, в playground не менялось |
+| `LoadBrowserProcessSpecificV8Snapshot`, `WasmTrapHandlers` | по умолчанию | ядру не нужны | - |
+
+Порядок сборки на macOS: упаковать `app.asar` -> переключить фьюзы (они лежат в `Electron Framework`, общем для всех помощников приложения: фьюз нельзя включить только для одного исполняемого файла) -> записать `ElectronAsarIntegrity` в `Info.plist` -> подписать пакет (подпись недействительна после любой правки, включая фьюзы) -> нотаризовать. На Linux фьюзы лежат в самом исполняемом файле `electron`. Переключать можно пакетом `@electron/fuses` (`flipFuses`) или плагином Electron Forge; проба в playground читает и пишет провод фьюзов своим кодом (`playground/scripts/fuses.mjs`, ~50 строк), чтобы не добавлять зависимость.
+
+Что это значит для запуска процесса Node вне `utilityProcess`: при выключенном `RunAsNode` `child_process.fork(…, { execPath: <бинарник Electron> })` запускает бинарник как приложение (`process.type === 'browser'`, полный Electron), а не как Node. `forkHosts({ execPath, env, execArgv })` для хоста стороннего плагина берёт отдельный бинарник Node; ограничения и цена - [spike-node-host.md](../docs/05-verification/spike-node-host.md).
+
 ## Точки расширения
 
 Места, под которые пакет оставлен открытым для следующих задач; все они не меняют поведения по умолчанию.
@@ -212,7 +231,7 @@ cp node_modules/@cyborg-harness/electron/dist/shell/shell.{js,js.map,css} dist/s
 | Задача | Точка |
 |---|---|
 | K-01, pty-хост отдельным процессом ядра | сделано: `electronOs({ ptyHost: utilityPtyHost('dist/pty-host.js').spawn })`, точка входа процесса - `@cyborg-harness/electron/pty-host-entry`; без `ptyHost` pty остаются в главном процессе (`pty` или `node-pty`). `ViewTerminals` раздаёт виду порт `MessageChannelMain`, preload принимает его сам |
-| K-04, группы рендера (origin по группе) | сделано: origin вида - группа (`viewOrigin`, `groupOfOrigin` в `view-protocol.ts`), плагин - первый сегмент пути, адрес вида в `LayoutRow.url`; плагин вида мост берёт из пути адреса кадра и только если он состоит в группе кадра (`ViewGroups`, его реализует `PluginsService`); `guardNavigation(..., groups)` и `viewChannel(groups, ...)` получают её же |
+| K-04, группы рендера (origin по группе) | сделано: origin вида - группа (`viewOrigin`, `groupOfOrigin` в `view-protocol.ts`), плагин - первый сегмент пути, адрес вида в `LayoutRow.url`; плагин вида мост берёт из привязки к кадру (TR-31: `frameTreeNodeId`, плагин записывается при фиксации документа по адресу, `pushState` его не меняет) и только если он состоит в группе кадра (`ViewGroups`, его реализует `PluginsService`); привязку ведёт `guardNavigation(..., groups)`, она же нужна `viewChannel(groups, ...)`: приложение, не вызвавшее `guardNavigation`, не получит ни одного вида |
 | K-05, строгая CSP вида | сделано: заголовок считается на ответ по флагу `ui.inlineStyles` плагина (`PluginUi.inlineStyles` -> `ViewRequest.inlineStyles` -> `viewCsp(inlineStyles)`); `VIEW_CSP` - политика без флага (`default-src 'none'`, явные источники, `base-uri 'none'`, `form-action 'none'`); `serveViews(resolve, shellDir, { csp })` с строкой или функцией `(плагин, группа, inlineStyles)` заменяет её (так пилот PL-05 задаёт наборы) |
 | K-09, K-13, каналы «главная часть - вид», отмена запросов | `viewChannel(plugins, channel, handler)`: канал, который принимает только вид плагина, плагин берётся из адреса фрейма в группе его origin; `windowChannel` - то же для документа окна. Имена каналов приложения не пересекаются с `plugins:`, `view:`, `window:`, `documents:`, `views:` |
 | K-11, переключатель безопасного режима | `restarts({ flags })` и канал `app:safe-mode` приложения; флаг и вопрос о живых pty - в пакете |

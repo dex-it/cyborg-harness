@@ -9,7 +9,7 @@ origin: derived
 
 Собрана из историй, имён тестов и исключений [acceptance.md](acceptance.md) командой `npm run check:acceptance -- --write`; руками не правится.
 
-Итог: критериев 258; тестом 213, исключением 19, целевое поведение 26.
+Итог: критериев 261; тестом 216, исключением 19, целевое поведение 26.
 
 | Критерий | Чем проверяется |
 |---|---|
@@ -132,6 +132,7 @@ origin: derived
 | ST-3001/9 | `core/test/plugin-imports.test.ts`, `core/test/third-party-check.test.ts`, `core/test/trust.test.ts`, `core/test/workspace-trust.test.ts` |
 | ST-3001/10 | целевое поведение |
 | ST-3001/11 | `core/test/host-minimum.test.ts`, `electron/test/host-env.test.ts` |
+| ST-3001/12 | `core/test/protected-files.test.ts`, `electron/test/agent-files.test.ts` |
 | ST-3002/1 | `core/test/os.test.ts` |
 | ST-3002/2 | `core/test/os-lifetime.test.ts`, `core/test/os.test.ts`, `core/test/security-gateway.test.ts` |
 | ST-3002/3 | `core/test/os.test.ts`, `core/test/workspace-trust.test.ts` |
@@ -157,6 +158,8 @@ origin: derived
 | ST-3005/5 | `core/test/semver-manifest.test.ts`, `electron/test/plugins.test.ts`, `electron/test/view-files.test.ts` |
 | ST-3005/6 | `electron/test/navigation.test.ts` |
 | ST-3005/7 | целевое поведение |
+| ST-3005/8 | `playground/test/real/views-real-frames.test.ts`; часть - окно: настоящий Electron: `npm run test:views` (`playground/test/real/views-real-frames.test.ts`), шаг CI «виды на настоящем Electron»; на подставных кадрах привязку держит `electron/test/view-frames.test.ts` |
+| ST-3005/9 | `playground/test/real/views-real-frames.test.ts`; часть - окно: настоящий Electron: `npm run test:views`, шаг CI «виды на настоящем Electron» |
 | ST-3006/1 | `playground/test/agents.test.ts` |
 | ST-3006/2 | `playground/test/agents.test.ts` |
 | ST-3006/3 | `playground/test/agents.test.ts` |

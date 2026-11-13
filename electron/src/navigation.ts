@@ -1,6 +1,6 @@
 import type { WebContents, WebFrameMain } from 'electron';
 import { groupOfOrigin, VIEW_SCHEME } from './view-protocol.ts';
-import { pluginOfFrame, type ViewGroups } from './view-frames.ts';
+import { pluginOfFrame, trackViewFrames, type ViewGroups } from './view-frames.ts';
 
 
 interface Navigation {
@@ -45,10 +45,12 @@ export function navigationPlugin(nav: Navigation, groups: ViewGroups): string | 
   return (nav.initiator && pluginOfFrame(nav.initiator, groups)) ?? (nav.frame && pluginOfFrame(nav.frame, groups)) ?? undefined;
 }
 
-/** Окно не открывает новых окон и не уходит со своих адресов (У-23): ссылки наружу - только `shell.openExternal` по праву. */
+/** Окно не открывает новых окон и не уходит со своих адресов (У-23): ссылки наружу - только `shell.openExternal` по праву. Заодно привязывает плагина к кадру вида (`trackViewFrames`). */
 export function guardNavigation(contents: WebContents, windowUrl: string, denied: (pluginId: string, url: string) => void, groups: ViewGroups): void {
   // Открывший фрейм Electron не называет, а referrer со схемы cyborg-plugin пуст: окно отклоняется без записи в журнал.
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // Плагин кадра вида фиксируется при создании его документа и дальше не читается из адреса, который вид меняет сам (TR-31).
+  trackViewFrames(contents, groups);
   contents.on('will-frame-navigate', (event) => {
     if (navigationAllowed(event, windowUrl, contents.mainFrame)) return;
     event.preventDefault();

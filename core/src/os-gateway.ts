@@ -44,6 +44,8 @@ export interface OsEnvironment {
   readonly home?: string;
   /** Закрыты всегда вместе с соседями `<файл>.*`: файл воркспейса, его замок, файл пользователя. */
   readonly protectedPaths?: readonly string[];
+  /** Файлы, закрытые плагинам по имени в любом месте дерева (настройки агента: запись, ключи: чтение и запись); см. `ProtectedFileRule`. Пусто - ядро ничего сверх `protectedPaths` не закрывает. */
+  readonly protectedFiles?: readonly ProtectedFileRule[];
   /** Каталог данных приложения: закрыт целиком, кроме своих каталогов плагина и корней проектов от приложения. */
   readonly appDir?: string;
   /** Корни проектов от приложения; к ним добавляются корни плагинов с правом `security.roots`. */
@@ -232,6 +234,49 @@ const inside = (dir: string, target: string) => target === dir || target.startsW
 /** Сосед `<файл>.<что угодно>` несёт содержимое защищённого файла: копия `.corrupt-<время>`, `.v1.bak`, временный файл атомарной записи. */
 const sibling = (file: string, target: string) => path.dirname(target) === path.dirname(file) && path.basename(target).startsWith(`${path.basename(file)}.`);
 
+/**
+ * Правило защиты файлов по имени в любом месте дерева, а не по одному пути (`OsEnvironment.protectedFiles`; TR-25, У-46). Ядро ничего не знает о том, что лежит в защищённых файлах:
+ * перечень - данные приложения (адаптер Electron даёт файлы настроек агента, `electron/src/agent-files.ts`). Рядом с файлом закрыты его соседи `<имя>.*` (копии, `.bak`).
+ */
+export interface ProtectedFileRule {
+  /** Хвост пути по сегментам; `*` внутри сегмента - любая подстрока; без учёта регистра (на macOS `readme.md` и `README.md` - один файл). */
+  readonly path: readonly string[];
+  /** `home` - путь отсчитывается от домашнего каталога; без поля хвост ищется на любой глубине. */
+  readonly under?: 'home';
+  /** Правило действует и на всё под путём (каталог целиком). */
+  readonly tree?: boolean;
+  /** `write` - читать можно, писать, удалять и создавать нельзя; `all` - закрыто и чтение. */
+  readonly closed: 'write' | 'all';
+  /** Что это за файлы, словами для отказа: «защищённый путь (<label>)». */
+  readonly label?: string;
+}
+
+interface CompiledRule {
+  readonly rule: ProtectedFileRule;
+  readonly segments: readonly RegExp[];
+  /** Последний сегмент с соседями `<имя>.*`; для `tree` не нужен. */
+  readonly last: RegExp;
+}
+
+const globRegExp = (pattern: string, tail = ''): RegExp => new RegExp(`^${pattern.toLowerCase().split('*').map((part) => part.replaceAll(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}${tail}$`);
+
+const compileRules = (rules: readonly ProtectedFileRule[]): readonly CompiledRule[] =>
+  rules.map((rule) => ({ rule, segments: rule.path.map((segment) => globRegExp(segment)), last: globRegExp(rule.path.at(-1) ?? '', '(\\..*)?') }));
+
+/** Правило, под которое попал настоящий путь `target`; `home` - настоящий домашний каталог. */
+function matchRule(rules: readonly CompiledRule[], home: string, target: string): ProtectedFileRule | undefined {
+  const parts = target.split(path.sep).filter((s) => s !== '').map((s) => s.toLowerCase());
+  const homeLength = home.split(path.sep).filter((s) => s !== '').length;
+  return rules.find(({ rule, segments, last }) => {
+    const size = segments.length;
+    const starts = rule.under === 'home' ? (inside(home, target) ? [homeLength] : []) : Array.from({ length: Math.max(0, parts.length - size + 1) }, (_, i) => i);
+    return starts.some((i) => {
+      if (!rule.tree && i + size !== parts.length) return false;
+      return segments.every((re, k) => (k === size - 1 && !rule.tree ? last : re).test(parts[i + k] ?? ''));
+    });
+  })?.rule;
+}
+
 /** Закрытые места внутри области чтения (`#zones`), настоящие пути. */
 interface Zones {
   readonly own: readonly string[];
@@ -239,6 +284,10 @@ interface Zones {
   readonly appDir?: string;
   readonly appRoots: readonly string[];
   readonly protectedPaths: readonly string[];
+  /** Настоящий домашний каталог: от него отсчитываются правила `under: 'home'`. */
+  readonly home: string;
+  /** Правила `OsEnvironment.protectedFiles`. */
+  readonly rules: readonly CompiledRule[];
 }
 
 const ZONE_TEXT = { plugin: 'каталог другого плагина', app: 'данные приложения', protected: 'защищённый путь' } as const;
@@ -249,6 +298,8 @@ function zoneOf(zones: Zones, target: string, write: boolean): 'own' | keyof typ
   if (zones.plugins.some((dir) => inside(dir, target))) return 'plugin';
   if (zones.appDir !== undefined && inside(zones.appDir, target) && !zones.appRoots.some((r) => inside(r, target))) return 'app';
   if (zones.protectedPaths.some((p) => inside(p, target) || (write && inside(target, p)) || sibling(p, target))) return 'protected';
+  const rule = matchRule(zones.rules, zones.home, target);
+  if (rule !== undefined && (write || rule.closed === 'all')) return 'protected';
   return undefined;
 }
 
@@ -465,6 +516,7 @@ export class OsGateway {
   readonly #appReal = new Map<string, string>();
   readonly #ownMade = new Map<string, Promise<void>>();
   readonly #limits: ResourceLimits;
+  readonly #rules: readonly CompiledRule[];
   // Счёт на поколение плагина: убитая при выгрузке программа закрывается позже, место уже у нового поколения.
   readonly #runs = new Map<string, { n: number }>();
 
@@ -479,6 +531,7 @@ export class OsGateway {
     ptyEvents: { readonly expired?: (expiry: PtyExpiry) => void; readonly kept?: () => void; readonly watchdog?: Partial<PtyWatchdog> | undefined } & PtyHostEvents = {},
   ) {
     this.#env = env;
+    this.#rules = compileRules(env.protectedFiles ?? []);
     this.#limits = limitsOf(env.limits);
     this.#serves = new HttpServes(ask);
     this.#grants = grants;
@@ -699,7 +752,7 @@ export class OsGateway {
     // Корни приложения нужны, только если путь и каталог приложения лежат один в другом: иначе вопрос не возникает.
     const appRoots = appDir !== undefined && (inside(appDir, target) || inside(target, appDir)) ? await Promise.all((this.#env.roots?.() ?? []).map(real)) : [];
     const protectedPaths = await Promise.all((this.#env.protectedPaths ?? []).map(real));
-    return { own: [ownData, ownTemp], plugins, ...(appDir !== undefined && { appDir }), appRoots, protectedPaths };
+    return { own: [ownData, ownTemp], plugins, ...(appDir !== undefined && { appDir }), appRoots, protectedPaths, home: await this.#realApp(this.#home()), rules: this.#rules };
   }
 
   async #checkPath(m: PluginManifest, method: string, raw: unknown, write: boolean, right: 'fs.read' | 'fs.write' | 'shell' = write ? 'fs.write' : 'fs.read', reason?: 'via-contract'): Promise<string> {
@@ -712,9 +765,14 @@ export class OsGateway {
     });
     const area = matched[0]?.dir;
     if (area === undefined) throw this.#denied(m, method, `вне области ${right}: ${given}`, reason);
-    const zone = zoneOf(await this.#zones(m, target), target, write);
+    const zones = await this.#zones(m, target);
+    // Имя, которым плагин назвал путь, проверяется тоже: ссылка `CLAUDE.md` на обычный файл после realpath обычным файлом и стала бы.
+    const zone = zoneOf(zones, target, write) ?? zoneOf({ ...zones, own: [] }, path.resolve(given), write);
     if (zone === 'own') return target;
-    if (zone !== undefined) throw this.#denied(m, method, `${ZONE_TEXT[zone]}: ${given}`, reason);
+    if (zone !== undefined) {
+      const label = zone === 'protected' ? (matchRule(zones.rules, zones.home, target) ?? matchRule(zones.rules, zones.home, path.resolve(given)))?.label : undefined;
+      throw this.#denied(m, method, `${ZONE_TEXT[zone]}${label === undefined ? '' : ` (${label})`}: ${given}`, reason);
+    }
     const gitOk = matched.some((a) => a.git);
     // От корня области, а не от каталога под маску: `*` совпадает и с самим `.git`, и путь внутри него был бы без сегмента `.git`.
     const inGit = matched.some((a) => path.relative(a.root, target).split(path.sep).includes('.git'));

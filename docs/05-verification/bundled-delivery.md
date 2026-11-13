@@ -41,6 +41,23 @@ pack-delivery: ПРОЙДЕНО
 
 Локально не запускалось (машина разработки - macOS). Проба идёт в CI на Linux под `xvfb-run` с `--no-sandbox`: шаг «упакованная поставка (Linux)» в PR #156 прошёл.
 
+## Фьюзы и сборка (TR-07)
+
+Задача TR-07 ([#248](https://github.com/dex-it/cyborg-harness/issues/248); [план](../research/trust-and-isolation/06-work-plan.md#62-задачи), [вопрос 2](../research/trust-and-isolation/07-open-questions.md#71-вопросы-владельцу)). Проба `pack-delivery.mjs` теперь собирает упакованное приложение по чек-листу `electron/README.md` (раздел «Сборка приложения: фьюзы и подпись») и проверяет его: две копии Electron - рабочая (`--inspect` включён, им пользуется сама проба) и по чек-листу (`hardened`, все фьюзы).
+
+| Проверка | Как | Контроль |
+|---|---|---|
+| Фьюзы прочитаны из бинарника | `fuses.mjs` читает провод фьюзов (sentinel, версия, состояние) и сверяет с чек-листом: `RunAsNode`, `NODE_OPTIONS`, `--inspect` выключены, `OnlyLoadAppFromAsar` и `EnableCookieEncryption` включены, на macOS `EnableEmbeddedAsarIntegrityValidation` | тест `playground/test/fuses.test.ts` сверяет разбор с настоящим Electron 45.2.3 (девять фьюзов, состояние по умолчанию) |
+| `RunAsNode` | упакованное приложение под `ELECTRON_RUN_AS_NODE=1` поднимается как приложение | исходный Electron под тем же флагом становится Node и выходит с кодом 9 (флаги приложения для Node - `bad option`) |
+| `EnableNodeOptionsEnvironmentVariable` | `NODE_OPTIONS=--require=<файл-метка>` не исполняется приложением по чек-листу | исходный Electron в режиме Node метку пишет |
+| `EnableNodeCliInspectArguments` | `--inspect=0` в приложении по чек-листу не печатает «Debugger listening» | рабочая копия с включённым фьюзом печатает |
+| ASAR integrity (macOS; в CI и по флагу `--tamper`) | `ElectronAsarIntegrity` в `Info.plist` (sha256 заголовка архива), подпись ad hoc; `app.asar` подменяется при прежнем хеше, подпись пакета пересобирается - приложение завершается (SIGTRAP) и окна не открывает | та же сборка до подмены поднимается |
+| `OnlyLoadAppFromAsar` | без `app.asar` каталог `resources/app` с кодом не исполняется | у исходного Electron каталог исполняется |
+
+Падение приложения при подмене asar намеренное; на рабочей машине macOS оно показывает системный диалог «завершило работу неожиданно», поэтому локально шаг пропускается (`--tamper` или переменная `CI` его включает; на раннерах CI диалогов нет). Проверка на Linux не делает ASAR integrity (Electron её там не поддерживает) - остаётся проверка остальных фьюзов. Результат 2026-11-13: macOS arm64 (локально; подмена asar проверена один раз вручную: SIGTRAP) и Linux arm64 (контейнер, Xvfb): проба пройдена.
+
+Остаток: `GrantFileProtocolExtraPrivileges` не менялся (окно playground - `file://`), `LoadBrowserProcessSpecificV8Snapshot` не нужен; подпись Developer ID и нотаризация в пробе не проверяются (нет сертификата).
+
 ## Не проверено
 
 - Подпись Developer ID, нотаризация и Gatekeeper: сертификата нет, а упаковка и подпись приложения Cyborg вне репозитория харнеса. Проверена только подпись ad hoc, то есть целостность пакета с asar и распакованным модулем.
