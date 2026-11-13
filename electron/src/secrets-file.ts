@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { withFileLock, type SecretStore } from '@cyborg-harness/core';
+import { PRIVATE_FILE_MODE, withFileLock, writeFileAtomic, type SecretStore } from '@cyborg-harness/core';
 
 /** Шифр ОС (в приложении - `safeStorage`); отдельно от файла, чтобы файловую часть проверял юнит-тест без Electron. */
 export interface SecretCipher {
@@ -21,11 +21,8 @@ export function fileSecrets(file: string, cipher: SecretCipher): SecretStore {
       return {};
     }
   };
-  // Временный файл и rename: оборванная запись не оставляет полупустой файл, права 0600 ставятся при создании.
   const write = (data: Record<string, string>) => {
-    const tmp = `${file}.${String(process.pid)}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
-    fs.renameSync(tmp, file);
+    writeFileAtomic(file, JSON.stringify(data, null, 2), { mode: PRIVATE_FILE_MODE });
   };
   // Файл в `userData` общий для всех экземпляров приложения (K-20): чтение, правка и запись идут под замком.
   // Шифрование (асинхронное) остаётся снаружи замка: внутри только синхронная работа с файлом.

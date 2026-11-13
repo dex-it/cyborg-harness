@@ -186,21 +186,11 @@ export async function createContext(options: LoadOptions, build: (ctx: KernelCon
   };
   const hostIds = assignHosts(manifests, options.hosts ?? {}, new Set(options.bundled ?? []), record);
   const groupIds = assignUiGroups(manifests, options.uiGroups ?? {}, new Set(options.bundled ?? []), record);
-  /**
-   * `init` хосту (TR-03): плагины хоста, поставщики, к которым привязаны их requires и optional, и потребители, привязанные к их контрактам;
-   * привязки - только тех, кто живёт в хосте: зеркало контрактов спрашивает их, чужих привязок хост не читает.
-   */
+  /** `init` хосту (TR-03): манифесты и привязки только плагинов этого хоста - зеркало контрактов читает манифест по id вызывающего, поставщики приходят описаниями в `contracts`. */
   const wireOf = (hostId: string): HostWire => {
     const own = new Set(graph.order.filter((id) => hostIds.get(id) === hostId));
-    const related = new Set(own);
-    for (const [consumer, bound] of graph.bindings) {
-      for (const provider of bound.values()) {
-        if (own.has(consumer)) related.add(provider);
-        if (own.has(provider)) related.add(consumer);
-      }
-    }
     return {
-      manifests: manifests.filter((m) => related.has(m.id)),
+      manifests: manifests.filter((m) => own.has(m.id)),
       bindings: [...graph.bindings].filter(([id]) => own.has(id)).map(([id, b]) => [id, [...b]] as const),
     };
   };

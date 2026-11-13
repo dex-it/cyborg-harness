@@ -5,41 +5,15 @@ import { SectionStore, type Layer, type LayerStore } from './config.ts';
 import { toDisposable, type Disposable } from './disposable.ts';
 import { isRecord } from './manifest.ts';
 import { readGroup } from './manifest-ui.ts';
+import { PRIVATE_FILE_MODE, writeFileAtomic } from './private-files.ts';
 import type { UserKeybinding } from './kernel-types.ts';
 
 /** Формат главного конфига; документ без поля `cyborg` - старый формат приложения, его переводит хук `migrate`. */
 export const CONFIG_FORMAT = 2;
 
-/** Права файлов данных приложения в `userData` (TR-05): владелец читает и пишет, остальным ничего; umask их только сужает, а не задаёт. */
-export const PRIVATE_FILE_MODE = 0o600;
-export const PRIVATE_DIR_MODE = 0o700;
-
-/**
- * Свой каталог данных приложения: создаётся с `0700`, а прежний, созданный с правами по умолчанию (`0755` при umask 022), сужается.
- * Только для каталогов, которые заводит само приложение (`state`, `diagnostics`), - не для `userData` целиком и не для места, которое выбрал человек.
- */
-export function ensurePrivateDir(dir: string): void {
-  fs.mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR_MODE });
-  try {
-    if ((fs.statSync(dir).mode & 0o077) !== 0) fs.chmodSync(dir, PRIVATE_DIR_MODE);
-  } catch {
-    // Чужой каталог или нет права менять: остаётся как есть, запись файла внутри всё равно идёт с закрытыми правами.
-  }
-}
-
-/**
- * Запись через временный файл и rename: оборванная запись не оставляет полупустой файл.
- * `mode` - права нового файла (rename подменяет файл целиком, поэтому и прежний с открытыми правами заменяется закрытым); `privateDir` - каталог файла свой, `0700`.
- */
+/** JSON через `writeFileAtomic`: `mode` - права нового файла, `privateDir` - каталог файла свой, `0700`. */
 export function writeJsonAtomic(file: string, data: unknown, mode?: number, privateDir = false): void {
-  if (privateDir) ensurePrivateDir(path.dirname(file));
-  else fs.mkdirSync(path.dirname(file), { recursive: true });
-  // pid в имени: два экземпляра приложения не делят временный файл.
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', mode === undefined ? undefined : { mode });
-  // Временный файл прошлого запуска с тем же pid мог остаться с открытыми правами: режим при создании к существующему не применяется.
-  if (mode !== undefined) fs.chmodSync(tmp, mode);
-  fs.renameSync(tmp, file);
+  writeFileAtomic(file, JSON.stringify(data, null, 2) + '\n', { ...(mode !== undefined && { mode }), privateDir });
 }
 
 export interface FileLockOptions {
@@ -105,8 +79,8 @@ export function readJson(file: string): Record<string, unknown> | undefined {
   return doc;
 }
 
-/** Битый файл ядро не перезаписывает, но человек может: копия `<файл>.corrupt-<время>` хранит исходник, и та же порча второй копии не даёт. */
-export function keepCorrupt(file: string, now = new Date()): string | undefined {
+/** Битый файл ядро не перезаписывает, но человек может: копия `<файл>.corrupt-<время>` хранит исходник, и та же порча второй копии не даёт; `mode` - права копии файла данных приложения. */
+export function keepCorrupt(file: string, now = new Date(), mode?: number): string | undefined {
   let bytes: Buffer;
   try {
     bytes = fs.readFileSync(file);
@@ -128,7 +102,7 @@ export function keepCorrupt(file: string, now = new Date()): string | undefined 
   for (let n = 0; n < 100; n++) {
     const name = n === 0 ? stamp : `${stamp}-${String(n)}`;
     try {
-      fs.writeFileSync(path.join(dir, name), bytes, { flag: 'wx' });
+      fs.writeFileSync(path.join(dir, name), bytes, { flag: 'wx', ...(mode !== undefined && { mode }) });
       return name;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') return undefined;
@@ -400,11 +374,11 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
     const stateFile = path.join(options.stateDir, `${key}.json`);
     const migrated: string[] = [];
     const problems: string[] = [];
-    const tolerant = (f: string): Record<string, unknown> | undefined => {
+    const tolerant = (f: string, mode?: number): Record<string, unknown> | undefined => {
       try {
         return readJson(f);
       } catch (error) {
-        const copy = keepCorrupt(f);
+        const copy = keepCorrupt(f, new Date(), mode);
         problems.push(`${f}: ${error instanceof Error ? error.message : String(error)}${copy === undefined ? '' : `; копия - ${copy}`}`);
         return undefined;
       }
@@ -502,7 +476,7 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
         }),
     };
     const stateStore: LayerStore = {
-      load: async () => (opening ? tolerant(stateFile) : readJson(stateFile)),
+      load: async () => (opening ? tolerant(stateFile, PRIVATE_FILE_MODE) : readJson(stateFile)),
       save: async (_layer, document) => {
         // Битый файл - правка человека: запись его не затирает.
         if (broken(stateFile)) throw new Error(`${stateFile}: не разобран, запись отменена`);
@@ -512,7 +486,7 @@ export async function openWorkspace(options: WorkspaceOptions): Promise<OpenResu
     const config = await SectionStore.open(configStore, ['user', 'workspace']);
     const state = await SectionStore.open(stateStore, ['workspace']);
     opening = false;
-    const user = pluginsOf(tolerant(options.userFile), options.userFile, (m) => problems.push(m));
+    const user = pluginsOf(tolerant(options.userFile, PRIVATE_FILE_MODE), options.userFile, (m) => problems.push(m));
     const own = pluginsOf(legacy ? legacy.config : doc, file, (m) => problems.push(m), false);
     const plugins: PluginsList = {
       enabled: own.enabled ?? user.enabled ?? [],

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { PRIVATE_FILE_MODE, readJson, withFileLock, writeJsonAtomic } from './workspace.ts';
+import { PRIVATE_FILE_MODE } from './private-files.ts';
+import { readJson, withFileLock, writeJsonAtomic } from './workspace.ts';
 
 /** «Недавние» (SAD §3.1) - в ядре: воркспейс выбирается до загрузки любого плагина. */
 export class RecentWorkspaces {

@@ -70,3 +70,16 @@ test('ST-3004/1: сбой самой unavailableReason запуск не ост�
   await box.os.secrets.set('token', 'секрет');
   await box.k.unload();
 });
+
+test('ST-3004/1: хранилище недоступно, а unavailableReason бросает - плагин получает Unavailable, а не исключение реализации', async () => {
+  const store: SecretStore = {
+    ...memorySecrets(false),
+    unavailableReason: () => {
+      throw new Error('нет ответа');
+    },
+  };
+  await using box = await start(store);
+  await assert.rejects(box.os.secrets.set('token', 'секрет'), { code: 'Unavailable' });
+  await assert.rejects(box.os.secrets.get('token'), { code: 'Unavailable' });
+  await box.k.unload();
+});

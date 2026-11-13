@@ -1,4 +1,4 @@
-// TR-06 (ADR-CH-0003, «Расхождения», п. 6): загрузчик зовёт проверку импортов для плагина вне поставки; найденное - предупреждение в журнале строк, загрузка идёт.
+// TR-06 (ADR-CH-0003, «Расхождения», п. 6): загрузчик зовёт проверку плагина (импорты, манифест, файлы из него) для плагина вне поставки; найденное - предупреждение в журнале строк, загрузка идёт.
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -43,7 +43,7 @@ test('ST-3001/9: плагин вне поставки с node:fs и child_proces
   try {
     const entries = { dirty: await plugin(root, 'dirty', DIRTY.replaceAll('NAME', 'dirty')) };
     const { k, lines } = await start(root, entries, ['somebody-else']);
-    const warnings = lines.filter((l) => l.startsWith('dirty [warn]') && l.includes('проверка импортов'));
+    const warnings = lines.filter((l) => l.startsWith('dirty [warn]') && l.includes('проверка плагина'));
     assert.equal(warnings.length, 2, lines.join('\n'));
     assert.ok(warnings.some((l) => l.includes('node:fs')) && warnings.some((l) => l.includes('node:child_process')), warnings.join('\n'));
     assert.ok(k.active.includes('dirty'), 'плагин не блокируется');
@@ -51,7 +51,7 @@ test('ST-3001/9: плагин вне поставки с node:fs и child_proces
     // Один раз за запуск ядра: повторная активация (disable, enable) предупреждений не множит.
     await k.disable('dirty');
     await k.enable('dirty');
-    assert.equal(lines.filter((l) => l.includes('проверка импортов')).length, 2);
+    assert.equal(lines.filter((l) => l.includes('проверка плагина')).length, 2);
     await k.unload();
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -66,11 +66,11 @@ test('ST-3001/9: плагин из поставки с теми же импор�
       clean: await plugin(root, 'clean', CLEAN.replaceAll('NAME', 'clean')),
     };
     const a = await start(root, entries, ['shipped']);
-    assert.deepEqual(a.lines.filter((l) => l.includes('проверка импортов')), [], a.lines.join('\n'));
+    assert.deepEqual(a.lines.filter((l) => l.includes('проверка плагина')), [], a.lines.join('\n'));
     assert.deepEqual([...a.k.active].sort(), ['clean', 'shipped']);
     await a.k.unload();
     const b = await start(root, entries, undefined);
-    assert.deepEqual(b.lines.filter((l) => l.includes('проверка импортов')), [], 'поставку не от чего отличить: проверки нет');
+    assert.deepEqual(b.lines.filter((l) => l.includes('проверка плагина')), [], 'поставку не от чего отличить: проверки нет');
     await b.k.unload();
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -82,7 +82,7 @@ test('ST-3001/9: нет manifest.json рядом с точкой входа - п
   try {
     const bare = await plugin(root, 'bare', DIRTY.replaceAll('NAME', 'bare'), false);
     const { k, lines } = await start(root, { bare }, ['somebody-else']);
-    assert.deepEqual(lines.filter((l) => l.includes('проверка импортов')), [], lines.join('\n'));
+    assert.deepEqual(lines.filter((l) => l.includes('проверка плагина')), [], lines.join('\n'));
     assert.ok(k.active.includes('bare'));
     await k.unload();
   } finally {
@@ -96,10 +96,50 @@ test('ST-3001/9: много нарушений - десять строк и од
     const imports = Array.from({ length: 14 }, (_, i) => `import m${String(i)} from 'node:fs';\nvoid m${String(i)};`).join('\n');
     const many = await plugin(root, 'many', `${imports}\nexport default { activate(ctx) { ctx.commands.register('many.ping', () => 1); } };\n`);
     const { k, lines } = await start(root, { many }, ['somebody-else']);
-    const audit = lines.filter((l) => l.includes('проверка импортов'));
+    const audit = lines.filter((l) => l.includes('проверка плагина'));
     assert.equal(audit.length, 11, audit.join('\n'));
     assert.match(audit[10] ?? '', /и ещё 4 замечаний/);
     assert.ok(k.active.includes('many'));
+    await k.unload();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('ST-3001/9: замечание не про импорты (нет файла схемы из манифеста) названо проверкой плагина, плагин загружается', async () => {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-audit-')));
+  try {
+    const schemaless = await plugin(root, 'schemaless', CLEAN.replaceAll('NAME', 'schemaless'));
+    await writeFile(path.join(root, 'schemaless', 'manifest.json'), JSON.stringify({ ...manifest('schemaless'), config: { version: 1, schema: './config.schema.json' } }));
+    const { k, lines } = await start(root, { schemaless }, ['somebody-else']);
+    const audit = lines.filter((l) => l.includes('проверка плагина'));
+    assert.equal(audit.length, 1, lines.join('\n'));
+    assert.match(audit[0] ?? '', /manifest\.json.*config\.schema/);
+    assert.ok(k.active.includes('schemaless'));
+    await k.unload();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('ST-3001/9: точка входа плагина вне поставки бросает - отказ только этого плагина в журнале, загрузка и соседи живы', async () => {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-audit-')));
+  try {
+    const y = await plugin(root, 'y', CLEAN.replaceAll('NAME', 'y'));
+    const k = await load({
+      apiVersion: PLUGIN_API_VERSION,
+      spawnHost: inlineHosts(async (entry) => ((await import(entry)) as { default: PluginModule }).default),
+      enabled: ['x', 'y'],
+      manifests: ['x', 'y'].map(manifest),
+      bundled: ['somebody-else'],
+      entry: (m) => {
+        if (m.id === 'x') throw new Error('нет точки входа x');
+        return y;
+      },
+    });
+    const failed = k.journal.find((e) => e.pluginId === 'x' && e.kind === 'failed');
+    assert.ok(failed?.kind === 'failed' && failed.error.includes('нет точки входа x'), JSON.stringify(k.journal));
+    assert.ok(k.active.includes('y'));
     await k.unload();
   } finally {
     await rm(root, { recursive: true, force: true });

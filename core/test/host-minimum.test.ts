@@ -176,14 +176,13 @@ test('ST-3001/11: поставщик выключен и включён снов
 
 const initIds = (rec: ReturnType<typeof recording>, hostId: string): string[][] => rec.received(hostId, 'init').map((n) => (n.p?.manifests ?? []).map((m) => m.id).sort());
 
-test('ST-3001/11: init хосту несёт манифесты плагинов хоста и тех, с кем у них привязки графа; чужих манифестов нет', async () => {
+test('ST-3001/11: init хосту несёт манифесты только плагинов хоста; манифестов связанных привязками и чужих нет', async () => {
   const { kernel, rec } = await start();
   assert.deepEqual(initIds(rec, 'hx'), [['other']], 'плагин без привязок: только свой манифест');
-  assert.deepEqual(initIds(rec, 'hc'), [['cons', 'prov']], 'потребитель: свой манифест и поставщика');
-  assert.deepEqual(initIds(rec, 'ho'), [['opt', 'prov']]);
-  // consumes граф не привязывает (поставщиков много, они приходят описаниями в contracts), поэтому манифеста поставщика хост consumes-потребителя не получает.
+  assert.deepEqual(initIds(rec, 'hc'), [['cons']], 'потребитель requires: без манифеста поставщика');
+  assert.deepEqual(initIds(rec, 'ho'), [['opt']], 'потребитель optional: без манифеста поставщика');
   assert.deepEqual(initIds(rec, 'ha'), [['all']]);
-  assert.deepEqual(initIds(rec, 'hp'), [['cons', 'opt', 'prov']], 'поставщик: свой манифест и тех, кто к нему привязан через requires и optional');
+  assert.deepEqual(initIds(rec, 'hp'), [['prov']], 'поставщик: без манифестов потребителей');
   // Привязки - только плагинов этого хоста: зеркало контрактов спрашивает о них, чужих привязок хост не получает.
   const bindings = (hostId: string) => rec.received(hostId, 'init').map((n) => (n.p?.bindings ?? []).map(([id]) => id));
   assert.deepEqual(bindings('hc'), [['cons']]);
@@ -202,7 +201,7 @@ test('ST-3001/11: init после disable, enable и перезапуска хо
   assert.equal(await kernel.run('cons.read'), TOKEN);
   const inits = initIds(rec, 'hc');
   assert.ok(inits.length >= 2, 'хост поднимался заново');
-  for (const ids of inits) assert.deepEqual(ids, ['cons', 'prov']);
+  for (const ids of inits) assert.deepEqual(ids, ['cons']);
   assert.deepEqual(initIds(rec, 'hx'), [['other']]);
   await kernel.unload();
 });
