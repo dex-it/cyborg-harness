@@ -40,6 +40,7 @@ import {
 import { migrateLegacyWorkspace } from './legacy-workspace.ts';
 import { createErrorReporter, type ErrorNotice } from './main-errors.ts';
 import { quietPipes } from './quiet-pipes.ts';
+import { trustFromArgv } from './trust-args.ts';
 import { runSpike } from './spike.ts';
 import { runHostsSpike } from './spike-hosts.ts';
 import { runGatewaySpike } from './spike-gateway.ts';
@@ -107,6 +108,13 @@ const userPlugins = process.argv.includes(USER_PLUGINS_FLAG);
 const traceArgs = process.argv.includes(TRACE_ARGS_FLAG);
 /** `--delivery` (P-07): встроенные плагины берутся из `delivery` рядом с приложением - поставки, собранной `cyborg-plugin delivery` (index.mjs и delivery.json); без флага это стенд с исходниками в `plugins` (index.ts). */
 const deliveryMode = process.argv.includes('--delivery');
+/** Проверка происхождения пакетов (TR-11, TR-12): только флаги командной строки, без них пакеты не проверяются (`trust-args.ts`). */
+const trustArgs = trustFromArgv(process.argv);
+if (trustArgs.error !== undefined) {
+  // eslint-disable-next-line no-console -- неверный флаг безопасности виден в stderr; приложение не стартует вполсилы
+  console.error(`[plugins] ${trustArgs.error}`);
+  app.exit(2);
+}
 
 let win: BrowserWindow | undefined;
 
@@ -267,6 +275,7 @@ const start = () => {
     safeMode,
     userPlugins,
     traceArgs,
+    ...(trustArgs.trust !== undefined && { trust: trustArgs.trust }),
     // Настоящие акселераторы меню окна: плагин не займёт их динамически, манифест на них проиграет с записью в журнале (PL-03).
     menuKeys: baseAccelerators(menuBase),
     neighbors: workspaceNeighbors(userData, workspaceFile),

@@ -80,11 +80,22 @@ describe('ci.yml: задания P-10', () => {
 });
 
 describe('release.yml: защита выпуска', () => {
-  it('срабатывает на тег v*; права по умолчанию пустые, у заданий - только чтение, id-token не запрашивается', () => {
+  it('срабатывает на тег v*; права по умолчанию пустые, у заданий - только чтение, id-token (происхождение выпуска) запрошен одним заданием publish', () => {
     assert.match(release, /on:\n {2}push:\n {4}tags: \['v\*'\]/);
     assert.match(release, /^permissions: \{\}$/m);
-    assert.doesNotMatch(release, /id-token:|contents: write|packages: write/);
-    assert.equal([...release.matchAll(/^ {6}contents: read$/gm)].length, 2);
+    assert.doesNotMatch(release, /contents: write|packages: write/);
+    assert.equal([...release.matchAll(/^ {6}contents: read$/gm)].length, 3);
+    assert.equal([...release.matchAll(/^\s+id-token: write$/gm)].length, 1);
+    assert.match(job(release, 'publish'), /permissions:\n {6}contents: read\n {6}id-token: write/);
+    assert.doesNotMatch(job(release, 'verify'), /id-token/);
+  });
+
+  it('ST-3009/7: происхождение выпуска: потребитель после публикации проверяет npm audit signatures, задание идёт только за publish, без токена и без права записи', () => {
+    const consumer = job(release, 'consumer-check');
+    assert.match(consumer, /needs: publish/);
+    assert.match(consumer, /if: vars\.RELEASE_PACKAGES_PUBLIC == 'true'/);
+    assert.match(consumer, /npm audit signatures/);
+    assert.doesNotMatch(consumer, /secrets\.|NODE_AUTH_TOKEN|id-token/);
   });
 
   it('публикует только задание publish: тег, переменная RELEASE_PUBLISH, окружение npm-publish, проверка master', () => {

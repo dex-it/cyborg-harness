@@ -137,7 +137,11 @@ export function publishPlan(plan: ReleasePlan, outDir: string, { publish = false
     if (pkg.tarball === undefined) throw new Error(`${pkg.name}: нет tarball, сначала \`pack\``);
     const file = path.join(outDir, pkg.tarball);
     if (!fs.existsSync(file)) throw new Error(`${pkg.name}: нет файла ${file}`);
-    const args = ['publish', file, '--tag', pkg.distTag, ...(real ? [] : ['--dry-run'])];
+    // TR-13 (ADR-CH-0017): настоящий выпуск несёт происхождение сборки (аттестация Sigstore: репозиторий, коммит, workflow); потребитель проверяет его `npm audit signatures`.
+    // Сухой прогон флага не получает: без токена облачного раннера (id-token) npm отказал бы, а репетиция идёт и на pull_request.
+    // `RELEASE_PROVENANCE=false` - выключатель на случай, когда npm не принимает аттестацию (например, пакет закрытый: access restricted, решение владельца).
+    const provenance = real && env.RELEASE_PROVENANCE !== 'false';
+    const args = ['publish', file, '--tag', pkg.distTag, ...(provenance ? ['--provenance'] : []), ...(real ? [] : ['--dry-run'])];
     commands.push(`npm ${args.join(' ')}`);
     run('npm', args, outDir);
   }
