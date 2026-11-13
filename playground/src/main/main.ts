@@ -244,7 +244,7 @@ const start = () => {
   withFileLock(config, () => {
     if (fs.existsSync(config)) return;
     const tmp = `${config}.${String(process.pid)}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(DEFAULT_CONFIG, null, 2));
+    fs.writeFileSync(tmp, JSON.stringify(DEFAULT_CONFIG, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, config);
   });
   createWindow();

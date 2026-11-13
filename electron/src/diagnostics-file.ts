@@ -7,9 +7,24 @@ export function diagnosticsDir(userData: string, workspaceFile: string): string 
   return path.join(userData, 'diagnostics', workspaceKey(workspaceFile));
 }
 
-/** Файловая система хранилища диагностики на диске: файлы с правами владельца, каталог заводится при первой записи. */
+/** Права владельца на каталоги диагностики и её файлы (TR-05): прежние, созданные с правами по умолчанию, сужаются; чужое и недоступное остаётся как есть. */
+function tighten(dir: string): void {
+  const narrow = (target: string, mode: number) => {
+    try {
+      if ((fs.statSync(target).mode & 0o077) !== 0) fs.chmodSync(target, mode);
+    } catch {
+      // Нет права менять - запись всё равно идёт в закрытый файл.
+    }
+  };
+  narrow(path.dirname(dir), 0o700);
+  narrow(dir, 0o700);
+  for (const name of fs.readdirSync(dir)) narrow(path.join(dir, name), 0o600);
+}
+
+/** Файловая система хранилища диагностики на диске: файлы `0600` и каталоги `0700` независимо от umask, каталог заводится при первой записи. */
 export function nodeDiagnosticsFs(dir: string): DiagnosticsFs {
   const at = (name: string) => path.join(dir, name);
+  let tightened = false;
   return {
     list: () => {
       try {
@@ -21,6 +36,10 @@ export function nodeDiagnosticsFs(dir: string): DiagnosticsFs {
     read: (name) => fs.readFileSync(at(name), 'utf8'),
     append: (name, text) => {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      if (!tightened) {
+        tighten(dir);
+        tightened = true;
+      }
       fs.appendFileSync(at(name), text, { mode: 0o600 });
     },
     size: (name) => fs.statSync(at(name), { throwIfNoEntry: false })?.size ?? 0,
