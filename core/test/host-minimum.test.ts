@@ -118,7 +118,7 @@ async function start(): Promise<{ kernel: Kernel; rec: ReturnType<typeof recordi
 const providerIds = (note: Sent) => (note.p?.providers ?? []).map((d) => d.pluginId);
 const leaked = (rec: ReturnType<typeof recording>, hostId: string) => rec.received(hostId, 'contracts').filter((n) => (n.p?.providers ?? []).some((d) => d.data.token === TOKEN));
 
-test('TR-03: contracts с данными поставщика идут только в хосты, где объявлен потребитель (requires, optional, consumes)', async () => {
+test('ST-3001/11: contracts с данными поставщика идут только в хосты, где объявлен потребитель (requires, optional, consumes)', async () => {
   const { kernel, rec } = await start();
   for (const host of ['hc', 'ho', 'ha']) {
     const notes = rec.received(host, 'contracts');
@@ -134,7 +134,7 @@ test('TR-03: contracts с данными поставщика идут толь�
   await kernel.unload();
 });
 
-test('TR-03: повторная отдача контракта рассылается тем же хостам, посторонний хост по-прежнему ничего не получает', async () => {
+test('ST-3001/11: повторная отдача контракта рассылается тем же хостам, посторонний хост по-прежнему ничего не получает', async () => {
   const { kernel, rec } = await start();
   const before = rec.received('hc', 'contracts').length;
   await kernel.run('prov.reprovide');
@@ -145,7 +145,7 @@ test('TR-03: повторная отдача контракта рассылае
   await kernel.unload();
 });
 
-test('TR-03: disable и enable потребителя во время работы, затем падение его хоста - зеркало контракта снова актуально, посторонний хост пуст', async () => {
+test('ST-3001/11: disable и enable потребителя во время работы, затем падение его хоста - зеркало контракта снова актуально, посторонний хост пуст', async () => {
   const { kernel, rec } = await start();
   await kernel.disable('cons');
   await kernel.enable('cons');
@@ -163,7 +163,7 @@ test('TR-03: disable и enable потребителя во время работ
   await kernel.unload();
 });
 
-test('TR-03: поставщик выключен и включён снова - потребитель из другого хоста получает его заново', async () => {
+test('ST-3001/11: поставщик выключен и включён снова - потребитель из другого хоста получает его заново', async () => {
   const { kernel, rec } = await start();
   await kernel.disable('prov');
   await kernel.enable('prov');
@@ -176,7 +176,7 @@ test('TR-03: поставщик выключен и включён снова - 
 
 const initIds = (rec: ReturnType<typeof recording>, hostId: string): string[][] => rec.received(hostId, 'init').map((n) => (n.p?.manifests ?? []).map((m) => m.id).sort());
 
-test('TR-03: init хосту несёт манифесты плагинов хоста и тех, с кем у них привязки графа; чужих манифестов нет', async () => {
+test('ST-3001/11: init хосту несёт манифесты плагинов хоста и тех, с кем у них привязки графа; чужих манифестов нет', async () => {
   const { kernel, rec } = await start();
   assert.deepEqual(initIds(rec, 'hx'), [['other']], 'плагин без привязок: только свой манифест');
   assert.deepEqual(initIds(rec, 'hc'), [['cons', 'prov']], 'потребитель: свой манифест и поставщика');
@@ -191,7 +191,7 @@ test('TR-03: init хосту несёт манифесты плагинов хо
   await kernel.unload();
 });
 
-test('TR-03: init после disable, enable и перезапуска хоста тот же, зеркало хоста работает', async () => {
+test('ST-3001/11: init после disable, enable и перезапуска хоста тот же, зеркало хоста работает', async () => {
   const { kernel, rec } = await start();
   await kernel.disable('cons');
   await kernel.enable('cons');

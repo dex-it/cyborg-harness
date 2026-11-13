@@ -1,7 +1,7 @@
 ---
 level: verification
 status: review
-date: 2026-11-12
+date: 2026-11-13
 origin: derived
 ---
 
@@ -9,7 +9,7 @@ origin: derived
 
 Собрана из историй, имён тестов и исключений [acceptance.md](acceptance.md) командой `npm run check:acceptance -- --write`; руками не правится.
 
-Итог: критериев 248; тестом 203, исключением 19, целевое поведение 26.
+Итог: критериев 250; тестом 205, исключением 19, целевое поведение 26.
 
 | Критерий | Чем проверяется |
 |---|---|
@@ -129,8 +129,9 @@ origin: derived
 | ST-3001/6 | `core/test/os.test.ts`, `core/test/stress-workspace.test.ts`, `core/test/window.test.ts` |
 | ST-3001/7 | `core/test/loader.test.ts`, `core/test/os.test.ts` |
 | ST-3001/8 | `core/test/os.test.ts`, `core/test/pty.test.ts`, `electron/test/plugins.test.ts` |
-| ST-3001/9 | `core/test/plugin-imports.test.ts`, `core/test/trust.test.ts`, `core/test/workspace-trust.test.ts` |
+| ST-3001/9 | `core/test/plugin-imports.test.ts`, `core/test/third-party-check.test.ts`, `core/test/trust.test.ts`, `core/test/workspace-trust.test.ts` |
 | ST-3001/10 | целевое поведение |
+| ST-3001/11 | `core/test/host-minimum.test.ts`, `electron/test/host-env.test.ts` |
 | ST-3002/1 | `core/test/os.test.ts` |
 | ST-3002/2 | `core/test/os-lifetime.test.ts`, `core/test/os.test.ts`, `core/test/security-gateway.test.ts` |
 | ST-3002/3 | `core/test/os.test.ts`, `core/test/workspace-trust.test.ts` |
@@ -143,11 +144,12 @@ origin: derived
 | ST-3003/3 | `core/test/command-callers.test.ts`, `playground/test/agents.test.ts` |
 | ST-3003/4 | `core/test/command-callers.test.ts` |
 | ST-3003/5 | `core/test/graph.test.ts`, `core/test/loader.test.ts`, `electron/test/plugins.test.ts` |
-| ST-3004/1 | `core/test/os.test.ts`, `electron/test/secrets-file.test.ts` |
+| ST-3004/1 | `core/test/os.test.ts`, `core/test/secrets-reason.test.ts`, `electron/test/secrets-backend.test.ts`, `electron/test/secrets-file.test.ts` |
 | ST-3004/2 | `core/test/os.test.ts`, `core/test/secrets-journal.test.ts`, `core/test/security-gateway.test.ts` |
 | ST-3004/3 | `core/test/diagnostics.test.ts`, `core/test/secrets-journal.test.ts` |
 | ST-3004/4 | `core/test/os.test.ts`, `core/test/uninstall.test.ts`, `electron/test/secrets-file.test.ts` |
 | ST-3004/5 | `core/test/plugin-log.test.ts` |
+| ST-3004/6 | `core/test/file-modes.test.ts`, `electron/test/file-modes.test.ts` |
 | ST-3005/1 | `core/test/loader.test.ts`, `core/test/workspace.test.ts`, `electron/test/plugins.test.ts` |
 | ST-3005/2 | `electron/test/view-frames.test.ts`; часть - окно: вызов `fromWindow` на каждом канале окна: `electron/src/channels.ts`, `playground/scripts/smoke.mjs` |
 | ST-3005/3 | `core/test/plugin-imports.test.ts`, `electron/test/window-layer.test.ts` |

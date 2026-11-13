@@ -36,6 +36,8 @@ async function runProbe(): Promise<TrustReport> {
 type Violator = NonNullable<TrustReport['violator']>;
 
 interface Row {
+  /** Ключ критерия приёмки, если строка закрывает его (docs/05-verification/acceptance.md). */
+  readonly key?: string;
   readonly what: string;
   /** Строка таблицы 2.8 исследования (или пояснение, если строки в таблице нет). */
   readonly table: string;
@@ -49,12 +51,12 @@ interface Row {
 
 const ROWS: readonly Row[] = [
   { what: 'process.permission определён (запреты Node действуют)', table: '«process.permission»', open: (v) => v.permission === 'undefined', expected: 'open', until: 'TR-21' },
-  { what: 'видит токен главного процесса в process.env', table: '«Видит токен главного процесса»', open: (v) => v.envToken !== null, expected: 'closed' },
+  { key: 'ST-3001/11', what: 'видит токен главного процесса в process.env', table: '«Видит токен главного процесса»', open: (v) => v.envToken !== null, expected: 'closed' },
   { what: 'читает файл «ядра» через node:fs', table: '«Читает файл секретов ядра»', open: (v) => v.coreFile.includes('secret-of-core'), expected: 'open', until: 'TR-21' },
   { what: 'запускает процесс через child_process', table: '«Запускает процесс»', open: (v) => v.spawn === 'spawned', expected: 'open', until: 'TR-21' },
   { what: 'открывает TCP-соединение', table: '«Открывает TCP-соединение»', open: (v, r) => v.tcp === 'connected' && (r.tcpConnections ?? 0) > 0, expected: 'open', until: 'TR-22' },
   { what: 'слушает «сырой» process.parentPort и получает сообщения ядра', table: '«Слушает сырой parentPort»', open: (v) => v.raw.messages > 0, expected: 'open', until: 'TR-21' },
-  { what: 'читает в сыром канале данные контракта чужого поставщика', table: '«Слушает сырой parentPort» (рассылка contracts, находка 3)', open: (v) => v.raw.contractData.includes(VAULT_TOKEN), expected: 'closed' },
+  { key: 'ST-3001/11', what: 'читает в сыром канале данные контракта чужого поставщика', table: '«Слушает сырой parentPort» (рассылка contracts, находка 3)', open: (v) => v.raw.contractData.includes(VAULT_TOKEN), expected: 'closed' },
   { what: 'пишет в parentPort от имени соседа и ядро исполняет', table: '«Пишет в parentPort от имени соседа»: ядро знает хост по каналу', open: (v) => v.forged === 'ok', expected: 'closed' },
   { what: 'видит манифесты плагинов в init (listener встаёт при загрузке плагина, после init)', table: '«видит init с чужими манифестами»: в загрузчике init приходит до кода плагина', open: (v) => v.raw.initManifests.length > 0, expected: 'closed' },
 ];
@@ -89,7 +91,7 @@ describe('TR-01: нарушитель в хосте стороннего пла�
 
   for (const row of ROWS) {
     const label = row.expected === 'open' ? `ожидаемо открыто до ${row.until ?? '?'}` : 'закрыто';
-    test(`нарушитель: ${row.what} - ${label}`, () => {
+    test(`${row.key === undefined ? '' : `${row.key}: `}нарушитель: ${row.what} - ${label}`, () => {
       assert.ok(report.violator, 'нарушитель вернул отчёт');
       const open = row.open(report.violator, report);
       assert.equal(
