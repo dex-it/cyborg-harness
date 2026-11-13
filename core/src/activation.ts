@@ -20,14 +20,20 @@ export function createActivation(ctx: KernelContext): Activation {
   const audited = new Set<string>();
 
   /**
-   * Плагин вне поставки (TR-06, ADR-CH-0003, п. 6): до первой активации `checkPlugin` читает его исходники и манифест, найденное идёт в журнал строк плагина
+   * Плагин вне поставки (TR-06, ADR-CH-0003, п. 6): до первой активации `checkPlugin` читает его исходники и манифест (импорты, манифест, файлы из него, точку входа), найденное идёт в журнал строк плагина
    * уровнем `warn`. Плагин при этом не блокируется: проверка - дисциплина автора, а не защита (код может обойти её динамикой). Один раз за запуск ядра.
    * Каталог плагина берётся из точки входа (`index.mjs|js|ts` рядом с `manifest.json`); нет файла-точки или `manifest.json` рядом - проверять нечего.
    */
   async function auditImports(m: PluginManifest): Promise<void> {
     if (options.bundled === undefined || options.bundled.includes(m.id) || audited.has(m.id)) return;
     audited.add(m.id);
-    const entry = options.entry?.(m);
+    let entry: string | undefined;
+    try {
+      entry = options.entry?.(m);
+    } catch {
+      // Сбой точки входа - отказ активации этого плагина: его записывает `failed` ниже, а не обрыв всей загрузки отсюда.
+      return;
+    }
     if (typeof entry !== 'string' || !entry.startsWith('file:')) return;
     let file: string;
     try {
@@ -39,10 +45,10 @@ export function createActivation(ctx: KernelContext): Activation {
     if (!ENTRY_FILES.includes(path.basename(file)) || !fs.existsSync(path.join(dir, 'manifest.json'))) return;
     try {
       const { problems } = await checkPlugin(dir, { apiVersion: options.apiVersion });
-      for (const problem of problems.slice(0, AUDIT_LINES)) ctx.parts.logs.pluginLine(m.id, `проверка импортов (плагин вне поставки, загрузка не останавливается): ${formatProblem(problem)}`, 'warn');
-      if (problems.length > AUDIT_LINES) ctx.parts.logs.pluginLine(m.id, `проверка импортов: и ещё ${String(problems.length - AUDIT_LINES)} замечаний, полный список - \`cyborg-plugin check\``, 'warn');
+      for (const problem of problems.slice(0, AUDIT_LINES)) ctx.parts.logs.pluginLine(m.id, `проверка плагина (плагин вне поставки, загрузка не останавливается): ${formatProblem(problem)}`, 'warn');
+      if (problems.length > AUDIT_LINES) ctx.parts.logs.pluginLine(m.id, `проверка плагина: и ещё ${String(problems.length - AUDIT_LINES)} замечаний, полный список - \`cyborg-plugin check\``, 'warn');
     } catch (error) {
-      ctx.parts.logs.pluginLine(m.id, `проверка импортов не выполнилась: ${errorMessage(error)}`, 'warn');
+      ctx.parts.logs.pluginLine(m.id, `проверка плагина не выполнилась: ${errorMessage(error)}`, 'warn');
     }
   }
 
