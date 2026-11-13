@@ -1,4 +1,4 @@
-import { gzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 
 // Минимальный писатель tar (ustar) для pack: без зависимостей и воспроизводимый - одни и те же файлы дают один и тот же архив
 // (время 0, владелец 0, права 0644, порядок задаёт вызывающий). Читает такой архив любой tar.
@@ -62,4 +62,70 @@ export function tarGz(entries: readonly TarEntry[]): Buffer {
   // Байт ОС заголовка gzip (RFC 1952) zlib берёт из платформы сборки: 3 на Linux, 19 на macOS, 10 на Windows. 255 - «неизвестно» везде.
   gz[9] = 255;
   return gz;
+}
+
+export interface TarContents {
+  /** Обычные файлы: путь внутри архива -> содержимое. */
+  readonly files: Map<string, Buffer>;
+  /** Символические ссылки: путь -> цель. */
+  readonly links: Map<string, string>;
+}
+
+const MAX_UNPACKED = 512 * 1024 * 1024;
+
+const text = (block: Buffer, offset: number, length: number): string => {
+  const raw = block.subarray(offset, offset + length);
+  const end = raw.indexOf(0);
+  return raw.subarray(0, end < 0 ? raw.length : end).toString('utf8');
+};
+
+/** Расширенный заголовок pax: `<длина> <ключ>=<значение>\n`; нужен только `path`. */
+function paxPath(data: Buffer): string | undefined {
+  let found: string | undefined;
+  for (let i = 0; i < data.length; ) {
+    const space = data.indexOf(0x20, i);
+    if (space < 0) break;
+    const length = Number(data.subarray(i, space).toString('ascii'));
+    if (!Number.isInteger(length) || length <= space - i) break;
+    const record = data.subarray(space + 1, i + length - 1).toString('utf8');
+    if (record.startsWith('path=')) found = record.slice('path='.length);
+    i += length;
+  }
+  return found;
+}
+
+/**
+ * Читает tar.gz в память, ничего не распаковывая на диск: проверка подписи работает над теми же байтами, которые потом лягут в каталог плагина.
+ * Принимаются обычные файлы, каталоги и ссылки; устройства и прочее - ошибка. Путь с `..` или абсолютный - ошибка.
+ */
+export function untarGz(archive: Uint8Array): TarContents {
+  const tar = gunzipSync(archive, { maxOutputLength: MAX_UNPACKED });
+  const files = new Map<string, Buffer>();
+  const links = new Map<string, string>();
+  let nextPath: string | undefined;
+  for (let at = 0; at + BLOCK <= tar.length; ) {
+    const block = tar.subarray(at, at + BLOCK);
+    if (block.every((byte) => byte === 0)) break;
+    const size = parseInt(text(block, 124, 12).trim() || '0', 8);
+    if (!Number.isInteger(size) || size < 0) throw new Error('tar: размер записи не прочитан');
+    const type = String.fromCharCode(block[156] ?? 0x30);
+    const prefix = text(block, 345, 155);
+    const stored = text(block, 0, 100);
+    const body = tar.subarray(at + BLOCK, at + BLOCK + size);
+    if (body.length !== size) throw new Error('tar: архив оборван');
+    at += BLOCK + Math.ceil(size / BLOCK) * BLOCK;
+    if (type === 'x') {
+      nextPath = paxPath(body);
+      continue;
+    }
+    if (type === 'g') continue;
+    const name = (nextPath ?? (prefix === '' ? stored : `${prefix}/${stored}`)).replace(/\/$/, '');
+    nextPath = undefined;
+    if (type === '5') continue;
+    if (name === '' || name.startsWith('/') || name.split('/').some((part) => part === '..' || part === '' || part === '.')) throw new Error(`tar: недопустимый путь ${JSON.stringify(name)}`);
+    if (type === '0' || type === '\0') files.set(name, Buffer.from(body));
+    else if (type === '2') links.set(name, text(block, 157, 100));
+    else throw new Error(`tar: ${name}: запись типа «${type}» в пакет плагина не входит`);
+  }
+  return { files, links };
 }

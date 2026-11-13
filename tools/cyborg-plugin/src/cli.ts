@@ -3,6 +3,7 @@ import { checkPlugin, formatProblem, type CheckOptions } from '@cyborg-harness/c
 import { buildPlugin } from './build.ts';
 import { buildDelivery } from './delivery.ts';
 import { packPlugin } from './pack.ts';
+import { DEFAULT_DAYS, keygen, signPlugin, verifyPlugin } from './sign.ts';
 
 /** Куда команда пишет: итог и права - в `out`, нарушения - в `err`. */
 export interface CliIo {
@@ -16,6 +17,9 @@ const USAGE = [
   '  cyborg-plugin build [каталог] [--out <каталог>] [--api-version <x.y.z>] [--declarations <файл>]... [--declarations-package <имя>]...',
   '  cyborg-plugin delivery <каталог плагина>... --out <каталог> [--api-version <x.y.z>] [--declarations <файл>]... [--declarations-package <имя>]...',
   '  cyborg-plugin pack [каталог] [--out <файл>] [--api-version <x.y.z>] [--dry-run]',
+  '  cyborg-plugin keygen --out <префикс>',
+  '  cyborg-plugin sign [каталог] --key <файл закрытого ключа> [--days <N> | --expires <дата>]',
+  '  cyborg-plugin verify <каталог или архив .tgz> --key <файл открытого ключа или ed25519:...>...',
   '  каталог                      check и build: каталог плагина с manifest.json (по умолчанию текущий); pack: собранный каталог (по умолчанию ./dist)',
   '  delivery                     поставка приложения: каждый плагин собирается как build и ложится в <out>/<id>, рядом delivery.json с хешами файлов (P-07); --out обязателен',
   '  --source                     check: главная часть грузится как есть, без сборки, - npm-пакеты в ней нарушение (по умолчанию её соберёт build, и пакеты допустимы)',
@@ -24,18 +28,26 @@ const USAGE = [
   '  --api-version <x.y.z>        версия API, под которую проверяется engines.cyborg (по умолчанию версия установленного ядра)',
   '  --declarations <файл>        файл пакета объявлений рядом с плагином: из него разрешён только import type, и в нём нет кода',
   '  --declarations-package <имя> пакет объявлений по имени (@acme/contracts): разрешён только import type',
+  '  keygen                       пара ключей Ed25519: <префикс>.key (закрытый, 0600; хранить как секрет, в репозиторий не класть) и <префикс>.pub (открытый); существующие файлы не затираются',
+  '  sign                         подписать собранный каталог (по умолчанию ./dist): integrity.json с хешами файлов, сроком и ключом; потом pack (TR-10, ADR-CH-0017)',
+  `  --days <N>                   sign: срок подписи в днях от сегодня (по умолчанию ${String(DEFAULT_DAYS)}); --expires <дата> - срок датой (2027-01-31 или ISO 8601)`,
+  '  verify                       проверить подпись так, как её проверит ядро: каталог или архив читается целиком, лишний или изменённый файл, чужой ключ и истёкший срок - отказ; без --key нельзя',
+  '  --key <…>                    sign: файл закрытого ключа; verify: доверенный открытый ключ (файл .pub или запись ed25519:…), можно несколько раз',
   '  --dry-run                    pack: проверить состав и перечислить файлы, архив не писать',
   'Код возврата: 0 - нарушений нет, 1 - есть, 2 - неверный вызов.',
 ];
 
-type Command = 'check' | 'build' | 'delivery' | 'pack';
+type Command = 'check' | 'build' | 'delivery' | 'pack' | 'keygen' | 'sign' | 'verify';
 const VALUES: Readonly<Record<Command, readonly string[]>> = {
   check: ['--out', '--api-version', '--declarations', '--declarations-package'],
   build: ['--out', '--api-version', '--declarations', '--declarations-package'],
   delivery: ['--out', '--api-version', '--declarations', '--declarations-package'],
   pack: ['--out', '--api-version'],
+  keygen: ['--out'],
+  sign: ['--key', '--days', '--expires'],
+  verify: ['--key'],
 };
-const SWITCHES: Readonly<Record<Command, readonly string[]>> = { check: ['--source'], build: [], delivery: [], pack: ['--dry-run'] };
+const SWITCHES: Readonly<Record<Command, readonly string[]>> = { check: ['--source'], build: [], delivery: [], pack: ['--dry-run'], keygen: [], sign: [], verify: [] };
 
 interface Parsed {
   readonly dir: string | undefined;
@@ -68,7 +80,7 @@ function parse(command: Command, args: readonly string[]): Parsed | string {
     values.set(name, [...(values.get(name) ?? []), value]);
   }
   if (dirs.length > 1 && command !== 'delivery') return 'каталог один';
-  for (const name of ['--out', '--api-version']) {
+  for (const name of ['--out', '--api-version', '--days', '--expires']) {
     if ((values.get(name)?.length ?? 0) > 1) return `${name}: значение одно`;
   }
   return { dir: dirs[0], dirs, values, switches };
@@ -153,10 +165,73 @@ async function runPack(parsed: Parsed, io: CliIo): Promise<number> {
   return 0;
 }
 
-/** Командная строка `cyborg-plugin`: `check`, `build`, `delivery`, `pack`. */
+async function runKeygen(parsed: Parsed, io: CliIo): Promise<number> {
+  const out = parsed.values.get('--out')?.[0];
+  if (out === undefined) {
+    io.err('cyborg-plugin: keygen: нужен --out <префикс>');
+    return 2;
+  }
+  const report = await keygen(out);
+  for (const problem of report.problems) io.err(formatProblem(problem));
+  if (!report.ok) return 1;
+  io.out(`Ключ ${report.keyId ?? ''}`);
+  io.out(`  закрытый: ${report.secretFile ?? ''} (хранить как секрет; в репозиторий и в сборку не класть)`);
+  io.out(`  открытый: ${report.publicFile ?? ''}`);
+  return 0;
+}
+
+/** Дата срока: `2027-01-31` или ISO 8601; без времени - конец суток по UTC. */
+function parseExpires(text: string): Date {
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? new Date(`${text}T23:59:59.999Z`) : new Date(text);
+}
+
+async function runSign(parsed: Parsed, io: CliIo): Promise<number> {
+  const key = parsed.values.get('--key')?.[0];
+  const days = parsed.values.get('--days')?.[0];
+  const expires = parsed.values.get('--expires')?.[0];
+  if (key === undefined) {
+    io.err('cyborg-plugin: sign: нужен --key <файл закрытого ключа>');
+    return 2;
+  }
+  if (days !== undefined && expires !== undefined) {
+    io.err('cyborg-plugin: sign: --days и --expires вместе не задают');
+    return 2;
+  }
+  if (days !== undefined && !/^[1-9]\d{0,4}$/.test(days)) {
+    io.err('cyborg-plugin: sign: --days - целое число дней');
+    return 2;
+  }
+  const report = await signPlugin(parsed.dir ?? 'dist', { keyFile: key, ...(days !== undefined && { days: Number(days) }), ...(expires !== undefined && { expires: parseExpires(expires) }) });
+  for (const problem of report.problems) io.err(formatProblem(problem));
+  if (!report.ok) {
+    io.err(`Нарушений: ${String(report.problems.length)}; пакет не подписан`);
+    return 1;
+  }
+  io.out(`Плагин ${report.id ?? ''} ${report.version ?? ''}: ${report.dir}`);
+  io.out(`Подписано ключом ${report.keyId ?? ''}, файлов: ${String(report.files)}, действует до ${report.notAfter ?? ''}`);
+  return 0;
+}
+
+async function runVerify(parsed: Parsed, io: CliIo): Promise<number> {
+  if (parsed.dir === undefined) {
+    io.err('cyborg-plugin: verify: нужен каталог или архив');
+    return 2;
+  }
+  const report = await verifyPlugin(parsed.dir, { keys: parsed.values.get('--key') ?? [] });
+  for (const problem of report.problems) io.err(formatProblem(problem));
+  if (!report.ok) {
+    io.err(`Пакет не принят${report.verdict?.ok === false ? ` (${report.verdict.code})` : ''}`);
+    return 1;
+  }
+  const manifest = report.verdict?.ok === true ? report.verdict.manifest : undefined;
+  io.out(`Подпись верна: ${report.id ?? ''} ${report.version ?? ''}, ключ ${manifest?.keyId ?? ''}, файлов: ${String(report.files)}, действует до ${manifest?.notAfter ?? ''}`);
+  return 0;
+}
+
+/** Командная строка `cyborg-plugin`: `check`, `build`, `delivery`, `pack`, `keygen`, `sign`, `verify`. */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   const [command, ...rest] = argv;
-  const known = command === 'check' || command === 'build' || command === 'delivery' || command === 'pack' ? command : undefined;
+  const known = command === 'check' || command === 'build' || command === 'delivery' || command === 'pack' || command === 'keygen' || command === 'sign' || command === 'verify' ? command : undefined;
   const parsed = known === undefined ? (command === undefined ? 'нет команды' : `неизвестная команда ${command}`) : parse(known, rest);
   if (typeof parsed === 'string' || known === undefined) {
     io.err(`cyborg-plugin: ${typeof parsed === 'string' ? parsed : 'неверный вызов'}`);
@@ -166,5 +241,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   if (known === 'check') return runCheck(parsed, io);
   if (known === 'build') return runBuild(parsed, io);
   if (known === 'delivery') return runDelivery(parsed, io);
+  if (known === 'keygen') return runKeygen(parsed, io);
+  if (known === 'sign') return runSign(parsed, io);
+  if (known === 'verify') return runVerify(parsed, io);
   return runPack(parsed, io);
 }

@@ -60,7 +60,7 @@ describe('ST-6001/1: package.json ядра', () => {
   });
 
   it('точки входа: главный процесс, хост, вход хоста для fork, pty-хост, клавиши, оболочка вида, слой окна, проверка плагина и элементы окна (имена в них - public-api.test.ts)', () => {
-    assert.deepEqual(Object.keys(manifest.exports ?? {}), ['.', './host', './host-entry', './pty-host', './keys', './ui-shell', './window', './plugin-check', './delivery', './elements', './package.json']);
+    assert.deepEqual(Object.keys(manifest.exports ?? {}), ['.', './host', './host-entry', './pty-host', './keys', './ui-shell', './window', './plugin-check', './delivery', './integrity', './elements', './package.json']);
     for (const target of exportTargets()) assert.match(target, /^\.\/dist\/.+\.(js|d\.ts)$/, target);
   });
 });
