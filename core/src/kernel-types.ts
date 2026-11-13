@@ -73,16 +73,9 @@ export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'group-isolated'; readonly group: string; readonly renderGroup: string; readonly reason: 'third-party' }
   /** Загружен плагин не из поставки (по `bundled`): его код не проверен, а на этапе 1 хост - обычный процесс Node. Состояния плагину запись не меняет. */
   | { readonly pluginId: string; readonly kind: 'third-party' }
-  /**
-   * Происхождение пакета не подтверждено (TR-11, ADR-CH-0017): подпись, хеши, версия или отзыв не сошлись, либо проверка не выполнена. `mode: 'enforce'` - плагин не запущен,
-   * `warn` - запущен как раньше и человек предупреждён. `code` - причина для машины, `reason` - слова человека (так её видит окно «Плагины Cyborg»); `keyId` - ключ из подписи, если он был прочитан.
-   */
+  /** Происхождение пакета не подтверждено (TR-11, ADR-CH-0017): подпись, хеши, версия, отзыв. `enforce` - плагин не запущен, `warn` - запущен; `reason` - слова для окна «Плагины Cyborg», `keyId` - ключ подписи. */
   | { readonly pluginId: string; readonly kind: 'integrity-failed'; readonly code: IntegrityCode; readonly reason: string; readonly mode: 'warn' | 'enforce'; readonly keyId?: string }
-  /**
-   * Поставка приложения не прошла сверку при старте (TR-12, ADR-CH-0017): `delivery.json` не подписан ключом выпуска или подпись не сходится, файл плагина изменён, лишний или пропал.
-   * `reasons` - слова человека, по строке на расхождение. `mode: 'enforce'` - плагины поставки, чьи файлы не сошлись, не запускаются (по отдельной записи `integrity-failed` на плагин);
-   * `warn` - запускаются как раньше. Запись пишет приложение до загрузки ядра, а не сам загрузчик: каталог поставки ему не известен.
-   */
+  /** Поставка не прошла сверку при старте (TR-12): `delivery.json` без подписи ключа выпуска или файл не сошёлся. Запись пишет приложение до загрузки ядра; запуск плагинов решает `mode` через `integrity-failed`. */
   | { readonly pluginId?: undefined; readonly kind: 'delivery-failed'; readonly reasons: readonly string[]; readonly mode: 'warn' | 'enforce' }
   /** Промис плагина отклонён без обработчика; хост держится, плагину страйк. */
   | { readonly pluginId: string; readonly kind: 'unhandled-rejection'; readonly error: string }
@@ -151,10 +144,7 @@ export interface LoadOptions {
   readonly spawnHost: SpawnHost;
   /** Что хост передаст импортёру; по умолчанию id плагина. */
   readonly entry?: ((manifest: PluginManifest) => string) | undefined;
-  /**
-   * Проверка происхождения пакета перед каждой активацией (TR-11, `createProvenance`): ядро читает каталог плагина один раз, проверяет и отдаёт хосту проверенные байты.
-   * Без неё пакеты не проверяются, как раньше. Отказ пишется записью `integrity-failed`; в режиме `enforce` плагин не запускается.
-   */
+  /** Проверка происхождения пакета перед каждой активацией (TR-11, `createProvenance`): ядро проверяет прочитанные байты и отдаёт хосту их же. Без неё пакеты не проверяются. */
   readonly provenance?: Provenance | undefined;
   /** `plugins.hosts`: группа -> плагины; не названный идёт в `builtin` или в свой хост по `host: "own"`. */
   readonly hosts?: Readonly<Record<string, readonly string[]>> | undefined;
