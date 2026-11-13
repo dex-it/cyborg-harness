@@ -646,6 +646,11 @@ export class OsGateway {
     return new CoreError('PermissionDenied', `${m.id}: ${method} - ${detail}`);
   }
 
+  /** Отказ члену, которому нужно право, а в манифесте его нет: `PermissionDenied` и запись `denied`. */
+  #needRight(m: PluginManifest, method: string, held: unknown, right: 'pty' | 'serve'): void {
+    if (!held) throw this.#denied(m, method, `нет права ${right}`);
+  }
+
   async #realApp(p: string): Promise<string> {
     const known = this.#appReal.get(p);
     if (known !== undefined) return known;
@@ -1019,22 +1024,29 @@ export class OsGateway {
         const size = (v: unknown, fallback: number) => (Number.isInteger(v) && (v as number) > 0 && (v as number) <= 1000 ? (v as number) : fallback);
         return await table.spawn(m.id, { program: checked.file, args: checked.argv, ...(checked.cwd !== undefined && { cwd: checked.cwd }), env: checked.env, cols: size(o.cols, 80), rows: size(o.rows, 24), persist: o.persist === true });
       }
+      // Члены ниже работают по таблице самого плагина и права сами не проверяют: без права отказ - здесь, с записью denied (#241), а не побочный NotFound.
       case 'pty.share':
+        this.#needRight(m, method, p.pty, 'pty');
         return this.#ptyTable().share(m.id, str(method, args[0], 'id'));
       case 'pty.list':
+        this.#needRight(m, method, p.pty, 'pty');
         return this.#ptyTable().list(m.id);
       case 'pty.attach':
+        this.#needRight(m, method, p.pty, 'pty');
         return await this.#ptyTable().attach(m.id, str(method, args[0], 'id'));
       case 'pty.write':
+        this.#needRight(m, method, p.pty, 'pty');
         this.#ptyTable().write(m.id, str(method, args[0], 'id'), str(method, args[1], 'ввод'));
         return undefined;
       case 'pty.resize': {
+        this.#needRight(m, method, p.pty, 'pty');
         const [cols, rows] = [args[1], args[2]];
         if (!Number.isInteger(cols) || !Number.isInteger(rows) || (cols as number) < 1 || (rows as number) < 1 || (cols as number) > 1000 || (rows as number) > 1000) throw new CoreError('Invalid', `${method}: размер - целые 1..1000`);
         this.#ptyTable().resize(m.id, str(method, args[0], 'id'), cols as number, rows as number);
         return undefined;
       }
       case 'pty.kill': {
+        this.#needRight(m, method, p.pty, 'pty');
         const signal = args[1];
         if (signal !== undefined && !PTY_SIGNALS.includes(signal as never)) throw new CoreError('Invalid', `${method}: сигнал - один из ${PTY_SIGNALS.join(', ')}`);
         this.#ptyTable().kill(m.id, str(method, args[0], 'id'), signal as string | undefined);
@@ -1046,6 +1058,7 @@ export class OsGateway {
         if (!p.serve) throw this.#denied(m, method, 'нет права serve');
         return this.#serves.open(m.id, str(method, args[0], 'id'));
       case 'serve.close':
+        this.#needRight(m, method, p.serve, 'serve');
         this.#serves.close(m.id, str(method, args[0], 'id'));
         return undefined;
       case 'env.get': {

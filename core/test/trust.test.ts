@@ -573,7 +573,7 @@ test('output: сводная строка хоста без плагина, не
   assert.deepEqual(logs, ['хост h [info]: строка 0', 'хост h [warn]: строк сверх предела за интервал: 3, из них error: 1; последняя error: строка 3']);
 });
 
-test('os: плагин без прав - у ctx.os нет членов под правом, а каждый запрос шлюзу в обход ctx.os (fs вне области, process, pty, net, serve, env, clipboard, secrets.ref, shell, notify, ui.lock, security.roots) - PermissionDenied и запись denied', async () => {
+test('ST-3001/1: os: плагин без прав - у ctx.os нет членов под правом, а каждый запрос шлюзу в обход ctx.os (fs вне области, process, все члены pty, net, serve, env, clipboard, secrets.ref, shell, notify, ui.lock, security.roots) - PermissionDenied и запись denied', async () => {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'cyborg-trust-os-')));
   const outside = path.join(root, 'outside');
   const file = path.join(outside, 'secret.txt');
@@ -623,8 +623,15 @@ test('os: плагин без прав - у ctx.os нет членов под п
     ['fs.remove', file],
     ['process.run', '/bin/sh', ['-c', 'id']],
     ['pty.spawn', { program: '/bin/sh', args: [] }],
+    ['pty.share', 'pty-1'],
+    ['pty.list'],
+    ['pty.attach', 'pty-1'],
+    ['pty.write', 'pty-1', 'x'],
+    ['pty.resize', 'pty-1', 80, 24],
+    ['pty.kill', 'pty-1'],
     ['net.fetch', 'https://example.com/'],
     ['serve.http', 's1'],
+    ['serve.close', 's1'],
     ['env.get', 'TOKEN'],
     ['clipboard.readText'],
     ['clipboard.writeText', 'x'],
@@ -683,4 +690,42 @@ test('os: notify.show и notify.close плагина без права notify о
     'каждый отказ - запись в журнале плагина',
   );
   await kernel.unload();
+});
+
+test('ST-3001/1: os: право pty отняли новой версией манифеста - pty с persist прежней версии не пережил выгрузку ядра, а члены pty.* новой версии отказывают PermissionDenied (#241)', async () => {
+  const backend = fakePty();
+  const first = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['agent'],
+    manifests: [manifest('agent', { permissions: { pty: ['/bin/sh'] } })],
+    spawnHost: inlineHosts(async () => ({
+      activate: async (ctx: PluginContext) => {
+        await ctx.os.pty?.spawn({ program: '/bin/sh', persist: true });
+      },
+    })),
+    os: { dataDir: tmpdir(), tempDir: tmpdir(), pty: backend },
+  });
+  assert.equal(backend.procs.length, 1, 'прежняя версия запустила pty с persist');
+  await first.unload();
+  assert.equal(backend.procs[0]?.killed, 'SIGHUP', 'persist держит pty только до падения хоста, выгрузка ядра завершает его: к новой версии он не доходит');
+
+  const forger = forging({ agent: { activate: () => undefined } });
+  const second = await load({
+    apiVersion: PLUGIN_API_VERSION,
+    enabled: ['agent'],
+    manifests: [manifest('agent', { version: '2.0.0' })],
+    spawnHost: forger.spawn,
+    hosts: { h: ['agent'] },
+    os: { dataDir: tmpdir(), tempDir: tmpdir(), pty: backend },
+  });
+  const members: [string, ...unknown[]][] = [['pty.list'], ['pty.attach', 'pty-1'], ['pty.write', 'pty-1', 'x'], ['pty.kill', 'pty-1']];
+  const codes: string[] = [];
+  for (const [method, ...args] of members) codes.push(`${method} ${String(code(await forger.request('h', 'os', { pluginId: 'agent', method, args })))}`);
+  assert.deepEqual(codes, members.map(([method]) => `${method} PermissionDenied`));
+  assert.deepEqual(backend.procs[0].writes, [], 'в прежний процесс ничего не записано');
+  assert.deepEqual(
+    second.journal.flatMap((e) => (e.kind === 'denied' ? [e.method] : [])),
+    members.map(([method]) => method),
+  );
+  await second.unload();
 });
