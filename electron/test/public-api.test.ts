@@ -103,7 +103,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
   './window': {
     source: 'src/index-window.ts',
     values: ['PATH_MIME', 'VIEW_SCHEME', 'WindowLayerView', 'groupOfOrigin', 'viewOrigin'],
-    types: ['DiagnosticsExport', 'DiagnosticsStatus', 'FeedLine', 'KeptPtyRow', 'KeyRow', 'LayoutRow', 'PluginJournalLine', 'PluginOrigin', 'PluginRow', 'PluginState', 'PluginsSnapshot', 'Reply', 'TerminalEvent', 'ViewBridge', 'ViewDrop', 'WindowApi', 'WindowPort', 'WorkspaceInfo'],
+    types: ['DiagnosticsExport', 'DiagnosticsStatus', 'FeedLine', 'KeptPtyRow', 'KeyRow', 'LayoutRow', 'PluginIsolationRow', 'PluginJournalLine', 'PluginOrigin', 'PluginRow', 'PluginState', 'PluginsSnapshot', 'Reply', 'TerminalEvent', 'ViewBridge', 'ViewDrop', 'WindowApi', 'WindowPort', 'WorkspaceInfo'],
   },
 };
 

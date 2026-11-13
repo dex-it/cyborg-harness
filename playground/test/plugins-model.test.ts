@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import type { LayoutRow, PluginJournalLine, PluginRow, PluginsSnapshot } from '@cyborg-harness/electron/window';
-import { actionsFor, conflictText, diagnosticsLine, exportMessage, groupLabel, groupNote, journalFor, keyStatus, mergeFeed, originNote, previousNote, sortedPlugins, summary, traceArgsNotice, userPluginsNotice, viewMode, viewSlots, workspaceActionError } from '../src/renderer/plugins-model.ts';
+import { actionsFor, conflictText, diagnosticsLine, exportMessage, groupLabel, groupNote, journalFor, keyStatus, mergeFeed, isolationLabel, isolationNote, originNote, previousNote, sortedPlugins, summary, traceArgsNotice, userPluginsNotice, viewMode, viewSlots, workspaceActionError } from '../src/renderer/plugins-model.ts';
 
 const row = (id: string, state: PluginRow['state'], over: Partial<PluginRow> = {}): PluginRow => ({ id, state, revivable: state === 'stopped', unloaded: false, commands: [], permissions: [], ...over });
 const snapshot = (plugins: PluginRow[], over: Partial<PluginsSnapshot> = {}): PluginsSnapshot => ({ phase: 'ready', safeMode: false, userPlugins: false, traceArgs: false, problems: [], plugins, layout: [], keys: [], feed: [], journal: [], canHang: true, window: { title: '', queued: 0, locks: [] }, documents: [], workspace: { current: '/w.cyborg.json', recent: [] }, ...over });
@@ -69,6 +69,16 @@ describe('окно «Плагины Cyborg»: модель', () => {
     assert.equal(originNote(row('ghost', 'disabled')), undefined);
     assert.equal(userPluginsNotice(snapshot([], { userPlugins: false })), undefined);
     assert.match(userPluginsNotice(snapshot([], { userPlugins: true })) ?? '', /--user-plugins/);
+  });
+
+  it('ST-3010/8: TR-24: уровень изоляции в строке: метка «Изоляция N из 3» и слова с названной сетью; без заявления запуска - ничего', () => {
+    const open = row('notes', 'active', { origin: 'user', isolation: { level: 2, network: 'open', reason: 'запреты Node; сеть и сокеты НЕ закрыты' } });
+    assert.equal(isolationLabel(open), 'Изоляция 2 из 3');
+    assert.match(isolationNote(open) ?? '', /^Изоляция 2 из 3 \(сеть открыта\): запреты Node; сеть и сокеты НЕ закрыты/);
+    const closed = row('notes', 'active', { isolation: { level: 3, network: 'closed', reason: 'ограничитель ОС' } });
+    assert.match(isolationNote(closed) ?? '', /\(сеть закрыта ограничителем ОС\)/);
+    assert.equal(isolationLabel(row('files', 'active')), undefined);
+    assert.equal(isolationNote(row('files', 'active')), undefined);
   });
 
   it('плашка аргументов в трассе (K-33): только с --trace-args, называет флаг, предел-смысл записи и выгрузку', () => {

@@ -469,7 +469,19 @@ button:focus-visible {
   font-size: 11px;
 }
 
+.plugin-isolation {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--modified);
+}
+
+.plugin-isolation[data-level='3'] {
+  border-color: var(--border, currentColor);
+}
+
 .plugin-origin-note,
+.plugin-isolation-note,
 .plugin-group-note {
   margin: 6px 0 0;
   padding-left: 8px;
