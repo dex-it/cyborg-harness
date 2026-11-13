@@ -75,8 +75,11 @@ export function senderPlugin(event: IpcMainEvent | IpcMainInvokeEvent, groups: V
   return frame ? pluginOfFrame(frame, groups) : undefined;
 }
 
+/** Плагин кадра без проверки группы: привязка настоящего кадра, адрес подставного. */
+const declaredPlugin = (frame: FrameLike): string | undefined => (frame.frameTreeNodeId === undefined ? frameAddress(frame.url)?.plugin : bound.get(frame.frameTreeNodeId));
+
 /** Кадры одного плагина в окне: тема - всем видам, а лог и видимость - только этим, не соседям по группе. */
 export function framesOfPlugin(contents: WebContents, group: string | undefined, pluginId: string): WebFrameMain[] {
   if (group === undefined) return [];
-  return contents.mainFrame.framesInSubtree.filter((frame) => frame.origin === viewOrigin(group) && (frame.frameTreeNodeId === undefined ? frameAddress(frame.url)?.plugin : bound.get(frame.frameTreeNodeId)) === pluginId);
+  return contents.mainFrame.framesInSubtree.filter((frame) => frame.origin === viewOrigin(group) && declaredPlugin(frame) === pluginId);
 }

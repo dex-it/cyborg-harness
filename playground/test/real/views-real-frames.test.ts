@@ -27,7 +27,10 @@ interface Cdp {
 }
 const cdp = (await import(pathToFileURL(path.resolve(import.meta.dirname, '..', '..', 'scripts', 'cdp.mjs')).href)) as Cdp;
 
-type Reply = { value?: unknown; error?: string };
+interface Reply {
+  value?: unknown;
+  error?: string;
+}
 
 /** executeJavaScript кадра, который в этот момент перезагружается, не отвечает никогда: каждое обращение к виду ограничено по времени. */
 const within = <T>(promise: Promise<T>, ms = 5000): Promise<T> => Promise.race([promise, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`нет ответа за ${String(ms)} мс`)), ms))]);
@@ -72,8 +75,8 @@ describe('TR-31: виды на настоящем Electron', () => {
     assert.match((await asAt('alice', '/', 'bob.hello', '/alice/?view=main')).error ?? '', /не команда плагина alice/);
     // Номер кадра при этом не менялся: ни от pushState, ни от возврата адреса.
     const after = await frameOf('alice');
-    assert.equal(after?.id, before.id);
-    assert.equal(after?.token, before.token);
+    assert.equal(after.id, before.id);
+    assert.equal(after.token, before.token);
   });
 
   test('ST-3005/8: и наоборот: bob с адресом alice остаётся bob, чужое состояние виду alice не отдаётся', async () => {
