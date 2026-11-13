@@ -9,7 +9,7 @@ origin: derived
 
 Собрана из историй, имён тестов и исключений [acceptance.md](acceptance.md) командой `npm run check:acceptance -- --write`; руками не правится.
 
-Итог: критериев 253; тестом 208, исключением 19, целевое поведение 26.
+Итог: критериев 261; тестом 216, исключением 19, целевое поведение 26.
 
 | Критерий | Чем проверяется |
 |---|---|
@@ -176,6 +176,14 @@ origin: derived
 | ST-3008/1 | `core/test/loader.test.ts`, `core/test/uninstall.test.ts`, `core/test/window.test.ts` |
 | ST-3008/2 | `core/test/loader.test.ts`, `core/test/workspace-trust.test.ts`, `core/test/workspace.test.ts` |
 | ST-3008/3 | целевое поведение |
+| ST-3009/1 | `core/test/integrity.test.ts`, `tools/cyborg-plugin/test/sign.test.ts` |
+| ST-3009/2 | `tools/cyborg-plugin/test/sign.test.ts` |
+| ST-3009/3 | `core/test/provenance.test.ts`, `core/test/verified-sources.test.ts`, `electron/test/provenance.test.ts`, `playground/test/host-electron-verified.test.ts`, `playground/test/real/trust-real-host.test.ts` |
+| ST-3009/4 | `core/test/provenance.test.ts`, `core/test/trust-store.test.ts`, `electron/test/provenance.test.ts`, `tools/cyborg-plugin/test/sign.test.ts` |
+| ST-3009/5 | `electron/test/provenance.test.ts`, `playground/src/main/trust-args.test.ts` |
+| ST-3009/6 | `core/test/delivery.test.ts`, `electron/test/provenance.test.ts`, `tools/cyborg-plugin/test/delivery.test.ts` |
+| ST-3009/7 | `tools/cyborg-plugin/test/build.test.ts` |
+| ST-3009/8 | `scripts/test/release.test.ts`, `scripts/test/workflows.test.ts` |
 | ST-4001/1 | `core/test/trace.test.ts` |
 | ST-4001/2 | `core/test/trace.test.ts` |
 | ST-4001/3 | `core/test/trace.test.ts` |
