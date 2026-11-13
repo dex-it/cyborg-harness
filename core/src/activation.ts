@@ -7,6 +7,16 @@ import type { ActivateResult } from './host-runtime.ts';
 import type { Activation, Host, KernelContext } from './kernel-context.ts';
 import type { PluginManifest } from './manifest.ts';
 import { checkPlugin, ENTRY_FILES, formatProblem } from './plugin-check.ts';
+import type { Provenance, ProvenanceVerdict, VerifiedPackage } from './provenance.ts';
+
+/** Проверка происхождения, которая не может уронить активацию: бросок проверяющего - отказ `unavailable` в режиме `enforce`. */
+async function check(provenance: Provenance, m: PluginManifest): Promise<ProvenanceVerdict> {
+  try {
+    return await provenance.check({ id: m.id, version: m.version });
+  } catch (error) {
+    return { ok: false, code: 'unavailable', reason: `проверка не выполнена: ${errorMessage(error)}`, mode: 'enforce' };
+  }
+}
 
 /** Сколько найденных нарушений ядро пишет строками: остальное одной строкой «и ещё N»; журнал строк плагина ограничен по частоте. */
 const AUDIT_LINES = 10;
@@ -78,6 +88,14 @@ export function createActivation(ctx: KernelContext): Activation {
       ctx.record({ pluginId, kind: 'skipped', reason: `поставщик ${down[0]} (${down[1]}) не активен` });
       return;
     }
+    let verified: VerifiedPackage | undefined;
+    if (options.provenance) {
+      const verdict = await check(options.provenance, m);
+      if (!verdict.ok) {
+        ctx.record({ pluginId, kind: 'integrity-failed', code: verdict.code, reason: verdict.reason, mode: verdict.mode, ...(verdict.keyId !== undefined && { keyId: verdict.keyId }) });
+        if (verdict.mode === 'enforce') return;
+      } else verified = verdict.verified;
+    }
     await auditImports(m);
     const hostId = ctx.hostOf(m.id) ?? m.id;
     let host: Host;
@@ -99,7 +117,7 @@ export function createActivation(ctx: KernelContext): Activation {
         }
       }
       gateway.approve(pluginId);
-      const params = { pluginId, entry: options.entry?.(m) ?? pluginId, paths: gateway.pathsOf(pluginId), config, state };
+      const params = { pluginId, entry: options.entry?.(m) ?? pluginId, paths: gateway.pathsOf(pluginId), config, state, ...(verified !== undefined && { verified }) };
       const result = await pool.call<ActivateResult>(host, pluginId, 'activate', params, ctx.activationTimeout);
       if (!result.ok) {
         ctx.record({ pluginId, kind: result.kind, result: result.result });

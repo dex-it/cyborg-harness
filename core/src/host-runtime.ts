@@ -3,6 +3,8 @@ import { splitSignal, withSignal } from './cancel.ts';
 import { resolveSection, VERSION_KEY, type SectionResult } from './config.ts';
 import { DisposableStore, toDisposable, type Disposable } from './disposable.ts';
 import { loadEntry } from './entry-load.ts';
+import type { VerifiedPackage } from './provenance.ts';
+import { installVerified, releaseVerified } from './verified-sources.ts';
 import { compileSchema } from './json-schema.ts';
 import type { AskDialog, ContractName, ContractType, DocumentChange, DocumentInfo, DocumentInit, HttpServer, Major, PluginOs, PluginPermissions, PtyExit, PtyHandle, Remote, SecretValue, ServeRequest, ServeResponse, ViewChannel, ModalInit, WatchOptions } from '@cyborg-harness/contracts';
 import { CoreError, errorMessage } from './errors.ts';
@@ -532,17 +534,32 @@ export function runHost(port: Port, importer: Importer, options: HostOptions = {
     );
   });
 
-  endpoint.handle('activate', (p: { pluginId: string; entry: string; paths: OsPaths; config?: SectionInput; state?: SectionInput }) => running.run(p.pluginId, async () => {
+  endpoint.handle('activate', (p: { pluginId: string; entry: string; paths: OsPaths; config?: SectionInput; state?: SectionInput; verified?: VerifiedPackage }) => running.run(p.pluginId, async () => {
     const manifest = manifests.get(p.pluginId);
     if (!manifest || !mirror) throw new CoreError('Remote', `хост не знает плагин ${p.pluginId}`);
-    const module = await loadEntry(importer, p.entry);
+    // TR-11: ядро проверило байты пакета и прислало их; import() получит их, а не файл с диска.
+    if (p.verified) installVerified(p.pluginId, p.verified);
+    else releaseVerified(p.pluginId);
+    let module: PluginModule;
+    try {
+      module = await loadEntry(importer, p.entry);
+    } catch (error) {
+      releaseVerified(p.pluginId);
+      throw error;
+    }
     running.enter(p.pluginId);
     const loaded: Loaded = { store: new DisposableStore(), provided: new Map(), commands: new Map(), served: new Map() };
     loaded.store.add(toDisposable(() => [...loaded.served.values()].forEach((d) => d.dispose())));
     const config = await section(endpoint, p.pluginId, 'config', module, p.config);
-    if (config && 'failed' in config) return { ok: false, kind: 'config', result: config.failed } satisfies ActivateResult;
+    if (config && 'failed' in config) {
+      releaseVerified(p.pluginId);
+      return { ok: false, kind: 'config', result: config.failed } satisfies ActivateResult;
+    }
     const state = await section(endpoint, p.pluginId, 'state', module, p.state);
-    if (state && 'failed' in state) return { ok: false, kind: 'state', result: state.failed } satisfies ActivateResult;
+    if (state && 'failed' in state) {
+      releaseVerified(p.pluginId);
+      return { ok: false, kind: 'state', result: state.failed } satisfies ActivateResult;
+    }
 
     plugins.set(p.pluginId, loaded);
     for (const [kind, s] of [['config', config], ['state', state]] as const) {
@@ -556,6 +573,7 @@ export function runHost(port: Port, importer: Importer, options: HostOptions = {
       if (result) loaded.store.add(result);
       return { ok: true } satisfies ActivateResult;
     } catch (error) {
+      releaseVerified(p.pluginId);
       plugins.delete(p.pluginId);
       loaded.store.dispose();
       throw error;
@@ -569,6 +587,7 @@ export function runHost(port: Port, importer: Importer, options: HostOptions = {
   }));
 
   endpoint.handle('deactivate', to((p: { pluginId: string }) => {
+    releaseVerified(p.pluginId);
     const loaded = plugins.get(p.pluginId);
     plugins.delete(p.pluginId);
     ptys.forget(p.pluginId);

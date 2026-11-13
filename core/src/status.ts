@@ -53,19 +53,21 @@ const LIFECYCLE: Record<JournalEntry['kind'], boolean> = {
   'group-isolated': false,
   'host-own-grouped': false,
   'third-party': false,
+  'integrity-failed': true,
+  'delivery-failed': false,
   'log-summary': false,
 };
 
 /** Запись о жизненном цикле плагина (таблица `LIFECYCLE`). */
 export const isLifecycleEntry = (entry: JournalEntry): boolean => LIFECYCLE[entry.kind];
 
-const REVIVABLE = new Set<JournalEntry['kind']>(['switched-off', 'failed', 'skipped', 'host-abandoned']);
+const REVIVABLE = new Set<JournalEntry['kind']>(['switched-off', 'failed', 'skipped', 'host-abandoned', 'integrity-failed']);
 
 /** Плагины, которых касается запись: свой id или перечень у записей хоста; у вызова устаревшего члена ещё и поставщик, чтобы он видел своих вызывающих. */
 export function entryPlugins(entry: JournalEntry): readonly string[] {
   if (entry.kind === 'deprecated-call') return [entry.pluginId, entry.provider];
   if (entry.pluginId !== undefined) return [entry.pluginId];
-  if (entry.kind === 'key-ignored' || entry.kind === 'trace-args') return [];
+  if (entry.kind === 'key-ignored' || entry.kind === 'trace-args' || entry.kind === 'delivery-failed') return [];
   return entry.kind === 'host-down' ? [...new Set([...entry.plugins, ...entry.culprits])] : entry.plugins;
 }
 
@@ -200,6 +202,10 @@ export function describeEntry(e: JournalEntry): string {
       return `сторонний плагин не делит группу рендера: группа ${e.group} не действует, работает в своей ${e.renderGroup}`;
     case 'third-party':
       return 'сторонний плагин: код не из поставки, не проверен; на этапе 1 хост - обычный процесс Node, и плагин может обойти шлюз ctx.os';
+    case 'integrity-failed':
+      return e.mode === 'enforce' ? `плагин не запущен: происхождение пакета не подтверждено - ${e.reason}` : `происхождение пакета не подтверждено, плагин запущен (режим «предупреждать») - ${e.reason}`;
+    case 'delivery-failed':
+      return `поставка приложения не прошла проверку (${e.mode === 'enforce' ? 'режим «отказывать»: плагины с несошедшимися файлами не запущены' : 'режим «предупреждать»: плагины запущены'}): ${e.reasons.join('; ')}`;
     case 'unhandled-rejection':
       return `необработанное отклонение промиса: ${e.error}`;
     case 'host-own-grouped':
@@ -247,6 +253,9 @@ export function entryLevel(e: JournalEntry): 'info' | 'warn' | 'error' {
       return 'warn';
     case 'deactivated':
       return e.error ? 'warn' : 'info';
+    case 'integrity-failed':
+    case 'delivery-failed':
+      return e.mode === 'enforce' ? 'error' : 'warn';
     case 'config':
     case 'state':
       return e.result.status === 'ok' ? 'info' : 'error';

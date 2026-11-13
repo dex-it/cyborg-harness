@@ -194,7 +194,21 @@ describe('packPlan и publishPlan', () => {
     const result = publishPlan(plan, out, { publish: true, env: { RELEASE_PUBLISH: 'true' }, run: (_c, args) => (calls.push([...args]), '') });
     assert.equal(result.real, true);
     assert.ok(calls.every((a) => !a.includes('--dry-run')));
+    assert.ok(calls.every((a) => a.includes('--provenance')), 'настоящий выпуск несёт происхождение сборки');
     assert.deepEqual(calls.map((a) => path.basename(a[1] ?? '')), ['core.tgz', 'electron.tgz']);
+  });
+
+  it('ST-3009/8: --provenance только у настоящего выпуска; сухой прогон его не получает; RELEASE_PROVENANCE=false выключает', () => {
+    const { out, plan } = packed();
+    const flags = (publish: boolean, env: NodeJS.ProcessEnv): boolean[] => {
+      const calls: string[][] = [];
+      publishPlan(plan, out, { publish, env, run: (_c, args) => (calls.push([...args]), '') });
+      return calls.map((a) => a.includes('--provenance'));
+    };
+    assert.deepEqual(flags(false, {}), [false, false]);
+    assert.deepEqual(flags(true, {}), [false, false], 'без RELEASE_PUBLISH=true выпуск сухой');
+    assert.deepEqual(flags(true, { RELEASE_PUBLISH: 'true' }), [true, true]);
+    assert.deepEqual(flags(true, { RELEASE_PUBLISH: 'true', RELEASE_PROVENANCE: 'false' }), [false, false]);
   });
 
   it('нет tarball или файла - отказ до первой публикации', () => {

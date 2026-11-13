@@ -6,7 +6,8 @@ import { after, describe, it } from 'node:test';
 import { forkHosts, load, PLUGIN_API_VERSION } from '@cyborg-harness/core';
 import { formatProblem } from '@cyborg-harness/core/plugin-check';
 import { buildPlugin } from '../src/build.ts';
-import { cleanup, fresh, packages as packagesOf, plugin, write } from './fixture.ts';
+import { runCli } from '../src/cli.ts';
+import { cleanup, fresh, packages as packagesOf, plugin, TINY_DEP, write } from './fixture.ts';
 
 after(cleanup);
 
@@ -416,5 +417,52 @@ describe('buildPlugin: символические ссылки в ui/ (ревь�
     assert.deepEqual(problems(report), []);
     assert.equal(read(out, 'ui/theme.css'), 'p { margin: 0; }\n');
     assert.equal(fs.lstatSync(path.join(out, 'ui', 'theme.css')).isSymbolicLink(), false);
+  });
+});
+
+describe('ST-3009/7: перечень пакетов бандла (TR-14, У-42)', () => {
+  const SCOPED = { 'package.json': '{"name":"@acme/util","version":"3.1.4","main":"index.js"}', 'index.js': "module.exports = { twice: (s) => String(s) + String(s) };\n" };
+  const NESTED = { 'package.json': '{"name":"inner","version":"0.9.0","main":"index.js"}', 'index.js': "module.exports = { id: (x) => x };\n" };
+  const WITH_DEP = { 'package.json': '{"name":"outer","version":"2.0.0","main":"index.js"}', 'index.js': "const { id } = require('inner'); module.exports = { go: (x) => id(x) };\n", 'node_modules/inner/package.json': NESTED['package.json'], 'node_modules/inner/index.js': NESTED['index.js'] };
+
+  it('в отчёте сборки: имя, версия и вклад в байтах каждого пакета npm, ушедшего в index.mjs; вложенный и scoped пакеты названы своими именами', async () => {
+    const main = [
+      "import { shout } from 'tiny-dep';",
+      "import { twice } from '@acme/util';",
+      "import { go } from 'outer';",
+      'export default { activate(ctx: { commands: { register(n: string, f: (x: unknown) => unknown): void } }) { ctx.commands.register(\'acme.dep.shout\', (t) => go(twice(shout(t)))); } };',
+      '',
+    ].join('\n');
+    const dir = plugin({ 'index.ts': main, 'ui/ui.ts': null, 'ui/ui.css': null }, { ui: undefined }, { 'tiny-dep': { ...TINY_DEP, 'package.json': '{"name":"tiny-dep","version":"1.0.0","main":"index.js"}' }, '@acme/util': SCOPED, outer: WITH_DEP });
+    const report = await buildPlugin(dir, { out: fresh('out') });
+    assert.deepEqual(problems(report), []);
+    assert.deepEqual(report.packages.map((p) => `${p.name}@${p.version ?? '?'}`), ['@acme/util@3.1.4', 'inner@0.9.0', 'outer@2.0.0', 'tiny-dep@1.0.0']);
+    assert.ok(report.packages.every((p) => p.bytes > 0), 'вклад в байтах назван');
+  });
+
+  it('нет зависимостей - перечень пуст; режим source перечня не имеет; версия не прочитана - undefined', async () => {
+    const bare = plugin({ 'index.ts': 'export default { activate() {} };\n', 'ui/ui.ts': null, 'ui/ui.css': null }, { ui: undefined, commands: undefined }, {});
+    assert.deepEqual((await buildPlugin(bare, { out: fresh('out') })).packages, []);
+    assert.deepEqual((await buildPlugin(plugin(), { out: fresh('out'), main: 'source' })).packages, []);
+    const noVersion = plugin({}, {}, { 'tiny-dep': { 'package.json': '{"name":"tiny-dep","main":"index.js"}', 'index.js': TINY_DEP['index.js'] } });
+    assert.deepEqual((await buildPlugin(noVersion, { out: fresh('out') })).packages.map((p) => [p.name, p.version]), [['tiny-dep', undefined]]);
+  });
+
+  it('cyborg-plugin build печатает перечень строками «имя версия - байт»; delivery - по плагину', async () => {
+    const lines: string[] = [];
+    const run = async (...argv: string[]) => {
+      lines.length = 0;
+      const code = await runCli(argv, { out: (l) => lines.push(l), err: (l) => lines.push(l) });
+      return { code, text: lines.join('\n') };
+    };
+    const built = await run('build', plugin(), '--out', fresh('out'));
+    assert.equal(built.code, 0, built.text);
+    assert.match(built.text, /Пакеты npm в бандле главной части \(1\):\n {2}tiny-dep 1\.0\.0 - \d+ Б/);
+    const bare = plugin({ 'index.ts': 'export default { activate() {} };\n', 'ui/ui.ts': null, 'ui/ui.css': null }, { id: 'acme.bare', ui: undefined, commands: undefined }, {});
+    assert.match((await run('build', bare, '--out', fresh('out'))).text, /Пакетов npm в бандле главной части нет/);
+    const delivered = await run('delivery', plugin(), bare, '--out', fresh('delivery'));
+    assert.equal(delivered.code, 0, delivered.text);
+    assert.match(delivered.text, /acme\.dep: пакеты npm в бандле: tiny-dep 1\.0\.0/);
+    assert.match(delivered.text, /acme\.bare: пакетов npm в бандле нет/);
   });
 });

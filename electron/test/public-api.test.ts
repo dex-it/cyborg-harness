@@ -76,6 +76,7 @@ const ENTRIES: Readonly<Record<string, PublicEntry>> = {
       'ServeViewsOptions',
       'ServiceOptions',
       'StartOptions',
+      'TrustOptions',
       'UtilityHosts',
       'UtilityPtyHost',
       'ViewChannelsOptions',
