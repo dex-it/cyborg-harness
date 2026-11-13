@@ -175,7 +175,7 @@ origin: derived
 | ST-3008/3 | целевое поведение |
 | ST-3009/1 | `core/test/integrity.test.ts`, `tools/cyborg-plugin/test/sign.test.ts` |
 | ST-3009/2 | `tools/cyborg-plugin/test/sign.test.ts` |
-| ST-3009/3 | `core/test/provenance.test.ts`, `electron/test/provenance.test.ts`, `playground/test/host-electron-verified.test.ts`, `playground/test/real/trust-real-host.test.ts` |
+| ST-3009/3 | `core/test/provenance.test.ts`, `core/test/verified-sources.test.ts`, `electron/test/provenance.test.ts`, `playground/test/host-electron-verified.test.ts`, `playground/test/real/trust-real-host.test.ts` |
 | ST-3009/4 | `core/test/provenance.test.ts`, `core/test/trust-store.test.ts`, `electron/test/provenance.test.ts`, `tools/cyborg-plugin/test/sign.test.ts` |
 | ST-3009/5 | `electron/test/provenance.test.ts`, `playground/src/main/trust-args.test.ts` |
 | ST-3009/6 | `core/test/delivery.test.ts`, `electron/test/provenance.test.ts`, `tools/cyborg-plugin/test/delivery.test.ts` |
