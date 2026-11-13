@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { forkHosts, type HostIsolation, type HostRequest, type SpawnHost } from '@cyborg-harness/core';
 import { landlockConfiner } from './confiner-landlock.ts';
@@ -88,6 +89,19 @@ export function nodeIsolation(confiner: ConfinerLauncher | { readonly none: stri
   };
 }
 
+/**
+ * Файлы `package.json` над каталогом: Node ищет по ним тип модуля точки входа и, найдя нечитаемый, падает (`ERR_INVALID_PACKAGE_CONFIG`). Запреты Node свои чтения разрешают сами,
+ * а ограничитель ОС о них не знает, поэтому ему они названы. Хост видит только эти файлы (имя пакета, версию, зависимости), содержимое остального над каталогом закрыто.
+ */
+export function packageFilesAbove(dir: string): string[] {
+  const found: string[] = [];
+  for (let current = dir; ; current = path.dirname(current)) {
+    const file = path.join(current, 'package.json');
+    if (fs.existsSync(file)) found.push(file);
+    if (path.dirname(current) === current) return found;
+  }
+}
+
 /** Путь для `--allow-fs-read`: Node читает `*` как маску, поэтому каталог со звёздочкой запуск не принимает. */
 function fsReadFlag(dir: string): string {
   if (dir.includes('*')) throw new Error(`каталог ${dir} содержит «*»: Node прочёл бы его как маску, хост стороннего плагина не запущен`);
@@ -119,7 +133,7 @@ export function pluginHosts(utility: (isolation: (request: HostRequest | undefin
       serialization: 'json',
       cwd: home ?? entryDir,
       isolation: nodeIsolation(confiner),
-      ...(!('none' in confiner) && confiner.status.ok && { wrap: (command) => confiner.wrap(command, { read, exec: [binary] }) }),
+      ...(!('none' in confiner) && confiner.status.ok && { wrap: (command) => confiner.wrap(command, { read: [...read, ...read.flatMap(packageFilesAbove)], exec: [binary] }) }),
     })(hostId, request);
     if (handle.pid !== undefined) {
       pids.set(hostId, handle.pid);

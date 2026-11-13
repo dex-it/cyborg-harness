@@ -10,7 +10,7 @@ import { inlineHosts, load, PLUGIN_API_VERSION, pluginStatuses, type HostIsolati
 import { describeProbe, landlockConfiner, parseProbe } from '../src/confiner-landlock.ts';
 import { seatbeltConfiner, seatbeltProfile, SANDBOX_EXEC } from '../src/confiner-seatbelt.ts';
 import type { ConfinerLauncher } from '../src/confiner.ts';
-import { nodeIsolation, pickConfiner, pluginHosts, utilityIsolation, type IsolationSettings } from '../src/node-hosts.ts';
+import { nodeIsolation, packageFilesAbove, pickConfiner, pluginHosts, utilityIsolation, type IsolationSettings } from '../src/node-hosts.ts';
 
 const ENTRY = fileURLToPath(import.meta.resolve('@cyborg-harness/core/host-entry'));
 const manifest = { id: 'sandboxed', version: '1.0.0', engines: { cyborg: '^1' }, commands: { 'sandboxed.probe': { args: ['string'] }, 'sandboxed.echo': { args: ['any'] }, 'sandboxed.bytes': { args: ['any'] }, 'sandboxed.leak': {}, 'sandboxed.hang': {}, 'sandboxed.crash': {} } };
@@ -226,4 +226,11 @@ test('ST-3010/7: TR-22b: Linux: хост за cyborg-confine - сеть закр
   } finally {
     await kernel.unload();
   }
+});
+
+test('ST-3010/7: TR-22: ограничителю названы файлы package.json над кодом хоста (Node ищет по ним тип модуля и падает на нечитаемом), и только они', () => {
+  const dir = path.dirname(ENTRY);
+  const files = packageFilesAbove(dir);
+  assert.ok(files.length > 0 && files.every((f) => path.basename(f) === 'package.json' && dir.startsWith(path.dirname(f))), files.join(', '));
+  assert.ok(files.includes(path.join(path.dirname(path.dirname(dir)), 'package.json')), 'пакет ядра: core/package.json над dist/src');
 });

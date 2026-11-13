@@ -124,3 +124,15 @@ test('ST-3010/1: TR-21: jsonPort кодирует исходящее и разб
   listeners[0]?.({ t: 'res', v: { $t: 'nope' } });
   assert.equal(got.length, 1);
 });
+
+test('ST-3010/1: TR-21: значение, которое JSON переживает без потерь, идёт как есть, без копии с тегами (горячий путь: pty.data, ответы ctx.os); любое исключение уходит полным путём', () => {
+  const plain = { t: 'note', m: 'pty.data', p: { pluginId: 'x', data: 'abc', list: [1, 'a', null, { n: 2.5 }] } };
+  assert.equal(encodeWire(plain), plain, 'простое дерево не копируется');
+  assert.equal(decodeWire(plain), plain, 'разобранный JSON без тегов не копируется');
+  const sparse: number[] = [1];
+  sparse[2] = 3;
+  for (const odd of [{ a: undefined }, { n: -0 }, { n: Number.NaN }, sparse, { d: new Date(0) }, { $t: 'x' }, Object.create({ inherited: 1 }) as object]) {
+    assert.notEqual(encodeWire(odd), odd, `${JSON.stringify(odd)} требует тегов`);
+  }
+  assert.equal(JSON.stringify(encodeWire({ a: [1, { b: 'c' }] })), '{"a":[1,{"b":"c"}]}');
+});

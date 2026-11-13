@@ -149,6 +149,21 @@ describe('TR-01, TR-21, TR-22: нарушитель в хосте сторонн
     });
   }
 
+  test('ST-3010/3: нарушитель в процессе Node: чтение вне каталога, процесс, поток и аддон - отказ; TCP закрыт ограничителем ОС или назван открытым; в utilityProcess всё это удаётся', () => {
+    const node = report.modes.node?.violator;
+    assert.ok(node, 'проход «node» выполнен');
+    assert.equal(node.permission, 'object');
+    assert.equal(node.coreFile, 'error:ERR_ACCESS_DENIED');
+    assert.match(node.spawn, /ERR_ACCESS_DENIED/);
+    assert.equal(node.worker, 'ERR_ACCESS_DENIED');
+    assert.match(node.addon, /^ERR_(ACCESS_DENIED|DLOPEN_DISABLED)$/);
+    assert.equal(node.tcp === 'connected', !confined, confined ? `при ограничителе ОС соединение закрыто: ${node.tcp}` : 'без ограничителя TCP открыт и записан открытым (уровень 2)');
+    const utility = report.modes.utility.violator;
+    assert.ok(utility);
+    assert.equal(utility.permission, 'undefined');
+    assert.ok(utility.coreFile.includes('secret-of-core') && utility.spawn === 'spawned' && utility.worker === 'выполнено' && utility.tcp === 'connected');
+  });
+
   test('нарушитель в процессе Node получает канал ipc (process.send), в utilityProcess - parentPort', () => {
     assert.equal(report.modes.utility.violator?.channel, 'parentPort');
     assert.equal(report.modes.node?.violator?.channel, 'ipc');

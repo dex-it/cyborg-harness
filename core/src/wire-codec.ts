@@ -33,9 +33,49 @@ function bytesOf(view: ArrayBufferView): string {
   return Buffer.from(view.buffer, view.byteOffset, view.byteLength).toString('base64');
 }
 
+/**
+ * Дерево, которое JSON переживает без потерь: строки, булевы, null, конечные числа (кроме -0), массивы без пустот и простые объекты без ключа `$t`. Такое значение уходит как есть:
+ * копия с тегами на горячем пути (поток `pty.data`, ответы `ctx.os`) стоит больше самого канала. Глубже предела дерево считается неподходящим и идёт полным путём, который его отвергнет.
+ */
+function plainJson(value: unknown, depth: number): boolean {
+  switch (typeof value) {
+    case 'string':
+    case 'boolean':
+      return true;
+    case 'number':
+      return Number.isFinite(value) && !Object.is(value, -0);
+    case 'object':
+      break;
+    default:
+      return false;
+  }
+  if (value === null) return true;
+  if (depth > MAX_DEPTH) return false;
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) if (!(i in value) || !plainJson(value[i], depth + 1)) return false;
+    return true;
+  }
+  const proto = Object.getPrototypeOf(value) as unknown;
+  if (proto !== Object.prototype && proto !== null) return false;
+  for (const key of Object.keys(value)) {
+    if (key === TAG || !plainJson((value as Record<string, unknown>)[key], depth + 1)) return false;
+  }
+  return true;
+}
+
 /** Значение для JSON: типы, которые JSON теряет, - тегированные объекты. Бросает на том, что structuredClone не клонирует. */
 export function encodeWire(value: unknown): unknown {
-  return encode(value, new Set<object>(), 0);
+  return plainJson(value, 0) ? value : encode(value, new Set<object>(), 0);
+}
+
+/** Есть ли в разобранном JSON хоть один объект с ключом `$t`. Нет - значение остаётся как есть: JSON.parse уже построил простые объекты, `__proto__` в них - собственное свойство. */
+function hasTag(raw: unknown, depth: number): boolean {
+  if (typeof raw !== 'object' || raw === null) return false;
+  if (depth > MAX_DEPTH) return true;
+  if (Array.isArray(raw)) return raw.some((item) => hasTag(item, depth + 1));
+  const record = raw as Record<string, unknown>;
+  for (const key of Object.keys(record)) if (key === TAG || hasTag(record[key], depth + 1)) return true;
+  return false;
 }
 
 function encode(value: unknown, ancestors: Set<object>, depth: number): unknown {
@@ -113,7 +153,7 @@ function encodeArray(list: readonly unknown[], ancestors: Set<object>, depth: nu
 
 /** Значение после JSON.parse: теги разобраны. Тег не по форме - ошибка кодека. */
 export function decodeWire(raw: unknown): unknown {
-  return decode(raw, 0);
+  return hasTag(raw, 0) ? decode(raw, 0) : raw;
 }
 
 function decode(raw: unknown, depth: number): unknown {

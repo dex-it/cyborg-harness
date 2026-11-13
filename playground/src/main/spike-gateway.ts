@@ -52,6 +52,8 @@ export interface GatewayReport {
   /** Где работал плагин замера: общий `utilityProcess` поставки или процесс Node стороннего плагина под запретами. */
   readonly host: 'utilityProcess' | 'node';
   traceRecords?: number;
+  /** Пути, которые в этом режиме не мерились, и причина. */
+  notMeasured?: string[];
   rows?: GatewayRow[];
   error?: string;
 }
@@ -265,7 +267,10 @@ export async function runGatewaySpike(options: GatewaySpikeOptions): Promise<voi
       return dir;
     });
     // Размер дописанного не меняет событие: оно несёт имена, а не данные.
-    await each('fs.watch', [64], (variant) => prepare(`watch-${variant}`));
+    // Нагрузку для fs.watch (дописывание в файл) создаёт сам плагин замера через node:fs: хосту стороннего плагина писать на диск нельзя (--permission), поэтому в режиме «node» путь не мерится.
+    // Событие идёт тем же кодом ядра и тем же каналом, что и в режиме utilityProcess; его цена сверяется в замере utilityProcess (check:budgets, первый шаг).
+    if (options.isolation?.node === undefined) await each('fs.watch', [64], (variant) => prepare(`watch-${variant}`));
+    else report.notMeasured = ['fs.watch: нагрузку создаёт плагин замера через node:fs, хосту под --permission писать нельзя'];
     await each('pty.write', SIZES, () => '');
     await each('secrets.get', SIZES, (_v, size) => `key-${String(size)}`);
     await each('net.fetch', SIZES, (_v, size) => `http://${host}/${String(size)}`);
