@@ -149,7 +149,7 @@ origin: derived
 | ST-3004/3 | `core/test/diagnostics.test.ts`, `core/test/secrets-journal.test.ts` |
 | ST-3004/4 | `core/test/os.test.ts`, `core/test/uninstall.test.ts`, `electron/test/secrets-file.test.ts` |
 | ST-3004/5 | `core/test/plugin-log.test.ts` |
-| ST-3004/6 | `core/test/file-modes.test.ts`, `electron/test/file-modes.test.ts` |
+| ST-3004/6 | `core/test/file-modes.test.ts`, `core/test/private-files.test.ts`, `electron/test/file-modes.test.ts` |
 | ST-3005/1 | `core/test/loader.test.ts`, `core/test/workspace.test.ts`, `electron/test/plugins.test.ts` |
 | ST-3005/2 | `electron/test/view-frames.test.ts`; часть - окно: вызов `fromWindow` на каждом канале окна: `electron/src/channels.ts`, `playground/scripts/smoke.mjs` |
 | ST-3005/3 | `core/test/plugin-imports.test.ts`, `electron/test/window-layer.test.ts` |
