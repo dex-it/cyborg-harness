@@ -11,3 +11,4 @@ tools/cyborg-plugin/dist/
 electron/dist/
 testing/dist/
 contracts/dist/
+electron/native/build/
