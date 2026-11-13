@@ -46,7 +46,6 @@ describe('ST-2001/1: заявка контракта', () => { ... });
 | ST-2003/4 | окно | `playground/scripts/smoke.mjs`, шаг перезапуска хоста: вид под плашкой без ввода |
 | ST-2005/1 | окно | `playground/scripts/smoke.mjs`, шаг «элементы ядра» |
 | ST-2007/2 | документ | гейты CI `.github/workflows/ci.yml`: `npm test` с `core/test/plugin-imports.test.ts`, `typecheck`, `lint`, `smoke` |
-| ST-3001/1 | ручная | дефект [#241](https://github.com/dex-it/cyborg-harness/issues/241): прямой запрос хоста от плагина без прав к `pty.share`, `pty.attach`, `pty.write`, `pty.resize`, `pty.kill` даёт `NotFound`, к `pty.list` - пустой список, к `serve.close` - `ok`, а не `PermissionDenied` с записью `denied` (проверки права нет, операция идёт по таблице самого плагина, чужого он не касается); остальные члены `ctx.os` отказывают как надо - `core/test/trust.test.ts` |
 | ST-4001/10 | замер | `npm run spike:gateway` и `-- --trace=off`, [spike-gateway.md](spike-gateway.md) |
 | ST-5002/7 | документ | `contracts/CHANGELOG.md`; формат - `scripts/test/release.test.ts` |
 | ST-5003/5 | ручная | ревью по ADR-CH-0002, п. 4: срок жизни члена с `@deprecated` сверкой рода изменения не держится (FR-CH-5003, «Ещё нет»); пометку `@deprecated` держит снимок `core/test/api-snapshot/1.0.0.txt` |

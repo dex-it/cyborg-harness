@@ -9,7 +9,7 @@ origin: derived
 
 Собрана из историй, имён тестов и исключений [acceptance.md](acceptance.md) командой `npm run check:acceptance -- --write`; руками не правится.
 
-Итог: критериев 248; тестом 202, исключением 20, целевое поведение 26.
+Итог: критериев 248; тестом 203, исключением 19, целевое поведение 26.
 
 | Критерий | Чем проверяется |
 |---|---|
@@ -121,7 +121,7 @@ origin: derived
 | ST-2006/14 | `playground/test/agents.test.ts` |
 | ST-2007/1 | `core/test/purity.test.ts` |
 | ST-2007/2 | документ: гейты CI `.github/workflows/ci.yml`: `npm test` с `core/test/plugin-imports.test.ts`, `typecheck`, `lint`, `smoke` |
-| ST-3001/1 | ручная: дефект [#241](https://github.com/dex-it/cyborg-harness/issues/241): прямой запрос хоста от плагина без прав к `pty.share`, `pty.attach`, `pty.write`, `pty.resize`, `pty.kill` даёт `NotFound`, к `pty.list` - пустой список, к `serve.close` - `ok`, а не `PermissionDenied` с записью `denied` (проверки права нет, операция идёт по таблице самого плагина, чужого он не касается); остальные члены `ctx.os` отказывают как надо - `core/test/trust.test.ts` |
+| ST-3001/1 | `core/test/trust.test.ts` |
 | ST-3001/2 | `core/test/os.test.ts`, `core/test/security-gateway.test.ts` |
 | ST-3001/3 | `core/test/os.test.ts` |
 | ST-3001/4 | `core/test/os.test.ts` |
