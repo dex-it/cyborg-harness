@@ -176,7 +176,21 @@ export function signIntegrity(input: SignInput, secretKey: string): IntegrityMan
     if (!SHA256.test(hash)) throw new Error(`${file}: ожидался sha256 в hex`);
   }
   const body = { format: INTEGRITY_FORMAT, id: input.id, version: input.version, keyId: keyIdOf(publicKeyOf(secretKey)), notAfter: input.notAfter.toISOString(), files: sortedFiles(input.files) } as const;
-  return { ...body, signature: sign(null, canonicalBytes(body), secretObject(secretKey)).toString('base64') };
+  return { ...body, signature: signBytes(secretKey, canonicalBytes(body)) };
+}
+
+/** Подпись Ed25519 над байтами закрытым ключом, base64. Общая для пакета, поставки и списка отзыва: область подписи задаёт вызывающий в самих байтах. */
+export function signBytes(secretKey: string, bytes: Uint8Array): string {
+  return sign(null, bytes, secretObject(secretKey)).toString('base64');
+}
+
+/** Подпись верна для открытого ключа; испорченный ключ или подпись - `false`, не исключение. */
+export function verifyBytes(publicKey: string, bytes: Uint8Array, signature: string): boolean {
+  try {
+    return verify(null, bytes, publicObject(publicKey), Buffer.from(signature, 'base64'));
+  } catch {
+    return false;
+  }
 }
 
 /** Хеши файлов пакета по их байтам. */
@@ -199,7 +213,9 @@ function badPath(file: string): string | undefined {
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const FIELDS = ['format', 'id', 'version', 'keyId', 'notAfter', 'files', 'signature'];
+// Имена полей записи: ключи типа, чтобы список не разошёлся с ним (и без строки `files`: purity.test.ts держит id плагинов стенда вне строк ядра).
+const SHAPE: Record<keyof IntegrityManifest, true> = { format: true, id: true, version: true, keyId: true, notAfter: true, files: true, signature: true };
+const FIELDS: readonly string[] = Object.keys(SHAPE);
 
 /** Разбор `integrity.json`: строгий, лишнее поле - ошибка, потому что подпись покрывает только известные. Текст ошибки или запись. */
 export function parseIntegrity(text: string): IntegrityManifest | string {
@@ -237,6 +253,32 @@ const some = (names: readonly string[]): string => {
   return names.length > 5 ? `${shown} и ещё ${String(names.length - 5)}` : shown;
 };
 
+export interface HashDiff {
+  readonly modified: readonly string[];
+  readonly missing: readonly string[];
+  readonly extra: readonly string[];
+}
+
+/** Сравнение хешей файлов на диске (`actual`) с подписанными (`expected`): путь -> хеш или `link:<цель>` у ссылки поставки. */
+export function diffHashes(actual: Readonly<Record<string, string>>, expected: Readonly<Record<string, string>>): HashDiff {
+  const modified: string[] = [];
+  const missing: string[] = [];
+  for (const [file, hash] of Object.entries(expected)) {
+    const found = Object.hasOwn(actual, file) ? actual[file] : undefined;
+    if (found === undefined) missing.push(file);
+    else if (!sameHex(found, hash)) modified.push(file);
+  }
+  return { modified, missing, extra: Object.keys(actual).filter((file) => !Object.hasOwn(expected, file)) };
+}
+
+/** Первое расхождение словами; порядок: изменённый, пропавший, лишний. `undefined` - расхождений нет. */
+export function describeDiff(diff: HashDiff): { code: 'modified' | 'missing' | 'extra'; reason: string } | undefined {
+  if (diff.modified.length > 0) return { code: 'modified', reason: `файл изменён после подписи: ${some(diff.modified)}` };
+  if (diff.missing.length > 0) return { code: 'missing', reason: `файла нет в пакете: ${some(diff.missing)}` };
+  if (diff.extra.length > 0) return { code: 'extra', reason: `лишний файл, которого нет в подписи: ${some(diff.extra)}` };
+  return undefined;
+}
+
 /**
  * Проверка пакета над прочитанными байтами. Порядок: разбор записи, ключ (известен ли, не отозван ли), подпись, срок, совпадение с `manifest.json`, версия не ниже виденной,
  * затем файлы (ссылки, изменённые, пропавшие, лишние) и отозванные хеши. Первый отказ возвращается со словами для человека.
@@ -267,17 +309,9 @@ export function verifyIntegrity(bytes: PackageBytes, policy: VerifyPolicy): Inte
   }
   const links = [...(bytes.links?.keys() ?? [])];
   if (links.length > 0) return fail('symlink', `символические ссылки в пакете: ${some(links)}`, m.keyId);
-  const modified: string[] = [];
-  const missing: string[] = [];
-  for (const [file, hash] of Object.entries(m.files)) {
-    const data = bytes.files.get(file);
-    if (data === undefined) missing.push(file);
-    else if (!sameHex(sha256Hex(data), hash)) modified.push(file);
-  }
-  if (modified.length > 0) return fail('modified', `файл изменён после подписи: ${some(modified)}`, m.keyId);
-  if (missing.length > 0) return fail('missing', `файла нет в пакете: ${some(missing)}`, m.keyId);
-  const extra = [...bytes.files.keys()].filter((file) => !Object.hasOwn(m.files, file));
-  if (extra.length > 0) return fail('extra', `лишний файл, которого нет в подписи: ${some(extra)}`, m.keyId);
+  const diff = diffHashes(hashFiles(bytes.files), m.files);
+  const problem = describeDiff(diff);
+  if (problem !== undefined) return fail(problem.code, problem.reason, m.keyId);
   const digest = sha256Hex(canonicalBytes(m));
   if (policy.revokedHashes !== undefined) {
     if (policy.revokedHashes.has(digest)) return fail('revoked-hash', 'этот выпуск пакета отозван', m.keyId);

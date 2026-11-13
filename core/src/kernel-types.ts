@@ -3,10 +3,12 @@ import type { SectionResult, SectionStore } from './config.ts';
 import type { DocumentRow } from './documents.ts';
 import type { ContractGraph, Rejection } from './graph.ts';
 import type { SystemEvent } from './host-runtime.ts';
+import type { IntegrityCode } from './integrity.ts';
 import type { LayoutEntry } from './layout.ts';
 import type { MenuEntry } from './menu-entry.ts';
 import type { ResourceLimits } from './limits.ts';
 import type { PluginManifest } from './manifest.ts';
+import type { Provenance } from './provenance.ts';
 import type { OsEnvironment } from './os-gateway.ts';
 import type { KeptPty, TerminalChannel, TerminalView } from './pty.ts';
 import type { ContractRegistry } from './registry.ts';
@@ -71,6 +73,11 @@ export type JournalEntry =
   | { readonly pluginId: string; readonly kind: 'group-isolated'; readonly group: string; readonly renderGroup: string; readonly reason: 'third-party' }
   /** Загружен плагин не из поставки (по `bundled`): его код не проверен, а на этапе 1 хост - обычный процесс Node. Состояния плагину запись не меняет. */
   | { readonly pluginId: string; readonly kind: 'third-party' }
+  /**
+   * Происхождение пакета не подтверждено (TR-11, ADR-CH-0017): подпись, хеши, версия или отзыв не сошлись, либо проверка не выполнена. `mode: 'enforce'` - плагин не запущен,
+   * `warn` - запущен как раньше и человек предупреждён. `code` - причина для машины, `reason` - слова человека (так её видит окно «Плагины Cyborg»); `keyId` - ключ из подписи, если он был прочитан.
+   */
+  | { readonly pluginId: string; readonly kind: 'integrity-failed'; readonly code: IntegrityCode; readonly reason: string; readonly mode: 'warn' | 'enforce'; readonly keyId?: string }
   /** Промис плагина отклонён без обработчика; хост держится, плагину страйк. */
   | { readonly pluginId: string; readonly kind: 'unhandled-rejection'; readonly error: string }
   /** Плагин поставки просит свой хост (`"host": "own"`), а группа plugins.hosts сажает его к соседям: действует группа. */
@@ -138,6 +145,11 @@ export interface LoadOptions {
   readonly spawnHost: SpawnHost;
   /** Что хост передаст импортёру; по умолчанию id плагина. */
   readonly entry?: ((manifest: PluginManifest) => string) | undefined;
+  /**
+   * Проверка происхождения пакета перед каждой активацией (TR-11, `createProvenance`): ядро читает каталог плагина один раз, проверяет и отдаёт хосту проверенные байты.
+   * Без неё пакеты не проверяются, как раньше. Отказ пишется записью `integrity-failed`; в режиме `enforce` плагин не запускается.
+   */
+  readonly provenance?: Provenance | undefined;
   /** `plugins.hosts`: группа -> плагины; не названный идёт в `builtin` или в свой хост по `host: "own"`. */
   readonly hosts?: Readonly<Record<string, readonly string[]>> | undefined;
   /** `plugins.uiGroups`: группа рендера -> плагины с видами; перекрывает `ui.group` манифеста. Не названный идёт в группу по `ui.group`, без неё - в группу со своим id; сторонний всегда один (`Kernel.groupOf` даёт ему `solo_<id>`). */

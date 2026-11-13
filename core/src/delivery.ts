@@ -28,21 +28,31 @@ async function pluginDirs(root: string): Promise<string[]> {
 
 const byName = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
+/** Запись списка по прочитанным файлам и ссылкам каталога плагина: путь -> sha256 (у ссылки - `link:<цель>`), по алфавиту. Одно правило для записи списка и для проверки перед запуском. */
+export function deliveryEntries(files: ReadonlyMap<string, Uint8Array>, links: ReadonlyMap<string, string> = new Map()): Record<string, string> {
+  const all: [string, string][] = [
+    ...[...files].map(([file, data]): [string, string] => [file, createHash('sha256').update(data).digest('hex')]),
+    ...[...links].map(([file, target]): [string, string] => [file, `${LINK}${target}`]),
+  ];
+  return Object.fromEntries(all.sort(([a], [b]) => byName(a, b)));
+}
+
 /** Файлы каталога плагина -> хеш; пути через `/`, по алфавиту. Ссылка не читается: хешируется её цель-текст, подмена файла ссылкой видна. */
 async function hashTree(home: string): Promise<Record<string, string>> {
-  const out: Record<string, string> = {};
+  const files = new Map<string, Buffer>();
+  const links = new Map<string, string>();
   const walk = async (dir: string): Promise<void> => {
     const entries = (await fs.readdir(dir, { withFileTypes: true })).sort((a, b) => byName(a.name, b.name));
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       const rel = path.relative(home, full).split(path.sep).join('/');
       if (entry.isDirectory()) await walk(full);
-      else if (entry.isSymbolicLink()) out[rel] = `${LINK}${await fs.readlink(full)}`;
-      else if (entry.isFile()) out[rel] = createHash('sha256').update(await fs.readFile(full)).digest('hex');
+      else if (entry.isSymbolicLink()) links.set(rel, await fs.readlink(full));
+      else if (entry.isFile()) files.set(rel, await fs.readFile(full));
     }
   };
   await walk(home);
-  return out;
+  return deliveryEntries(files, links);
 }
 
 async function hashCatalog(root: string): Promise<DeliveryManifest['plugins']> {

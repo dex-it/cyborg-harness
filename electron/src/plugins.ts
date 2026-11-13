@@ -13,7 +13,11 @@ import {
   load,
   pluginStatuses,
   openWorkspace,
+  createProvenance,
   PLUGIN_API_VERSION,
+  TRUST_FILE,
+  TrustStore,
+  type DeliveryState,
   type Diagnostics,
   type JournalEntry,
   type Kernel,
@@ -23,11 +27,13 @@ import {
   type MenuEntry,
   type MigrateWorkspace,
   type OsEnvironment,
+  type Provenance,
   type SpawnHost,
   type SystemEvent,
   type TerminalChannel,
   type TerminalView,
   type TraceRecord,
+  type TrustMode,
   type WatchdogOptions,
   type WindowSnapshot,
   MENU_OWNER,
@@ -62,6 +68,8 @@ function countDirs(dir: string): number {
 
 export interface Discovered {
   readonly manifests: unknown[];
+  /** id -> разобранный JSON манифеста, как его прочёл поиск: проверка пакета сверяет с ним подписанный `manifest.json`. */
+  readonly rawManifests: Map<string, unknown>;
   /** id -> file URL точки входа (первая найденная по порядку `ENTRY_FILES`; файла нет - путь первого кандидата, причина в `problems`); при повторе id остаётся первый, второй манифест пропущен с записью в `problems`. */
   readonly entries: Map<string, string>;
   /** id -> каталог, где найден первым. */
@@ -82,7 +90,7 @@ export interface DiscoverOptions {
 
 /** Каталоги по порядку приоритета: встроенные раньше пользовательских. */
 export function discoverPlugins(dirs: readonly string[], options: DiscoverOptions = {}): Discovered {
-  const found: Discovered = { manifests: [], entries: new Map(), origins: new Map(), views: new Map(), homes: new Map(), missing: new Map(), problems: [] };
+  const found: Discovered = { manifests: [], rawManifests: new Map(), entries: new Map(), origins: new Map(), views: new Map(), homes: new Map(), missing: new Map(), problems: [] };
   for (const dir of dirs) {
     let names: string[];
     try {
@@ -127,6 +135,7 @@ export function discoverPlugins(dirs: readonly string[], options: DiscoverOption
       if (id) {
         found.origins.set(id, dir);
         found.homes.set(id, home);
+        found.rawManifests.set(id, raw);
         if (isRecord(raw) && raw.ui !== undefined) found.views.set(id, home);
       }
     }
@@ -152,6 +161,19 @@ async function checkDelivery(dir: string): Promise<string[]> {
   } catch (error) {
     return [`контрольные суммы поставки ${dir}: ${errorMessage(error)}`];
   }
+}
+
+/** Проверка происхождения пакетов (TR-11, ADR-CH-0017): подпись, хеши, версия, отзыв до запуска. Без этого поля пакеты не проверяются, как раньше. */
+export interface TrustOptions {
+  /** Открытые ключи издателя поставки (`ed25519:…`), зашитые в приложение: корень доверия - само приложение. Ими же проверяется подпись `delivery.json` и принимаются пакеты каталога пользователя. */
+  readonly releaseKeys?: readonly string[];
+  /** Режим по происхождению. По умолчанию поставка - `warn` (подпись не «окирпичивает» приложение, пока выпуск не обкатан), каталог пользователя - `enforce`. Режим стенда (`builtinMode: 'stand'`) поставку не проверяет вовсе. */
+  readonly modes?: { readonly bundled?: TrustMode; readonly user?: TrustMode };
+  /** Файл хранилища доверия; по умолчанию `<userData>/trust.json`. */
+  readonly file?: string;
+  /** Подписанный список отозванных ключей и хешей (`cyborg-plugin revoke`), который применяется при каждом запуске; по умолчанию `<userData>/revocations.json`, если файл есть. */
+  readonly revocations?: string;
+  readonly now?: () => number;
 }
 
 export interface StartOptions {
@@ -225,10 +247,54 @@ export interface StartOptions {
   readonly safeMode?: boolean;
   /** Соседние окна того же `userData` (`workspaceNeighbors`): `Kernel.uninstall` не стирает общие данные из-под плагина, который может работать у соседа (#154). */
   readonly neighbors?: LoadOptions['neighbors'];
+  /** Проверка происхождения пакетов перед запуском (TR-11); без поля - как раньше, без проверки. */
+  readonly trust?: TrustOptions;
 }
 
 /** Аргументы в трассе действуют, если их просили флагом и есть кому записи читать (то же условие у ядра). */
 const tracesArgs = (options: Pick<StartOptions, 'traceArgs' | 'diagnostics' | 'onTrace'>): boolean => options.traceArgs === true && (options.diagnostics !== undefined || options.onTrace !== undefined);
+
+/** Хранилище доверия, список отзыва и проверка пакетов (TR-11). Всё, что не удалось, - в `report` словами; проверка тогда отказывает сама (хранилище закрыто на запись). */
+async function openProvenance(options: StartOptions, found: Discovered, delivery: boolean, report: (problem: string) => void): Promise<Provenance> {
+  const trust = options.trust ?? {};
+  const store = await TrustStore.open(trust.file ?? path.join(options.userData, TRUST_FILE));
+  if (store.error !== undefined) report(`${store.error}: проверка пакетов отказывает, пока файл не исправлен`);
+  const releaseKeys = trust.releaseKeys ?? [];
+  const now = trust.now ?? Date.now;
+  const revocations = trust.revocations ?? path.join(options.userData, 'revocations.json');
+  try {
+    const applied = await store.applyRevocations(fs.readFileSync(revocations, 'utf8'), releaseKeys, now());
+    if (!applied.ok && !applied.reason.includes('не новее')) report(`список отзыва ${revocations}: ${applied.reason}`);
+    if (applied.ok) options.log(`[plugins] список отзыва №${String(applied.serial)} применён, новых записей: ${String(applied.added)}`);
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) report(`список отзыва ${revocations}: ${errorMessage(error)}`);
+  }
+  if (store.revocationsStale(now())) report(`список отзыва устарел (срок вышел ${store.revocationState()?.notAfter ?? ''}): отозванное остаётся отозванным, получите свежий список`);
+  const modes = { bundled: trust.modes?.bundled ?? 'warn', user: trust.modes?.user ?? 'enforce' };
+  const bundled = new Set([...found.origins].filter(([, dir]) => dir === options.builtinDir).map(([id]) => id));
+  const state: DeliveryState | undefined = delivery && countDirs(options.builtinDir) > 0 ? await deliveryState(options.builtinDir) : undefined;
+  return createProvenance({
+    trust: store,
+    releaseKeys,
+    // Поставка стенда собрана как исходники и сумм не имеет: проверять нечего.
+    mode: (id) => (bundled.has(id) ? (delivery ? modes.bundled : 'off') : modes.user),
+    bundled: (id) => bundled.has(id),
+    homeOf: (id) => found.homes.get(id),
+    rawManifestOf: (id) => found.rawManifests.get(id),
+    delivery: state,
+    now,
+  });
+}
+
+/** `delivery.json` каталога поставки, как его читает проверка перед запуском. */
+async function deliveryState(dir: string): Promise<DeliveryState> {
+  try {
+    return { manifest: await readDelivery(dir) };
+  } catch {
+    // Нечитаемый файл сообщает checkDelivery; проверка плагина откажет с «нет delivery.json».
+    return { manifest: undefined };
+  }
+}
 
 export async function startPlugins(options: StartOptions): Promise<Kernel & { readonly workspace: string }> {
   const report = (p: string) => {
@@ -243,6 +309,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
   for (const m of ws.migrated) options.log(`[plugins] ${m}`);
   const userDir = path.join(options.userData, 'plugins');
   const delivery = options.builtinMode !== 'stand';
+  let provenance: Provenance | undefined;
   const found = discoverPlugins(options.userPlugins === true ? [options.builtinDir, userDir] : [options.builtinDir], { strictEntry: delivery ? [options.builtinDir] : [] });
   if (options.userPlugins !== true) {
     const skipped = countDirs(userDir);
@@ -251,6 +318,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
   for (const p of found.problems) report(p);
   if (delivery && countDirs(options.builtinDir) > 0) for (const p of await checkDelivery(options.builtinDir)) report(p);
   options.onDiscovered?.(found);
+  if (options.trust !== undefined) provenance = await openProvenance(options, found, delivery, report);
 
   const kernel = await load({
     apiVersion: PLUGIN_API_VERSION,
@@ -265,6 +333,7 @@ export async function startPlugins(options: StartOptions): Promise<Kernel & { re
     // ADR-CH-0002 п. 6: cyborg.* - пространство поставки; чужой поставщик cyborg.agent сделал бы встроенного потребителя ambiguous.
     reservedPrefixes: ['cyborg.'],
     spawnHost: options.spawnHost,
+    ...(provenance !== undefined && { provenance }),
     entry: (m) => {
       const entry = found.entries.get(m.id);
       // Выброшенное здесь ядро записывает в журнал как отказ активации этого плагина, с текстом причины.

@@ -4,6 +4,8 @@ export {
   INTEGRITY_FILE,
   INTEGRITY_FORMAT,
   canonicalBytes,
+  describeDiff,
+  diffHashes,
   checkPublicKey,
   generateSigningKey,
   hashFiles,
@@ -13,8 +15,13 @@ export {
   readPackageTree,
   renderIntegrity,
   sha256Hex,
+  signBytes,
   signIntegrity,
+  verifyBytes,
   verifyIntegrity,
 } from './integrity.ts';
 
-export type { IntegrityCode, IntegrityManifest, IntegrityVerdict, PackageBytes, PackageTree, SignInput, SigningKey, VerifyPolicy } from './integrity.ts';
+export { signRevocations, verifyRevocations } from './trust-store.ts';
+
+export type { HashDiff, IntegrityCode, IntegrityManifest, IntegrityVerdict, PackageBytes, PackageTree, SignInput, SigningKey, VerifyPolicy } from './integrity.ts';
+export type { RevocationInput, RevocationList } from './trust-store.ts';
