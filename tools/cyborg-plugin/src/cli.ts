@@ -134,6 +134,9 @@ async function runBuild(parsed: Parsed, io: CliIo): Promise<number> {
   io.out(`Плагин ${report.id ?? ''}: ${report.dir}`);
   io.out(`Собрано в ${report.out} (файлов: ${String(report.files.length)})`);
   for (const file of report.files) io.out(`  ${file}`);
+  // TR-14 (У-42): что из npm уехало внутрь index.mjs. Перечень читает ревью поставки; его версии проверяет `npm audit --omit=dev` по lock-файлу плагина.
+  io.out(report.packages.length === 0 ? 'Пакетов npm в бандле главной части нет' : `Пакеты npm в бандле главной части (${String(report.packages.length)}):`);
+  for (const p of report.packages) io.out(`  ${p.name} ${p.version ?? '(версия не прочитана)'} - ${String(p.bytes)} Б`);
   return 0;
 }
 
@@ -185,6 +188,10 @@ async function runDelivery(parsed: Parsed, io: CliIo): Promise<number> {
     return 1;
   }
   io.out(`Поставка: ${report.out} (плагинов: ${String(report.plugins.length)}) - ${report.plugins.join(', ')}`);
+  for (const id of report.plugins) {
+    const packages = report.bundles?.[id] ?? [];
+    io.out(packages.length === 0 ? `  ${id}: пакетов npm в бандле нет` : `  ${id}: пакеты npm в бандле: ${packages.map((p) => `${p.name} ${p.version ?? '?'}`).join(', ')}`);
+  }
   io.out(report.keyId === undefined ? 'delivery.json не подписан (нет --sign-key)' : `delivery.json подписан ключом выпуска ${report.keyId}`);
   return 0;
 }

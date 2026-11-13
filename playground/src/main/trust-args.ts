@@ -13,7 +13,10 @@ const MODES = new Set(['off', 'warn', 'enforce']);
 
 const valuesOf = (argv: readonly string[], flag: string): string[] => argv.filter((a) => a.startsWith(flag)).map((a) => a.slice(flag.length));
 
-export type TrustArgs = { readonly trust?: TrustOptions; readonly error?: string };
+export interface TrustArgs {
+  readonly trust?: TrustOptions;
+  readonly error?: string;
+}
 
 /** Настройки проверки из командной строки; `trust` нет, если ни одного флага не дано. */
 export function trustFromArgv(argv: readonly string[]): TrustArgs {
